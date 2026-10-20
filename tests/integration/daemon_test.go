@@ -1,0 +1,468 @@
+// Package integration runs the real harmflowd binary and talks to it over its local API, with stand-in harness CLIs
+// that speak the real output formats. These are the E3 tests across the daemon's process boundary.
+package integration
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
+	"syscall"
+	"testing"
+	"time"
+)
+
+var binary string
+
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "harmflowd-bin")
+	if err != nil {
+		panic(err)
+	}
+	binary = filepath.Join(dir, "harmflowd")
+	build := exec.Command("go", "build", "-o", binary, "./cmd/harmflowd")
+	build.Dir = filepath.Join(repoRoot(), "daemon")
+	build.Stdout, build.Stderr = os.Stdout, os.Stderr
+	if err := build.Run(); err != nil {
+		panic("building harmflowd: " + err.Error())
+	}
+	code := m.Run()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
+}
+
+func repoRoot() string {
+	_, file, _, _ := runtime.Caller(0)
+	return filepath.Dir(filepath.Dir(filepath.Dir(file)))
+}
+
+type daemon struct {
+	t     *testing.T
+	home  string
+	cmd   *exec.Cmd
+	base  string
+	token string
+}
+
+func startDaemon(t *testing.T, home string) *daemon {
+	t.Helper()
+	_ = os.Remove(filepath.Join(home, "run", "daemon.json"))
+	cmd := exec.Command(binary, "--home", home, "--builtins", repoRoot())
+	cmd.Env = append(os.Environ(), "HARMFLOW_TOKEN_STORE=file")
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	d := &daemon{t: t, home: home, cmd: cmd}
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(filepath.Join(home, "run", "daemon.json"))
+		if err == nil {
+			var rt struct {
+				Address string `json:"address"`
+			}
+			if json.Unmarshal(data, &rt) == nil && rt.Address != "" {
+				tok, _ := os.ReadFile(filepath.Join(home, "run", "token"))
+				d.base = "http://" + rt.Address + "/api/v1"
+				d.token = strings.TrimSpace(string(tok))
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if d.base == "" {
+		_ = cmd.Process.Kill()
+		t.Fatalf("the daemon did not start:\n%s", out.String())
+	}
+	t.Cleanup(func() { d.stop() })
+	fakes := filepath.Join(repoRoot(), "tests", "integration", "testdata")
+	d.call("PUT", "/harnesses/claude-code", map[string]any{"path": filepath.Join(fakes, "fake-claude")}, 200)
+	d.call("PUT", "/harnesses/codex", map[string]any{"path": filepath.Join(fakes, "fake-codex")}, 200)
+	return d
+}
+
+func (d *daemon) stop() {
+	if d.cmd.ProcessState != nil {
+		return
+	}
+	_ = d.cmd.Process.Signal(syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() { _ = d.cmd.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		_ = d.cmd.Process.Kill()
+		<-done
+	}
+}
+
+func (d *daemon) kill() {
+	_ = d.cmd.Process.Kill()
+	_ = d.cmd.Wait()
+}
+
+func (d *daemon) request(method, path string, body any, headers map[string]string) (int, []byte) {
+	d.t.Helper()
+	var r io.Reader
+	if body != nil {
+		data, _ := json.Marshal(body)
+		r = bytes.NewReader(data)
+	}
+	req, _ := http.NewRequest(method, d.base+path, r)
+	req.Header.Set("Authorization", "Bearer "+d.token)
+	req.Header.Set("Content-Type", "application/json")
+	for k, v := range headers {
+		if k == "Host" {
+			req.Host = v
+			continue
+		}
+		req.Header.Set(k, v)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		d.t.Fatalf("%s %s: %v", method, path, err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, data
+}
+
+func (d *daemon) call(method, path string, body any, want int) map[string]any {
+	d.t.Helper()
+	status, data := d.request(method, path, body, nil)
+	if status != want {
+		d.t.Fatalf("%s %s: status %d, want %d: %s", method, path, status, want, data)
+	}
+	var out map[string]any
+	_ = json.Unmarshal(data, &out)
+	return out
+}
+
+func (d *daemon) list(path string) []map[string]any {
+	d.t.Helper()
+	status, data := d.request("GET", path, nil, nil)
+	if status != 200 {
+		d.t.Fatalf("GET %s: %d %s", path, status, data)
+	}
+	var out []map[string]any
+	_ = json.Unmarshal(data, &out)
+	return out
+}
+
+func (d *daemon) waitStatus(id string, want ...string) map[string]any {
+	d.t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	var x map[string]any
+	for time.Now().Before(deadline) {
+		x = d.call("GET", "/executions/"+id, nil, 200)
+		for _, w := range want {
+			if x["status"] == w {
+				return x
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	d.t.Fatalf("execution %s is %v, want %v", id, x["status"], want)
+	return nil
+}
+
+func task(id, prompt, extra string) string {
+	return fmt.Sprintf(`apiVersion: harmflow/v1alpha1
+kind: Task
+metadata:
+  id: %s
+  name: Task %s
+spec:
+  type: general
+  prompt: %q
+  harness:
+    preferred:
+      provider: claude-code
+%s`, id, id, prompt, extra)
+}
+
+// FS-009 FR-004, FR-005: the token is required everywhere; a web page's Origin and a non-loopback Host are refused.
+func TestAPIProtection(t *testing.T) {
+	d := startDaemon(t, t.TempDir())
+	saved := d.token
+	d.token = "wrong"
+	if s, _ := d.request("GET", "/tasks", nil, nil); s != 401 {
+		t.Errorf("wrong token: %d", s)
+	}
+	if s, _ := d.request("GET", "/events/stream", nil, nil); s != 401 {
+		t.Errorf("the SSE stream accepted a wrong token: %d", s)
+	}
+	d.token = saved
+	if s, _ := d.request("POST", "/tasks/x/run", nil, map[string]string{"Origin": "https://example.com"}); s != 403 {
+		t.Errorf("web Origin: %d", s)
+	}
+	if s, _ := d.request("GET", "/health", nil, map[string]string{"Host": "attacker.example:80"}); s != 403 {
+		t.Errorf("rebinding Host: %d", s)
+	}
+	info, err := os.Stat(filepath.Join(d.home, "run", "daemon.json"))
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Errorf("runtime file %v %v", err, info)
+	}
+}
+
+// FS-001 AC-001, AC-003, AC-004, AC-005, AC-006, AC-007, AC-008: the daemon is the only writer; form and YAML go
+// through one validation; files and dashboard converge; conflicts are reported.
+func TestTaskLifecycle(t *testing.T) {
+	d := startDaemon(t, t.TempDir())
+	doc := map[string]any{"apiVersion": "harmflow/v1alpha1", "kind": "Task",
+		"metadata": map[string]any{"id": "notes", "name": "Notes"},
+		"spec": map[string]any{"type": "general", "prompt": "Write notes.",
+			"harness":  map[string]any{"preferred": map[string]any{"provider": "claude-code"}},
+			"schedule": map[string]any{"cron": "0 9 * * 1-5", "timezone": "America/Sao_Paulo"}}}
+	created := d.call("POST", "/tasks", map[string]any{"document": doc}, 201)
+	file := filepath.Join(d.home, "tasks", "notes.yaml")
+	onDisk, err := os.ReadFile(file)
+	if err != nil || string(onDisk) != created["yaml"] {
+		t.Fatalf("file and API differ: %v", err)
+	}
+	if created["nextFireAt"] == nil {
+		t.Error("no next firing")
+	}
+	// The same schema error from the form and from the editor.
+	bad := map[string]any{"document": map[string]any{"apiVersion": "harmflow/v1alpha1", "kind": "Task",
+		"metadata": map[string]any{"id": "Bad ID", "name": "x"}, "spec": doc["spec"]}}
+	v1 := d.call("POST", "/tasks/validate", bad, 200)
+	v2 := d.call("POST", "/tasks/validate", map[string]any{"yaml": strings.Replace(string(onDisk), "id: notes", "id: Bad ID", 1)}, 200)
+	e1 := v1["errors"].([]any)[0].(map[string]any)
+	e2 := v2["errors"].([]any)[0].(map[string]any)
+	if v1["valid"] != false || e1["path"] != e2["path"] || e1["message"] != e2["message"] || e2["line"] == nil {
+		t.Errorf("form and editor disagree: %v / %v", e1, e2)
+	}
+	// An invalid save keeps the valid file.
+	rev := created["revision"].(string)
+	d.call("PUT", "/tasks/notes", map[string]any{"yaml": "apiVersion: harmflow/v1alpha1\nkind: Task\n", "baseRevision": rev}, 422)
+	if again, _ := os.ReadFile(file); !bytes.Equal(again, onDisk) {
+		t.Error("an invalid edit changed the file")
+	}
+	// An external edit converges and makes the old revision a conflict.
+	_ = os.WriteFile(file, bytes.Replace(onDisk, []byte("name: Notes"), []byte("name: Edited outside"), 1), 0o600)
+	deadline := time.Now().Add(6 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := d.call("GET", "/tasks/notes", nil, 200); got["name"] == "Edited outside" {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if got := d.call("GET", "/tasks/notes", nil, 200); got["name"] != "Edited outside" {
+		t.Fatalf("the external edit did not converge: %v", got["name"])
+	}
+	conflict := d.call("PUT", "/tasks/notes", map[string]any{"yaml": string(onDisk), "baseRevision": rev}, 409)
+	if conflict["error"].(map[string]any)["code"] != "conflict" {
+		t.Errorf("conflict body %v", conflict)
+	}
+	// Export carries the definition only; import makes an editable task.
+	status, exported := d.request("GET", "/tasks/notes/export", nil, nil)
+	if status != 200 || strings.Contains(string(exported), "state") || !strings.Contains(string(exported), "Edited outside") {
+		t.Errorf("export %d %s", status, exported)
+	}
+	d.call("POST", "/tasks/import", map[string]any{"yaml": strings.Replace(string(exported), "id: notes", "id: imported", 1)}, 201)
+	dup := d.call("POST", "/tasks/notes/duplicate", nil, 201)
+	if dup["id"] != "notes-copy" || dup["enabled"] != false {
+		t.Errorf("duplicate %v %v", dup["id"], dup["enabled"])
+	}
+	if s, _ := d.request("DELETE", "/tasks/notes", nil, nil); s != 204 {
+		t.Errorf("delete %d", s)
+	}
+	if _, err := os.Stat(file); !os.IsNotExist(err) {
+		t.Error("the file survived deletion")
+	}
+	preview := d.call("POST", "/schedules/preview", map[string]any{"schedule": map[string]any{"cron": "0 9 * * *",
+		"timezone": "America/Sao_Paulo"}, "count": 3}, 200)
+	occ := preview["occurrences"].([]any)
+	if len(occ) != 3 || !strings.Contains(occ[0].(string), "T09:00:00-03:00") {
+		t.Errorf("preview %v", preview)
+	}
+}
+
+type sseEvent struct {
+	ID   int64
+	Type string
+	Data map[string]any
+}
+
+func (d *daemon) stream(t *testing.T, lastID int64) (<-chan sseEvent, func()) {
+	req, _ := http.NewRequest("GET", d.base+"/events/stream", nil)
+	req.Header.Set("Authorization", "Bearer "+d.token)
+	if lastID > 0 {
+		req.Header.Set("Last-Event-ID", strconv.FormatInt(lastID, 10))
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != 200 {
+		t.Fatalf("stream: %v", err)
+	}
+	ch := make(chan sseEvent, 1000)
+	go func() {
+		defer close(ch)
+		sc := bufio.NewScanner(resp.Body)
+		sc.Buffer(make([]byte, 1<<20), 1<<22)
+		var cur sseEvent
+		for sc.Scan() {
+			line := sc.Text()
+			switch {
+			case strings.HasPrefix(line, "id: "):
+				cur.ID, _ = strconv.ParseInt(strings.TrimPrefix(line, "id: "), 10, 64)
+			case strings.HasPrefix(line, "event: "):
+				cur.Type = strings.TrimPrefix(line, "event: ")
+			case strings.HasPrefix(line, "data: "):
+				_ = json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &cur.Data)
+			case line == "" && cur.Type != "":
+				ch <- cur
+				cur = sseEvent{}
+			}
+		}
+	}()
+	return ch, func() { resp.Body.Close() }
+}
+
+// FS-008 AC: live events over SSE, the same events on replay, and a reconnection that resumes after the last id.
+func TestRunStreamAndReplay(t *testing.T) {
+	d := startDaemon(t, t.TempDir())
+	d.call("POST", "/tasks", map[string]any{"yaml": task("streamed", "SCENARIO=report", "")}, 201)
+	events, closeStream := d.stream(t, 0)
+	run := d.call("POST", "/tasks/streamed/run", nil, 202)
+	id := run["executionId"].(string)
+	var seen []sseEvent
+	timeout := time.After(20 * time.Second)
+	for done := false; !done; {
+		select {
+		case e := <-events:
+			if e.Data["executionId"] == id {
+				seen = append(seen, e)
+				done = e.Type == "execution.completed"
+			}
+		case <-timeout:
+			t.Fatalf("no execution.completed; saw %d events", len(seen))
+		}
+	}
+	closeStream()
+	types := map[string]bool{}
+	for _, e := range seen {
+		types[e.Type] = true
+	}
+	for _, want := range []string{"execution.created", "execution.started", "harness.started", "tool.started", "tool.completed",
+		"harness.message", "test.completed", "pull_request.created", "execution.completed"} {
+		if !types[want] {
+			t.Errorf("SSE lacked %s", want)
+		}
+	}
+	x := d.waitStatus(id, "completed")
+	if x["pullRequestUrl"] != "https://github.com/o/r/pull/4" || x["testsStatus"] != "passed" {
+		t.Errorf("execution %v", x)
+	}
+	replay := d.call("GET", "/executions/"+id+"/events", nil, 200)
+	stored := replay["events"].([]any)
+	if len(stored) < len(seen) {
+		t.Errorf("replay has %d events, the stream delivered %d", len(stored), len(seen))
+	}
+	// Reconnecting after the third event delivers only the later ones.
+	again, closeAgain := d.stream(t, seen[2].ID)
+	defer closeAgain()
+	first := <-again
+	if first.ID <= seen[2].ID {
+		t.Errorf("reconnect replayed %d, already received %d", first.ID, seen[2].ID)
+	}
+	// The JSONL log is one file per execution.
+	if _, err := os.Stat(filepath.Join(d.home, "logs", id+".jsonl")); err != nil {
+		t.Error(err)
+	}
+}
+
+// FS-005 §5.1: Claude Code exhausts its quota; Codex finishes the same execution.
+func TestFailoverAcrossHarnesses(t *testing.T) {
+	d := startDaemon(t, t.TempDir())
+	d.call("POST", "/tasks", map[string]any{"yaml": task("failover", "SCENARIO=quota",
+		"    fallback:\n      candidates:\n        - provider: codex\n")}, 201)
+	run := d.call("POST", "/tasks/failover/run", nil, 202)
+	x := d.waitStatus(run["executionId"].(string), "completed", "failed")
+	attempts := x["attempts"].([]any)
+	if x["status"] != "completed" || len(attempts) != 2 {
+		t.Fatalf("status %v attempts %v error %v", x["status"], attempts, x["errorMessage"])
+	}
+	a1, a2 := attempts[0].(map[string]any), attempts[1].(map[string]any)
+	if a1["harness"] != "claude-code" || a1["outcome"] != "quota_exhausted" || a2["harness"] != "codex" || a2["outcome"] != "succeeded" {
+		t.Errorf("attempts %v %v", a1, a2)
+	}
+	events := d.call("GET", "/executions/"+run["executionId"].(string)+"/events", nil, 200)["events"].([]any)
+	var order []string
+	for _, e := range events {
+		switch typ := e.(map[string]any)["type"].(string); typ {
+		case "harness.quota_exhausted", "harness.switched", "harness.started":
+			order = append(order, typ)
+		}
+	}
+	if strings.Join(order, ",") != "harness.started,harness.quota_exhausted,harness.switched,harness.started" {
+		t.Errorf("visible switch: %v", order)
+	}
+}
+
+// FS-003 AC-007, AC-006: cancelling ends the harness and its children; another task keeps running.
+func TestCancelEndsTheTree(t *testing.T) {
+	d := startDaemon(t, t.TempDir())
+	d.call("POST", "/tasks", map[string]any{"yaml": task("slow-a", "SCENARIO=slow", "  execution:\n    cancelGraceSeconds: 1\n")}, 201)
+	d.call("POST", "/tasks", map[string]any{"yaml": task("slow-b", "SCENARIO=slow", "")}, 201)
+	a := d.call("POST", "/tasks/slow-a/run", nil, 202)["executionId"].(string)
+	b := d.call("POST", "/tasks/slow-b/run", nil, 202)["executionId"].(string)
+	x := d.waitStatus(a, "running")
+	d.waitStatus(b, "running")
+	pidFile := filepath.Join(x["executionDir"].(string), "child.pid")
+	var child int
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline) && child == 0; time.Sleep(100 * time.Millisecond) {
+		data, _ := os.ReadFile(pidFile)
+		child, _ = strconv.Atoi(strings.TrimSpace(string(data)))
+	}
+	if child == 0 {
+		t.Fatal("the fake harness did not start its child")
+	}
+	d.call("POST", "/executions/"+a+"/cancel", nil, 202)
+	x = d.waitStatus(a, "cancelled")
+	if x["cancelRequestedAt"] == nil {
+		t.Error("the cancellation was not recorded")
+	}
+	time.Sleep(200 * time.Millisecond)
+	if err := syscall.Kill(child, 0); err == nil {
+		t.Errorf("the harness's child %d survived the cancellation", child)
+	}
+	if got := d.call("GET", "/executions/"+b, nil, 200); got["status"] != "running" {
+		t.Errorf("the other task's execution is %v", got["status"])
+	}
+}
+
+// FS-003 AC-009: an execution running when the daemon is killed reads interrupted after the restart, with its log.
+func TestRestartInterrupts(t *testing.T) {
+	home := t.TempDir()
+	d := startDaemon(t, home)
+	d.call("POST", "/tasks", map[string]any{"yaml": task("crash", "SCENARIO=slow", "")}, 201)
+	id := d.call("POST", "/tasks/crash/run", nil, 202)["executionId"].(string)
+	d.waitStatus(id, "running")
+	time.Sleep(1500 * time.Millisecond) // let the record reach the disk
+	d.kill()
+	d2 := startDaemon(t, home)
+	x := d2.call("GET", "/executions/"+id, nil, 200)
+	if x["status"] != "interrupted" {
+		t.Fatalf("status %v", x["status"])
+	}
+	events := d2.call("GET", "/executions/"+id+"/events", nil, 200)
+	if events["logExpired"] == true || len(events["events"].([]any)) == 0 {
+		t.Error("the attempt's log was lost")
+	}
+	// The task can run again right away.
+	run := d2.call("POST", "/tasks/crash/run", nil, 202)
+	if run["outcome"] != "started" {
+		t.Errorf("rerun %v", run)
+	}
+	d2.call("POST", "/executions/"+run["executionId"].(string)+"/cancel", nil, 202)
+}

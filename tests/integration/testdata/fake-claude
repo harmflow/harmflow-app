@@ -1,0 +1,40 @@
+#!/bin/bash
+# A stand-in for the Claude Code CLI that speaks its stream-json format. The task's prompt picks the scenario:
+# SCENARIO=ok (default), SCENARIO=quota, SCENARIO=slow, SCENARIO=report.
+case "$1" in
+  --version) echo "2.1.239 (Claude Code)"; exit 0 ;;
+  --help) cat <<'HELP'
+Usage: claude [options]
+  -p, --print  --output-format <format>  --permission-mode <mode>  --allowedTools <tools...>
+  --disallowedTools <tools...>  --append-system-prompt <prompt>  --plugin-dir <path>  --agents <json>  --agent <agent>
+  --add-dir <directories...>  --tools <tools...>  --no-session-persistence  --model <model>
+  --effort <level>  Effort level for the current session (low, medium, high, xhigh, max)
+HELP
+    exit 0 ;;
+  auth) echo '{"loggedIn": true}'; exit 0 ;;
+esac
+PROMPT=$(cat)
+SCENARIO=ok
+[[ "$PROMPT" =~ SCENARIO=([a-z]+) ]] && SCENARIO=${BASH_REMATCH[1]}
+echo '{"type":"system","subtype":"init","session_id":"fake-session","model":"fake-model","permissionMode":"acceptEdits"}'
+case "$SCENARIO" in
+  quota)
+    echo '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rateLimitType":"five_hour","resetsAt":1}}'
+    echo '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Claude AI usage limit reached"}'
+    exit 1 ;;
+  slow)
+    sleep 300 &
+    echo $! > "$HARMFLOW_EXECUTION_DIR/child.pid"
+    echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"sleep 300","description":"Waiting"}}]}}'
+    wait
+    exit 0 ;;
+  report)
+    echo '{"type":"step.started","phase":"testing","message":"Running the tests"}' >> "$HARMFLOW_EXECUTION_DIR/progress.jsonl"
+    echo '{"type":"test.completed","status":"passed","message":"12 passed"}' >> "$HARMFLOW_EXECUTION_DIR/progress.jsonl"
+    sleep 1.5
+    printf '%s' '{"outcome":"completed","summary":"done","workItems":[{"key":"o/r#3","outcome":"completed","pullRequest":{"url":"https://github.com/o/r/pull/4","created":true,"draft":true},"tests":{"status":"passed"}}]}' > "$HARMFLOW_EXECUTION_DIR/report.json" ;;
+esac
+echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"echo hi","description":"Say hi"}}]}}'
+echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"hi","is_error":false}]}}'
+echo '{"type":"assistant","message":{"content":[{"type":"text","text":"All done."}]}}'
+echo '{"type":"result","subtype":"success","is_error":false,"result":"All done.","session_id":"fake-session"}'
