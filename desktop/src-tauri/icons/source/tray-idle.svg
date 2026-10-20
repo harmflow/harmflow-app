@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44">
+  <!-- Menu-bar template icon, idle: the outline only. -->
+  <g fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round" stroke-width="3">
+    <path d="M22 5 37 13.7v16.6L22 39 7 30.3V13.7L22 5Z"/>
+    <path d="M15 18.5c4-3 10-3 14 0M15 24.5c4-3 10-3 14 0"/>
+  </g>
+</svg>
