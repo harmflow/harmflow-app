@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harmflow.com/schemas/v1alpha1/execution-report.schema.json",
+  "title": "HarmFlow execution report",
+  "description": "The operational checkpoint a harness session leaves in its execution directory. HarmFlow implements no task behavior (D-064): the session's agents and skills write this report, and the daemon only records it. report.json holds the final outcome; progress.jsonl holds one progress line per step, read while the session runs.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "outcome": {
+      "description": "completed: the work ended operationally, possibly with failing tests. no_work: nothing eligible was found, not a failure. needs_attention: a human must act. failed: a blocking operational error.",
+      "type": "string",
+      "enum": ["completed", "no_work", "needs_attention", "failed"]
+    },
+    "summary": { "type": "string", "maxLength": 8000 },
+    "lastOperation": {
+      "description": "The last external operation applied — a push, a pull-request creation — used to reconcile a later attempt (D-089).",
+      "type": "string",
+      "maxLength": 500
+    },
+    "workItems": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/workItem" }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message"],
+        "properties": {
+          "code": { "type": "string", "enum": ["repository_unprotected", "conflicting_activity", "other"] },
+          "message": { "type": "string" },
+          "repository": { "type": "string" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "workItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key"],
+      "properties": {
+        "key": { "description": "Stable key, such as owner/repo#123.", "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "enum": ["new", "resume"] },
+        "repository": { "type": "string" },
+        "issueNumber": { "type": "integer", "minimum": 1 },
+        "title": { "type": "string" },
+        "branch": { "type": "string" },
+        "worktreePath": { "type": "string" },
+        "outcome": { "type": "string", "enum": ["completed", "failed", "needs_attention", "skipped", "closed"] },
+        "pullRequest": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "number": { "type": "integer", "minimum": 1 },
+            "url": { "type": "string" },
+            "draft": { "type": "boolean" },
+            "created": { "description": "true when this execution opened it; false when it updated an existing one.", "type": "boolean" }
+          }
+        },
+        "tests": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "status": { "type": "string", "enum": ["passed", "failed", "not_run"] },
+            "summary": { "type": "string" }
+          }
+        },
+        "commits": { "type": "array", "items": { "type": "string" } },
+        "changedFiles": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "progress": {
+      "description": "One line of progress.jsonl.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "step.started",
+            "work_item.selected",
+            "workspace.changed",
+            "test.started",
+            "test.completed",
+            "pull_request.created",
+            "pull_request.updated",
+            "repository.unprotected"
+          ]
+        },
+        "message": { "type": "string", "maxLength": 1000 },
+        "workItem": { "type": "string" },
+        "phase": { "description": "For step.started: the lifecycle phase the step belongs to.", "type": "string", "enum": ["preparing", "running", "testing", "publishing"] },
+        "status": { "description": "For test.completed.", "type": "string", "enum": ["passed", "failed", "not_run"] },
+        "url": { "type": "string" },
+        "number": { "type": "integer" },
+        "branch": { "type": "string" },
+        "repository": { "type": "string" }
+      }
+    }
+  }
+}
