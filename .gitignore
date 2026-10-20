@@ -1,0 +1,14 @@
+# Build output
+/build/
+/dist/
+desktop/src-tauri/target/
+desktop/src-tauri/binaries/
+desktop/ui/dist/
+node_modules/
+*.tsbuildinfo
+
+# Local data of development runs
+/.harmflow-dev/
+
+# OS
+.DS_Store

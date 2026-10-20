@@ -1,0 +1,75 @@
+# Task runner for the harmflow-app monorepo (D-091). Run `make help` for the list.
+
+SHELL := /bin/bash
+VERSION := 0.1.0
+TRIPLE := $(shell rustc -vV 2>/dev/null | sed -n 's/^host: //p')
+DEV_HOME := $(CURDIR)/.harmflow-dev/home
+SIDECAR := desktop/src-tauri/binaries/harmflowd-$(TRIPLE)
+LDFLAGS := -s -w -X main.Version=$(VERSION)
+
+.PHONY: help
+help: ## List the targets
+	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}'
+
+.PHONY: generate
+generate: ## Refresh the code generated from contracts/
+	cp contracts/schemas/task.schema.json contracts/schemas/event.schema.json \
+		contracts/schemas/execution-report.schema.json daemon/internal/contracts/
+	pnpm -C desktop generate
+
+.PHONY: check-generated
+check-generated: generate ## Fail when a generated copy is stale
+	git diff --exit-code -- daemon/internal/contracts desktop/ui/src/api/generated.ts
+
+.PHONY: daemon
+daemon: ## Build the daemon into build/harmflowd
+	go -C daemon build -trimpath -ldflags "$(LDFLAGS)" -o ../build/harmflowd ./cmd/harmflowd
+
+.PHONY: sidecar
+sidecar: daemon ## Place the daemon where the desktop bundle expects it
+	mkdir -p desktop/src-tauri/binaries
+	cp build/harmflowd $(SIDECAR)
+
+.PHONY: deps
+deps: ## Install the desktop's JavaScript dependencies
+	pnpm -C desktop install --frozen-lockfile
+
+.PHONY: test
+test: test-daemon test-desktop test-integration ## Run every test
+
+.PHONY: test-daemon
+test-daemon: ## Unit tests of the daemon
+	go -C daemon vet ./...
+	go -C daemon test ./...
+
+.PHONY: test-desktop
+test-desktop: ## Type check and unit tests of the desktop
+	pnpm -C desktop typecheck
+	pnpm -C desktop test
+	cd desktop/src-tauri && cargo test
+
+.PHONY: test-integration
+test-integration: daemon ## Tests across the daemon's process boundary, with fake harnesses
+	go -C tests test -count=1 ./...
+
+.PHONY: dev-daemon
+dev-daemon: daemon ## Run the daemon on a development data directory
+	HARMFLOW_HOME=$(DEV_HOME) ./build/harmflowd --builtins $(CURDIR)
+
+.PHONY: dev-ui
+dev-ui: ## Serve the interface in a browser, proxied to the development daemon
+	HARMFLOW_HOME=$(DEV_HOME) pnpm -C desktop dev
+
+.PHONY: dev-desktop
+dev-desktop: sidecar ## Run the desktop shell against the development daemon
+	HARMFLOW_HOME=$(DEV_HOME) HARMFLOW_DAEMON_BIN=$(CURDIR)/build/harmflowd HARMFLOW_BUILTINS_DIR=$(CURDIR) \
+		pnpm -C desktop tauri dev
+
+.PHONY: app
+app: sidecar ## Build HarmFlow.app and the DMG (unsigned until the Developer ID exists, D-080)
+	cd desktop && pnpm tauri build
+	@echo "Bundles in desktop/src-tauri/target/release/bundle/"
+
+.PHONY: clean
+clean: ## Remove build output
+	rm -rf build desktop/ui/dist
