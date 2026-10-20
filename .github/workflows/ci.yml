@@ -1,0 +1,134 @@
+# CI follows D-091: a pull request runs only the parts it touches, a change in contracts/ runs every part, and main
+# runs everything. The full macOS, Linux, and Windows matrix of D-091 starts when the Linux and Windows ports exist;
+# until then every job runs on macOS, the MVP's only platform.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Parts touched
+    runs-on: ubuntu-latest
+    outputs:
+      contracts: ${{ steps.parts.outputs.contracts }}
+      daemon: ${{ steps.parts.outputs.daemon }}
+      integration: ${{ steps.parts.outputs.integration }}
+      desktop: ${{ steps.parts.outputs.desktop }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: parts
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            files="everything"
+          else
+            files=$(git diff --name-only "origin/$BASE...HEAD")
+          fi
+          echo "$files"
+          touched() {
+            # Everything runs on main, and for a change to contracts/, the build, or CI itself.
+            [ "$files" = "everything" ] && return 0
+            echo "$files" | grep -Eq '^(contracts/|Makefile$|\.github/)' && return 0
+            echo "$files" | grep -Eq "$1"
+          }
+          for part in contracts daemon integration desktop; do
+            case $part in
+              contracts)   pattern='^(contracts/|daemon/internal/contracts/|desktop/ui/src/api/generated\.ts$)' ;;
+              daemon)      pattern='^daemon/' ;;
+              integration) pattern='^(daemon/|tests/|agents/|skills/)' ;;
+              desktop)     pattern='^(desktop/|agents/|skills/)' ;;
+            esac
+            if touched "$pattern"; then echo "$part=true" >> "$GITHUB_OUTPUT"; else echo "$part=false" >> "$GITHUB_OUTPUT"; fi
+          done
+
+  generated:
+    name: Generated code is current
+    needs: changes
+    if: needs.changes.outputs.contracts == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: desktop/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      - run: make deps
+      - run: make check-generated
+
+  daemon:
+    name: Daemon (macOS)
+    needs: changes
+    if: needs.changes.outputs.daemon == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: daemon/go.mod
+          cache-dependency-path: daemon/go.sum
+      - name: Formatting
+        run: test -z "$(gofmt -l daemon tests)" || { gofmt -l daemon tests; exit 1; }
+      - run: make test-daemon
+        env:
+          GOFLAGS: -race
+
+  integration:
+    name: Integration (macOS)
+    needs: changes
+    if: needs.changes.outputs.integration == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: daemon/go.mod
+          cache-dependency-path: daemon/go.sum
+      - run: make test-integration
+
+  desktop:
+    name: Desktop (macOS)
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: desktop/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: daemon/go.mod
+          cache-dependency-path: daemon/go.sum
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - run: make deps
+      # The bundle's sidecar must exist for tauri-build, and the interface for the shell.
+      - run: make sidecar
+      - run: pnpm -C desktop build
+      - run: make test-desktop
