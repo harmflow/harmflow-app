@@ -1,0 +1,277 @@
+package app
+
+import (
+	"encoding/json"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/harmflow/harmflow-app/daemon/internal/domain"
+)
+
+// ExecutionSummary is the row of an execution in lists; no progress percentage is invented (FS-008 FR-009).
+type ExecutionSummary struct {
+	ID             string                 `json:"id"`
+	TaskID         string                 `json:"taskId"`
+	TaskName       string                 `json:"taskName"`
+	TaskType       string                 `json:"taskType"`
+	Status         domain.ExecutionStatus `json:"status"`
+	Trigger        domain.Trigger         `json:"trigger"`
+	CreatedAt      time.Time              `json:"createdAt"`
+	StartedAt      *time.Time             `json:"startedAt,omitempty"`
+	EndedAt        *time.Time             `json:"endedAt,omitempty"`
+	Harness        string                 `json:"harness"`
+	Model          string                 `json:"model,omitempty"`
+	AttemptCount   int                    `json:"attemptCount"`
+	CurrentStep    string                 `json:"currentStep,omitempty"`
+	Repository     string                 `json:"repository,omitempty"`
+	WorkItem       string                 `json:"workItem,omitempty"`
+	PullRequestURL string                 `json:"pullRequestUrl,omitempty"`
+	TestsStatus    string                 `json:"testsStatus,omitempty"`
+	Summary        string                 `json:"summary,omitempty"`
+	ErrorMessage   string                 `json:"errorMessage,omitempty"`
+	WarningCount   int                    `json:"warningCount"`
+}
+
+func summarize(x *domain.Execution) ExecutionSummary {
+	return ExecutionSummary{
+		ID: x.ID, TaskID: x.TaskID, TaskName: x.TaskName, TaskType: x.TaskType, Status: x.Status, Trigger: x.Trigger,
+		CreatedAt: x.CreatedAt, StartedAt: x.StartedAt, EndedAt: x.EndedAt, Harness: x.Harness, Model: x.Model,
+		AttemptCount: len(x.Attempts), CurrentStep: x.CurrentStep, Repository: x.Repository, WorkItem: x.WorkItem,
+		PullRequestURL: x.PullRequestURL, TestsStatus: x.TestsStatus, Summary: trimTo(x.Summary, 300),
+		ErrorMessage: trimTo(x.ErrorMessage, 300), WarningCount: len(x.Warnings),
+	}
+}
+
+type ExecutionFilter struct {
+	TaskID   string
+	Statuses []string
+	Active   *bool
+	Limit    int
+	Before   *time.Time
+}
+
+func (a *App) ListExecutions(f ExecutionFilter) []ExecutionSummary {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var list []*domain.Execution
+	for _, x := range a.executions {
+		if f.TaskID != "" && x.TaskID != f.TaskID {
+			continue
+		}
+		if len(f.Statuses) > 0 && !containsString(f.Statuses, string(x.Status)) {
+			continue
+		}
+		if f.Active != nil && x.Status.IsActive() != *f.Active {
+			continue
+		}
+		if f.Before != nil && !x.CreatedAt.Before(*f.Before) {
+			continue
+		}
+		list = append(list, x)
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].CreatedAt.After(list[j].CreatedAt) })
+	limit := f.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	if len(list) > limit {
+		list = list[:limit]
+	}
+	out := make([]ExecutionSummary, 0, len(list))
+	for _, x := range list {
+		out = append(out, summarize(x))
+	}
+	return out
+}
+
+// ExecutionView is the full record as the API returns it.
+type ExecutionView struct {
+	ExecutionSummary
+	ScheduledFor       *time.Time              `json:"scheduledFor,omitempty"`
+	CancelRequestedAt  *time.Time              `json:"cancelRequestedAt,omitempty"`
+	TimeoutAt          *time.Time              `json:"timeoutAt,omitempty"`
+	DefinitionRevision string                  `json:"definitionRevision,omitempty"`
+	WorkspacePath      string                  `json:"workspacePath,omitempty"`
+	ExecutionDir       string                  `json:"executionDir,omitempty"`
+	Attempts           []domain.Attempt        `json:"attempts"`
+	WorkItems          []domain.WorkItemResult `json:"workItems"`
+	Warnings           []domain.Warning        `json:"warnings"`
+	ChangedFiles       []string                `json:"changedFiles"`
+	Commands           []domain.CommandRecord  `json:"commands"`
+	LastOperation      string                  `json:"lastOperation,omitempty"`
+	LogExpired         bool                    `json:"logExpired"`
+	HarnessSwitches    int                     `json:"harnessSwitches"`
+}
+
+func (a *App) GetExecution(id string) (ExecutionView, error) {
+	a.mu.Lock()
+	x, ok := a.executions[id]
+	if !ok {
+		a.mu.Unlock()
+		return ExecutionView{}, errf(CodeNotFound, "no execution %s", id)
+	}
+	data, _ := json.Marshal(x)
+	a.mu.Unlock()
+	var c domain.Execution
+	_ = json.Unmarshal(data, &c)
+	return ExecutionView{
+		ExecutionSummary: summarize(&c), ScheduledFor: c.ScheduledFor, CancelRequestedAt: c.CancelRequestedAt,
+		TimeoutAt: c.TimeoutAt, DefinitionRevision: c.DefinitionRevision, WorkspacePath: c.WorkspacePath,
+		ExecutionDir: c.ExecutionDir, Attempts: c.Attempts, WorkItems: c.WorkItems, Warnings: c.Warnings,
+		ChangedFiles: c.ChangedFiles, Commands: c.Commands, LastOperation: c.LastOperation, LogExpired: c.LogExpired,
+		HarnessSwitches: c.HarnessSwitches,
+	}, nil
+}
+
+type Activity struct {
+	Running   []int `json:"running"`
+	Queued    []int `json:"queued"`
+	Completed []int `json:"completed"`
+	Failed    []int `json:"failed"`
+}
+
+type Stats struct {
+	Running        int            `json:"running"`
+	Queued         int            `json:"queued"`
+	CompletedToday int            `json:"completedToday"`
+	FailedToday    int            `json:"failedToday"`
+	System         map[string]any `json:"system,omitempty"`
+	Activity       Activity       `json:"activity"`
+}
+
+// Stats counts executions for the counters of the executions screen, with per-hour activity for the last 12 hours.
+func (a *App) Stats() Stats {
+	now := a.now().In(a.d.Location)
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, a.d.Location)
+	const hours = 12
+	start := now.Truncate(time.Hour).Add(-(hours - 1) * time.Hour)
+	bucket := func(t *time.Time) int {
+		if t == nil || t.Before(start) {
+			return -1
+		}
+		i := int(t.Sub(start) / time.Hour)
+		if i >= hours {
+			return hours - 1
+		}
+		return i
+	}
+	s := Stats{Activity: Activity{Running: make([]int, hours), Queued: make([]int, hours), Completed: make([]int, hours),
+		Failed: make([]int, hours)}}
+	a.mu.Lock()
+	for _, x := range a.executions {
+		switch {
+		case x.Status.IsActive():
+			s.Running++
+		case x.Status == domain.StatusQueued:
+			s.Queued++
+		}
+		if x.EndedAt != nil && !x.EndedAt.Before(midnight) {
+			switch x.Status {
+			case domain.StatusCompleted, domain.StatusNoWork:
+				s.CompletedToday++
+			case domain.StatusFailed, domain.StatusInterrupted:
+				s.FailedToday++
+			}
+		}
+		if i := bucket(x.StartedAt); i >= 0 {
+			s.Activity.Running[i]++
+			if x.StartedAt.Sub(x.CreatedAt) > 5*time.Second {
+				s.Activity.Queued[i]++
+			}
+		}
+		if i := bucket(x.EndedAt); i >= 0 {
+			switch x.Status {
+			case domain.StatusCompleted, domain.StatusNoWork:
+				s.Activity.Completed[i]++
+			case domain.StatusFailed, domain.StatusInterrupted:
+				s.Activity.Failed[i]++
+			}
+		}
+	}
+	a.mu.Unlock()
+	if a.d.System != nil {
+		s.System = a.d.System.Snapshot(a.d.Paths.Home)
+	}
+	return s
+}
+
+type Upcoming struct {
+	TaskID     string    `json:"taskId"`
+	TaskName   string    `json:"taskName"`
+	Harness    string    `json:"harness,omitempty"`
+	NextFireAt time.Time `json:"nextFireAt"`
+}
+
+type QueueView struct {
+	Waiting   []ExecutionSummary `json:"waiting"`
+	Upcoming  []Upcoming         `json:"upcoming"`
+	WorkItems []domain.WorkItem  `json:"workItems"`
+}
+
+// Queue is what waits: firings waiting for their task, the next scheduled firings, and the work items the task's
+// sessions reported (FS-008 FR-004).
+func (a *App) Queue() QueueView {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	q := QueueView{Waiting: []ExecutionSummary{}, Upcoming: []Upcoming{}, WorkItems: []domain.WorkItem{}}
+	var waiting []*domain.Execution
+	for _, x := range a.executions {
+		if x.Status == domain.StatusQueued {
+			waiting = append(waiting, x)
+		}
+	}
+	sortByCreated(waiting)
+	for _, x := range waiting {
+		q.Waiting = append(q.Waiting, summarize(x))
+	}
+	for id, s := range a.sched {
+		e := a.tasks[id]
+		if e == nil || s.NextFireAt == nil || !e.doc.IsEnabled() || e.invalid != nil {
+			continue
+		}
+		q.Upcoming = append(q.Upcoming, Upcoming{TaskID: id, TaskName: e.doc.Metadata.Name,
+			Harness: e.doc.Effective().Spec.Harness.Preferred.Provider, NextFireAt: *s.NextFireAt})
+	}
+	sort.Slice(q.Upcoming, func(i, j int) bool { return q.Upcoming[i].NextFireAt.Before(q.Upcoming[j].NextFireAt) })
+	for _, task := range sortedKeys(a.ledger) {
+		for _, key := range sortedKeys(a.ledger[task]) {
+			q.WorkItems = append(q.WorkItems, *a.ledger[task][key])
+		}
+	}
+	sort.SliceStable(q.WorkItems, func(i, j int) bool { return q.WorkItems[i].UpdatedAt.After(q.WorkItems[j].UpdatedAt) })
+	return q
+}
+
+// Diagnostics lists the directories and the local API's address (FS-010 FR-009).
+type Diagnostics struct {
+	Version      string `json:"version"`
+	Address      string `json:"address"`
+	HomeDir      string `json:"homeDir"`
+	TasksDir     string `json:"tasksDir"`
+	StateDir     string `json:"stateDir"`
+	LogsDir      string `json:"logsDir"`
+	WorkspaceDir string `json:"workspaceDir"`
+	RunsDir      string `json:"runsDir"`
+	RuntimeFile  string `json:"runtimeFile"`
+	TokenStore   string `json:"tokenStore"`
+	BuiltinsDir  string `json:"builtinsDir"`
+}
+
+func (a *App) Diagnostics(address, tokenStore string) Diagnostics {
+	p := a.d.Paths
+	return Diagnostics{Version: a.d.Version, Address: address, HomeDir: p.Home, TasksDir: p.Tasks, StateDir: p.State,
+		LogsDir: p.Logs, WorkspaceDir: p.Workspace, RunsDir: p.Runs, RuntimeFile: p.RuntimeFile, TokenStore: tokenStore,
+		BuiltinsDir: p.Builtins}
+}
+
+// ParseStatuses splits a comma-separated status filter.
+func ParseStatuses(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}

@@ -1,0 +1,211 @@
+// Package ports declares the output ports the use cases depend on (architecture/daemon-structure.md). Every vendor,
+// tool, and operating-system detail lives behind one of them, in an adapter.
+package ports
+
+import (
+	"context"
+	"io"
+	"time"
+
+	"github.com/harmflow/harmflow-app/daemon/internal/domain"
+)
+
+// Clock is injectable so the scheduler can be tested without waiting (ADR-0001).
+type Clock interface {
+	Now() time.Time
+}
+
+// TaskFile is one task definition as stored: the raw YAML is kept so comments survive edits from the editor.
+type TaskFile struct {
+	ID       string
+	Path     string
+	Content  []byte
+	Revision string
+	ModTime  time.Time
+}
+
+// TaskRepository holds task YAML files; the daemon is their only writer (FS-001 FR-004).
+type TaskRepository interface {
+	List() ([]TaskFile, error)
+	Get(id string) (TaskFile, error)
+	// Save writes atomically; expectedRevision, when set, must match the file on disk or ErrConflict is returned.
+	Save(id string, content []byte, expectedRevision string) (TaskFile, error)
+	Delete(id string) error
+	Dir() string
+}
+
+// StateStore persists operational state as versioned JSON, written atomically (ADR-0007).
+type StateStore interface {
+	Load(name string, v any) (bool, error)
+	Save(name string, v any) error
+}
+
+// ExecutionRepository keeps execution records with no time limit (D-073).
+type ExecutionRepository interface {
+	Save(x *domain.Execution) error
+	LoadAll() ([]*domain.Execution, error)
+}
+
+// EventLog writes one JSONL file per execution and publishes every event live (ADR-0004, ADR-0007).
+type EventLog interface {
+	Append(e domain.Event) domain.Event
+	Replay(executionID string, after int64, limit int) ([]domain.Event, bool, error)
+	Subscribe(after int64) (events <-chan domain.Event, replayGap bool, cancel func())
+	RawWriter(executionID string, attempt int) (io.WriteCloser, error)
+	DeleteLog(executionID string) error
+	LogModTime(executionID string) (time.Time, bool)
+}
+
+// SecretStore keeps the local API token in the operating system's credential store (D-090).
+type SecretStore interface {
+	Get() (string, error)
+	Set(token string) error
+	Kind() string
+}
+
+// HostServiceManager enables and disables the daemon's start with the user's session (D-008, D-062).
+type HostServiceManager interface {
+	Enabled() bool
+	Enable(executable string, args []string, env map[string]string) error
+	Disable() error
+	Mechanism() string
+	Location() string
+}
+
+// HarnessInfo is what detection found (FS-004 FR-006, FR-007).
+type HarnessInfo struct {
+	ID                  string          `json:"id"`
+	Name                string          `json:"name"`
+	Detected            bool            `json:"detected"`
+	Path                string          `json:"path,omitempty"`
+	PathSource          string          `json:"pathSource,omitempty"`
+	Installations       []string        `json:"installations"`
+	Version             string          `json:"version,omitempty"`
+	VersionSupport      string          `json:"versionSupport,omitempty"`
+	Authentication      string          `json:"authentication"`
+	Readiness           string          `json:"readiness"`
+	Models              []ModelInfo     `json:"models"`
+	Efforts             []string        `json:"efforts"`
+	CapabilitySource    string          `json:"capabilitySource,omitempty"`
+	EnforceableControls []string        `json:"enforceableControls"`
+	LastCheckedAt       time.Time       `json:"lastCheckedAt"`
+	Diagnostic          string          `json:"diagnostic,omitempty"`
+	Features            map[string]bool `json:"-"`
+}
+
+type ModelInfo struct {
+	ID      string   `json:"id"`
+	Efforts []string `json:"efforts,omitempty"`
+}
+
+// Ready reports whether an execution may start on the harness.
+func (h HarnessInfo) Ready() bool { return h.Readiness == "ready" }
+
+// Resolved agent or skill, delivered to the harness (D-092).
+type ResolvedItem struct {
+	Name        string
+	Kind        string // agent or skill
+	Builtin     bool
+	Path        string // file of an agent, folder of a skill
+	Description string
+}
+
+// RunRequest is everything an adapter needs to start one attempt.
+type RunRequest struct {
+	ExecutionID    string
+	TaskID         string
+	Attempt        int
+	Prompt         string
+	Context        string // HarmFlow's orchestration context, delivered as a system prompt where the harness has one
+	Agents         []ResolvedItem
+	Skills         []ResolvedItem
+	Model          string
+	Effort         string
+	WorkDir        string
+	AdditionalDirs []string
+	Permissions    domain.Permissions
+	ExecutionDir   string
+	Env            []string
+}
+
+// Restriction is one declared restriction and whether the harness enforces it (D-068).
+type Restriction struct {
+	Name     string
+	Enforced bool
+	Message  string
+}
+
+// Invocation is the process an adapter asks the executor to start.
+type Invocation struct {
+	Path         string
+	Args         []string
+	Env          []string
+	Dir          string
+	Stdin        string
+	Restrictions []Restriction
+}
+
+// HarnessEventKind is a normalized observation of the harness's structured output.
+type HarnessEventKind string
+
+const (
+	HarnessStarted     HarnessEventKind = "started"
+	HarnessMessage     HarnessEventKind = "message"
+	HarnessToolStarted HarnessEventKind = "tool_started"
+	HarnessToolDone    HarnessEventKind = "tool_completed"
+	HarnessFileChanged HarnessEventKind = "file_changed"
+	HarnessWarning     HarnessEventKind = "warning"
+	HarnessRateLimit   HarnessEventKind = "rate_limit"
+)
+
+type HarnessEvent struct {
+	Kind      HarnessEventKind
+	Message   string
+	ToolID    string
+	Tool      string
+	Command   string
+	Path      string
+	ExitCode  *int
+	IsError   bool
+	Output    string
+	SessionID string
+	Model     string
+}
+
+// OutputParser turns one attempt's stdout lines into events and classifies its end.
+type OutputParser interface {
+	Line(line []byte) []HarnessEvent
+	Finish(exitCode int, stderrTail string, timedOut, cancelled bool) domain.AttemptEnd
+}
+
+// HarnessAdapter is the HarnessRunner port of one harness (ADR-0009): detect, declare capabilities, run
+// non-interactively, capture events, and recognize quota failure. Cancellation is the executor's, by process group.
+type HarnessAdapter interface {
+	ID() string
+	Name() string
+	Detect(ctx context.Context, manualPath string) HarnessInfo
+	ValidateProfile(info HarnessInfo, model, effort string) error
+	Prepare(info HarnessInfo, req RunRequest) (Invocation, OutputParser, error)
+	// UserItem looks up an agent or skill in the user's harness configuration.
+	UserItem(kind, name string) (ResolvedItem, bool)
+	UserItems(kind string) []ResolvedItem
+}
+
+// SystemInfo reads the gauges of the sidebar.
+type SystemInfo interface {
+	Snapshot(dir string) map[string]any
+}
+
+// ToolProber reports git and gh.
+type ToolProber interface {
+	Probe(ctx context.Context) []ToolInfo
+}
+
+type ToolInfo struct {
+	ID             string `json:"id"`
+	Detected       bool   `json:"detected"`
+	Path           string `json:"path,omitempty"`
+	Version        string `json:"version,omitempty"`
+	Authentication string `json:"authentication,omitempty"`
+	Diagnostic     string `json:"diagnostic,omitempty"`
+}
