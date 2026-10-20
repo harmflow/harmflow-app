@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harmflow.com/schemas/v1alpha1/event.schema.json",
+  "title": "HarmFlow event",
+  "description": "A normalized event, as written to one JSONL file per execution and delivered on the SSE stream (ADR-0004, ADR-0007). Event types are object.action in snake_case (D-094).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "schemaVersion", "timestamp", "type", "severity"],
+  "properties": {
+    "id": {
+      "description": "Incremental identifier; a reconnecting client asks for the events after the last one it received.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "schemaVersion": { "const": "1" },
+    "timestamp": { "description": "RFC 3339 with its time-zone offset.", "type": "string", "format": "date-time" },
+    "taskId": { "type": "string" },
+    "executionId": { "type": "string" },
+    "workItemId": { "type": "string" },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "harness": { "type": "string" },
+    "type": { "$ref": "#/$defs/eventType" },
+    "severity": { "type": "string", "enum": ["debug", "info", "warning", "error"] },
+    "message": {
+      "description": "Short text in its original language: agent text and tool output are never translated (FS-012 FR-005). The dashboard translates the label of the type.",
+      "type": "string"
+    },
+    "payload": { "type": "object" }
+  },
+  "$defs": {
+    "eventType": {
+      "type": "string",
+      "enum": [
+        "daemon.started",
+        "daemon.stopping",
+        "task.created",
+        "task.updated",
+        "task.deleted",
+        "task.changed_externally",
+        "task.invalid",
+        "firing.queued",
+        "firing.coalesced",
+        "firing.skipped",
+        "firing.missed",
+        "execution.created",
+        "execution.started",
+        "execution.status_changed",
+        "execution.cancel_requested",
+        "execution.completed",
+        "execution.no_work",
+        "execution.failed",
+        "execution.cancelled",
+        "execution.interrupted",
+        "execution.needs_attention",
+        "harness.started",
+        "harness.message",
+        "harness.output",
+        "harness.exited",
+        "harness.quota_exhausted",
+        "harness.rate_limited",
+        "harness.unavailable",
+        "harness.switched",
+        "harness.no_alternative",
+        "harness.version_untested",
+        "tool.started",
+        "tool.completed",
+        "step.started",
+        "work_item.selected",
+        "workspace.changed",
+        "test.started",
+        "test.completed",
+        "test.failed",
+        "pull_request.created",
+        "pull_request.updated",
+        "policy.unenforced",
+        "repository.unprotected",
+        "notification.created"
+      ]
+    }
+  }
+}

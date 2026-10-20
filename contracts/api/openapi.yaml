@@ -1,0 +1,1140 @@
+openapi: 3.1.0
+info:
+  title: HarmFlow local API
+  version: v1
+  description: |
+    The only control surface of the HarmFlow daemon (ADR-0003), on HTTP bound to 127.0.0.1 with Server-Sent Events
+    for the live stream (ADR-0004). The daemon picks a free port at start and writes it, with its pid and version, to
+    a runtime file only the user can read (D-090).
+
+    Every request, the SSE stream included, carries the per-installation token in `Authorization: Bearer <token>`.
+    Requests whose `Host` is not the loopback address, or whose `Origin` is a web page, are rejected (FS-009 FR-005).
+
+    Naming follows D-094: plural resources, actions as a POST to a verb sub-resource, camelCase keys, snake_case
+    values from closed sets, and `object.action` event types.
+servers:
+  - url: http://127.0.0.1:{port}/api/v1
+    variables:
+      port:
+        default: "0"
+        description: The port written to the runtime file.
+security:
+  - bearerToken: []
+tags:
+  - name: daemon
+  - name: harnesses
+  - name: tasks
+  - name: executions
+  - name: events
+  - name: queue
+  - name: settings
+  - name: notifications
+
+paths:
+  /health:
+    get:
+      tags: [daemon]
+      operationId: getHealth
+      summary: Daemon state and version
+      responses:
+        "200":
+          description: The daemon is running.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /daemon/stop:
+    post:
+      tags: [daemon]
+      operationId: stopDaemon
+      summary: Stop the daemon
+      description: Refused with 409 while executions run, unless force is set; the desktop asks for confirmation first (FS-010 FR-008).
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force: { type: boolean, default: false }
+      responses:
+        "202":
+          description: The daemon is stopping.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Accepted" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /diagnostics:
+    get:
+      tags: [daemon]
+      operationId: getDiagnostics
+      summary: Directories, address, and token store
+      responses:
+        "200":
+          description: Diagnostics.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Diagnostics" }
+
+  /stats:
+    get:
+      tags: [executions]
+      operationId: getStats
+      summary: Counters for the executions screen
+      responses:
+        "200":
+          description: Counters and their recent activity.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Stats" }
+
+  /harnesses:
+    get:
+      tags: [harnesses]
+      operationId: listHarnesses
+      summary: Detected harnesses and their capabilities (FS-004 FR-007)
+      responses:
+        "200":
+          description: One entry per supported harness, detected or not.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Harness" }
+
+  /harnesses/refresh:
+    post:
+      tags: [harnesses]
+      operationId: refreshHarnesses
+      summary: Detect the harnesses again
+      responses:
+        "200":
+          description: The refreshed inventory.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Harness" }
+
+  /harnesses/{harnessId}:
+    parameters:
+      - $ref: "#/components/parameters/HarnessId"
+    put:
+      tags: [harnesses]
+      operationId: setHarnessPath
+      summary: Choose an installation or set a path by hand (FS-004 FR-001)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  description: Absolute path of the CLI; null returns to automatic detection.
+                  type: [string, "null"]
+      responses:
+        "200":
+          description: The harness, revalidated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Harness" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Invalid" }
+
+  /tools:
+    get:
+      tags: [harnesses]
+      operationId: listTools
+      summary: Git and gh as found in the environment
+      responses:
+        "200":
+          description: Tools the built-in skills use.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Tool" }
+
+  /catalog:
+    get:
+      tags: [tasks]
+      operationId: getCatalog
+      summary: Agents and skills a task can cite, built in or the user's (D-092)
+      responses:
+        "200":
+          description: The catalog.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Catalog" }
+
+  /tasks:
+    get:
+      tags: [tasks]
+      operationId: listTasks
+      summary: List tasks
+      responses:
+        "200":
+          description: Every task, with its next firing and latest execution.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/TaskSummary" }
+    post:
+      tags: [tasks]
+      operationId: createTask
+      summary: Create and validate a task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TaskInput" }
+      responses:
+        "201":
+          description: The task was written.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Invalid" }
+
+  /tasks/validate:
+    post:
+      tags: [tasks]
+      operationId: validateTask
+      summary: Validate YAML or form input with the one schema the form, the editor, and import share
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TaskInput" }
+      responses:
+        "200":
+          description: The result, valid or not.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ValidationResult" }
+
+  /tasks/import:
+    post:
+      tags: [tasks]
+      operationId: importTask
+      summary: Import a portable task YAML
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [yaml]
+              properties:
+                yaml: { type: string }
+                overwrite: { type: boolean, default: false }
+      responses:
+        "201":
+          description: The imported task; warnings name the agents and skills this machine lacks (FS-001 FR-018).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Invalid" }
+
+  /tasks/{taskId}:
+    parameters:
+      - $ref: "#/components/parameters/TaskId"
+    get:
+      tags: [tasks]
+      operationId: getTask
+      summary: Get a task's definition
+      responses:
+        "200":
+          description: The task.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [tasks]
+      operationId: updateTask
+      summary: Update a task
+      description: baseRevision must be the revision the edit started from; a file changed meanwhile is a conflict, never a silent overwrite (FS-001 FR-005).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TaskInput" }
+      responses:
+        "200":
+          description: The task was written.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Invalid" }
+    delete:
+      tags: [tasks]
+      operationId: deleteTask
+      summary: Delete a task
+      description: A running task is deleted once its execution finishes (D-083); its execution records stay.
+      responses:
+        "202":
+          description: Deletion waits for the running execution.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Accepted" }
+        "204":
+          description: The task was deleted.
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /tasks/{taskId}/run:
+    parameters:
+      - $ref: "#/components/parameters/TaskId"
+    post:
+      tags: [tasks]
+      operationId: runTask
+      summary: Manual trigger
+      responses:
+        "202":
+          description: The execution was created, or the firing waits or was coalesced or skipped.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FiringResult" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /tasks/{taskId}/duplicate:
+    parameters:
+      - $ref: "#/components/parameters/TaskId"
+    post:
+      tags: [tasks]
+      operationId: duplicateTask
+      summary: Duplicate a task, disabled, with a new identifier
+      responses:
+        "201":
+          description: The copy.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /tasks/{taskId}/enable:
+    parameters:
+      - $ref: "#/components/parameters/TaskId"
+    post:
+      tags: [tasks]
+      operationId: enableTask
+      summary: Enable a task
+      responses:
+        "200":
+          description: The task.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /tasks/{taskId}/disable:
+    parameters:
+      - $ref: "#/components/parameters/TaskId"
+    post:
+      tags: [tasks]
+      operationId: disableTask
+      summary: Disable a task; a running execution finishes normally (D-083)
+      responses:
+        "200":
+          description: The task.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /tasks/{taskId}/export:
+    parameters:
+      - $ref: "#/components/parameters/TaskId"
+    get:
+      tags: [tasks]
+      operationId: exportTask
+      summary: Portable YAML, with no secrets, logs, or state (FS-001 FR-006)
+      responses:
+        "200":
+          description: The task's YAML.
+          content:
+            application/yaml:
+              schema: { type: string }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /schedules/preview:
+    post:
+      tags: [tasks]
+      operationId: previewSchedule
+      summary: The next occurrences of a schedule, in its time zone (FS-002 FR-002)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [schedule]
+              properties:
+                schedule: { $ref: "#/components/schemas/ScheduleInput" }
+                count: { type: integer, minimum: 1, maximum: 20, default: 5 }
+      responses:
+        "200":
+          description: Occurrences, or the error that prevents computing them.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SchedulePreview" }
+
+  /executions:
+    get:
+      tags: [executions]
+      operationId: listExecutions
+      summary: List executions, newest first
+      parameters:
+        - { name: taskId, in: query, schema: { type: string } }
+        - name: status
+          in: query
+          description: Comma-separated statuses.
+          schema: { type: string }
+        - { name: active, in: query, schema: { type: boolean } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+        - name: before
+          in: query
+          description: Only executions created before this time.
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Executions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ExecutionSummary" }
+
+  /executions/{executionId}:
+    parameters:
+      - $ref: "#/components/parameters/ExecutionId"
+    get:
+      tags: [executions]
+      operationId: getExecution
+      summary: Execution details
+      responses:
+        "200":
+          description: The execution record.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Execution" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /executions/{executionId}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/ExecutionId"
+    post:
+      tags: [executions]
+      operationId: cancelExecution
+      summary: Cancel one execution; the others continue (FS-003 FR-004)
+      responses:
+        "202":
+          description: Cancellation was recorded and is being carried out.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Accepted" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /executions/{executionId}/events:
+    parameters:
+      - $ref: "#/components/parameters/ExecutionId"
+    get:
+      tags: [events]
+      operationId: listExecutionEvents
+      summary: Replay an execution's stored events
+      parameters:
+        - name: after
+          in: query
+          description: Only events whose id is greater.
+          schema: { type: integer, minimum: 0 }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 5000, default: 2000 } }
+      responses:
+        "200":
+          description: Events in order; logExpired is true when retention removed the log (D-073).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events, logExpired]
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: "#/components/schemas/Event" }
+                  logExpired: { type: boolean }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /events/stream:
+    get:
+      tags: [events]
+      operationId: streamEvents
+      summary: SSE stream of events
+      description: |
+        Each message is `id: <event id>`, `event: <type>`, `data: <Event JSON>`. A client that reconnects sends
+        `Last-Event-ID` (or `after`) and first receives the buffered events after it; an `event: replay_gap` message
+        means older events must be fetched per execution.
+      parameters:
+        - { name: after, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: Last-Event-ID, in: header, schema: { type: string } }
+      responses:
+        "200":
+          description: The stream.
+          content:
+            text/event-stream:
+              schema: { type: string }
+
+  /queue:
+    get:
+      tags: [queue]
+      operationId: getQueue
+      summary: Waiting firings, upcoming firings, and the work items of each task
+      responses:
+        "200":
+          description: The queue.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Queue" }
+
+  /settings:
+    get:
+      tags: [settings]
+      operationId: getSettings
+      responses:
+        "200":
+          description: Settings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Settings" }
+    patch:
+      tags: [settings]
+      operationId: updateSettings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SettingsPatch" }
+      responses:
+        "200":
+          description: Settings after the change.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Settings" }
+        "422": { $ref: "#/components/responses/Invalid" }
+
+  /settings/token/rotate:
+    post:
+      tags: [settings]
+      operationId: rotateToken
+      summary: Replace the API token (D-090); the response is the last one the old token authorizes
+      responses:
+        "200":
+          description: The token was replaced in the credential store.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Accepted" }
+
+  /workspaces/clean:
+    post:
+      tags: [settings]
+      operationId: cleanWorkspaces
+      summary: Remove the worktrees no longer needed (D-073, FS-010 FR-010)
+      responses:
+        "200":
+          description: What was removed and what was kept.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CleanResult" }
+
+  /notifications:
+    get:
+      tags: [notifications]
+      operationId: listNotifications
+      parameters:
+        - { name: unread, in: query, schema: { type: boolean } }
+      responses:
+        "200":
+          description: Notices, newest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Notification" }
+
+  /notifications/read:
+    post:
+      tags: [notifications]
+      operationId: markNotificationsRead
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  description: The notices to mark read; absent marks every notice read.
+                  type: array
+                  items: { type: string }
+      responses:
+        "200":
+          description: Done.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Accepted" }
+
+components:
+  securitySchemes:
+    bearerToken:
+      type: http
+      scheme: bearer
+
+  parameters:
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      schema: { type: string }
+    ExecutionId:
+      name: executionId
+      in: path
+      required: true
+      schema: { type: string }
+    HarnessId:
+      name: harnessId
+      in: path
+      required: true
+      schema: { type: string, enum: [claude-code, codex] }
+
+  responses:
+    Unauthorized:
+      description: The token is missing or wrong.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: No such resource.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: The request conflicts with the current state.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Invalid:
+      description: Validation failed; nothing was written.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [bad_request, unauthorized, forbidden, not_found, conflict, validation_failed, task_disabled, executions_running, internal]
+            message: { type: string }
+            validation: { $ref: "#/components/schemas/ValidationResult" }
+            currentRevision: { type: string }
+
+    Accepted:
+      type: object
+      required: [ok]
+      properties:
+        ok: { type: boolean }
+        message: { type: string }
+
+    Health:
+      type: object
+      required: [status, version, apiVersion, pid, startedAt, acceptingFirings]
+      properties:
+        status: { type: string, enum: [ok] }
+        version: { type: string }
+        apiVersion: { type: string, enum: [v1] }
+        pid: { type: integer }
+        startedAt: { type: string, format: date-time }
+        acceptingFirings: { type: boolean }
+
+    Diagnostics:
+      type: object
+      required: [version, address, homeDir, tasksDir, stateDir, logsDir, workspaceDir, runtimeFile, tokenStore, builtinsDir]
+      properties:
+        version: { type: string }
+        address: { type: string }
+        homeDir: { type: string }
+        tasksDir: { type: string }
+        stateDir: { type: string }
+        logsDir: { type: string }
+        workspaceDir: { type: string }
+        runsDir: { type: string }
+        runtimeFile: { type: string }
+        tokenStore: { type: string, enum: [keychain, file] }
+        builtinsDir: { type: string }
+        diskUsageBytes: { type: integer }
+
+    Stats:
+      type: object
+      required: [running, queued, completedToday, failedToday, activity]
+      properties:
+        running: { type: integer }
+        queued: { type: integer }
+        completedToday: { type: integer }
+        failedToday: { type: integer }
+        system:
+          description: Gauges of the machine and of HarmFlow's own directory, for the sidebar foot.
+          type: object
+          properties:
+            cpuPercent: { type: number }
+            memoryUsedBytes: { type: integer }
+            memoryTotalBytes: { type: integer }
+            diskUsedBytes: { type: integer }
+            diskTotalBytes: { type: integer }
+            harmflowDirBytes: { type: integer }
+        activity:
+          description: Per hour, the last 12 hours, oldest first.
+          type: object
+          required: [running, queued, completed, failed]
+          properties:
+            running: { type: array, items: { type: integer } }
+            queued: { type: array, items: { type: integer } }
+            completed: { type: array, items: { type: integer } }
+            failed: { type: array, items: { type: integer } }
+
+    ReadinessState:
+      description: FS-004 FR-006.
+      type: string
+      enum: [not_installed, installed, version_identified, authenticated, ready, not_ready]
+
+    Harness:
+      type: object
+      required: [id, name, detected, readiness, authentication, models, efforts, lastCheckedAt, installations]
+      properties:
+        id: { type: string, enum: [claude-code, codex] }
+        name: { type: string }
+        detected: { type: boolean }
+        path: { type: string, description: The resolved absolute path. }
+        pathSource: { type: string, enum: [path, known_location, manual] }
+        installations:
+          type: array
+          items: { type: string }
+        version: { type: string }
+        versionSupport: { type: string, enum: [supported, untested_newer, below_minimum, unknown] }
+        authentication: { type: string, enum: [valid, invalid, unknown] }
+        readiness: { $ref: "#/components/schemas/ReadinessState" }
+        models:
+          type: array
+          items:
+            type: object
+            required: [id]
+            properties:
+              id: { type: string }
+              efforts: { type: array, items: { type: string } }
+        efforts: { type: array, items: { type: string } }
+        capabilitySource: { type: string, enum: [reported, verified, declared] }
+        enforceableControls:
+          description: The native controls the installed version offers (D-068).
+          type: array
+          items: { type: string }
+        lastCheckedAt: { type: string, format: date-time }
+        diagnostic: { type: string }
+
+    Tool:
+      type: object
+      required: [id, detected]
+      properties:
+        id: { type: string, enum: [git, gh] }
+        detected: { type: boolean }
+        path: { type: string }
+        version: { type: string }
+        authentication: { type: string, enum: [valid, invalid, unknown] }
+        diagnostic: { type: string }
+
+    CatalogEntry:
+      type: object
+      required: [name, kind, source, harnesses]
+      properties:
+        name: { type: string }
+        kind: { type: string, enum: [agent, skill] }
+        source: { type: string, enum: [builtin, user] }
+        description: { type: string }
+        harnesses:
+          description: The harnesses that can load it.
+          type: array
+          items: { type: string }
+
+    Catalog:
+      type: object
+      required: [agents, skills, taskTypes]
+      properties:
+        agents: { type: array, items: { $ref: "#/components/schemas/CatalogEntry" } }
+        skills: { type: array, items: { $ref: "#/components/schemas/CatalogEntry" } }
+        taskTypes:
+          type: array
+          items:
+            type: object
+            required: [id, parametersKey, defaultAgents, defaultSkills]
+            properties:
+              id: { type: string }
+              parametersKey: { type: [string, "null"] }
+              defaultAgents: { type: array, items: { type: string } }
+              defaultSkills: { type: array, items: { type: string } }
+              defaultPrompt: { type: string }
+
+    TaskDocument:
+      description: The task document of contracts/schemas/task.schema.json.
+      type: object
+      additionalProperties: true
+
+    TaskInput:
+      description: Either the YAML text (the editor and import) or the document (the form). Both go through the same validation.
+      type: object
+      properties:
+        yaml: { type: string }
+        document: { $ref: "#/components/schemas/TaskDocument" }
+        baseRevision: { type: string, description: Required on update. }
+
+    ValidationIssue:
+      type: object
+      required: [message]
+      properties:
+        path: { type: string, description: JSON pointer into the document. }
+        message: { type: string }
+        line: { type: integer }
+        column: { type: integer }
+        code: { type: string }
+
+    ValidationResult:
+      type: object
+      required: [valid, errors, warnings]
+      properties:
+        valid: { type: boolean }
+        errors: { type: array, items: { $ref: "#/components/schemas/ValidationIssue" } }
+        warnings: { type: array, items: { $ref: "#/components/schemas/ValidationIssue" } }
+        document: { $ref: "#/components/schemas/TaskDocument" }
+        effective:
+          description: The document with every default applied.
+          $ref: "#/components/schemas/TaskDocument"
+        yaml: { type: string }
+
+    Warning:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, enum: [policy_unenforced, repository_unprotected, missing_agent, missing_skill, invalid_fallback, harness_not_ready, version_untested, external_edit_invalid, other] }
+        message: { type: string }
+        subject: { type: string }
+
+    ExecutionRef:
+      type: object
+      required: [id, status, createdAt]
+      properties:
+        id: { type: string }
+        status: { $ref: "#/components/schemas/ExecutionStatus" }
+        createdAt: { type: string, format: date-time }
+        endedAt: { type: string, format: date-time }
+
+    TaskSummary:
+      type: object
+      required: [id, name, type, enabled, revision, harness, warnings]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        type: { type: string }
+        enabled: { type: boolean }
+        revision: { type: string }
+        harness: { type: string }
+        fallbackHarnesses: { type: array, items: { type: string } }
+        schedule: { type: string, description: The cron expression or interval, if any. }
+        timezone: { type: string }
+        nextFireAt: { type: string, format: date-time }
+        running: { type: boolean }
+        queued: { type: boolean }
+        deletePending: { type: boolean }
+        repositories: { type: array, items: { type: string } }
+        lastExecution: { $ref: "#/components/schemas/ExecutionRef" }
+        warnings: { type: array, items: { $ref: "#/components/schemas/Warning" } }
+        invalid: { type: boolean, description: The file on disk fails validation; the last valid definition is in use. }
+
+    Task:
+      allOf:
+        - $ref: "#/components/schemas/TaskSummary"
+        - type: object
+          required: [document, yaml, effective, path]
+          properties:
+            document: { $ref: "#/components/schemas/TaskDocument" }
+            effective: { $ref: "#/components/schemas/TaskDocument" }
+            yaml: { type: string }
+            path: { type: string }
+            validation: { $ref: "#/components/schemas/ValidationResult" }
+
+    ScheduleInput:
+      type: object
+      properties:
+        cron: { type: string }
+        interval: { type: string }
+        timezone: { type: string }
+
+    SchedulePreview:
+      type: object
+      required: [occurrences]
+      properties:
+        occurrences: { type: array, items: { type: string, format: date-time } }
+        timezone: { type: string }
+        error: { type: string }
+
+    FiringResult:
+      type: object
+      required: [outcome]
+      properties:
+        outcome: { type: string, enum: [started, queued, coalesced, skipped] }
+        executionId: { type: string }
+
+    ExecutionStatus:
+      type: string
+      enum: [queued, preparing, running, switching_harness, testing, publishing, completed, no_work, failed, cancelled, interrupted, needs_attention]
+
+    Trigger:
+      type: string
+      enum: [manual, schedule, catch_up]
+
+    Attempt:
+      type: object
+      required: [number, harness, model, effort, startedAt]
+      properties:
+        number: { type: integer }
+        harness: { type: string }
+        harnessVersion: { type: string }
+        model: { type: string }
+        effort: { type: string }
+        startedAt: { type: string, format: date-time }
+        endedAt: { type: string, format: date-time }
+        outcome: { type: string, enum: [running, succeeded, failed, quota_exhausted, rate_limited, harness_unavailable, timed_out, cancelled, interrupted] }
+        exitCode: { type: integer }
+        sessionId: { type: string }
+        errorMessage: { type: string }
+        reason: { type: string, description: Why the attempt started — first, failover, rate-limit retry. }
+
+    WorkItemResult:
+      type: object
+      required: [key]
+      properties:
+        key: { type: string }
+        kind: { type: string }
+        repository: { type: string }
+        issueNumber: { type: integer }
+        title: { type: string }
+        branch: { type: string }
+        worktreePath: { type: string }
+        outcome: { type: string }
+        pullRequest:
+          type: object
+          properties:
+            number: { type: integer }
+            url: { type: string }
+            draft: { type: boolean }
+            created: { type: boolean }
+        tests:
+          type: object
+          properties:
+            status: { type: string, enum: [passed, failed, not_run] }
+            summary: { type: string }
+        commits: { type: array, items: { type: string } }
+        changedFiles: { type: array, items: { type: string } }
+
+    ExecutionSummary:
+      type: object
+      required: [id, taskId, taskName, taskType, status, trigger, createdAt, harness]
+      properties:
+        id: { type: string }
+        taskId: { type: string }
+        taskName: { type: string }
+        taskType: { type: string }
+        status: { $ref: "#/components/schemas/ExecutionStatus" }
+        trigger: { $ref: "#/components/schemas/Trigger" }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: string, format: date-time }
+        endedAt: { type: string, format: date-time }
+        harness: { type: string, description: The harness of the current or last attempt. }
+        model: { type: string }
+        attemptCount: { type: integer }
+        currentStep: { type: string, description: The latest step; no percentage is invented (FS-008 FR-009). }
+        repository: { type: string }
+        workItem: { type: string }
+        pullRequestUrl: { type: string }
+        testsStatus: { type: string, enum: [passed, failed, not_run] }
+        summary: { type: string }
+        errorMessage: { type: string }
+        warningCount: { type: integer }
+
+    Execution:
+      allOf:
+        - $ref: "#/components/schemas/ExecutionSummary"
+        - type: object
+          required: [attempts, workItems, warnings, changedFiles, commands]
+          properties:
+            scheduledFor: { type: string, format: date-time }
+            cancelRequestedAt: { type: string, format: date-time }
+            timeoutAt: { type: string, format: date-time }
+            definitionRevision: { type: string }
+            workspacePath: { type: string }
+            executionDir: { type: string }
+            attempts: { type: array, items: { $ref: "#/components/schemas/Attempt" } }
+            workItems: { type: array, items: { $ref: "#/components/schemas/WorkItemResult" } }
+            warnings: { type: array, items: { $ref: "#/components/schemas/Warning" } }
+            changedFiles: { type: array, items: { type: string } }
+            commands:
+              type: array
+              items:
+                type: object
+                required: [id, command, status]
+                properties:
+                  id: { type: string }
+                  command: { type: string }
+                  status: { type: string, enum: [running, succeeded, failed] }
+                  exitCode: { type: integer }
+                  startedAt: { type: string, format: date-time }
+                  endedAt: { type: string, format: date-time }
+                  attempt: { type: integer }
+            lastOperation: { type: string }
+            logExpired: { type: boolean }
+
+    Event:
+      description: contracts/schemas/event.schema.json.
+      type: object
+      required: [id, schemaVersion, timestamp, type, severity]
+      properties:
+        id: { type: integer }
+        schemaVersion: { type: string }
+        timestamp: { type: string, format: date-time }
+        taskId: { type: string }
+        executionId: { type: string }
+        workItemId: { type: string }
+        attempt: { type: integer }
+        harness: { type: string }
+        type: { type: string }
+        severity: { type: string, enum: [debug, info, warning, error] }
+        message: { type: string }
+        payload: { type: object, additionalProperties: true }
+
+    Queue:
+      type: object
+      required: [waiting, upcoming, workItems]
+      properties:
+        waiting:
+          description: Firings waiting for their task's running execution (at most one per task, D-072).
+          type: array
+          items: { $ref: "#/components/schemas/ExecutionSummary" }
+        upcoming:
+          type: array
+          items:
+            type: object
+            required: [taskId, taskName, nextFireAt]
+            properties:
+              taskId: { type: string }
+              taskName: { type: string }
+              harness: { type: string }
+              nextFireAt: { type: string, format: date-time }
+        workItems:
+          type: array
+          items: { $ref: "#/components/schemas/WorkItem" }
+
+    WorkItem:
+      description: The daemon's ledger of a task's work items, built from the reports its sessions leave.
+      type: object
+      required: [taskId, key, status, resumes, failures, updatedAt]
+      properties:
+        taskId: { type: string }
+        key: { type: string }
+        title: { type: string }
+        repository: { type: string }
+        status: { type: string, enum: [in_progress, completed, failed, needs_attention, closed] }
+        resumes: { type: integer }
+        failures: { type: integer }
+        branch: { type: string }
+        pullRequestUrl: { type: string }
+        testsStatus: { type: string }
+        lastExecutionId: { type: string }
+        lastOperation: { type: string }
+        updatedAt: { type: string, format: date-time }
+
+    Settings:
+      type: object
+      required: [language, trayEnabled, notificationLevel, logRetentionDays, autostart, pathVariables, onboardingCompleted]
+      properties:
+        language: { type: string, enum: [pt-BR, en-US, es-ES, system] }
+        trayEnabled: { type: boolean, default: true }
+        notificationLevel: { type: string, enum: [all, failures_and_attention, none], default: all }
+        logRetentionDays: { type: integer, minimum: 1, maximum: 3650, default: 30 }
+        theme: { type: string, enum: [harmflow-dark], default: harmflow-dark }
+        autostart:
+          type: object
+          required: [enabled, mechanism]
+          properties:
+            enabled: { type: boolean }
+            mechanism: { type: string, enum: [launchd, none] }
+            plistPath: { type: string }
+        pathVariables:
+          description: Values for ${NAME} references in task paths, such as PROJECTS_ROOT.
+          type: object
+          additionalProperties: { type: string }
+        onboardingCompleted: { type: boolean }
+
+    SettingsPatch:
+      type: object
+      properties:
+        language: { type: string, enum: [pt-BR, en-US, es-ES, system] }
+        trayEnabled: { type: boolean }
+        notificationLevel: { type: string, enum: [all, failures_and_attention, none] }
+        logRetentionDays: { type: integer, minimum: 1, maximum: 3650 }
+        autostart: { type: boolean }
+        pathVariables:
+          type: object
+          additionalProperties: { type: string }
+        onboardingCompleted: { type: boolean }
+
+    CleanResult:
+      type: object
+      required: [removed, kept]
+      properties:
+        removed: { type: array, items: { type: string } }
+        kept:
+          type: array
+          items:
+            type: object
+            required: [path, reason]
+            properties:
+              path: { type: string }
+              reason: { type: string }
+
+    Notification:
+      type: object
+      required: [id, createdAt, eventType, title, body, read, severity]
+      properties:
+        id: { type: string }
+        createdAt: { type: string, format: date-time }
+        eventType: { type: string }
+        taskId: { type: string }
+        executionId: { type: string }
+        title: { type: string }
+        body: { type: string }
+        severity: { type: string, enum: [info, warning, error] }
+        read: { type: boolean }
+        params:
+          description: Values the desktop interpolates into its translated text for eventType; title and body are the en-US fallback.
+          type: object
+          additionalProperties: { type: string }

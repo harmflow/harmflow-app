@@ -1,0 +1,550 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harmflow.com/schemas/v1alpha1/task.schema.json",
+  "title": "HarmFlow task",
+  "description": "One general-purpose automation, stored as one YAML file per task (D-070). Keys are camelCase, closed-set values snake_case, identifiers of named things kebab-case (D-094). Defaults are those of D-082.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "harmflow/v1alpha1"
+    },
+    "kind": {
+      "const": "Task"
+    },
+    "metadata": {
+      "$ref": "#/$defs/metadata"
+    },
+    "spec": {
+      "$ref": "#/$defs/spec"
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "description": "Kebab-case identifier of a named thing: task, task type, harness, agent, skill.",
+      "type": "string",
+      "pattern": "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      }
+    },
+    "taskType": {
+      "description": "github-issue-implementation takes repositories (FS-006, FS-007); general takes no type parameters (D-060).",
+      "type": "string",
+      "enum": [
+        "github-issue-implementation",
+        "general"
+      ]
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "prompt",
+        "harness"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "type": {
+          "$ref": "#/$defs/taskType"
+        },
+        "prompt": {
+          "description": "The instructions given to the harness at the start of each execution (D-066).",
+          "type": "string",
+          "minLength": 1
+        },
+        "agents": {
+          "description": "Agents cited by name: built-in ones carry the harmflow- prefix, the user's live in the harness configuration (D-092). The first one is the session's main agent; the others are available to it.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/identifier"
+          },
+          "uniqueItems": true
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/identifier"
+          },
+          "uniqueItems": true
+        },
+        "workspace": {
+          "$ref": "#/$defs/workspace"
+        },
+        "schedule": {
+          "$ref": "#/$defs/schedule"
+        },
+        "concurrency": {
+          "$ref": "#/$defs/concurrency"
+        },
+        "harness": {
+          "$ref": "#/$defs/harness"
+        },
+        "permissions": {
+          "$ref": "#/$defs/permissions"
+        },
+        "execution": {
+          "$ref": "#/$defs/execution"
+        },
+        "notifications": {
+          "$ref": "#/$defs/notifications"
+        },
+        "githubIssueImplementation": {
+          "$ref": "#/$defs/githubIssueImplementation"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "github-issue-implementation"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "githubIssueImplementation"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "general"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "githubIssueImplementation"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "workspace": {
+      "description": "Where the harness session works. A path may use ${VARIABLE} references and ~.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "schedule": {
+      "description": "A 5-field cron expression or a simple interval, never both; no seconds field (D-071). A task with no schedule runs only by manual trigger.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cron": {
+          "type": "string",
+          "pattern": "^\\s*\\S+(\\s+\\S+){4}\\s*$"
+        },
+        "interval": {
+          "description": "A whole number of minutes, hours, or days, such as 30m, 2h, or 1d.",
+          "type": "string",
+          "pattern": "^[1-9][0-9]*(m|h|d)$"
+        },
+        "timezone": {
+          "description": "IANA time zone; the system's when absent.",
+          "type": "string",
+          "minLength": 1
+        },
+        "missedRun": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "policy": {
+              "type": "string",
+              "enum": [
+                "run_on_resume",
+                "skip"
+              ],
+              "default": "run_on_resume"
+            }
+          }
+        }
+      },
+      "not": {
+        "required": [
+          "cron",
+          "interval"
+        ]
+      }
+    },
+    "concurrency": {
+      "description": "One execution per task (D-023). A firing that arrives while the task runs waits or is skipped (D-072).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "overlappingRuns": {
+          "type": "string",
+          "enum": [
+            "queue",
+            "skip"
+          ],
+          "default": "queue"
+        }
+      }
+    },
+    "harnessProvider": {
+      "type": "string",
+      "enum": [
+        "claude-code",
+        "codex"
+      ]
+    },
+    "harnessProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider"
+      ],
+      "properties": {
+        "provider": {
+          "$ref": "#/$defs/harnessProvider"
+        },
+        "model": {
+          "description": "A model the installed harness accepts; default leaves the harness's own default.",
+          "type": "string",
+          "minLength": 1,
+          "default": "default"
+        },
+        "effort": {
+          "description": "A reasoning effort the installed harness accepts; default leaves the harness's own default. Translated per adapter (ADR-0009).",
+          "type": "string",
+          "minLength": 1,
+          "default": "default"
+        }
+      }
+    },
+    "harness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "preferred"
+      ],
+      "properties": {
+        "preferred": {
+          "$ref": "#/$defs/harnessProfile"
+        },
+        "fallback": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "on": {
+              "description": "What triggers a failover (D-067). Rate limits retry on the same harness.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "quota_exhausted",
+                  "harness_unavailable"
+                ]
+              },
+              "uniqueItems": true,
+              "default": [
+                "quota_exhausted",
+                "harness_unavailable"
+              ]
+            },
+            "candidates": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/harnessProfile"
+              }
+            },
+            "maxSwitches": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 5,
+              "default": 1
+            }
+          }
+        }
+      }
+    },
+    "permissions": {
+      "description": "Translated to each harness's native controls (D-068); a restriction a harness cannot enforce runs with a policy.unenforced warning.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "profile": {
+          "type": "string",
+          "enum": [
+            "read_only",
+            "workspace_write",
+            "custom"
+          ],
+          "default": "workspace_write"
+        },
+        "restrictToWorkspace": {
+          "type": "boolean",
+          "default": true
+        },
+        "network": {
+          "type": "string",
+          "enum": [
+            "allow",
+            "deny"
+          ],
+          "default": "allow"
+        },
+        "custom": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "allowedTools": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "deniedTools": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "writablePaths": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            }
+          }
+        }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "timeoutMinutes": {
+          "description": "Covers the whole execution, shared by all its attempts (D-067).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1440,
+          "default": 60
+        },
+        "cancelGraceSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 600,
+          "default": 30
+        },
+        "rateLimit": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maxRetries": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 20,
+              "default": 5
+            },
+            "initialWaitSeconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "default": 60
+            },
+            "maxWaitSeconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 86400,
+              "default": 900
+            }
+          }
+        }
+      }
+    },
+    "notifiableEvent": {
+      "description": "Event types a task may be notified about; the names of event.schema.json (D-094).",
+      "type": "string",
+      "enum": [
+        "execution.started",
+        "execution.completed",
+        "execution.failed",
+        "execution.cancelled",
+        "execution.needs_attention",
+        "pull_request.created",
+        "pull_request.updated",
+        "test.failed",
+        "harness.unavailable",
+        "harness.no_alternative"
+      ]
+    },
+    "notifications": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "native": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "events": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/notifiableEvent"
+              },
+              "uniqueItems": true,
+              "default": [
+                "execution.completed",
+                "execution.failed",
+                "execution.needs_attention",
+                "pull_request.created",
+                "harness.no_alternative"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "repositoryTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "localPath"
+      ],
+      "properties": {
+        "name": {
+          "description": "owner/repo on GitHub.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        },
+        "localPath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "baseBranch": {
+          "type": "string",
+          "minLength": 1,
+          "default": "main"
+        }
+      }
+    },
+    "githubIssueImplementation": {
+      "description": "Parameters of the github-issue-implementation type. Which issues are eligible is written in the prompt; there is no filter syntax (D-093).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repositories"
+      ],
+      "properties": {
+        "repositories": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/repositoryTarget"
+          },
+          "minItems": 1
+        },
+        "queue": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ordering": {
+              "type": "string",
+              "enum": [
+                "oldest_first",
+                "newest_first"
+              ],
+              "default": "oldest_first"
+            },
+            "maxDiscoveredPerCycle": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 10
+            },
+            "maxItemsPerCycle": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20,
+              "default": 1
+            },
+            "resumeStrategy": {
+              "type": "string",
+              "enum": [
+                "resume_first",
+                "new_first",
+                "alternate"
+              ],
+              "default": "resume_first"
+            },
+            "maxResumeAttempts": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 20,
+              "default": 3
+            },
+            "maxFailedRetries": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 20,
+              "default": 3
+            }
+          }
+        },
+        "delivery": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "testRepairAttempts": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10,
+              "default": 2
+            }
+          }
+        }
+      }
+    }
+  }
+}
