@@ -1,0 +1,137 @@
+/*
+ * HarmFlow design tokens (FS-012 FR-007, D-079). Every color, typeface, spacing, and radius in the interface comes
+ * from here, so the Phase 2 themes only have to replace these values. The palette is a placeholder until the visual
+ * identity is approved (D-095): graphite near-black, cyan/teal and violet/magenta accents (D-046).
+ */
+:root {
+  color-scheme: dark;
+
+  /* Channels, for translucent variants: rgba(var(--hf-rgb-cyan), 0.4) */
+  --hf-rgb-cyan: 34, 211, 238;
+  --hf-rgb-blue: 96, 165, 250;
+  --hf-rgb-violet: 167, 139, 250;
+  --hf-rgb-purple: 168, 85, 247;
+  --hf-rgb-magenta: 232, 121, 249;
+  --hf-rgb-success: 52, 211, 153;
+  --hf-rgb-warning: 251, 191, 36;
+  --hf-rgb-danger: 251, 74, 106;
+  --hf-rgb-neutral: 129, 144, 168;
+  --hf-rgb-line: 120, 150, 210;
+  --hf-rgb-panel-top: 16, 22, 34;
+  --hf-rgb-panel-bottom: 10, 14, 22;
+  --hf-rgb-sunken: 8, 11, 18;
+  --hf-rgb-white: 255, 255, 255;
+  --hf-rgb-primary-a: 10, 26, 40;
+  --hf-rgb-primary-b: 30, 18, 52;
+  --hf-rgb-primary-a-hover: 14, 40, 58;
+  --hf-rgb-primary-b-hover: 44, 24, 74;
+  --hf-rgb-danger-deep: 40, 8, 16;
+  --hf-rgb-success-deep: 10, 18, 18;
+  --hf-color-white: #ffffff;
+  --hf-gradient-panel: linear-gradient(180deg, rgba(var(--hf-rgb-panel-top), 0.92), rgba(var(--hf-rgb-panel-bottom), 0.92));
+
+  /* Surfaces */
+  --hf-color-bg: #06080d;
+  --hf-color-bg-glow-a: rgba(34, 211, 238, 0.06);
+  --hf-color-bg-glow-b: rgba(168, 85, 247, 0.07);
+  --hf-color-grid-line: rgba(90, 130, 200, 0.045);
+  --hf-color-sidebar: #070a11;
+  --hf-color-surface: #0b0f18;
+  --hf-color-surface-raised: #0f1420;
+  --hf-color-surface-sunken: #070a10;
+  --hf-color-surface-hover: #131a29;
+  --hf-color-overlay: rgba(3, 5, 9, 0.72);
+
+  /* Borders */
+  --hf-color-border: rgba(110, 140, 200, 0.16);
+  --hf-color-border-strong: rgba(120, 160, 230, 0.28);
+  --hf-color-border-focus: #22d3ee;
+
+  /* Text */
+  --hf-color-text: #e7edf8;
+  --hf-color-text-muted: #94a2bb;
+  --hf-color-text-faint: #5f6c84;
+  --hf-color-text-inverse: #04121a;
+
+  /* Accents */
+  --hf-color-cyan: #22d3ee;
+  --hf-color-cyan-soft: rgba(34, 211, 238, 0.14);
+  --hf-color-cyan-glow: rgba(34, 211, 238, 0.45);
+  --hf-color-teal: #2dd4bf;
+  --hf-color-violet: #a78bfa;
+  --hf-color-violet-soft: rgba(167, 139, 250, 0.16);
+  --hf-color-magenta: #e879f9;
+  --hf-color-magenta-soft: rgba(232, 121, 249, 0.14);
+  --hf-color-blue: #60a5fa;
+  --hf-color-blue-soft: rgba(96, 165, 250, 0.15);
+
+  /* States — always paired with a text label or an icon, never color alone */
+  --hf-color-success: #34d399;
+  --hf-color-success-soft: rgba(52, 211, 153, 0.14);
+  --hf-color-warning: #fbbf24;
+  --hf-color-warning-soft: rgba(251, 191, 36, 0.14);
+  --hf-color-danger: #fb4a6a;
+  --hf-color-danger-soft: rgba(251, 74, 106, 0.13);
+  --hf-color-danger-border: rgba(251, 74, 106, 0.55);
+  --hf-color-neutral: #8190a8;
+  --hf-color-neutral-soft: rgba(129, 144, 168, 0.14);
+
+  /* Harness marks */
+  --hf-color-claude: #f2895d;
+  --hf-color-codex: #dfe6f3;
+
+  /* Gradients */
+  --hf-gradient-primary: linear-gradient(135deg, #1fb6d6 0%, #6d5df5 55%, #b04cf0 100%);
+  --hf-gradient-active-nav: linear-gradient(90deg, rgba(34, 211, 238, 0.2) 0%, rgba(167, 139, 250, 0.12) 100%);
+  --hf-gradient-scan: linear-gradient(90deg, transparent 0%, var(--hf-color-cyan) 45%, var(--hf-color-violet) 70%, transparent 100%);
+
+  /* Typography */
+  --hf-font-sans: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", "Helvetica Neue", sans-serif;
+  --hf-font-display: "SF Pro Display", -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+  --hf-font-mono: "SF Mono", ui-monospace, Menlo, "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  --hf-font-size-2xs: 10.5px;
+  --hf-font-size-xs: 11.5px;
+  --hf-font-size-sm: 12.5px;
+  --hf-font-size-md: 13.5px;
+  --hf-font-size-lg: 15px;
+  --hf-font-size-xl: 18px;
+  --hf-font-size-2xl: 22px;
+  --hf-font-size-3xl: 28px;
+  --hf-font-weight-regular: 400;
+  --hf-font-weight-medium: 500;
+  --hf-font-weight-semibold: 600;
+  --hf-font-weight-bold: 700;
+  --hf-line-height-tight: 1.2;
+  --hf-line-height: 1.45;
+  --hf-letter-spacing-label: 0.08em;
+
+  /* Spacing */
+  --hf-space-1: 4px;
+  --hf-space-2: 8px;
+  --hf-space-3: 12px;
+  --hf-space-4: 16px;
+  --hf-space-5: 20px;
+  --hf-space-6: 24px;
+  --hf-space-8: 32px;
+  --hf-space-10: 40px;
+
+  /* Radii */
+  --hf-radius-sm: 5px;
+  --hf-radius-md: 8px;
+  --hf-radius-lg: 11px;
+  --hf-radius-pill: 999px;
+
+  /* Elevation and glow */
+  --hf-shadow-panel: 0 0 0 1px rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
+  --hf-shadow-glow-cyan: 0 0 0 1px var(--hf-color-cyan), 0 0 18px rgba(34, 211, 238, 0.28), inset 0 0 22px rgba(34, 211, 238, 0.06);
+  --hf-shadow-glow-violet: 0 0 0 1px rgba(167, 139, 250, 0.6), 0 0 16px rgba(167, 139, 250, 0.22);
+
+  /* Layout */
+  --hf-sidebar-width: 236px;
+  --hf-aside-width: 318px;
+
+  /* Motion — only active work animates */
+  --hf-duration-fast: 120ms;
+  --hf-duration: 200ms;
+  --hf-duration-scan: 2.2s;
+}

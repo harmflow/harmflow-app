@@ -1,0 +1,331 @@
+//! Finding, reaching, and starting the HarmFlow daemon.
+//!
+//! The daemon writes its address to a runtime file only the user can read and keeps the API token in the
+//! Keychain (D-090). The desktop reads both and holds the token here, in the Rust core, so it never reaches the
+//! webview (FS-009 FR-005).
+
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::Mutex;
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+const KEYCHAIN_SERVICE: &str = "com.harmflow.local-api";
+const KEYCHAIN_ACCOUNT: &str = "token";
+const DAEMON_BINARY: &str = "harmflowd";
+
+/// `$HARMFLOW_HOME`, or `~/Library/Application Support/HarmFlow`.
+pub fn harmflow_home() -> PathBuf {
+    if let Some(home) = std::env::var_os("HARMFLOW_HOME").filter(|v| !v.is_empty()) {
+        return PathBuf::from(home);
+    }
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("/"))
+        .join("Library")
+        .join("Application Support")
+        .join("HarmFlow")
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Runtime {
+    pub address: String,
+    /// "keychain" or "file"; the pid, version, and start time it also holds are read from GET /health instead.
+    #[serde(default)]
+    pub token_store: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Connection {
+    pub runtime: Runtime,
+    pub token: String,
+}
+
+impl Connection {
+    pub fn base_url(&self) -> String {
+        format!("http://{}", self.runtime.address)
+    }
+}
+
+fn read_runtime(home: &Path) -> Result<Runtime, String> {
+    let path = home.join("run").join("daemon.json");
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+fn read_token(home: &Path, store: Option<&str>) -> Result<String, String> {
+    if store == Some("file") {
+        let path = home.join("run").join("token");
+        return std::fs::read_to_string(&path)
+            .map(|t| t.trim().to_string())
+            .map_err(|e| format!("{}: {e}", path.display()));
+    }
+    // The security CLI created the item, so reading it through the same CLI shows no Keychain prompt.
+    let out = Command::new("/usr/bin/security")
+        .args(["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", KEYCHAIN_ACCOUNT, "-w"])
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| format!("security: {e}"))?;
+    if !out.status.success() {
+        return Err("the API token is not in the Keychain".into());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DaemonStatus {
+    pub running: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// One response of the local API, as the webview receives it.
+#[derive(Debug, Clone, Serialize)]
+pub struct ApiResponse {
+    pub status: u16,
+    pub body: Value,
+}
+
+pub struct DaemonClient {
+    http: reqwest::Client,
+    conn: Mutex<Option<Connection>>,
+}
+
+impl DaemonClient {
+    pub fn new() -> Self {
+        let http = reqwest::Client::builder()
+            .no_proxy()
+            .connect_timeout(Duration::from_secs(3))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+        Self { http, conn: Mutex::new(None) }
+    }
+
+    pub fn http(&self) -> &reqwest::Client {
+        &self.http
+    }
+
+    /// The cached connection, or a fresh one read from the runtime file and the Keychain.
+    pub fn connection(&self) -> Result<Connection, String> {
+        if let Ok(guard) = self.conn.lock() {
+            if let Some(c) = guard.as_ref() {
+                return Ok(c.clone());
+            }
+        }
+        let home = harmflow_home();
+        let runtime = read_runtime(&home)?;
+        let token = read_token(&home, runtime.token_store.as_deref())?;
+        let conn = Connection { runtime, token };
+        if let Ok(mut guard) = self.conn.lock() {
+            *guard = Some(conn.clone());
+        }
+        Ok(conn)
+    }
+
+    /// Forgets the cached address and token: the daemon may have restarted on another port or rotated the token.
+    pub fn invalidate(&self) {
+        if let Ok(mut guard) = self.conn.lock() {
+            *guard = None;
+        }
+    }
+
+    async fn send_once(&self, method: &reqwest::Method, path: &str, body: &Option<Value>) -> Result<reqwest::Response, String> {
+        let conn = self.connection()?;
+        let mut req = self
+            .http
+            .request(method.clone(), format!("{}/api/v1{}", conn.base_url(), path))
+            .bearer_auth(&conn.token)
+            .timeout(Duration::from_secs(30));
+        if let Some(b) = body {
+            req = req.json(b);
+        }
+        req.send().await.map_err(|e| e.to_string())
+    }
+
+    /// Sends a request; after a 401 or a refused connection it rereads the token and address and tries once more.
+    pub async fn send(&self, method: &str, path: &str, body: Option<Value>) -> Result<reqwest::Response, String> {
+        validate_path(path)?;
+        let method = parse_method(method)?;
+        match self.send_once(&method, path, &body).await {
+            Ok(res) if res.status() != reqwest::StatusCode::UNAUTHORIZED => Ok(res),
+            _ => {
+                self.invalidate();
+                self.send_once(&method, path, &body).await
+            }
+        }
+    }
+
+    pub async fn request(&self, method: &str, path: &str, body: Option<Value>) -> ApiResponse {
+        match self.send(method, path, body).await {
+            Ok(res) => {
+                let status = res.status().as_u16();
+                let text = res.text().await.unwrap_or_default();
+                let body = if text.is_empty() {
+                    Value::Null
+                } else {
+                    serde_json::from_str(&text).unwrap_or(Value::String(text))
+                };
+                ApiResponse { status, body }
+            }
+            Err(message) => ApiResponse {
+                status: 0,
+                body: serde_json::json!({ "error": { "code": "internal", "message": message } }),
+            },
+        }
+    }
+
+    pub async fn request_text(&self, path: &str) -> (u16, String) {
+        match self.send("GET", path, None).await {
+            Ok(res) => {
+                let status = res.status().as_u16();
+                (status, res.text().await.unwrap_or_default())
+            }
+            Err(message) => (0, message),
+        }
+    }
+
+    /// Running means the runtime file exists and GET /health answers with it.
+    pub async fn status(&self) -> DaemonStatus {
+        let res = self.request("GET", "/health", None).await;
+        if res.status == 200 {
+            let get = |k: &str| res.body.get(k).and_then(Value::as_str).map(str::to_string);
+            let address = self.connection().ok().map(|c| c.runtime.address);
+            return DaemonStatus {
+                running: true,
+                address,
+                pid: res.body.get("pid").and_then(Value::as_u64).map(|p| p as u32),
+                version: get("version"),
+                started_at: get("startedAt"),
+                error: None,
+            };
+        }
+        self.invalidate();
+        let error = res
+            .body
+            .pointer("/error/message")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        DaemonStatus { running: false, error, ..Default::default() }
+    }
+}
+
+fn parse_method(method: &str) -> Result<reqwest::Method, String> {
+    match method.to_ascii_uppercase().as_str() {
+        "GET" => Ok(reqwest::Method::GET),
+        "POST" => Ok(reqwest::Method::POST),
+        "PUT" => Ok(reqwest::Method::PUT),
+        "PATCH" => Ok(reqwest::Method::PATCH),
+        "DELETE" => Ok(reqwest::Method::DELETE),
+        other => Err(format!("method not allowed: {other}")),
+    }
+}
+
+/// Only paths of the local API, relative to /api/v1, may be forwarded.
+fn validate_path(path: &str) -> Result<(), String> {
+    let ok = path.starts_with('/')
+        && !path.contains("..")
+        && !path.contains("://")
+        && !path.contains('\\')
+        && path.chars().all(|c| !c.is_control());
+    if ok {
+        Ok(())
+    } else {
+        Err(format!("path not allowed: {path}"))
+    }
+}
+
+/// The daemon binary: `$HARMFLOW_DAEMON_BIN`, the sidecar next to this executable, or the development build.
+pub fn daemon_binary() -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os("HARMFLOW_DAEMON_BIN").map(PathBuf::from) {
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    if let Some(dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)) {
+        let sidecar = dir.join(DAEMON_BINARY);
+        if sidecar.is_file() {
+            return Some(sidecar);
+        }
+    }
+    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("binaries")
+        .join(format!("{DAEMON_BINARY}-{}", target_triple()));
+    dev.is_file().then_some(dev)
+}
+
+fn target_triple() -> &'static str {
+    if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        "aarch64-apple-darwin"
+    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        "x86_64-apple-darwin"
+    } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        "x86_64-unknown-linux-gnu"
+    } else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+        "aarch64-unknown-linux-gnu"
+    } else {
+        "x86_64-pc-windows-msvc"
+    }
+}
+
+/// Starts the daemon detached in its own process group, so it outlives the window and the app (FS-010 FR-004).
+pub fn spawn_daemon() -> Result<(), String> {
+    let bin = daemon_binary().ok_or_else(|| "the harmflowd binary was not found".to_string())?;
+    let mut cmd = Command::new(&bin);
+    if let Some(home) = std::env::var_os("HARMFLOW_HOME").filter(|v| !v.is_empty()) {
+        cmd.arg("--home").arg(home);
+    }
+    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    cmd.spawn().map(|_| ()).map_err(|e| format!("{}: {e}", bin.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_api_paths_are_forwarded() {
+        assert!(validate_path("/tasks/implement-issues/run").is_ok());
+        assert!(validate_path("/executions?active=true&limit=50").is_ok());
+        assert!(validate_path("tasks").is_err());
+        assert!(validate_path("/../../etc/passwd").is_err());
+        assert!(validate_path("/http://example.com").is_err());
+    }
+
+    #[test]
+    fn only_known_methods_are_forwarded() {
+        assert!(parse_method("patch").is_ok());
+        assert!(parse_method("TRACE").is_err());
+    }
+
+    #[test]
+    fn runtime_file_is_read() {
+        let dir = std::env::temp_dir().join(format!("harmflow-runtime-test-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("run")).unwrap();
+        std::fs::write(
+            dir.join("run").join("daemon.json"),
+            r#"{"address":"127.0.0.1:4321","port":4321,"pid":7,"version":"0.1.0","startedAt":"2026-10-20T10:00:00Z","tokenStore":"file"}"#,
+        )
+        .unwrap();
+        std::fs::write(dir.join("run").join("token"), "secret\n").unwrap();
+        let rt = read_runtime(&dir).unwrap();
+        assert_eq!(rt.address, "127.0.0.1:4321");
+        assert_eq!(read_token(&dir, rt.token_store.as_deref()).unwrap(), "secret");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}

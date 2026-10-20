@@ -1,0 +1,5 @@
+# Produced by `tauri icon` for platforms HarmFlow does not target.
+src-tauri/icons/android/
+src-tauri/icons/ios/
+# Produced by tauri-build.
+src-tauri/gen/
