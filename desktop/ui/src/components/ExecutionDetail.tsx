@@ -6,6 +6,7 @@ import { api } from "../api/client";
 import { native } from "../api/native";
 import type { Execution, ExecutionOutput, ExecutionSummary, HarmflowEvent } from "../api/types";
 import { isActive } from "../api/types";
+import { daemonText } from "../lib/daemonText";
 import { formatBytes, formatDateTime, formatDuration, formatElapsed, formatTime, elapsedMs } from "../lib/format";
 import { useNow } from "../lib/hooks";
 import { buildTimeline, changedFilesFromEvents, toolKey, type TimelineItem } from "../lib/timeline";
@@ -512,7 +513,7 @@ function Results({ detail, summary }: { detail?: Execution; summary: ExecutionSu
           <h4>{t("executions.detail.warnings")}</h4>
           {warnings.map((w, i) => (
             <Banner key={i} tone="warning" icon="shield">
-              <strong>{t(`warnings.${w.code}`)}</strong> — {w.message}
+              <strong>{t(`warnings.${w.code}`)}</strong> — {daemonText(w)}
             </Banner>
           ))}
         </div>

@@ -679,6 +679,42 @@ func TestValidationAndImport(t *testing.T) {
 	}
 }
 
+// FS-012 FR-005: what the daemon tells the user carries a key and params the desktop translates — a validation error,
+// the warning a task keeps, and a use-case error — beside its en-US text.
+func TestMessagesCarryKeys(t *testing.T) {
+	e := newEnv(t)
+	skills := "  skills: [nowhere-skill]\n"
+	_, err := e.app.CreateTask(TaskInput{YAML: taskYAML("skilled", skills)})
+	ae, ok := err.(*Error)
+	if !ok || ae.Key != "skill_not_found" || ae.Params["name"] != "nowhere-skill" || ae.Params["source"] != "harness" ||
+		ae.Validation == nil || ae.Validation.Errors[0].Key != "skill_not_found" {
+		t.Fatalf("missing skill on save: %#v", err)
+	}
+	imported, err := e.app.ImportTask(taskYAML("skilled", skills), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imported.Warnings) != 1 || imported.Warnings[0].Code != domain.WarningMissingSkill ||
+		imported.Warnings[0].Key != "skill_missing" || imported.Warnings[0].Params["harness"] != domain.HarnessClaudeCode {
+		t.Errorf("task warnings: %+v", imported.Warnings)
+	}
+	if _, err := e.app.GetTask("nope"); err.(*Error).Key != "task_not_found" || err.(*Error).Params["task"] != "nope" {
+		t.Errorf("unknown task: %#v", err)
+	}
+	e.create("quick", "")
+	e.claude.setScript(func(ports.RunRequest) string { return "echo 'END ok'" })
+	res, err := e.app.RunTask("quick")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.wait(res.ExecutionID, domain.StatusCompleted)
+	err = e.app.CancelExecution(res.ExecutionID)
+	if ae, ok := err.(*Error); !ok || ae.Key != "execution_ended" || ae.Params["status"] != "completed" ||
+		ae.Message != "the execution already ended as completed" {
+		t.Errorf("cancelling an ended execution: %#v", err)
+	}
+}
+
 // FS-001 AC-002: duplicate creates a disabled copy with a new identifier.
 func TestDuplicate(t *testing.T) {
 	e := newEnv(t)

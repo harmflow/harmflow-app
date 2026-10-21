@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
 import type { Catalog, CatalogEntry, Harness, SchedulePreview } from "../api/types";
+import { daemonText } from "../lib/daemonText";
 import { formatDateTime } from "../lib/format";
 import { useDebounced } from "../lib/hooks";
 import { HARNESS_PROVIDERS, NOTIFIABLE_EVENTS, TASK_TYPES, schemaDefault, schemaEnum, schemaRange } from "../lib/schema";
@@ -642,7 +643,11 @@ function ScheduleFields({
       <div className="preview">
         <span className="preview__label">{t("tasks.fields.preview")}</span>
         {kind === "none" ? <span className="muted">{t("tasks.fields.previewEmpty")}</span> : null}
-        {preview?.error ? <span className="tone-danger mono">{preview.error}</span> : null}
+        {preview?.error ? (
+          <span className="tone-danger mono">
+            {daemonText({ message: preview.error, messageKey: preview.errorKey, params: preview.errorParams })}
+          </span>
+        ) : null}
         <ul className="preview__list">
           {(preview?.occurrences ?? []).map((o) => (
             <li key={o} className="mono">

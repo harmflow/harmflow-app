@@ -2,10 +2,7 @@
 // GitHub, Tauri, or an operating system (ADR-0001).
 package domain
 
-import (
-	"fmt"
-	"strings"
-)
+import "strings"
 
 const (
 	APIVersion = "harmflow/v1alpha1"
@@ -376,7 +373,7 @@ func ExpandPath(path, home string, vars map[string]string, env func(string) stri
 		if out[i] == '$' && i+1 < len(out) && out[i+1] == '{' {
 			end := strings.IndexByte(out[i:], '}')
 			if end < 0 {
-				return "", fmt.Errorf("unterminated variable reference in %q", path)
+				return "", TextErr("path_variable_unterminated", `unterminated variable reference in "{{path}}"`, "path", path)
 			}
 			name := out[i+2 : i+end]
 			val, ok := vars[name]
@@ -397,7 +394,8 @@ func ExpandPath(path, home string, vars map[string]string, env func(string) stri
 		b.WriteByte(out[i])
 	}
 	if len(missing) > 0 {
-		return "", fmt.Errorf("undefined path variable %s in %q; define it in Settings", strings.Join(missing, ", "), path)
+		return "", TextErr("path_variable_undefined", `undefined path variable {{names}} in "{{path}}"; define it in Settings`,
+			"names", strings.Join(missing, ", "), "path", path)
 	}
 	return b.String(), nil
 }

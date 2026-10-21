@@ -576,11 +576,23 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * @description Names a text the daemon writes for the user. The desktop shows it in the interface's language, filling it with its params; the message beside it is the same text in en-US, shown for a key the desktop does not know (FS-012 FR-005). The agent's text, tool output, and a tool's own error get no key and stay as they are.
+         * @enum {string}
+         */
+        MessageKey: "host_forbidden" | "origin_forbidden" | "token_required" | "route_not_found" | "body_not_json" | "task_not_found" | "execution_not_found" | "harness_not_found" | "task_exists" | "task_file_exists" | "base_revision_required" | "task_changed_on_disk" | "task_invalid" | "task_disabled" | "task_being_deleted" | "daemon_stopping" | "execution_ended" | "executions_running" | "harness_path_not_absolute" | "harness_path_not_executable" | "settings_language_invalid" | "settings_notification_level_invalid" | "settings_log_retention_invalid" | "settings_path_variable_invalid" | "yaml_syntax" | "document_empty" | "document_not_json" | "document_not_representable" | "task_input_missing" | "schema_type" | "schema_const" | "schema_enum" | "schema_required" | "schema_additional_properties" | "schema_pattern" | "schema_min_length" | "schema_max_length" | "schema_minimum" | "schema_maximum" | "schema_min_items" | "schema_unique_items" | "schema_not" | "id_immutable" | "id_file_mismatch" | "task_file_invalid" | "schedule_missing" | "schedule_empty" | "schedule_cron_and_interval" | "timezone_unknown" | "interval_invalid" | "interval_unit_invalid" | "cron_seconds" | "cron_field_count" | "cron_step_invalid" | "cron_value_invalid" | "cron_value_out_of_range" | "harness_unknown" | "claude_model_unknown" | "claude_effort_unsupported" | "claude_effort_invalid" | "codex_model_unknown" | "codex_effort_invalid" | "harness_not_detected" | "harness_not_ready" | "agent_not_found" | "skill_not_found" | "agent_missing" | "skill_missing" | "fallback_agent_missing" | "fallback_skill_missing" | "fallback_repeats_preferred" | "path_variable_unterminated" | "path_variable_undefined" | "local_path_missing" | "restriction_claude_shell_workspace" | "restriction_claude_shell_network" | "restriction_codex_tool_lists" | "harness_version_untested" | "repository_unprotected" | "report_not_json" | "report_schema_invalid";
+        /** @description Values the desktop interpolates into the translated text of a messageKey; a count param picks its plural form. */
+        MessageParams: {
+            [key: string]: string;
+        };
         Error: {
             error: {
                 /** @enum {string} */
                 code: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "conflict" | "validation_failed" | "task_disabled" | "executions_running" | "internal";
+                /** @description The en-US text. */
                 message: string;
+                messageKey?: components["schemas"]["MessageKey"];
+                params?: components["schemas"]["MessageParams"];
                 validation?: components["schemas"]["ValidationResult"];
                 currentRevision?: string;
             };
@@ -716,7 +728,10 @@ export interface components {
         ValidationIssue: {
             /** @description JSON pointer into the document. */
             path?: string;
+            /** @description The en-US text. */
             message: string;
+            messageKey?: components["schemas"]["MessageKey"];
+            params?: components["schemas"]["MessageParams"];
             line?: number;
             column?: number;
             code?: string;
@@ -733,7 +748,10 @@ export interface components {
         Warning: {
             /** @enum {string} */
             code: "policy_unenforced" | "repository_unprotected" | "missing_agent" | "missing_skill" | "invalid_fallback" | "harness_not_ready" | "version_untested" | "external_edit_invalid" | "other";
+            /** @description The en-US text, or the agent's own words, which have no messageKey. */
             message: string;
+            messageKey?: components["schemas"]["MessageKey"];
+            params?: components["schemas"]["MessageParams"];
             subject?: string;
         };
         ExecutionRef: {
@@ -782,7 +800,10 @@ export interface components {
         SchedulePreview: {
             occurrences: string[];
             timezone?: string;
+            /** @description Why the schedule is invalid, in en-US. */
             error?: string;
+            errorKey?: components["schemas"]["MessageKey"];
+            errorParams?: components["schemas"]["MessageParams"];
         };
         FiringResult: {
             /** @enum {string} */

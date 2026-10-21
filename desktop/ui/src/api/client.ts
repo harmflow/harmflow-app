@@ -1,4 +1,5 @@
 // Typed calls to the local API, one per operation of contracts/api/openapi.yaml.
+import { daemonText } from "../lib/daemonText";
 import { transport } from "./transport";
 import type {
   Accepted,
@@ -37,7 +38,7 @@ export class ApiError extends Error {
 
   constructor(status: number, body: unknown) {
     const err = (body as ApiErrorBody | null)?.error;
-    super(err?.message ?? (typeof body === "string" && body ? body : `HTTP ${status}`));
+    super(err ? daemonText(err) : typeof body === "string" && body ? body : `HTTP ${status}`);
     this.status = status;
     this.code = err?.code ?? (status === 0 ? "network" : "internal");
     this.validation = err?.validation;

@@ -10,6 +10,7 @@ import { Icon } from "../components/Icon";
 import { TaskEditor, ValidationPanel } from "../components/TaskEditor";
 import { toast } from "../components/toast";
 import { Banner, Button, Checkbox, Chip, EmptyState, IconButton, Modal, Select, StatusChip, TextArea, TextInput, Toggle, cx } from "../components/ui";
+import { daemonText } from "../lib/daemonText";
 import { formatRelative } from "../lib/format";
 import { useNow } from "../lib/hooks";
 import { newTaskDocument, type TemplateKind } from "../lib/taskForm";
@@ -101,7 +102,7 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
     try {
       const task = await api.importTask(yaml, overwrite);
       toast(t("tasks.imported"));
-      for (const w of task.warnings) toast(`${t(`warnings.${w.code}`)}: ${w.message}`, "warning", 6000);
+      for (const w of task.warnings) toast(`${t(`warnings.${w.code}`)}: ${daemonText(w)}`, "warning", 6000);
       void actions.refreshTasks();
       onImported(task);
     } catch (err) {
@@ -284,7 +285,7 @@ function TaskList({ onView, onOpenExecution }: { onView: (v: TaskView) => void; 
                   {task.deletePending ? <Chip tone="warning" icon="trash">{t("tasks.deletePending")}</Chip> : null}
                   {task.invalid ? <Chip tone="danger" icon="alert" title={t("tasks.invalidOnDisk")}>{t("warnings.external_edit_invalid")}</Chip> : null}
                   {task.warnings.length ? (
-                    <Chip tone="warning" icon="shield" title={task.warnings.map((w) => `${t(`warnings.${w.code}`)}: ${w.message}`).join("\n")}>
+                    <Chip tone="warning" icon="shield" title={task.warnings.map((w) => `${t(`warnings.${w.code}`)}: ${daemonText(w)}`).join("\n")}>
                       {t("warnings.count", { count: task.warnings.length })}
                     </Chip>
                   ) : null}

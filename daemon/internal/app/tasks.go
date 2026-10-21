@@ -71,7 +71,8 @@ func (a *App) loadTaskFile(f ports.TaskFile) *taskEntry {
 	e.file = f
 	if r.Valid && r.doc.Metadata.ID != f.ID {
 		r.Valid = false
-		r.addError("/metadata/id", "metadata.id %q must match the file name %s.yaml", r.doc.Metadata.ID, f.ID)
+		r.addError("/metadata/id", domain.T("id_file_mismatch", `metadata.id "{{id}}" must match the file name {{file}}.yaml`,
+			"id", r.doc.Metadata.ID, "file", f.ID))
 	}
 	if r.Valid {
 		e.doc = *r.doc
@@ -84,11 +85,11 @@ func (a *App) loadTaskFile(f ports.TaskFile) *taskEntry {
 			e.doc = domain.TaskDocument{Metadata: domain.TaskMetadata{ID: f.ID, Name: f.ID}}
 			e.doc.Spec.Enabled = boolPtr(false)
 		}
-		msg := "the task file fails validation"
+		text := domain.T("task_file_invalid", "the task file fails validation")
 		if len(r.Errors) > 0 {
-			msg = r.Errors[0].Message
+			text = r.Errors[0].Text
 		}
-		e.warnings = []domain.Warning{{Code: domain.WarningExternalEditInvalid, Message: msg}}
+		e.warnings = []domain.Warning{{Code: domain.WarningExternalEditInvalid, Text: text}}
 	}
 	return e
 }
@@ -105,7 +106,7 @@ func issuesToWarnings(issues []schemaIssue) []domain.Warning {
 		default:
 			code = domain.WarningOther
 		}
-		out = append(out, domain.Warning{Code: code, Message: is.Message, Subject: is.Path})
+		out = append(out, domain.Warning{Code: code, Text: is.Text, Subject: is.Path})
 	}
 	return out
 }
@@ -115,7 +116,7 @@ func (a *App) entry(id string) (*taskEntry, error) {
 	defer a.mu.Unlock()
 	e, ok := a.tasks[id]
 	if !ok {
-		return nil, errf(CodeNotFound, "no task %s", id)
+		return nil, newError(CodeNotFound, domain.T("task_not_found", "no task {{task}}", "task", id))
 	}
 	return e, nil
 }
@@ -135,7 +136,7 @@ func (a *App) GetTask(id string) (TaskView, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if _, ok := a.tasks[id]; !ok {
-		return TaskView{}, errf(CodeNotFound, "no task %s", id)
+		return TaskView{}, newError(CodeNotFound, domain.T("task_not_found", "no task {{task}}", "task", id))
 	}
 	return a.viewLocked(id, true), nil
 }
@@ -199,15 +200,16 @@ func (a *App) viewLocked(id string, full bool) TaskView {
 	return v
 }
 
+// invalidError says what the first problem is; the validation it carries lists them all.
 func (a *App) invalidError(r *ValidationResult) *Error {
-	msg := "the task fails validation"
+	text := domain.T("task_invalid", "the task fails validation")
 	if len(r.Errors) > 0 {
-		msg = r.Errors[0].Message
+		text = r.Errors[0].Text
 		if r.Errors[0].Path != "" {
-			msg = r.Errors[0].Path + ": " + msg
+			text.Message = r.Errors[0].Path + ": " + text.Message
 		}
 	}
-	return &Error{Code: CodeValidationFailed, Message: msg, Validation: r}
+	return &Error{Code: CodeValidationFailed, Text: text, Validation: r}
 }
 
 // CreateTask validates and writes a new task file; the daemon is its only writer (FS-001 FR-004).
@@ -231,10 +233,12 @@ func (a *App) createTask(in TaskInput, mode catalogMode, overwrite bool) (TaskVi
 	_, running := a.running[id]
 	a.mu.Unlock()
 	if exists && (!overwrite || running) {
-		return TaskView{}, errf(CodeConflict, "a task with the identifier %s already exists", id)
+		return TaskView{}, newError(CodeConflict,
+			domain.T("task_exists", "a task with the identifier {{task}} already exists", "task", id))
 	}
 	if _, err := a.d.Tasks.Get(id); err == nil && !overwrite {
-		return TaskView{}, errf(CodeConflict, "a task file %s.yaml already exists", id)
+		return TaskView{}, newError(CodeConflict,
+			domain.T("task_file_exists", "a task file {{task}}.yaml already exists", "task", id))
 	}
 	f, err := a.d.Tasks.Save(id, r.content, "")
 	if err != nil {
@@ -254,19 +258,21 @@ func (a *App) UpdateTask(id string, in TaskInput) (TaskView, error) {
 		return TaskView{}, err
 	}
 	if in.BaseRevision == "" {
-		return TaskView{}, errf(CodeBadRequest, "baseRevision is required to update a task")
+		return TaskView{}, newError(CodeBadRequest,
+			domain.T("base_revision_required", "baseRevision is required to update a task"))
 	}
 	r := a.validate(in, catalogStrict)
 	if !r.Valid {
 		return TaskView{}, a.invalidError(r)
 	}
 	if r.doc.Metadata.ID != id {
-		return TaskView{}, a.invalidError(withError(r, "/metadata/id", "the identifier cannot change; duplicate the task instead"))
+		return TaskView{}, a.invalidError(withError(r, "/metadata/id",
+			domain.T("id_immutable", "the identifier cannot change; duplicate the task instead")))
 	}
 	f, err := a.d.Tasks.Save(id, r.content, in.BaseRevision)
 	if errors.Is(err, ports.ErrConflict) {
-		return TaskView{}, &Error{Code: CodeConflict, CurrentRevision: f.Revision,
-			Message: "the task file changed since this edit started; reload it before saving"}
+		return TaskView{}, &Error{Code: CodeConflict, CurrentRevision: f.Revision, Text: domain.T("task_changed_on_disk",
+			"the task file changed since this edit started; reload it before saving")}
 	}
 	if err != nil {
 		return TaskView{}, err
@@ -278,9 +284,9 @@ func (a *App) UpdateTask(id string, in TaskInput) (TaskView, error) {
 	return v, nil
 }
 
-func withError(r *ValidationResult, path, msg string) *ValidationResult {
+func withError(r *ValidationResult, path string, text domain.Text) *ValidationResult {
 	r.Valid = false
-	r.addError(path, "%s", msg)
+	r.addError(path, text)
 	return r
 }
 
@@ -312,7 +318,7 @@ func (a *App) DeleteTask(id string) (bool, error) {
 	e, ok := a.tasks[id]
 	if !ok {
 		a.mu.Unlock()
-		return false, errf(CodeNotFound, "no task %s", id)
+		return false, newError(CodeNotFound, domain.T("task_not_found", "no task {{task}}", "task", id))
 	}
 	if _, running := a.running[id]; running {
 		e.deletePending = true

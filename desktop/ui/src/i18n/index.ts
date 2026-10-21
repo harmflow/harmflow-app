@@ -14,10 +14,12 @@ export const resources = {
   "es-ES": { translation: esES },
 } as const;
 
+// The daemon's texts are looked up by keys that arrive at run time (lib/daemonText.ts), so they stay out of the typed
+// keys, which would otherwise grow too deep for the type checker.
 declare module "i18next" {
   interface CustomTypeOptions {
     defaultNS: "translation";
-    resources: { translation: typeof enUS };
+    resources: { translation: Omit<typeof enUS, "messages" | "cronFields" | "itemSource"> };
   }
 }
 

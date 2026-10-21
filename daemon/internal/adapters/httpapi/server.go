@@ -131,15 +131,15 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			host = r.Host
 		}
 		if host != "127.0.0.1" && host != "localhost" && host != "::1" && host != "[::1]" {
-			writeError(w, 403, "forbidden", "the Host header must be the loopback address")
+			writeError(w, 403, "forbidden", domain.T("host_forbidden", "the Host header must be the loopback address"))
 			return
 		}
 		if origin := r.Header.Get("Origin"); origin != "" && !allowedOrigins[origin] {
-			writeError(w, 403, "forbidden", "requests from web pages are not accepted")
+			writeError(w, 403, "forbidden", domain.T("origin_forbidden", "requests from web pages are not accepted"))
 			return
 		}
 		if !strings.HasPrefix(r.URL.Path, "/api/v1/") {
-			writeError(w, 404, "not_found", "no such route")
+			writeError(w, 404, "not_found", domain.T("route_not_found", "no such route"))
 			return
 		}
 		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -147,7 +147,7 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		want := s.token
 		s.mu.RUnlock()
 		if want == "" || got == "" || subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
-			writeError(w, 401, "unauthorized", "a valid token is required")
+			writeError(w, 401, "unauthorized", domain.T("token_required", "a valid token is required"))
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
@@ -168,14 +168,14 @@ type errorBody struct {
 }
 
 type errorDetail struct {
-	Code            string                `json:"code"`
-	Message         string                `json:"message"`
+	Code string `json:"code"`
+	domain.Text
 	Validation      *app.ValidationResult `json:"validation,omitempty"`
 	CurrentRevision string                `json:"currentRevision,omitempty"`
 }
 
-func writeError(w http.ResponseWriter, status int, code, msg string) {
-	writeJSON(w, status, errorBody{Error: errorDetail{Code: code, Message: msg}})
+func writeError(w http.ResponseWriter, status int, code string, text domain.Text) {
+	writeJSON(w, status, errorBody{Error: errorDetail{Code: code, Text: text}})
 }
 
 // fail maps a use-case error to its response.
@@ -189,11 +189,11 @@ func fail(w http.ResponseWriter, err error) {
 		if status == 0 {
 			status = 400
 		}
-		writeJSON(w, status, errorBody{Error: errorDetail{Code: ae.Code, Message: ae.Message, Validation: ae.Validation,
+		writeJSON(w, status, errorBody{Error: errorDetail{Code: ae.Code, Text: ae.Text, Validation: ae.Validation,
 			CurrentRevision: ae.CurrentRevision}})
 		return
 	}
-	writeError(w, 500, "internal", err.Error())
+	writeError(w, 500, "internal", domain.Text{Message: err.Error()})
 }
 
 const maxBody = 4 << 20
@@ -207,7 +207,8 @@ func decode(r *http.Request, v any) error {
 		return nil
 	}
 	if err := json.Unmarshal(data, v); err != nil {
-		return &app.Error{Code: app.CodeBadRequest, Message: "the body is not valid JSON: " + err.Error()}
+		return &app.Error{Code: app.CodeBadRequest,
+			Text: domain.T("body_not_json", "the body is not valid JSON: {{detail}}", "detail", err.Error())}
 	}
 	return nil
 }
@@ -444,7 +445,7 @@ func (s *Server) executionOutput(w http.ResponseWriter, r *http.Request) {
 func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		writeError(w, 500, "internal", "streaming is not supported")
+		writeError(w, 500, "internal", domain.Text{Message: "streaming is not supported"})
 		return
 	}
 	after, _ := strconv.ParseInt(r.Header.Get("Last-Event-ID"), 10, 64)

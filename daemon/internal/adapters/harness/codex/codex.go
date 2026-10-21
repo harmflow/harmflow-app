@@ -197,7 +197,9 @@ func (a *Adapter) ValidateProfile(info ports.HarnessInfo, model, effort string) 
 		for _, m := range info.Models {
 			ids = append(ids, m.ID)
 		}
-		return fmt.Errorf("Codex %s does not offer the model %q; it offers %s", info.Version, model, strings.Join(ids, ", "))
+		return domain.TextErr("codex_model_unknown",
+			`Codex {{version}} does not offer the model "{{model}}"; it offers {{models}}`,
+			"version", info.Version, "model", model, "models", strings.Join(ids, ", "))
 	}
 	if effort == "" || effort == domain.DefaultEffort {
 		return nil
@@ -211,7 +213,9 @@ func (a *Adapter) ValidateProfile(info ports.HarnessInfo, model, effort string) 
 			return nil
 		}
 	}
-	return fmt.Errorf("Codex model %q does not accept the effort %q; it accepts %s", chosen.ID, effort, strings.Join(efforts, ", "))
+	return domain.TextErr("codex_effort_invalid",
+		`Codex model "{{model}}" does not accept the effort "{{effort}}"; it accepts {{efforts}}`,
+		"model", chosen.ID, "effort", effort, "efforts", strings.Join(efforts, ", "))
 }
 
 func (a *Adapter) userDir() catalog.Dir { return catalog.Dir{Root: a.codexHome()} }
@@ -245,22 +249,26 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 	case domain.ProfileReadOnly:
 		args = append(args, "--sandbox", "read-only")
 		restrictions = append(restrictions,
-			ports.Restriction{Name: "read_only", Enforced: true, Message: "Codex's read-only sandbox blocks every write"},
-			ports.Restriction{Name: "network", Enforced: true, Message: "Codex's read-only sandbox blocks network access"})
+			ports.Restriction{Name: "read_only", Enforced: true,
+				Text: domain.Text{Message: "Codex's read-only sandbox blocks every write"}},
+			ports.Restriction{Name: "network", Enforced: true,
+				Text: domain.Text{Message: "Codex's read-only sandbox blocks network access"}})
 	default:
 		args = append(args, "--sandbox", "workspace-write",
 			"-c", fmt.Sprintf("sandbox_workspace_write.network_access=%t", network))
 		restrictions = append(restrictions, ports.Restriction{Name: "restrictToWorkspace", Enforced: true,
-			Message: "Codex's workspace-write sandbox confines writes to the workspace and the added directories"})
+			Text: domain.Text{
+				Message: "Codex's workspace-write sandbox confines writes to the workspace and the added directories"}})
 		if !network {
 			restrictions = append(restrictions, ports.Restriction{Name: "network", Enforced: true,
-				Message: "Codex's sandbox blocks network access"})
+				Text: domain.Text{Message: "Codex's sandbox blocks network access"}})
 		}
 		if perm.Profile == domain.ProfileCustom {
 			dirs = append(dirs, perm.Custom.WritablePaths...)
 			if len(perm.Custom.AllowedTools) > 0 || len(perm.Custom.DeniedTools) > 0 {
 				restrictions = append(restrictions, ports.Restriction{Name: "tool_allowlist", Enforced: false,
-					Message: "Codex has no per-tool allow or deny list; the custom tool lists are not enforced"})
+					Text: domain.T("restriction_codex_tool_lists",
+						"Codex has no per-tool allow or deny list; the custom tool lists are not enforced")})
 			}
 		}
 	}

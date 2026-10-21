@@ -13,20 +13,22 @@ import (
 	"strings"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 	"gopkg.in/yaml.v3"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/contracts"
+	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 )
 
 // Issue is one validation problem, located when possible.
 type Issue struct {
-	Path    string `json:"path,omitempty"`
-	Message string `json:"message"`
-	Line    int    `json:"line,omitempty"`
-	Column  int    `json:"column,omitempty"`
-	Code    string `json:"code,omitempty"`
+	Path string `json:"path,omitempty"`
+	domain.Text
+	Line   int    `json:"line,omitempty"`
+	Column int    `json:"column,omitempty"`
+	Code   string `json:"code,omitempty"`
 }
 
 type Validator struct {
@@ -70,7 +72,7 @@ func ParseYAML(text []byte) (any, *yaml.Node, []Issue) {
 		return nil, nil, []Issue{syntaxIssue(err)}
 	}
 	if len(node.Content) == 0 {
-		return nil, &node, []Issue{{Message: "the document is empty", Code: "syntax"}}
+		return nil, &node, []Issue{{Text: domain.T("document_empty", "the document is empty"), Code: "syntax"}}
 	}
 	var raw any
 	if err := node.Decode(&raw); err != nil {
@@ -78,14 +80,14 @@ func ParseYAML(text []byte) (any, *yaml.Node, []Issue) {
 	}
 	value, err := jsonCompatible(raw)
 	if err != nil {
-		return nil, &node, []Issue{{Message: err.Error(), Code: "syntax"}}
+		return nil, &node, []Issue{{Text: domain.TextOf(err), Code: "syntax"}}
 	}
 	return value, &node, nil
 }
 
 func syntaxIssue(err error) Issue {
 	msg := strings.TrimPrefix(err.Error(), "yaml: ")
-	is := Issue{Message: "YAML syntax error: " + msg, Code: "syntax"}
+	is := Issue{Text: domain.T("yaml_syntax", "YAML syntax error: {{detail}}", "detail", msg), Code: "syntax"}
 	if m := yamlLine.FindStringSubmatch(msg); m != nil {
 		is.Line, _ = strconv.Atoi(m[1])
 		if m[2] != "" {
@@ -99,7 +101,8 @@ func syntaxIssue(err error) Issue {
 func jsonCompatible(v any) (any, error) {
 	data, err := json.Marshal(normalize(v))
 	if err != nil {
-		return nil, fmt.Errorf("the document cannot be represented as JSON: %w", err)
+		return nil, domain.TextErr("document_not_representable", "the document cannot be represented as JSON: {{detail}}",
+			"detail", err.Error())
 	}
 	return jsonschema.UnmarshalJSON(bytes.NewReader(data))
 }
@@ -149,7 +152,7 @@ func collect(err error, node *yaml.Node) []Issue {
 	}
 	var ve *jsonschema.ValidationError
 	if !errors.As(err, &ve) {
-		return []Issue{{Message: err.Error(), Code: "schema"}}
+		return []Issue{{Text: domain.Text{Message: err.Error()}, Code: "schema"}}
 	}
 	var leaves []*jsonschema.ValidationError
 	var walk func(e *jsonschema.ValidationError)
@@ -170,13 +173,13 @@ func collect(err error, node *yaml.Node) []Issue {
 		if len(l.InstanceLocation) == 0 {
 			path = ""
 		}
-		msg := l.ErrorKind.LocalizedString(printer)
-		key := path + "|" + msg
+		text := kindText(l.ErrorKind)
+		key := path + "|" + text.Message
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
-		is := Issue{Path: path, Message: msg, Code: "schema"}
+		is := Issue{Path: path, Text: text, Code: "schema"}
 		if node != nil {
 			is.Line, is.Column = Locate(node, l.InstanceLocation)
 		}
@@ -189,6 +192,91 @@ func collect(err error, node *yaml.Node) []Issue {
 		return out[i].Path < out[j].Path
 	})
 	return out
+}
+
+// kindText is the translatable text of a schema error, for the kinds the task and report schemas raise; any other
+// kind keeps the validator's own en-US text, with no key.
+func kindText(k jsonschema.ErrorKind) domain.Text {
+	switch k := k.(type) {
+	case *kind.Type:
+		return domain.T("schema_type", "expected {{want}}, got {{got}}", "want", strings.Join(k.Want, "/"), "got", k.Got)
+	case *kind.Enum:
+		if values, ok := primitives(k.Want); ok {
+			if len(values) == 1 {
+				return domain.T("schema_const", "value must be {{value}}", "value", values[0])
+			}
+			return domain.T("schema_enum", "value must be one of {{values}}", "values", strings.Join(values, ", "))
+		}
+	case *kind.Const:
+		if values, ok := primitives([]any{k.Want}); ok {
+			return domain.T("schema_const", "value must be {{value}}", "value", values[0])
+		}
+	case *kind.Required:
+		return domain.T("schema_required",
+			plural(len(k.Missing), "missing property {{properties}}", "missing properties {{properties}}"),
+			"properties", quoteAll(k.Missing), "count", strconv.Itoa(len(k.Missing)))
+	case *kind.AdditionalProperties:
+		return domain.T("schema_additional_properties",
+			plural(len(k.Properties), "property {{properties}} is not allowed", "properties {{properties}} are not allowed"),
+			"properties", quoteAll(k.Properties), "count", strconv.Itoa(len(k.Properties)))
+	case *kind.Pattern:
+		return domain.T("schema_pattern", "{{value}} does not match the pattern {{pattern}}",
+			"value", strconv.Quote(k.Got), "pattern", strconv.Quote(k.Want))
+	case *kind.MinLength:
+		return domain.T("schema_min_length",
+			plural(k.Want, "must have at least {{count}} character", "must have at least {{count}} characters"),
+			"count", strconv.Itoa(k.Want))
+	case *kind.MaxLength:
+		return domain.T("schema_max_length",
+			plural(k.Want, "must have at most {{count}} character", "must have at most {{count}} characters"),
+			"count", strconv.Itoa(k.Want))
+	case *kind.Minimum:
+		return domain.T("schema_minimum", "must be at least {{limit}}", "limit", k.Want.RatString())
+	case *kind.Maximum:
+		return domain.T("schema_maximum", "must be at most {{limit}}", "limit", k.Want.RatString())
+	case *kind.MinItems:
+		return domain.T("schema_min_items",
+			plural(k.Want, "must have at least {{count}} item", "must have at least {{count}} items"),
+			"count", strconv.Itoa(k.Want))
+	case *kind.UniqueItems:
+		return domain.T("schema_unique_items", "items at {{first}} and {{second}} are equal",
+			"first", strconv.Itoa(k.Duplicates[0]), "second", strconv.Itoa(k.Duplicates[1]))
+	case *kind.Not:
+		return domain.T("schema_not", "this combination of properties is not allowed")
+	}
+	return domain.Text{Message: k.LocalizedString(printer)}
+}
+
+// primitives shows each value as the schema writes it; ok is false when one is an object or an array.
+func primitives(values []any) ([]string, bool) {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		switch v := v.(type) {
+		case []any, map[string]any:
+			return nil, false
+		case string:
+			out = append(out, strconv.Quote(v))
+		default:
+			out = append(out, fmt.Sprint(v))
+		}
+	}
+	return out, true
+}
+
+func quoteAll(names []string) string {
+	quoted := make([]string, len(names))
+	for i, n := range names {
+		quoted[i] = strconv.Quote(n)
+	}
+	return strings.Join(quoted, ", ")
+}
+
+// plural picks the en-US template for a count; the desktop picks its own form from the count param.
+func plural(n int, one, other string) string {
+	if n == 1 {
+		return one
+	}
+	return other
 }
 
 // Locate finds the line and column of a JSON-pointer location in a YAML node tree; it falls back to the deepest

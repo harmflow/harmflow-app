@@ -109,7 +109,8 @@ func (a *App) GetExecution(id string) (ExecutionView, error) {
 	x, ok := a.executions[id]
 	if !ok {
 		a.mu.Unlock()
-		return ExecutionView{}, errf(CodeNotFound, "no execution %s", id)
+		return ExecutionView{}, newError(CodeNotFound,
+			domain.T("execution_not_found", "no execution {{execution}}", "execution", id))
 	}
 	data, _ := json.Marshal(x)
 	a.mu.Unlock()
@@ -144,7 +145,8 @@ func (a *App) ExecutionOutput(id string, limit int64) (ExecutionOutput, error) {
 	x, ok := a.executions[id]
 	if !ok {
 		a.mu.Unlock()
-		return ExecutionOutput{}, errf(CodeNotFound, "no execution %s", id)
+		return ExecutionOutput{}, newError(CodeNotFound,
+			domain.T("execution_not_found", "no execution {{execution}}", "execution", id))
 	}
 	attempts := append([]domain.Attempt(nil), x.Attempts...)
 	out := ExecutionOutput{Attempts: []AttemptOutput{}, LogExpired: x.LogExpired}
