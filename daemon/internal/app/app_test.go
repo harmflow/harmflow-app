@@ -283,6 +283,20 @@ func TestOverlapSkip(t *testing.T) {
 	if r, _ := e.app.RunTask("skipper"); r.Outcome != "skipped" {
 		t.Fatalf("got %+v", r)
 	}
+	// The dropped firing is in the log of the execution it was skipped for, so it outlives the replay buffer.
+	events, _, err := e.app.ExecutionEvents(first.ExecutionID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var skipped []domain.Event
+	for _, ev := range events {
+		if ev.Type == domain.EventFiringSkipped {
+			skipped = append(skipped, ev)
+		}
+	}
+	if len(skipped) != 1 || skipped[0].Payload["trigger"] != string(domain.TriggerManual) {
+		t.Errorf("firing.skipped in the running execution's log: %+v", skipped)
+	}
 	_ = e.app.CancelExecution(first.ExecutionID)
 	e.wait(first.ExecutionID, domain.StatusCancelled)
 	if n := len(e.executions("skipper")); n != 1 {

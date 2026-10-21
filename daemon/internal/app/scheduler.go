@@ -246,19 +246,35 @@ func (a *App) fire(taskID string, trigger domain.Trigger, scheduledFor *time.Tim
 	}
 	doc := e.doc
 	_, running := a.running[taskID]
-	var waiting *domain.Execution
+	var waiting, active *domain.Execution
 	for _, x := range a.executions {
-		if x.TaskID == taskID && x.Status == domain.StatusQueued {
+		if x.TaskID != taskID {
+			continue
+		}
+		if x.Status == domain.StatusQueued {
 			waiting = x
+		} else if x.Status.IsActive() {
+			active = x
 		}
 	}
 	now := a.now()
 	if running || waiting != nil {
 		if doc.Effective().Spec.Concurrency.OverlappingRuns == domain.OverlapSkip {
+			// The skip is logged with the execution that caused it, as a coalesced firing is with the one it joined; an
+			// execution just claimed stays queued until it starts.
+			cause := active
+			if cause == nil {
+				cause = waiting
+			}
+			var causeID string
+			if cause != nil {
+				causeID = cause.ID
+			}
 			a.mu.Unlock()
-			a.emit(domain.Event{Type: domain.EventFiringSkipped, TaskID: taskID, Severity: domain.SeverityWarning,
-				Message: "the task was running; this firing was skipped, per its overlap policy",
-				Payload: map[string]any{"trigger": string(trigger)}})
+			a.emit(domain.Event{Type: domain.EventFiringSkipped, TaskID: taskID, ExecutionID: causeID,
+				Severity: domain.SeverityWarning,
+				Message:  "the task was running; this firing was skipped, per its overlap policy",
+				Payload:  map[string]any{"trigger": string(trigger)}})
 			return FiringResult{Outcome: "skipped"}, nil
 		}
 		if waiting != nil {
