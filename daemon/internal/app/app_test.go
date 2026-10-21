@@ -683,6 +683,55 @@ func TestNotificationLevels(t *testing.T) {
 	}
 }
 
+// FS-011 FR-005: past the cap the oldest read notices go first, and an unread notice is never dropped.
+func TestNotificationCapKeepsUnread(t *testing.T) {
+	e := newEnv(t)
+	e.create("noisy", "")
+	hold := func(read func(i int) bool) { // maxNotifications notices, newest first
+		e.app.mu.Lock()
+		e.app.notifications = nil
+		for i := 0; i < maxNotifications; i++ {
+			e.app.notifications = append(e.app.notifications, Notification{ID: fmt.Sprintf("old-%d", i), Read: read(i)})
+		}
+		e.app.mu.Unlock()
+	}
+	completed := domain.Event{Type: domain.EventExecutionCompleted, TaskID: "noisy"}
+
+	hold(func(int) bool { return false })
+	e.app.notifyFor(completed)
+	if n := e.app.Notifications(true); len(n) != maxNotifications+1 {
+		t.Errorf("%d unread notices kept, want %d", len(n), maxNotifications+1)
+	}
+	// Once they are read, the next notice trims the list back to the cap, oldest first.
+	e.app.MarkNotificationsRead(nil)
+	e.app.notifyFor(completed)
+	all := e.app.Notifications(false)
+	if len(all) != maxNotifications {
+		t.Fatalf("%d read notices kept, want %d", len(all), maxNotifications)
+	}
+	if oldest := all[len(all)-1].ID; oldest != fmt.Sprintf("old-%d", maxNotifications-3) {
+		t.Errorf("oldest notice kept is %s, want the two oldest dropped", oldest)
+	}
+
+	// Only the two notices before the oldest are read: the older of them is dropped, not the oldest unread one.
+	hold(func(i int) bool { return i == maxNotifications-2 || i == maxNotifications-3 })
+	e.app.notifyFor(completed)
+	kept := map[string]bool{}
+	for _, n := range e.app.Notifications(false) {
+		kept[n.ID] = true
+	}
+	var dropped []string
+	for i := 0; i < maxNotifications; i++ {
+		if id := fmt.Sprintf("old-%d", i); !kept[id] {
+			dropped = append(dropped, id)
+		}
+	}
+	if want := fmt.Sprintf("old-%d", maxNotifications-2); len(kept) != maxNotifications || len(dropped) != 1 ||
+		dropped[0] != want {
+		t.Errorf("dropped %v of %d notices, want only %s", dropped, maxNotifications+1, want)
+	}
+}
+
 // FS-009 FR-010: an unenforced restriction runs with a warning on the task and on the execution.
 func TestPolicyWarningIsShown(t *testing.T) {
 	e := newEnv(t)
