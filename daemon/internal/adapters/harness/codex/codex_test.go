@@ -103,6 +103,55 @@ func TestPrepareSandbox(t *testing.T) {
 	}
 }
 
+// D-092: built-ins are read from copies in the execution's directory, never from the app; the user's own items stay put.
+func TestPrepareDeliversBuiltins(t *testing.T) {
+	root := t.TempDir()
+	skill := filepath.Join(root, "skills", "harmflow-x")
+	_ = os.MkdirAll(filepath.Join(skill, "scripts"), 0o700)
+	_ = os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("---\nname: harmflow-x\ndescription: d\n---\nbody"), 0o600)
+	_ = os.WriteFile(filepath.Join(skill, "scripts", "run.sh"), []byte("echo hi"), 0o700)
+	main := filepath.Join(root, "agents", "harmflow-a.md")
+	other := filepath.Join(root, "agents", "harmflow-b.md")
+	_ = os.MkdirAll(filepath.Dir(main), 0o700)
+	_ = os.WriteFile(main, []byte("---\nname: harmflow-a\ndescription: an agent\n---\nYou implement."), 0o600)
+	_ = os.WriteFile(other, []byte("---\nname: harmflow-b\ndescription: another\n---\nYou review."), 0o600)
+	userSkill := filepath.Join(t.TempDir(), "skills", "mine")
+	exec := t.TempDir()
+	t.Setenv("CODEX_HOME", "")
+	a := &Adapter{Home: t.TempDir()}
+	info := ports.HarnessInfo{Path: "/bin/codex", Features: map[string]bool{"--add-dir": true}}
+	inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", ExecutionDir: exec, Prompt: "do it",
+		Permissions: *domain.TaskDocument{}.Effective().Spec.Permissions,
+		Skills: []ports.ResolvedItem{{Name: "harmflow-x", Kind: "skill", Builtin: true, Path: skill},
+			{Name: "mine", Kind: "skill", Path: userSkill}},
+		Agents: []ports.ResolvedItem{{Name: "harmflow-a", Kind: "agent", Builtin: true, Path: main},
+			{Name: "harmflow-b", Kind: "agent", Builtin: true, Path: other}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivered := filepath.Join(exec, "codex-builtins")
+	for _, f := range []string{"skills/harmflow-x/SKILL.md", "skills/harmflow-x/scripts/run.sh", "agents/harmflow-b.md"} {
+		if _, err := os.Stat(filepath.Join(delivered, f)); err != nil {
+			t.Errorf("%s not delivered: %v", f, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(delivered, "agents", "harmflow-a.md")); err == nil {
+		t.Error("the main agent is inlined in the instructions; it needs no copy")
+	}
+	for _, want := range []string{"You implement.", filepath.Join(delivered, "skills", "harmflow-x", "SKILL.md"),
+		filepath.Join(delivered, "agents", "harmflow-b.md"), filepath.Join(userSkill, "SKILL.md")} {
+		if !strings.Contains(inv.Stdin, want) {
+			t.Errorf("the instructions lack %q:\n%s", want, inv.Stdin)
+		}
+	}
+	if strings.Contains(inv.Stdin, root) {
+		t.Errorf("the instructions name a built-in at its source:\n%s", inv.Stdin)
+	}
+	if entries, _ := os.ReadDir(a.Home); len(entries) > 0 {
+		t.Error("the user's home was touched")
+	}
+}
+
 func TestModelsFromCache(t *testing.T) {
 	home := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(home, ".codex"), 0o700)
