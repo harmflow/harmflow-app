@@ -1,7 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44">
-  <!-- Menu-bar template icon, idle: the outline only. -->
-  <g fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round" stroke-width="3">
-    <path d="M22 5 37 13.7v16.6L22 39 7 30.3V13.7L22 5Z"/>
-    <path d="M15 18.5c4-3 10-3 14 0M15 24.5c4-3 10-3 14 0"/>
+  <!-- Menu-bar template icon, idle: the logo's H and wave inside the outline of its HUD ring. -->
+  <g fill="none" stroke="#000" stroke-linecap="round">
+    <circle cx="22" cy="22" r="19.5" stroke-width="2.5"/>
+    <path d="M14 12.3V31.7M30 12.3V31.7" stroke-width="3.4"/>
+    <path d="M9 25.69Q11.5 26.89 14 22Q18 14.15 22 22T30 22Q32.5 17.11 35 18.31" stroke-width="2.8"/>
   </g>
 </svg>

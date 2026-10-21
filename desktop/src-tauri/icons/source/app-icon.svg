@@ -1,31 +1,128 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- HarmFlow placeholder app icon (D-095): an original hexagon with three flow lines. -->
+  <!-- HarmFlow app icon: the official logo, a neon H whose crossbar is a wave, on the macOS tile. The master of every
+       size from 64 px up; app-icon-small.svg draws the smaller ones. The artwork keeps the coordinates of the
+       organization avatar (harmflow/.github, profile/assets/logo.svg), frozen on its first frame and placed on the
+       824 px tile of Apple's 1024 px icon grid. -->
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0d1322"/>
-      <stop offset="1" stop-color="#05070c"/>
+      <stop offset="0" stop-color="#060a15"/>
+      <stop offset="1" stop-color="#0d1328"/>
     </linearGradient>
-    <linearGradient id="neon" x1="0.1" y1="0.05" x2="0.9" y2="0.95">
-      <stop offset="0" stop-color="#22d3ee"/>
-      <stop offset="0.55" stop-color="#a78bfa"/>
-      <stop offset="1" stop-color="#e879f9"/>
-    </linearGradient>
-    <radialGradient id="glow" cx="0.5" cy="0.45" r="0.55">
-      <stop offset="0" stop-color="#22d3ee" stop-opacity="0.20"/>
+    <radialGradient id="glow-cyan">
+      <stop offset="0" stop-color="#22d3ee" stop-opacity=".26"/>
       <stop offset="1" stop-color="#22d3ee" stop-opacity="0"/>
     </radialGradient>
-    <filter id="blur" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="14"/>
+    <radialGradient id="glow-magenta">
+      <stop offset="0" stop-color="#e040fb" stop-opacity=".24"/>
+      <stop offset="1" stop-color="#e040fb" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow-violet">
+      <stop offset="0" stop-color="#8b5cf6" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#8b5cf6" stop-opacity="0"/>
+    </radialGradient>
+
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#67e8f9" stroke-opacity=".09"/>
+    </pattern>
+    <radialGradient id="grid-fade" r=".6">
+      <stop offset="0" stop-color="#fff" stop-opacity="1"/>
+      <stop offset="1" stop-color="#fff" stop-opacity=".12"/>
+    </radialGradient>
+    <mask id="grid-mask">
+      <rect width="512" height="512" fill="url(#grid-fade)"/>
+    </mask>
+
+    <!-- The mark's colors run left to right, like "Flow" in the banner -->
+    <linearGradient id="neon" gradientUnits="userSpaceOnUse" x1="128" y1="0" x2="384" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset=".5" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#e040fb"/>
+    </linearGradient>
+    <linearGradient id="core" gradientUnits="userSpaceOnUse" x1="128" y1="0" x2="384" y2="0">
+      <stop offset="0" stop-color="#ecfeff"/>
+      <stop offset=".5" stop-color="#f1edff"/>
+      <stop offset="1" stop-color="#fdf2ff"/>
+    </linearGradient>
+
+    <!-- The wave fades in before the H and out after it -->
+    <linearGradient id="flow-fade" gradientUnits="userSpaceOnUse" x1="56" y1="0" x2="456" y2="0">
+      <stop offset="0" stop-color="#fff" stop-opacity="0"/>
+      <stop offset=".235" stop-color="#fff" stop-opacity="1"/>
+      <stop offset=".765" stop-color="#fff" stop-opacity="1"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <mask id="flow-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
+      <rect x="56" width="400" height="512" fill="url(#flow-fade)"/>
+    </mask>
+
+    <!-- User-space regions: the stems are vertical lines, whose bounding box has no width -->
+    <filter id="bloom" filterUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
+      <feGaussianBlur stdDeviation="20"/>
     </filter>
+    <filter id="glow" filterUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
+      <feGaussianBlur stdDeviation="6" result="soft"/>
+      <feMerge>
+        <feMergeNode in="soft"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- The tile, in the avatar's coordinates: 824 px with a 185 px corner radius on the 1024 px grid -->
+    <clipPath id="tile">
+      <rect width="512" height="512" rx="115"/>
+    </clipPath>
+
+    <path id="stems" d="M150 128V384M362 128V384"/>
+    <path id="wave" d="M44 256q53 104 106 0t106 0t106 0t106 0"/>
   </defs>
-  <rect x="64" y="64" width="896" height="896" rx="200" fill="url(#bg)"/>
-  <rect x="64" y="64" width="896" height="896" rx="200" fill="url(#glow)"/>
-  <rect x="65.5" y="65.5" width="893" height="893" rx="198.5" fill="none" stroke="#22d3ee" stroke-opacity="0.18" stroke-width="3"/>
-  <g fill="none" stroke="url(#neon)" stroke-linecap="round" stroke-linejoin="round">
-    <g filter="url(#blur)" opacity="0.75" stroke-width="40">
-      <path d="M512 196 785 354v316L512 828 239 670V354L512 196Z"/>
+
+  <g transform="translate(100 100) scale(1.609375)">
+    <g clip-path="url(#tile)">
+      <!-- Background, ambient glow, grid -->
+      <rect width="512" height="512" fill="url(#bg)"/>
+      <circle cx="96" cy="80" r="340" fill="url(#glow-cyan)"/>
+      <circle cx="440" cy="448" r="340" fill="url(#glow-magenta)"/>
+      <circle cx="256" cy="256" r="220" fill="url(#glow-violet)"/>
+      <rect width="512" height="512" fill="url(#grid)" mask="url(#grid-mask)"/>
+
+      <!-- HUD ring with ticks at the four quarters; the avatar's corner brackets would fall outside the tile. The
+           dashes are the avatar's "34 4 3 4" of a 360 path length, in user units: rasterizers ignore pathLength -->
+      <g fill="none">
+        <circle cx="256" cy="256" r="214" stroke="#8b5cf6" stroke-opacity=".5" stroke-width="3"
+                stroke-dasharray="126.99 14.94 11.21 14.94"/>
+        <circle cx="256" cy="256" r="200" stroke="#22d3ee" stroke-opacity=".14" stroke-width="1.5"/>
+        <path stroke="#22d3ee" stroke-opacity=".7" stroke-width="4" d="M256 34V50M478 256H462M256 478V462M34 256H50"/>
+      </g>
+
+      <!-- The mark: bloom, chromatic split, neon tube, hot core, packets -->
+      <g fill="none" stroke-linecap="round">
+        <g stroke="url(#neon)" opacity=".75" filter="url(#bloom)">
+          <use href="#stems" stroke-width="60"/>
+          <use href="#wave" stroke-width="48" mask="url(#flow-mask)"/>
+        </g>
+
+        <g opacity=".55">
+          <use href="#stems" stroke="#22d3ee" stroke-width="44" transform="translate(-6 0)"/>
+          <use href="#stems" stroke="#e040fb" stroke-width="44" transform="translate(6 0)"/>
+        </g>
+
+        <g stroke="url(#neon)" filter="url(#glow)">
+          <use href="#stems" stroke-width="44"/>
+          <use href="#wave" stroke-width="32" mask="url(#flow-mask)"/>
+        </g>
+
+        <g stroke="url(#core)">
+          <use href="#stems" stroke-width="15"/>
+          <use href="#wave" stroke-width="10" mask="url(#flow-mask)"/>
+        </g>
+
+        <use href="#wave" stroke="#ffffff" stroke-width="18" stroke-dasharray="0.1 155.2" stroke-dashoffset="-77.6"
+             mask="url(#flow-mask)" filter="url(#glow)"/>
+      </g>
     </g>
-    <path d="M512 196 785 354v316L512 828 239 670V354L512 196Z" stroke-width="34"/>
-    <path d="M378 420c74-54 194-54 268 0M378 518c74-54 194-54 268 0M378 616c74-54 194-54 268 0" stroke-width="34"/>
+
+    <!-- Edge light -->
+    <rect x=".75" y=".75" width="510.5" height="510.5" rx="114.25" fill="none" stroke="#22d3ee" stroke-opacity=".18"
+          stroke-width="1.5"/>
   </g>
 </svg>

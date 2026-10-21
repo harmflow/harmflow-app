@@ -1,4 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44">
-  <!-- Menu-bar template icon, executing: the hexagon filled, with a play mark cut out of it. -->
-  <path fill="#000" fill-rule="evenodd" d="M22 4 38 13.2v17.6L22 40 6 30.8V13.2L22 4ZM18 15.5v13a.8.8 0 0 0 1.2.7l10.4-6.5a.8.8 0 0 0 0-1.4l-10.4-6.5a.8.8 0 0 0-1.2.7Z"/>
+  <!-- Menu-bar template icon, executing: the ring filled, with the H and wave of the idle icon cut out of it. -->
+  <defs>
+    <mask id="cutout" maskUnits="userSpaceOnUse" x="0" y="0" width="44" height="44">
+      <rect width="44" height="44" fill="#fff"/>
+      <g fill="none" stroke="#000" stroke-linecap="round">
+        <path d="M14 12.3V31.7M30 12.3V31.7" stroke-width="3.6"/>
+        <path d="M9 25.69Q11.5 26.89 14 22Q18 14.15 22 22T30 22Q32.5 17.11 35 18.31" stroke-width="3"/>
+      </g>
+    </mask>
+  </defs>
+  <circle cx="22" cy="22" r="20.75" fill="#000" mask="url(#cutout)"/>
 </svg>

@@ -17,6 +17,10 @@ generate: ## Refresh the code generated from contracts/
 		contracts/schemas/execution-report.schema.json daemon/internal/contracts/
 	pnpm -C desktop generate
 
+.PHONY: icons
+icons: ## Render the app and tray icons from desktop/src-tauri/icons/source (needs librsvg)
+	pnpm -C desktop icons
+
 .PHONY: check-generated
 check-generated: generate ## Fail when a generated copy is stale
 	git diff --exit-code -- daemon/internal/contracts desktop/ui/src/api/generated.ts

@@ -9,6 +9,7 @@
     "tauri": "tauri",
     "test": "pnpm -C ui test",
     "generate": "pnpm -C ui generate",
+    "icons": "node scripts/render-icons.mjs",
     "typecheck": "pnpm -C ui typecheck"
   },
   "devDependencies": {
