@@ -353,14 +353,58 @@ func TestUnavailableStartsOnFallback(t *testing.T) {
 		t.Fatalf("attempts: %+v", x.Attempts)
 	}
 	events, _, _ := e.app.ExecutionEvents(r.ExecutionID, 0, 0)
-	seen := false
-	for _, ev := range events {
-		if ev.Type == domain.EventHarnessUnavailable {
-			seen = true
+	unavailable, started := -1, -1
+	for i, ev := range events {
+		switch ev.Type {
+		case domain.EventHarnessUnavailable:
+			unavailable = i
+		case domain.EventExecutionStarted:
+			started = i
 		}
 	}
-	if !seen {
+	if unavailable < 0 {
 		t.Error("no explicit event named the unavailable harness")
+	}
+	// The harness is revalidated before the execution starts (FS-004 FR-003).
+	if started < unavailable {
+		t.Errorf("execution.started at %d, harness.unavailable at %d", started, unavailable)
+	}
+}
+
+// FS-004 AC-004: with no ready harness in its chain, the execution fails without starting, and names the harness.
+func TestUnavailableWithoutFallbackNeverStarts(t *testing.T) {
+	e := newEnv(t)
+	e.create("gone", "")
+	e.claude.mu.Lock()
+	e.claude.unavailable = true
+	e.claude.mu.Unlock()
+	r, _ := e.app.RunTask("gone")
+	x := e.wait(r.ExecutionID, domain.StatusFailed)
+	if x.StartedAt != nil || x.TimeoutAt != nil || len(x.Attempts) != 0 {
+		t.Errorf("the execution started: startedAt %v, timeoutAt %v, attempts %+v", x.StartedAt, x.TimeoutAt, x.Attempts)
+	}
+	if x.WorkspacePath != "" || x.ExecutionDir != "" {
+		t.Errorf("the workspace was prepared: %q, %q", x.WorkspacePath, x.ExecutionDir)
+	}
+	if _, err := os.Stat(filepath.Join(e.app.d.Paths.Workspace, "gone")); !os.IsNotExist(err) {
+		t.Errorf("the workspace exists: %v", err)
+	}
+	if !strings.Contains(x.ErrorMessage, domain.HarnessClaudeCode) {
+		t.Errorf("error %q does not name the harness", x.ErrorMessage)
+	}
+	types := map[string]bool{}
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline) && !types[domain.EventExecutionFailed]; {
+		events, _, _ := e.app.ExecutionEvents(r.ExecutionID, 0, 0)
+		for _, ev := range events {
+			types[ev.Type] = true
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !types[domain.EventHarnessUnavailable] || !types[domain.EventExecutionFailed] {
+		t.Errorf("events: %v", types)
+	}
+	if types[domain.EventExecutionStarted] {
+		t.Error("execution.started was emitted for an execution that never started")
 	}
 }
 

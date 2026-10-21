@@ -98,22 +98,24 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 	x.DefinitionRevision = rev
 	x.TaskName = def.Metadata.Name
 	x.TaskType = def.Spec.Type
-	x.StartedAt = &now
-	x.TimeoutAt = &deadline
 	a.mu.Unlock()
 	if cancelled {
 		r.finish(domain.StatusCancelled, "cancelled before it started")
 		return
 	}
-	r.setStatus(domain.StatusPreparing, "Preparing the workspace")
-	r.event(domain.Event{Type: domain.EventExecutionStarted, Message: def.Metadata.Name,
-		Payload: map[string]any{"trigger": string(x.Trigger), "timeoutAt": deadline, "definitionRevision": rev}})
-
-	if err := r.prepare(); err != nil {
-		r.finish(domain.StatusFailed, err.Error())
-		return
-	}
-	status, reason := r.attempts()
+	// Leave queued before the harness check: the scheduler and cancellation take a queued execution for a waiting firing.
+	r.setStatus(domain.StatusPreparing, "Checking the harness")
+	status, reason := r.attempts(func() error {
+		started := a.now()
+		a.mu.Lock()
+		x.StartedAt = &started
+		x.TimeoutAt = &deadline
+		a.mu.Unlock()
+		r.setStatus(domain.StatusPreparing, "Preparing the workspace")
+		r.event(domain.Event{Type: domain.EventExecutionStarted, Message: def.Metadata.Name,
+			Payload: map[string]any{"trigger": string(x.Trigger), "timeoutAt": deadline, "definitionRevision": rev}})
+		return r.prepare()
+	})
 	if status == "" {
 		status, reason = r.outcomeFromReport()
 	} else if r.daemonStopping() && !r.cancelRequested() {
@@ -307,9 +309,10 @@ func (r *run) repositoryPaths() map[string]string {
 }
 
 // attempts runs the harness chain: quota exhaustion and an unavailable harness switch to the next profile, a rate
-// limit retries on the same one, and everything shares the execution's one timeout (D-067). It returns a terminal
-// status when the attempts themselves decide it, or "" when the report decides.
-func (r *run) attempts() (domain.ExecutionStatus, string) {
+// limit retries on the same one, and everything shares the execution's one timeout (D-067). start runs once, when the
+// first harness of the chain is found ready, so an execution with none ready never starts (FS-004 FR-003). It
+// returns a terminal status when the attempts themselves decide it, or "" when the report decides.
+func (r *run) attempts(start func() error) (domain.ExecutionStatus, string) {
 	a := r.a
 	chain, invalid := r.chain()
 	for _, w := range invalid {
@@ -319,6 +322,7 @@ func (r *run) attempts() (domain.ExecutionStatus, string) {
 	idx, rateRetries := 0, 0
 	reason := "first attempt"
 	var prev []previousAttempt
+	started := false
 	for {
 		if r.cancelRequested() {
 			return domain.StatusCancelled, "cancelled"
@@ -335,6 +339,12 @@ func (r *run) attempts() (domain.ExecutionStatus, string) {
 			r.event(domain.Event{Type: domain.EventHarnessUnavailable, Harness: profile.Provider, Severity: domain.SeverityWarning,
 				Message: end.Message, Payload: map[string]any{"readiness": info.Readiness}})
 		} else {
+			if !started {
+				if err := start(); err != nil {
+					return domain.StatusFailed, err.Error()
+				}
+				started = true
+			}
 			if err := r.writeContext(prev); err != nil {
 				return domain.StatusFailed, "writing context.json: " + err.Error()
 			}
