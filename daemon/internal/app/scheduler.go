@@ -285,10 +285,11 @@ func (a *App) fire(taskID string, trigger domain.Trigger, scheduledFor *time.Tim
 		}
 		x := domain.NewExecution(doc, trigger, scheduledFor, now)
 		a.executions[x.ID] = x
+		status := x.Status
 		a.mu.Unlock()
 		a.persistExecution(x)
 		a.emit(domain.Event{Type: domain.EventExecutionCreated, TaskID: taskID, ExecutionID: x.ID,
-			Payload: map[string]any{"trigger": string(trigger), "status": string(x.Status)}})
+			Payload: map[string]any{"trigger": string(trigger), "status": string(status)}})
 		a.emit(domain.Event{Type: domain.EventFiringQueued, TaskID: taskID, ExecutionID: x.ID,
 			Message: "the task is running; this firing waits for it"})
 		return FiringResult{Outcome: "queued", ExecutionID: x.ID}, nil
@@ -296,10 +297,11 @@ func (a *App) fire(taskID string, trigger domain.Trigger, scheduledFor *time.Tim
 	x := domain.NewExecution(doc, trigger, scheduledFor, now)
 	a.executions[x.ID] = x
 	h := a.claimLocked(taskID)
+	status := x.Status
 	a.mu.Unlock()
 	a.persistExecution(x)
 	a.emit(domain.Event{Type: domain.EventExecutionCreated, TaskID: taskID, ExecutionID: x.ID,
-		Payload: map[string]any{"trigger": string(trigger), "status": string(x.Status)}})
+		Payload: map[string]any{"trigger": string(trigger), "status": string(status)}})
 	a.launch(x, h)
 	return FiringResult{Outcome: "started", ExecutionID: x.ID}, nil
 }

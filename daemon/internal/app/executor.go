@@ -160,12 +160,7 @@ func (r *run) save(force bool) {
 		return
 	}
 	r.lastSave = time.Now()
-	r.a.mu.Lock()
-	data, _ := json.Marshal(r.x)
-	r.a.mu.Unlock()
-	var snapshot domain.Execution
-	_ = json.Unmarshal(data, &snapshot)
-	r.a.persistExecution(&snapshot)
+	r.a.persistExecution(r.x)
 }
 
 func (r *run) setStatus(s domain.ExecutionStatus, step string) {

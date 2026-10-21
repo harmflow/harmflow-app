@@ -354,6 +354,32 @@ func TestQuotaFailover(t *testing.T) {
 	}
 }
 
+// A record is saved from a copy taken under the lock, since the executor may change it at the same time: a queued
+// firing is saved while the execution it waited for ends and starts it. go test -race catches an unlocked save.
+func TestSaveWhileTheExecutionChanges(t *testing.T) {
+	e := newEnv(t)
+	e.create("save", "")
+	e.claude.setScript(func(ports.RunRequest) string { return "echo 'END ok'" })
+	r, _ := e.app.RunTask("save")
+	e.wait(r.ExecutionID, domain.StatusCompleted)
+	e.app.mu.Lock()
+	x := e.app.executions[r.ExecutionID]
+	e.app.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 100; i++ {
+			e.app.mu.Lock()
+			x.CurrentStep = fmt.Sprintf("step %d", i)
+			e.app.mu.Unlock()
+		}
+	}()
+	for i := 0; i < 100; i++ {
+		e.app.persistExecution(x)
+	}
+	<-done
+}
+
 // FS-005 FR-009: a harness already unavailable when the task fires is skipped for the fallback.
 func TestUnavailableStartsOnFallback(t *testing.T) {
 	e := newEnv(t)
