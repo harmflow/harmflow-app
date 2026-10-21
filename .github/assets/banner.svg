@@ -1,0 +1,184 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img"
+     aria-labelledby="banner-title banner-desc">
+  <title id="banner-title">harmflow-app</title>
+  <desc id="banner-desc">HarmFlow's daemon, desktop, contracts, and installers, in one monorepo. The official HarmFlow
+    logo, a neon H whose crossbar is a wave, sits beside the wordmark.</desc>
+
+  <style>
+    .sans { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif; }
+    .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
+
+    .cursor  { animation: blink 1.1s steps(1) infinite; }
+    .pulse   { transform-box: fill-box; transform-origin: center; animation: pulse 2.4s ease-out infinite; }
+    .ring    { transform-box: fill-box; transform-origin: center; animation: spin 60s linear infinite; }
+    .packets { animation: packets 2.6s linear infinite; }
+
+    @keyframes blink   { 50% { opacity: 0; } }
+    @keyframes pulse   { 0% { transform: scale(1); opacity: .7; } 100% { transform: scale(3.2); opacity: 0; } }
+    @keyframes spin    { to { transform: rotate(360deg); } }
+    /* One half-wave of the mark is about 155 units long: a packet moves one peak per cycle */
+    @keyframes packets { from { stroke-dashoffset: -77.6; } to { stroke-dashoffset: -232.9; } }
+
+    @media (prefers-reduced-motion: reduce) {
+      .cursor, .pulse, .ring, .packets { animation: none; }
+    }
+  </style>
+
+  <defs>
+    <clipPath id="frame">
+      <rect width="1280" height="360" rx="18"/>
+    </clipPath>
+
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#060a15"/>
+      <stop offset="1" stop-color="#0d1328"/>
+    </linearGradient>
+    <radialGradient id="glow-cyan">
+      <stop offset="0" stop-color="#22d3ee" stop-opacity=".20"/>
+      <stop offset="1" stop-color="#22d3ee" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow-magenta">
+      <stop offset="0" stop-color="#e040fb" stop-opacity=".20"/>
+      <stop offset="1" stop-color="#e040fb" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow-violet">
+      <stop offset="0" stop-color="#8b5cf6" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#8b5cf6" stop-opacity="0"/>
+    </radialGradient>
+
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#67e8f9" stroke-opacity=".07"/>
+    </pattern>
+    <linearGradient id="grid-fade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity=".15"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="1"/>
+    </linearGradient>
+    <mask id="grid-mask">
+      <rect width="1280" height="360" fill="url(#grid-fade)"/>
+    </mask>
+
+    <linearGradient id="flow-text" gradientUnits="userSpaceOnUse" x1="300" y1="0" x2="600" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset=".55" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#e040fb"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset=".5" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#e040fb"/>
+    </linearGradient>
+
+    <filter id="blur" x="-20%" y="-60%" width="140%" height="220%">
+      <feGaussianBlur stdDeviation="16"/>
+    </filter>
+
+    <!-- The official logo's mark (harmflow/.github, profile/assets/logo.svg), in its own 512-unit coordinates -->
+    <linearGradient id="neon" gradientUnits="userSpaceOnUse" x1="128" y1="0" x2="384" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset=".5" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#e040fb"/>
+    </linearGradient>
+    <linearGradient id="core" gradientUnits="userSpaceOnUse" x1="128" y1="0" x2="384" y2="0">
+      <stop offset="0" stop-color="#ecfeff"/>
+      <stop offset=".5" stop-color="#f1edff"/>
+      <stop offset="1" stop-color="#fdf2ff"/>
+    </linearGradient>
+    <linearGradient id="flow-fade" gradientUnits="userSpaceOnUse" x1="56" y1="0" x2="456" y2="0">
+      <stop offset="0" stop-color="#fff" stop-opacity="0"/>
+      <stop offset=".235" stop-color="#fff" stop-opacity="1"/>
+      <stop offset=".765" stop-color="#fff" stop-opacity="1"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <mask id="flow-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
+      <rect x="56" width="400" height="512" fill="url(#flow-fade)"/>
+    </mask>
+    <!-- User-space regions: the stems are vertical lines, whose bounding box has no width -->
+    <filter id="bloom" filterUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
+      <feGaussianBlur stdDeviation="20"/>
+    </filter>
+    <filter id="glow" filterUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
+      <feGaussianBlur stdDeviation="6" result="soft"/>
+      <feMerge>
+        <feMergeNode in="soft"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <path id="stems" d="M150 128V384M362 128V384"/>
+    <path id="wave" d="M44 256q53 104 106 0t106 0t106 0t106 0"/>
+  </defs>
+
+  <g clip-path="url(#frame)">
+    <!-- Background, ambient glow, grid -->
+    <rect width="1280" height="360" fill="url(#bg)"/>
+    <circle cx="150" cy="30" r="420" fill="url(#glow-cyan)"/>
+    <circle cx="1180" cy="340" r="420" fill="url(#glow-magenta)"/>
+    <circle cx="1058" cy="166" r="250" fill="url(#glow-violet)"/>
+    <rect width="1280" height="360" fill="url(#grid)" mask="url(#grid-mask)"/>
+
+    <!-- HUD corners -->
+    <g fill="none" stroke="#22d3ee" stroke-opacity=".55" stroke-width="2">
+      <path d="M24 56V24H56"/>
+      <path d="M1224 24H1256V56"/>
+      <path d="M24 304V336H56"/>
+      <path d="M1256 304V336H1224"/>
+    </g>
+
+    <!-- Prompt -->
+    <text x="64" y="78" class="mono" font-size="16" letter-spacing="2" fill="#22d3ee">&gt;_ make dev-desktop<tspan
+        class="cursor" fill="#22d3ee"> &#x258C;</tspan></text>
+
+    <!-- Wordmark -->
+    <g class="sans" font-size="108" font-weight="800" letter-spacing="-2">
+      <text x="60" y="206" fill="#22d3ee" opacity=".35" filter="url(#blur)">HarmFlow</text>
+      <text x="60" y="206"><tspan fill="#eef4ff">Harm</tspan><tspan fill="url(#flow-text)">Flow</tspan></text>
+    </g>
+
+    <!-- Tagline -->
+    <text x="64" y="256" class="sans" font-size="25" fill="#b8c4dc">The daemon, the desktop, and the installers, in one
+      monorepo.</text>
+    <text x="64" y="304" class="mono" font-size="14" letter-spacing="3" fill="#7d8bab">DAEMON <tspan
+        fill="#22d3ee">&#xB7;</tspan> DESKTOP <tspan fill="#8b5cf6">&#xB7;</tspan> CONTRACTS <tspan
+        fill="#e040fb">&#xB7;</tspan> INSTALLERS</text>
+
+    <!-- The mark: HUD ring, bloom, chromatic split, neon tube, hot core, packets -->
+    <g transform="translate(924.88 32.88) scale(.52)">
+      <g class="ring" fill="none">
+        <circle cx="256" cy="256" r="214" pathLength="360" stroke="#8b5cf6" stroke-opacity=".5" stroke-width="3"
+                stroke-dasharray="34 4 3 4"/>
+        <circle cx="256" cy="256" r="200" stroke="#22d3ee" stroke-opacity=".14" stroke-width="1.5"/>
+        <path stroke="#22d3ee" stroke-opacity=".7" stroke-width="4" d="M256 34V50M478 256H462M256 478V462M34 256H50"/>
+      </g>
+
+      <g fill="none" stroke-linecap="round">
+        <g stroke="url(#neon)" opacity=".75" filter="url(#bloom)">
+          <use href="#stems" stroke-width="60"/>
+          <use href="#wave" stroke-width="48" mask="url(#flow-mask)"/>
+        </g>
+        <g opacity=".55">
+          <use href="#stems" stroke="#22d3ee" stroke-width="44" transform="translate(-6 0)"/>
+          <use href="#stems" stroke="#e040fb" stroke-width="44" transform="translate(6 0)"/>
+        </g>
+        <g stroke="url(#neon)" filter="url(#glow)">
+          <use href="#stems" stroke-width="44"/>
+          <use href="#wave" stroke-width="32" mask="url(#flow-mask)"/>
+        </g>
+        <g stroke="url(#core)">
+          <use href="#stems" stroke-width="15"/>
+          <use href="#wave" stroke-width="10" mask="url(#flow-mask)"/>
+        </g>
+        <use class="packets" href="#wave" stroke="#ffffff" stroke-width="18" stroke-dasharray="0.1 155.2"
+             stroke-dashoffset="-77.6" mask="url(#flow-mask)" filter="url(#glow)"/>
+      </g>
+    </g>
+
+    <!-- Status chip -->
+    <rect x="940" y="292" width="236" height="36" rx="18" fill="#0f1729" stroke="#f59e0b" stroke-opacity=".5"/>
+    <circle class="pulse" cx="964" cy="310" r="5" fill="#f59e0b"/>
+    <circle cx="964" cy="310" r="5" fill="#f59e0b"/>
+    <text x="980" y="315" class="mono" font-size="14" letter-spacing="1.5" fill="#fcd34d">MVP · MACOS FIRST</text>
+
+    <!-- Neon bottom edge -->
+    <rect x="0" y="356" width="1280" height="4" fill="url(#edge)" opacity=".85"/>
+  </g>
+  <rect x=".5" y=".5" width="1279" height="359" rx="18" fill="none" stroke="#22d3ee" stroke-opacity=".18"/>
+</svg>

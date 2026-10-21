@@ -1,0 +1,199 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="610" viewBox="0 0 1280 610" role="img"
+     aria-labelledby="arch-title arch-desc">
+  <title id="arch-title">How the parts of harmflow-app fit together</title>
+  <desc id="arch-desc">The desktop, a Tauri 2 shell with a React interface, talks to the daemon, harmflowd, through a
+    local HTTP and SSE API on the loopback, with a bearer token. The daemon is written in Go as domain, use cases,
+    ports, and adapters, among them Claude Code, Codex, HTTP and SSE, the Keychain, YAML, JSON, JSONL, and launchd. It
+    starts the harness the user installed and signed in to, Claude Code or Codex, which reports its progress back. The
+    built-in agents and skills are given to the harness per task. The daemon keeps tasks, state, event logs, and
+    execution directories in its data directory with atomic writes. The contracts, an OpenAPI file and JSON Schemas,
+    are the single source of every name, and make generate copies them into the daemon and the desktop.</desc>
+
+  <style>
+    .sans  { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif; }
+    .mono  { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
+    .label { font-size: 14px; letter-spacing: 2.5px; }
+    .title { font-size: 28px; font-weight: 700; fill: #eef4ff; }
+    .body  { font-size: 17px; fill: #aab6cf; }
+    .note  { font-size: 15px; fill: #7d8bab; }
+    .wnote { font-size: 14px; fill: #7d8bab; }
+
+    .card  { fill: #0c1324; stroke: #24314f; stroke-width: 1.5; }
+    .chip  { fill: #0b1a2c; stroke: #22d3ee; stroke-opacity: .35; }
+    .chipt { font-size: 14px; fill: #a5f3fc; }
+    .path  { fill: #0b1a2c; stroke: #67e8f9; stroke-opacity: .3; }
+    .patht { font-size: 13px; fill: #cffafe; }
+    .wire  { fill: none; stroke-width: 2; stroke-dasharray: 5 9; animation: flow 0.9s linear infinite; }
+    .slow  { animation-duration: 1.6s; }
+
+    @keyframes flow { to { stroke-dashoffset: -14; } }
+
+    @media (prefers-reduced-motion: reduce) {
+      .wire { animation: none; }
+    }
+  </style>
+
+  <defs>
+    <clipPath id="frame">
+      <rect width="1280" height="610" rx="18"/>
+    </clipPath>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#060a15"/>
+      <stop offset="1" stop-color="#0d1328"/>
+    </linearGradient>
+    <radialGradient id="glow-cyan">
+      <stop offset="0" stop-color="#22d3ee" stop-opacity=".14"/>
+      <stop offset="1" stop-color="#22d3ee" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow-magenta">
+      <stop offset="0" stop-color="#e040fb" stop-opacity=".12"/>
+      <stop offset="1" stop-color="#e040fb" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#67e8f9" stroke-opacity=".05"/>
+    </pattern>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset=".5" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#e040fb"/>
+    </linearGradient>
+    <filter id="halo" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+    <marker id="arrow-cyan" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7"
+            orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#22d3ee"/>
+    </marker>
+    <marker id="arrow-violet" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7"
+            orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#8b5cf6"/>
+    </marker>
+    <marker id="arrow-magenta" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7"
+            orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#e040fb"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7"
+            orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#fbbf24"/>
+    </marker>
+  </defs>
+
+  <g clip-path="url(#frame)">
+    <rect width="1280" height="610" fill="url(#bg)"/>
+    <circle cx="640" cy="310" r="440" fill="url(#glow-cyan)"/>
+    <circle cx="1150" cy="560" r="380" fill="url(#glow-magenta)"/>
+    <rect width="1280" height="610" fill="url(#grid)"/>
+
+    <!-- HUD corners -->
+    <g fill="none" stroke="#22d3ee" stroke-opacity=".5" stroke-width="2">
+      <path d="M24 56V24H56"/>
+      <path d="M1224 24H1256V56"/>
+      <path d="M24 554V586H56"/>
+      <path d="M1256 554V586H1224"/>
+    </g>
+
+    <!-- Desktop -->
+    <rect class="card" x="390" y="40" width="500" height="110" rx="12"/>
+    <text x="414" y="72" class="mono label" fill="#8b5cf6">DESKTOP</text>
+    <text x="866" y="72" class="mono note" text-anchor="end">desktop/</text>
+    <text x="414" y="108" class="sans" font-size="24" font-weight="700" fill="#eef4ff">Tauri 2 shell + React UI</text>
+    <text x="414" y="134" class="sans body">tray · notifications · the dashboard</text>
+
+    <path class="wire" stroke="#8b5cf6" d="M640 156V194" marker-start="url(#arrow-violet)"
+          marker-end="url(#arrow-violet)"/>
+    <text x="624" y="181" class="mono wnote" text-anchor="end">loopback · bearer token</text>
+    <text x="656" y="181" class="mono wnote">local API · HTTP + SSE</text>
+
+    <text x="914" y="86" class="mono note">// the daemon owns the state;</text>
+    <text x="914" y="114" class="mono note">// the desktop works through</text>
+    <text x="914" y="142" class="mono note">// its local API.</text>
+
+    <!-- Contracts -->
+    <rect class="card" x="50" y="200" width="260" height="220" rx="14"/>
+    <text x="74" y="236" class="mono label" fill="#fbbf24">CONTRACTS</text>
+    <text x="74" y="278" class="sans title">One source</text>
+    <text x="74" y="316" class="sans body">the local API (OpenAPI)</text>
+    <text x="74" y="344" class="sans body">task, event, and report</text>
+    <text x="74" y="372" class="sans body">schemas (JSON Schema)</text>
+    <text x="74" y="400" class="mono note">contracts/</text>
+
+    <path class="wire slow" stroke="#fbbf24" stroke-opacity=".85" d="M180 194V95H382" marker-end="url(#arrow-amber)"/>
+    <text x="196" y="85" class="mono wnote">make generate</text>
+    <path class="wire slow" stroke="#fbbf24" stroke-opacity=".85" d="M316 300H382" marker-end="url(#arrow-amber)"/>
+
+    <!-- Daemon: the highlighted core -->
+    <rect x="390" y="200" width="500" height="220" rx="14" fill="#22d3ee" opacity=".22" filter="url(#halo)"/>
+    <rect x="390" y="200" width="500" height="220" rx="14" fill="#0c1526" stroke="#22d3ee" stroke-width="2"/>
+    <text x="414" y="236" class="mono label" fill="#22d3ee">DAEMON</text>
+    <text x="866" y="236" class="mono note" text-anchor="end">daemon/ · Go</text>
+    <text x="414" y="278" class="mono" font-size="30" font-weight="700" fill="#eef4ff">harmflowd</text>
+    <text x="414" y="306" class="mono wnote">domain · use cases · ports · adapters</text>
+
+    <rect class="chip" x="414" y="322" width="117" height="30" rx="7"/>
+    <text x="426" y="342" class="mono chipt">Claude Code</text>
+    <rect class="chip" x="541" y="322" width="66" height="30" rx="7"/>
+    <text x="553" y="342" class="mono chipt">Codex</text>
+    <rect class="chip" x="617" y="322" width="108" height="30" rx="7"/>
+    <text x="629" y="342" class="mono chipt">HTTP + SSE</text>
+    <rect class="chip" x="735" y="322" width="91" height="30" rx="7"/>
+    <text x="747" y="342" class="mono chipt">Keychain</text>
+
+    <rect class="chip" x="414" y="362" width="58" height="30" rx="7"/>
+    <text x="426" y="382" class="mono chipt">YAML</text>
+    <rect class="chip" x="482" y="362" width="58" height="30" rx="7"/>
+    <text x="494" y="382" class="mono chipt">JSON</text>
+    <rect class="chip" x="550" y="362" width="66" height="30" rx="7"/>
+    <text x="562" y="382" class="mono chipt">JSONL</text>
+    <rect class="chip" x="626" y="362" width="83" height="30" rx="7"/>
+    <text x="638" y="382" class="mono chipt">launchd</text>
+    <text x="866" y="382" class="mono wnote" text-anchor="end">← adapters</text>
+
+    <!-- Harness -->
+    <path class="wire" stroke="#e040fb" d="M896 282H962" marker-end="url(#arrow-magenta)"/>
+    <text x="929" y="272" class="mono wnote" text-anchor="middle">starts</text>
+    <path class="wire" stroke="#e040fb" d="M962 350H896" marker-end="url(#arrow-magenta)"/>
+    <text x="929" y="340" class="mono wnote" text-anchor="middle">progress</text>
+
+    <rect class="card" x="970" y="200" width="260" height="220" rx="14"/>
+    <text x="994" y="236" class="mono label" fill="#e040fb">HARNESS</text>
+    <text x="994" y="278" class="sans title">Your agent</text>
+    <rect x="994" y="294" width="150" height="32" rx="7" fill="#1a1410" stroke="#d97757" stroke-opacity=".8"/>
+    <text x="1010" y="316" class="mono" font-size="15" fill="#f2b8a0">Claude Code</text>
+    <rect x="994" y="336" width="150" height="32" rx="7" fill="#12161f" stroke="#cbd5e1" stroke-opacity=".6"/>
+    <text x="1010" y="358" class="mono" font-size="15" fill="#e2e8f0">Codex</text>
+    <text x="994" y="400" class="sans body">signed in by you</text>
+
+    <!-- Data directory -->
+    <path class="wire slow" stroke="#22d3ee" d="M640 426V464" marker-start="url(#arrow-cyan)"
+          marker-end="url(#arrow-cyan)"/>
+    <text x="656" y="450" class="mono wnote">atomic writes</text>
+
+    <rect class="card" x="390" y="470" width="500" height="100" rx="12"/>
+    <text x="414" y="502" class="mono label" fill="#67e8f9">DATA</text>
+    <text x="866" y="502" class="mono note" text-anchor="end">$HARMFLOW_HOME</text>
+    <rect class="path" x="414" y="520" width="114" height="28" rx="6"/>
+    <text x="424" y="539" class="mono patht">tasks/*.yaml</text>
+    <rect class="path" x="536" y="520" width="114" height="28" rx="6"/>
+    <text x="546" y="539" class="mono patht">state/*.json</text>
+    <rect class="path" x="658" y="520" width="114" height="28" rx="6"/>
+    <text x="668" y="539" class="mono patht">logs/*.jsonl</text>
+    <rect class="path" x="780" y="520" width="59" height="28" rx="6"/>
+    <text x="790" y="539" class="mono patht">runs/</text>
+
+    <!-- Built-in agent and skills -->
+    <path class="wire slow" stroke="#e040fb" d="M1100 464V428" marker-end="url(#arrow-magenta)"/>
+    <text x="1116" y="450" class="mono wnote">per task</text>
+
+    <rect class="card" x="970" y="470" width="260" height="100" rx="12"/>
+    <text x="994" y="502" class="mono label" fill="#e040fb">BUILT-INS</text>
+    <text x="994" y="532" class="mono" font-size="16" fill="#eef4ff">agents/ · skills/</text>
+    <text x="994" y="556" class="mono wnote">harmflow-* agent &amp; skills</text>
+
+    <text x="74" y="508" class="mono note">// HarmFlow implements</text>
+    <text x="74" y="532" class="mono note">// no task behavior:</text>
+    <text x="74" y="556" class="mono note">// the harness does the work.</text>
+
+    <rect x="0" y="606" width="1280" height="4" fill="url(#edge)" opacity=".85"/>
+  </g>
+  <rect x=".5" y=".5" width="1279" height="609" rx="18" fill="none" stroke="#22d3ee" stroke-opacity=".18"/>
+</svg>
