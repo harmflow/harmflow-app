@@ -104,7 +104,10 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 		return
 	}
 	// Leave queued before the harness check: the scheduler and cancellation take a queued execution for a waiting firing.
-	r.setStatus(domain.StatusPreparing, "Checking the harness")
+	// One cancelled or dropped while still queued, after its task was claimed for it, has already ended: it never starts.
+	if !r.setStatus(domain.StatusPreparing, "Checking the harness") {
+		return
+	}
 	status, reason := r.attempts(func() error {
 		started := a.now()
 		a.mu.Lock()
@@ -163,15 +166,21 @@ func (r *run) save(force bool) {
 	r.a.persistExecution(r.x)
 }
 
-func (r *run) setStatus(s domain.ExecutionStatus, step string) {
+// setStatus moves the execution to s and records the step. It changes nothing and returns false once the execution
+// has ended.
+func (r *run) setStatus(s domain.ExecutionStatus, step string) bool {
 	r.a.mu.Lock()
 	from := r.x.Status
+	if from.IsTerminal() {
+		r.a.mu.Unlock()
+		return false
+	}
 	if from == s || from.CanTransition(s) != nil {
 		if step != "" {
 			r.x.CurrentStep = step
 		}
 		r.a.mu.Unlock()
-		return
+		return true
 	}
 	r.x.Status = s
 	if step != "" {
@@ -181,6 +190,7 @@ func (r *run) setStatus(s domain.ExecutionStatus, step string) {
 	r.save(true)
 	r.event(domain.Event{Type: domain.EventExecutionStatusChanged, Message: step,
 		Payload: map[string]any{"from": string(from), "status": string(s)}})
+	return true
 }
 
 // prepare creates the execution directory and the workspace, and writes context.json for the session.
