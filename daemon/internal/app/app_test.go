@@ -115,12 +115,36 @@ func (p *fakeParser) Finish(exit int, _ string, timedOut, cancelled bool) domain
 	return domain.AttemptEnd{Class: domain.ClassTaskError, Message: fmt.Sprintf("exit %d", exit)}
 }
 
+// hookedEvents runs the test's hook on each event before it is appended, on the goroutine that emits it.
+type hookedEvents struct {
+	*eventlog.Log
+	mu   sync.Mutex
+	hook func(domain.Event)
+}
+
+func (h *hookedEvents) Append(ev domain.Event) domain.Event {
+	h.mu.Lock()
+	hook := h.hook
+	h.mu.Unlock()
+	if hook != nil {
+		hook(ev)
+	}
+	return h.Log.Append(ev)
+}
+
+func (h *hookedEvents) setHook(hook func(domain.Event)) {
+	h.mu.Lock()
+	h.hook = hook
+	h.mu.Unlock()
+}
+
 type env struct {
 	t      *testing.T
 	app    *App
 	clock  *fakeClock
 	claude *fakeHarness
 	codex  *fakeHarness
+	events *hookedEvents
 	home   string
 }
 
@@ -141,10 +165,10 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := &env{t: t, clock: clock, home: home,
+	e := &env{t: t, clock: clock, home: home, events: &hookedEvents{Log: events},
 		claude: &fakeHarness{id: domain.HarnessClaudeCode}, codex: &fakeHarness{id: domain.HarnessCodex}}
 	a, err := New(Deps{Paths: paths, Version: "test", Clock: clock, Location: time.UTC, Tasks: tasks, State: state,
-		Executions: execs, Events: events, Validator: v, Harnesses: []ports.HarnessAdapter{e.claude, e.codex},
+		Executions: execs, Events: e.events, Validator: v, Harnesses: []ports.HarnessAdapter{e.claude, e.codex},
 		TickInterval: time.Hour, Logger: log.New(io.Discard, "", 0)})
 	if err != nil {
 		t.Fatal(err)
@@ -200,6 +224,20 @@ func (e *env) wait(id string, want ...domain.ExecutionStatus) ExecutionView {
 
 func (e *env) executions(task string) []ExecutionSummary {
 	return e.app.ListExecutions(ExecutionFilter{TaskID: task})
+}
+
+// idle waits until the task's execution has returned and freed the task.
+func (e *env) idle(task string) {
+	e.t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		e.app.mu.Lock()
+		_, busy := e.app.running[task]
+		e.app.mu.Unlock()
+		if !busy {
+			return
+		}
+	}
+	e.t.Fatalf("task %s is still running", task)
 }
 
 const slow = "echo working; sleep 30; echo 'END ok'"
@@ -326,6 +364,48 @@ func TestParallelTasksAndIsolatedCancel(t *testing.T) {
 			t.Errorf("%s is %s after cancelling another task", id, x.Status)
 		}
 		_ = e.app.CancelExecution(id)
+	}
+}
+
+// FS-003 FR-005, D-083: an execution cancelled or dropped while it is still queued never runs, even when its task was
+// already claimed for it: fire and startQueued claim the task before the executor leaves queued.
+func TestCancelBeforeItStarts(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		cancel func(e *env, id string) error
+	}{
+		{"cancelled", func(e *env, id string) error { return e.app.CancelExecution(id) }},
+		{"disabled", func(e *env, _ string) error { _, err := e.app.SetEnabled("early", false); return err }},
+		{"deleted", func(e *env, _ string) error { _, err := e.app.DeleteTask("early"); return err }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.create("early", "")
+			var once sync.Once
+			e.events.setHook(func(ev domain.Event) {
+				// fire announces the execution after it claimed the task and before the executor starts.
+				if ev.Type == domain.EventExecutionCreated {
+					once.Do(func() {
+						if err := tc.cancel(e, ev.ExecutionID); err != nil {
+							t.Error(err)
+						}
+					})
+				}
+			})
+			r, err := e.app.RunTask("early")
+			if err != nil || r.Outcome != "started" {
+				t.Fatalf("run: %v %+v", err, r)
+			}
+			e.idle("early")
+			x, _ := e.app.GetExecution(r.ExecutionID)
+			e.claude.mu.Lock()
+			prompts := len(e.claude.prompts)
+			e.claude.mu.Unlock()
+			if x.Status != domain.StatusCancelled || x.StartedAt != nil || len(x.Attempts) != 0 || prompts != 0 {
+				t.Errorf("the harness ran for a cancelled execution: status %s, started at %v, %d attempts, %d prompts",
+					x.Status, x.StartedAt, len(x.Attempts), prompts)
+			}
+		})
 	}
 }
 
