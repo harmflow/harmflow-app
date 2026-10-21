@@ -1,7 +1,7 @@
 // Renders each screen from a known state, to catch rendering errors without a browser or a daemon.
 import { renderToString } from "react-dom/server";
 import { beforeAll, describe, expect, it } from "vitest";
-import type { Execution, ExecutionSummary, HarmflowEvent, Harness, Settings, TaskSummary } from "../api/types";
+import type { Execution, ExecutionSummary, HarmflowEvent, Harness, Settings, TaskSummary, WorkItem } from "../api/types";
 import { TaskForm } from "../components/TaskForm";
 import i18n from "../i18n";
 import { newTaskDocument } from "../lib/taskForm";
@@ -82,6 +82,26 @@ const task: TaskSummary = {
   repositories: ["org/core-banking"],
 };
 
+const item = (key: string, status: WorkItem["status"], title: string): WorkItem => ({
+  taskId: "implementacao-core",
+  key: `org/core-banking#${key}`,
+  title,
+  repository: "org/core-banking",
+  status,
+  resumes: 0,
+  failures: 0,
+  lastExecutionId: "exec-1",
+  updatedAt: "2026-10-20T19:40:00-03:00",
+});
+
+const workItems: WorkItem[] = [
+  { ...item("124", "in_progress", "Draft PR with failing tests"), testsStatus: "failed", pullRequestUrl: "https://github.com/org/core-banking/pull/9" },
+  { ...item("125", "failed", "Issue to retry"), failures: 1 },
+  item("126", "completed", "Completed issue"),
+  item("127", "closed", "Closed issue"),
+  item("128", "needs_attention", "Issue past its limits"),
+];
+
 const settings: Settings = {
   language: "pt-BR",
   trayEnabled: true,
@@ -121,7 +141,7 @@ beforeAll(async () => {
     queue: {
       waiting: [{ ...running, id: "exec-q", status: "queued" }],
       upcoming: [{ taskId: "docs", taskName: "Generate docs", nextFireAt: "2026-10-21T10:00:00-03:00" }],
-      workItems: [],
+      workItems,
     },
     tasks: [task],
     tasksLoaded: true,
@@ -140,8 +160,19 @@ describe("screens", () => {
     expect(html).toContain("Execuções ativas (1)");
     expect(html).toContain("org/core-banking");
     expect(html).toContain("Trocando de harness");
-    expect(html).toContain("Fila de execução (2)");
+    expect(html).toContain("Fila de execução (4)");
     expect(html).not.toMatch(/\d+%/); // no invented progress percentage (FS-008 FR-009)
+  });
+
+  it("lists in the queue the work items waiting to be resumed or retried (FS-008 FR-004)", () => {
+    const html = renderToString(<ExecutionsScreen selectedId={null} onSelect={() => {}} onGoToTasks={() => {}} onSeeHistory={() => {}} />);
+    expect(html).toContain("Draft PR with failing tests");
+    expect(html).toContain("Para retomar");
+    expect(html).toContain("Issue to retry");
+    expect(html).toContain("Para tentar de novo");
+    expect(html).not.toContain("Completed issue");
+    expect(html).not.toContain("Closed issue");
+    expect(html).not.toContain("Issue past its limits");
   });
 
   it("renders the other screens", () => {

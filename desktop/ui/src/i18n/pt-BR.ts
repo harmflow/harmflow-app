@@ -322,6 +322,8 @@ export const ptBR: Resources = {
     title: "Fila de execução ({{count}})",
     waiting: "Na fila",
     upcoming: "Agendada",
+    toResume: "Para retomar",
+    toRetry: "Para tentar de novo",
     nextRun: "Próxima execução",
     inTime: "em {{time}}",
     overdue: "agora",

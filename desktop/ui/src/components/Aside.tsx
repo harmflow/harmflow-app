@@ -1,6 +1,6 @@
 // The right column of the executions screen: the queue, the recent history, and a quiet signature card.
 import { useTranslation } from "react-i18next";
-import type { Stats } from "../api/types";
+import type { Stats, WorkItem } from "../api/types";
 import type { Tone } from "../design/tokens";
 import { formatRelative } from "../lib/format";
 import { useNow } from "../lib/hooks";
@@ -13,8 +13,10 @@ export function QueuePanel({ onOpenExecution }: { onOpenExecution: (id: string) 
   const queue = useStore((s) => s.queue);
   const now = useNow(30000);
   const waiting = queue?.waiting ?? [];
+  // A work item waits for a later cycle only to be resumed or retried; the other statuses are done or need a human.
+  const workItems = (queue?.workItems ?? []).filter((w) => w.status === "in_progress" || w.status === "failed");
   const upcoming = [...(queue?.upcoming ?? [])].sort((a, b) => Date.parse(a.nextFireAt) - Date.parse(b.nextFireAt)).slice(0, 6);
-  const count = waiting.length + upcoming.length;
+  const count = waiting.length + workItems.length + upcoming.length;
 
   return (
     <Panel title={t("queue.title", { count })} icon="layers" className="aside-panel">
@@ -35,6 +37,11 @@ export function QueuePanel({ onOpenExecution }: { onOpenExecution: (id: string) 
               </span>
               <Chip tone="violet">{t("queue.waiting")}</Chip>
             </button>
+          </li>
+        ))}
+        {workItems.map((w) => (
+          <li key={`${w.taskId}/${w.key}`}>
+            <WorkItemRow item={w} onOpenExecution={onOpenExecution} now={now} />
           </li>
         ))}
         {upcoming.map((u) => {
@@ -60,6 +67,37 @@ export function QueuePanel({ onOpenExecution }: { onOpenExecution: (id: string) 
         })}
       </ul>
     </Panel>
+  );
+}
+
+function WorkItemRow({ item, onOpenExecution, now }: { item: WorkItem; onOpenExecution: (id: string) => void; now: number }) {
+  const { t, i18n } = useTranslation();
+  const lastExecution = item.lastExecutionId;
+  const content = (
+    <>
+      <span className="queue-item__icon">
+        <Icon name={item.pullRequestUrl ? "pr" : "issue"} size={18} />
+      </span>
+      <span className="queue-item__text">
+        <span className="queue-item__title">{item.title || item.key}</span>
+        <span className="queue-item__sub mono">{item.repository || t("queue.taskLabel", { task: item.taskId })}</span>
+        <span className="queue-item__when">
+          <Icon name="clock" size={13} /> {formatRelative(item.updatedAt, i18n.language, now)}
+        </span>
+      </span>
+      {item.status === "in_progress" ? (
+        <Chip tone="cyan">{t("queue.toResume")}</Chip>
+      ) : (
+        <Chip tone="warning">{t("queue.toRetry")}</Chip>
+      )}
+    </>
+  );
+  return lastExecution ? (
+    <button type="button" className="queue-item" onClick={() => onOpenExecution(lastExecution)}>
+      {content}
+    </button>
+  ) : (
+    <div className="queue-item">{content}</div>
   );
 }
 

@@ -320,6 +320,8 @@ export const enUS = {
     title: "Execution queue ({{count}})",
     waiting: "Waiting",
     upcoming: "Scheduled",
+    toResume: "To resume",
+    toRetry: "To retry",
     nextRun: "Next run",
     inTime: "in {{time}}",
     overdue: "due now",

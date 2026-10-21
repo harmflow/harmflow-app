@@ -322,6 +322,8 @@ export const esES: Resources = {
     title: "Cola de ejecución ({{count}})",
     waiting: "En cola",
     upcoming: "Programada",
+    toResume: "Por reanudar",
+    toRetry: "Por reintentar",
     nextRun: "Próxima ejecución",
     inTime: "en {{time}}",
     overdue: "ahora",
