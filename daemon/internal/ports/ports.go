@@ -137,11 +137,12 @@ type RunRequest struct {
 	Env            []string
 }
 
-// Restriction is one declared restriction and whether the harness enforces it (D-068).
+// Restriction is one declared restriction and whether the harness enforces it (D-068). Text says how; the user sees
+// it only for a restriction not enforced, so only those texts carry a key.
 type Restriction struct {
 	Name     string
 	Enforced bool
-	Message  string
+	Text     domain.Text
 }
 
 // Invocation is the process an adapter asks the executor to start.

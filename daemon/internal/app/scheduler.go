@@ -224,13 +224,14 @@ func (a *App) RunTask(id string) (FiringResult, error) {
 	accepting := a.accepting
 	a.mu.Unlock()
 	if !accepting {
-		return FiringResult{}, errf(CodeConflict, "the daemon is stopping and accepts no new firing")
+		return FiringResult{}, newError(CodeConflict,
+			domain.T("daemon_stopping", "the daemon is stopping and accepts no new firing"))
 	}
 	if !enabled {
-		return FiringResult{}, errf(CodeTaskDisabled, "the task is disabled; enable it to run it")
+		return FiringResult{}, newError(CodeTaskDisabled, domain.T("task_disabled", "the task is disabled; enable it to run it"))
 	}
 	if pending {
-		return FiringResult{}, errf(CodeConflict, "the task is being deleted")
+		return FiringResult{}, newError(CodeConflict, domain.T("task_being_deleted", "the task is being deleted"))
 	}
 	return a.fire(id, domain.TriggerManual, nil)
 }
@@ -242,7 +243,7 @@ func (a *App) fire(taskID string, trigger domain.Trigger, scheduledFor *time.Tim
 	e := a.tasks[taskID]
 	if e == nil {
 		a.mu.Unlock()
-		return FiringResult{}, errf(CodeNotFound, "no task %s", taskID)
+		return FiringResult{}, newError(CodeNotFound, domain.T("task_not_found", "no task {{task}}", "task", taskID))
 	}
 	doc := e.doc
 	_, running := a.running[taskID]
@@ -366,10 +367,13 @@ func (a *App) dropQueued(taskID, reason string) {
 }
 
 // SchedulePreview lists the next occurrences in the schedule's time zone (FS-002 FR-002).
+// SchedulePreview carries an invalid schedule's error as a text the desktop translates: Error is the en-US one.
 type SchedulePreview struct {
-	Occurrences []time.Time `json:"occurrences"`
-	Timezone    string      `json:"timezone,omitempty"`
-	Error       string      `json:"error,omitempty"`
+	Occurrences []time.Time       `json:"occurrences"`
+	Timezone    string            `json:"timezone,omitempty"`
+	Error       string            `json:"error,omitempty"`
+	ErrorKey    string            `json:"errorKey,omitempty"`
+	ErrorParams map[string]string `json:"errorParams,omitempty"`
 }
 
 func (a *App) PreviewSchedule(s domain.Schedule, count int) SchedulePreview {
@@ -378,7 +382,8 @@ func (a *App) PreviewSchedule(s domain.Schedule, count int) SchedulePreview {
 	}
 	rule, err := domain.ParseSchedule(s, a.d.Location)
 	if err != nil {
-		return SchedulePreview{Occurrences: []time.Time{}, Error: err.Error()}
+		text := domain.TextOf(err)
+		return SchedulePreview{Occurrences: []time.Time{}, Error: text.Message, ErrorKey: text.Key, ErrorParams: text.Params}
 	}
 	loc := a.d.Location
 	if s.Timezone != "" {

@@ -83,7 +83,7 @@ func (a *App) harnessInfo(id string) ports.HarnessInfo {
 // SetHarnessPath chooses an installation or a path set by hand; an empty path returns to detection (FS-004 FR-001).
 func (a *App) SetHarnessPath(ctx context.Context, id string, path *string) (ports.HarnessInfo, error) {
 	if _, ok := a.adapters[id]; !ok {
-		return ports.HarnessInfo{}, errf(CodeNotFound, "no harness %s", id)
+		return ports.HarnessInfo{}, newError(CodeNotFound, domain.T("harness_not_found", "no harness {{harness}}", "harness", id))
 	}
 	a.mu.Lock()
 	if path == nil || *path == "" {
@@ -91,11 +91,13 @@ func (a *App) SetHarnessPath(ctx context.Context, id string, path *string) (port
 	} else {
 		if !strings.HasPrefix(*path, "/") {
 			a.mu.Unlock()
-			return ports.HarnessInfo{}, errf(CodeValidationFailed, "the path must be absolute")
+			return ports.HarnessInfo{}, newError(CodeValidationFailed,
+				domain.T("harness_path_not_absolute", "the path must be absolute"))
 		}
 		if st, err := os.Stat(*path); err != nil || st.IsDir() {
 			a.mu.Unlock()
-			return ports.HarnessInfo{}, errf(CodeValidationFailed, "no executable file at %s", *path)
+			return ports.HarnessInfo{}, newError(CodeValidationFailed,
+				domain.T("harness_path_not_executable", "no executable file at {{path}}", "path", *path))
 		}
 		a.manualPaths[id] = *path
 	}

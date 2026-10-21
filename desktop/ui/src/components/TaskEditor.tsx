@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ApiError, api } from "../api/client";
 import type { Task, TaskInput, ValidationResult } from "../api/types";
+import { daemonText } from "../lib/daemonText";
 import { useDebounced } from "../lib/hooks";
 import type { Doc } from "../lib/taskForm";
 import { actions, getState, useStore } from "../state/store";
@@ -255,7 +256,7 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved }: TaskEditor
                     <Icon name="shield" size={14} />
                     <span>
                       {w.code ? <strong>{t(`warnings.${w.code}` as never, { defaultValue: w.code }) as string}: </strong> : null}
-                      {w.message}
+                      {daemonText(w)}
                       {w.path ? <span className="mono muted"> {w.path}</span> : null}
                     </span>
                   </li>
@@ -286,7 +287,7 @@ export function ValidationPanel({ validation }: { validation: ValidationResult |
           <li key={i} className="validation__item">
             <Icon name="x" size={14} />
             <span>
-              {e.message}
+              {daemonText(e)}
               {e.line ? <span className="mono muted"> — {t("tasks.editor.line", { line: e.line, column: e.column ?? 1 })}</span> : null}
               {e.path ? <span className="mono muted"> {e.path}</span> : null}
             </span>

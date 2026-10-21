@@ -158,19 +158,22 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 
 func (a *Adapter) ValidateProfile(info ports.HarnessInfo, model, effort string) error {
 	if model != "" && model != domain.DefaultModel && !strings.HasPrefix(model, "claude-") && !containsStr(declaredModels, model) {
-		return fmt.Errorf("Claude Code does not offer the model %q; use one of %s or a full claude-* model name",
-			model, strings.Join(declaredModels, ", "))
+		return domain.TextErr("claude_model_unknown",
+			`Claude Code does not offer the model "{{model}}"; use one of {{models}} or a full claude-* model name`,
+			"model", model, "models", strings.Join(declaredModels, ", "))
 	}
 	if effort != "" && effort != domain.DefaultEffort {
 		if !info.Detected {
 			return nil
 		}
 		if !info.Features["--effort"] {
-			return fmt.Errorf("Claude Code %s has no --effort setting; leave the effort as default", info.Version)
+			return domain.TextErr("claude_effort_unsupported",
+				"Claude Code {{version}} has no --effort setting; leave the effort as default", "version", info.Version)
 		}
 		if !containsStr(info.Efforts, effort) {
-			return fmt.Errorf("Claude Code %s does not accept the effort %q; it accepts %s", info.Version, effort,
-				strings.Join(info.Efforts, ", "))
+			return domain.TextErr("claude_effort_invalid",
+				`Claude Code {{version}} does not accept the effort "{{effort}}"; it accepts {{efforts}}`,
+				"version", info.Version, "effort", effort, "efforts", strings.Join(info.Efforts, ", "))
 		}
 	}
 	return nil
@@ -264,10 +267,10 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 		}
 		args = append(args, "--permission-mode", "dontAsk", "--tools", strings.Join(tools, ","))
 		restrictions = append(restrictions, ports.Restriction{Name: "read_only", Enforced: true,
-			Message: "no write or shell tool is available to the session"})
+			Text: domain.Text{Message: "no write or shell tool is available to the session"}})
 		if !network {
 			restrictions = append(restrictions, ports.Restriction{Name: "network", Enforced: true,
-				Message: "no web or shell tool is available to the session"})
+				Text: domain.Text{Message: "no web or shell tool is available to the session"}})
 		}
 	case domain.ProfileCustom:
 		allowed := perm.Custom.AllowedTools
@@ -290,7 +293,7 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 		}
 		dirs = append(dirs, perm.Custom.WritablePaths...)
 		restrictions = append(restrictions, ports.Restriction{Name: "tool_allowlist", Enforced: true,
-			Message: "Claude Code allows only the listed tools"})
+			Text: domain.Text{Message: "Claude Code allows only the listed tools"}})
 		restrictions = append(restrictions, shellRestrictions(mode == "acceptEdits" && hasShell(allowed), network,
 			*perm.RestrictToWorkspace)...)
 	default: // workspace_write
@@ -302,7 +305,7 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 		}
 		args = append(args, "--permission-mode", "acceptEdits", "--allowedTools", strings.Join(tools, ","))
 		restrictions = append(restrictions, ports.Restriction{Name: "edit_directories", Enforced: true,
-			Message: "file edits are limited to the workspace and the added directories"})
+			Text: domain.Text{Message: "file edits are limited to the workspace and the added directories"}})
 		restrictions = append(restrictions, shellRestrictions(true, network, *perm.RestrictToWorkspace)...)
 	}
 	if req.ExecutionDir != "" {
@@ -326,11 +329,13 @@ func shellRestrictions(shell, network, restrict bool) []ports.Restriction {
 	var out []ports.Restriction
 	if restrict {
 		out = append(out, ports.Restriction{Name: "restrictToWorkspace", Enforced: false,
-			Message: "Claude Code does not confine shell commands to the workspace; only its file-edit tools are confined"})
+			Text: domain.T("restriction_claude_shell_workspace",
+				"Claude Code does not confine shell commands to the workspace; only its file-edit tools are confined")})
 	}
 	if !network {
 		out = append(out, ports.Restriction{Name: "network", Enforced: false,
-			Message: "Claude Code does not block network access from shell commands; only its web tools are removed"})
+			Text: domain.T("restriction_claude_shell_network",
+				"Claude Code does not block network access from shell commands; only its web tools are removed")})
 	}
 	return out
 }

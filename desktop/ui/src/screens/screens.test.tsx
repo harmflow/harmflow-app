@@ -3,6 +3,7 @@ import { renderToString } from "react-dom/server";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { Execution, ExecutionSummary, HarmflowEvent, Harness, Settings, TaskSummary, WorkItem } from "../api/types";
 import { RawCaptures } from "../components/ExecutionDetail";
+import { ValidationPanel } from "../components/TaskEditor";
 import { TaskForm } from "../components/TaskForm";
 import i18n from "../i18n";
 import { formatBytes } from "../lib/format";
@@ -205,6 +206,23 @@ describe("screens", () => {
     expect(html).toContain("pushed with [REDACTED]");
     const empty = { logExpired: false, attempts: [{ attempt: 1, harness: "codex", size: 0, offset: 0, text: "" }] };
     expect(renderToString(<RawCaptures output={empty} />)).toContain("Nenhuma saída capturada ainda.");
+  });
+
+  it("shows the daemon's validation errors in the interface's language (FS-012 FR-005)", () => {
+    const html = renderToString(
+      <ValidationPanel
+        validation={{
+          valid: false,
+          warnings: [],
+          errors: [
+            { path: "/spec", line: 7, column: 3, code: "schema", message: "property colour is not allowed", messageKey: "schema_additional_properties", params: { properties: "colour", count: "1" } },
+            { path: "/spec/timeout", code: "semantic", message: "agent output, untouched" },
+          ],
+        }}
+      />,
+    );
+    expect(html).toContain("a propriedade colour não é permitida");
+    expect(html).toContain("agent output, untouched");
   });
 
   it("asks for repositories only for the GitHub type (FS-001 FR-008)", () => {

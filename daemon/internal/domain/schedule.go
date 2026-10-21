@@ -1,7 +1,6 @@
 package domain
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -21,19 +20,19 @@ func ParseSchedule(s Schedule, system *time.Location) (Rule, error) {
 	if s.Timezone != "" {
 		l, err := time.LoadLocation(s.Timezone)
 		if err != nil {
-			return nil, fmt.Errorf("unknown time zone %q", s.Timezone)
+			return nil, TextErr("timezone_unknown", `unknown time zone "{{timezone}}"`, "timezone", s.Timezone)
 		}
 		loc = l
 	}
 	switch {
 	case s.Cron != "" && s.Interval != "":
-		return nil, fmt.Errorf("a schedule is a cron expression or an interval, not both")
+		return nil, TextErr("schedule_cron_and_interval", "a schedule is a cron expression or an interval, not both")
 	case s.Cron != "":
 		return ParseCron(s.Cron, loc)
 	case s.Interval != "":
 		return ParseInterval(s.Interval)
 	default:
-		return nil, fmt.Errorf("a schedule needs a cron expression or an interval")
+		return nil, TextErr("schedule_empty", "a schedule needs a cron expression or an interval")
 	}
 }
 
@@ -46,11 +45,11 @@ type IntervalRule struct {
 func ParseInterval(text string) (*IntervalRule, error) {
 	t := strings.TrimSpace(text)
 	if len(t) < 2 {
-		return nil, fmt.Errorf("invalid interval %q: use a whole number of minutes, hours, or days, such as 30m", text)
+		return nil, invalidInterval(text)
 	}
 	n, err := strconv.Atoi(t[:len(t)-1])
 	if err != nil || n <= 0 {
-		return nil, fmt.Errorf("invalid interval %q: use a whole number of minutes, hours, or days, such as 30m", text)
+		return nil, invalidInterval(text)
 	}
 	var unit time.Duration
 	switch t[len(t)-1] {
@@ -61,9 +60,14 @@ func ParseInterval(text string) (*IntervalRule, error) {
 	case 'd':
 		unit = 24 * time.Hour
 	default:
-		return nil, fmt.Errorf("invalid interval %q: the unit is m, h, or d", text)
+		return nil, TextErr("interval_unit_invalid", `invalid interval "{{interval}}": the unit is m, h, or d`, "interval", text)
 	}
 	return &IntervalRule{Every: time.Duration(n) * unit, text: t}, nil
+}
+
+func invalidInterval(text string) error {
+	return TextErr("interval_invalid",
+		`invalid interval "{{interval}}": use a whole number of minutes, hours, or days, such as 30m`, "interval", text)
 }
 
 func (r *IntervalRule) Next(after time.Time) time.Time {
@@ -102,10 +106,12 @@ func ParseCron(expr string, loc *time.Location) (*CronRule, error) {
 	}
 	fields := strings.Fields(text)
 	if len(fields) == 6 {
-		return nil, fmt.Errorf("cron expression %q has 6 fields: seconds are not supported, use 5 fields", expr)
+		return nil, TextErr("cron_seconds", `cron expression "{{cron}}" has 6 fields: seconds are not supported, use 5 fields`,
+			"cron", expr)
 	}
 	if len(fields) != 5 {
-		return nil, fmt.Errorf("cron expression %q must have 5 fields: minute hour day-of-month month day-of-week", expr)
+		return nil, TextErr("cron_field_count",
+			`cron expression "{{cron}}" must have 5 fields: minute hour day-of-month month day-of-week`, "cron", expr)
 	}
 	r := &CronRule{loc: loc, text: strings.TrimSpace(expr)}
 	var err error
@@ -115,13 +121,13 @@ func ParseCron(expr string, loc *time.Location) (*CronRule, error) {
 	if r.hour, err = parseField(fields[1], 0, 23, nil, "hour"); err != nil {
 		return nil, err
 	}
-	if r.dom, err = parseField(fields[2], 1, 31, nil, "day of month"); err != nil {
+	if r.dom, err = parseField(fields[2], 1, 31, nil, "day_of_month"); err != nil {
 		return nil, err
 	}
 	if r.month, err = parseField(fields[3], 1, 12, monthNames, "month"); err != nil {
 		return nil, err
 	}
-	if r.dow, err = parseField(fields[4], 0, 7, dayNames, "day of week"); err != nil {
+	if r.dow, err = parseField(fields[4], 0, 7, dayNames, "day_of_week"); err != nil {
 		return nil, err
 	}
 	if r.dow&(1<<7) != 0 { // 7 is Sunday too
@@ -132,7 +138,7 @@ func ParseCron(expr string, loc *time.Location) (*CronRule, error) {
 	return r, nil
 }
 
-func parseField(f string, min, max int, names map[string]int, label string) (uint64, error) {
+func parseField(f string, min, max int, names map[string]int, field string) (uint64, error) {
 	var bits uint64
 	for _, part := range strings.Split(f, ",") {
 		step := 1
@@ -140,7 +146,7 @@ func parseField(f string, min, max int, names map[string]int, label string) (uin
 		if i := strings.IndexByte(part, '/'); i >= 0 {
 			s, err := strconv.Atoi(part[i+1:])
 			if err != nil || s <= 0 {
-				return 0, fmt.Errorf("invalid step in %s field %q", label, f)
+				return 0, TextErr("cron_step_invalid", `invalid step in {{fieldName}} field "{{value}}"`, fieldParams(field, f)...)
 			}
 			step = s
 			rangePart = part[:i]
@@ -152,17 +158,17 @@ func parseField(f string, min, max int, names map[string]int, label string) (uin
 			ends := strings.SplitN(rangePart, "-", 2)
 			a, err := fieldValue(ends[0], names)
 			if err != nil {
-				return 0, fmt.Errorf("invalid %s field %q", label, f)
+				return 0, TextErr("cron_value_invalid", `invalid {{fieldName}} field "{{value}}"`, fieldParams(field, f)...)
 			}
 			b, err := fieldValue(ends[1], names)
 			if err != nil {
-				return 0, fmt.Errorf("invalid %s field %q", label, f)
+				return 0, TextErr("cron_value_invalid", `invalid {{fieldName}} field "{{value}}"`, fieldParams(field, f)...)
 			}
 			lo, hi = a, b
 		default:
 			v, err := fieldValue(rangePart, names)
 			if err != nil {
-				return 0, fmt.Errorf("invalid %s field %q", label, f)
+				return 0, TextErr("cron_value_invalid", `invalid {{fieldName}} field "{{value}}"`, fieldParams(field, f)...)
 			}
 			lo = v
 			if strings.Contains(part, "/") {
@@ -172,13 +178,19 @@ func parseField(f string, min, max int, names map[string]int, label string) (uin
 			}
 		}
 		if lo < min || hi > max || lo > hi {
-			return 0, fmt.Errorf("%s field %q is out of range %d-%d", label, f, min, max)
+			return 0, TextErr("cron_value_out_of_range", `{{fieldName}} field "{{value}}" is out of range {{min}}-{{max}}`,
+				append(fieldParams(field, f), "min", strconv.Itoa(min), "max", strconv.Itoa(max))...)
 		}
 		for v := lo; v <= hi; v += step {
 			bits |= 1 << uint(v)
 		}
 	}
 	return bits, nil
+}
+
+// fieldParams name a cron field for the desktop, which translates it, and in en-US for the daemon's own text.
+func fieldParams(field, value string) []string {
+	return []string{"field", field, "fieldName", strings.ReplaceAll(field, "_", " "), "value", value}
 }
 
 func fieldValue(s string, names map[string]int) (int, error) {

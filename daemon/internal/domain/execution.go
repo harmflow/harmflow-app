@@ -124,8 +124,8 @@ type WorkItemResult struct {
 }
 
 type Warning struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code string `json:"code"`
+	Text
 	Subject string `json:"subject,omitempty"`
 }
 

@@ -321,7 +321,7 @@ func (r *run) attempts(start func() error) (domain.ExecutionStatus, string) {
 	a := r.a
 	chain, invalid := r.chain()
 	for _, w := range invalid {
-		r.warn(domain.Warning{Code: domain.WarningInvalidFallback, Message: w}, domain.EventHarnessNoAlternative, false)
+		r.warn(domain.Warning{Code: domain.WarningInvalidFallback, Text: w}, domain.EventHarnessNoAlternative, false)
 	}
 	fallback := r.eff.Spec.Harness.Fallback
 	idx, rateRetries := 0, 0
@@ -438,18 +438,17 @@ func unavailableMessage(ad ports.HarnessAdapter, info ports.HarnessInfo) string 
 }
 
 // chain returns the preferred profile and the fallbacks that can load the task's agents and skills (D-092).
-func (r *run) chain() ([]domain.HarnessProfile, []string) {
+func (r *run) chain() ([]domain.HarnessProfile, []domain.Text) {
 	profiles := r.def.Profiles()
 	out := []domain.HarnessProfile{profiles[0]}
-	var invalid []string
+	var invalid []domain.Text
 	for _, p := range profiles[1:] {
 		ad, ok := r.a.adapters[p.Provider]
 		if !ok {
 			continue
 		}
 		if missing := r.a.missingItems(r.def, p.Provider); len(missing) > 0 {
-			invalid = append(invalid, fmt.Sprintf("%s is not a valid fallback: %s %q cannot be found for it",
-				ad.Name(), missing[0].kind, missing[0].name))
+			invalid = append(invalid, missing[0].invalidFallback(ad.Name()))
 			continue
 		}
 		out = append(out, p)
@@ -507,13 +506,15 @@ func (r *run) runAttempt(ad ports.HarnessAdapter, info ports.HarnessInfo, p doma
 	}
 	for _, res := range inv.Restrictions {
 		if !res.Enforced {
-			r.warn(domain.Warning{Code: domain.WarningPolicyUnenforced, Subject: res.Name, Message: res.Message},
+			r.warn(domain.Warning{Code: domain.WarningPolicyUnenforced, Subject: res.Name, Text: res.Text},
 				domain.EventPolicyUnenforced, true)
 		}
 	}
 	if info.VersionSupport == "untested_newer" {
 		r.warn(domain.Warning{Code: domain.WarningVersionUntested, Subject: p.Provider,
-			Message: fmt.Sprintf("%s %s is newer than the versions HarmFlow was tested with", ad.Name(), info.Version)},
+			Text: domain.T("harness_version_untested",
+				"{{harness}} {{version}} is newer than the versions HarmFlow was tested with",
+				"harness", ad.Name(), "version", info.Version)},
 			domain.EventHarnessVersionUntested, true)
 	}
 	raw, err := a.d.Events.RawWriter(r.x.ID, n)
@@ -864,9 +865,13 @@ func (r *run) onProgress(p domain.ProgressLine) {
 		a.mu.Unlock()
 		r.setStatus(domain.StatusPublishing, msg)
 	case domain.EventRepositoryUnprotected:
-		r.warn(domain.Warning{Code: domain.WarningRepositoryUnprotected, Subject: p.Repository,
-			Message: firstNonEmpty(msg, p.Repository+": the base branch is not protected against merging without review")},
-			"", false)
+		// The agent's own words stay as they are; the daemon's text stands in when it wrote none.
+		text := domain.Text{Message: msg}
+		if msg == "" {
+			text = domain.T("repository_unprotected",
+				"{{repository}}: the base branch is not protected against merging without review", "repository", p.Repository)
+		}
+		r.warn(domain.Warning{Code: domain.WarningRepositoryUnprotected, Subject: p.Repository, Text: text}, "", false)
 	case domain.EventWorkspaceChanged:
 		if p.Branch != "" {
 			a.mu.Lock()
@@ -895,12 +900,14 @@ func (r *run) outcomeFromReport() (domain.ExecutionStatus, string) {
 	}
 	value, err := schema.FromJSON(data)
 	if err != nil {
-		r.warn(domain.Warning{Code: domain.WarningOther, Message: "report.json is not valid JSON; it was ignored"}, "", false)
+		r.warn(domain.Warning{Code: domain.WarningOther,
+			Text: domain.T("report_not_json", "report.json is not valid JSON; it was ignored")}, "", false)
 		return domain.StatusCompleted, ""
 	}
 	if issues := r.a.d.Validator.ValidateReport(value); len(issues) > 0 {
-		r.warn(domain.Warning{Code: domain.WarningOther,
-			Message: "report.json does not follow its schema (" + issues[0].Path + ": " + issues[0].Message + "); it was ignored"}, "", false)
+		r.warn(domain.Warning{Code: domain.WarningOther, Text: domain.T("report_schema_invalid",
+			"report.json does not follow its schema ({{path}}: {{detail}}); it was ignored",
+			"path", issues[0].Path, "detail", issues[0].Message)}, "", false)
 		return domain.StatusCompleted, ""
 	}
 	var rep domain.ExecutionReport
@@ -948,7 +955,8 @@ func (r *run) applyReport(rep *domain.ExecutionReport) {
 		if w.Code == "repository_unprotected" {
 			code, eventType = domain.WarningRepositoryUnprotected, domain.EventRepositoryUnprotected
 		}
-		r.warn(domain.Warning{Code: code, Subject: w.Repository, Message: w.Message}, eventType, eventType != "")
+		r.warn(domain.Warning{Code: code, Subject: w.Repository, Text: domain.Text{Message: w.Message}},
+			eventType, eventType != "")
 	}
 	limits := r.limits()
 	for _, w := range rep.WorkItems {
@@ -1058,11 +1066,12 @@ func (a *App) CancelExecution(id string) error {
 	x, ok := a.executions[id]
 	if !ok {
 		a.mu.Unlock()
-		return errf(CodeNotFound, "no execution %s", id)
+		return newError(CodeNotFound, domain.T("execution_not_found", "no execution {{execution}}", "execution", id))
 	}
 	if x.Status.IsTerminal() {
 		a.mu.Unlock()
-		return errf(CodeConflict, "the execution already ended as %s", x.Status)
+		return newError(CodeConflict,
+			domain.T("execution_ended", "the execution already ended as {{status}}", "status", string(x.Status)))
 	}
 	now := a.now()
 	if x.Status == domain.StatusQueued {

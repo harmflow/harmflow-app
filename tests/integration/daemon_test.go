@@ -242,9 +242,17 @@ func TestTaskLifecycle(t *testing.T) {
 	if v1["valid"] != false || e1["path"] != e2["path"] || e1["message"] != e2["message"] || e2["line"] == nil {
 		t.Errorf("form and editor disagree: %v / %v", e1, e2)
 	}
+	// The desktop translates the error from its key and params (FS-012 FR-005).
+	if e1["messageKey"] != "schema_pattern" || e2["messageKey"] != e1["messageKey"] || e1["params"] == nil {
+		t.Errorf("no translatable key: %v / %v", e1, e2)
+	}
 	// An invalid save keeps the valid file.
 	rev := created["revision"].(string)
-	d.call("PUT", "/tasks/notes", map[string]any{"yaml": "apiVersion: harmflow/v1alpha1\nkind: Task\n", "baseRevision": rev}, 422)
+	invalid := d.call("PUT", "/tasks/notes",
+		map[string]any{"yaml": "apiVersion: harmflow/v1alpha1\nkind: Task\n", "baseRevision": rev}, 422)
+	if e, _ := invalid["error"].(map[string]any); e["messageKey"] == nil || e["message"] == nil {
+		t.Errorf("an invalid save's error has no translatable key: %v", invalid)
+	}
 	if again, _ := os.ReadFile(file); !bytes.Equal(again, onDisk) {
 		t.Error("an invalid edit changed the file")
 	}

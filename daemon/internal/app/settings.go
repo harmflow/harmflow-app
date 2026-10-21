@@ -3,6 +3,8 @@ package app
 import (
 	"fmt"
 	"regexp"
+
+	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 )
 
 // Settings are the preferences the dashboard changes (FS-010 FR-009, FS-011 FR-006, FS-012).
@@ -82,17 +84,21 @@ var varName = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 // UpdateSettings applies a patch. Autostart is opt-in: it changes only when the user asks (D-008).
 func (a *App) UpdateSettings(p SettingsPatch) (SettingsView, error) {
 	if p.Language != nil && !containsString([]string{"pt-BR", "en-US", "es-ES", "system"}, *p.Language) {
-		return SettingsView{}, errf(CodeValidationFailed, "language must be pt-BR, en-US, es-ES, or system")
+		return SettingsView{}, newError(CodeValidationFailed,
+			domain.T("settings_language_invalid", "language must be pt-BR, en-US, es-ES, or system"))
 	}
 	if p.NotificationLevel != nil && !containsString([]string{"all", "failures_and_attention", "none"}, *p.NotificationLevel) {
-		return SettingsView{}, errf(CodeValidationFailed, "notificationLevel must be all, failures_and_attention, or none")
+		return SettingsView{}, newError(CodeValidationFailed, domain.T("settings_notification_level_invalid",
+			"notificationLevel must be all, failures_and_attention, or none"))
 	}
 	if p.LogRetentionDays != nil && (*p.LogRetentionDays < 1 || *p.LogRetentionDays > 3650) {
-		return SettingsView{}, errf(CodeValidationFailed, "logRetentionDays must be between 1 and 3650")
+		return SettingsView{}, newError(CodeValidationFailed,
+			domain.T("settings_log_retention_invalid", "logRetentionDays must be between 1 and 3650"))
 	}
 	for k := range p.PathVariables {
 		if !varName.MatchString(k) {
-			return SettingsView{}, errf(CodeValidationFailed, "path variable %q must be uppercase letters, digits, and _", k)
+			return SettingsView{}, newError(CodeValidationFailed, domain.T("settings_path_variable_invalid",
+				`path variable "{{name}}" must be uppercase letters, digits, and _`, "name", k))
 		}
 	}
 	if p.Autostart != nil && a.d.Service != nil {

@@ -5,11 +5,11 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,10 +19,10 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
-// Error is a use-case failure the API turns into a response.
+// Error is a use-case failure the API turns into a response; its Text is what the user reads.
 type Error struct {
-	Code            string
-	Message         string
+	Code string
+	domain.Text
 	Validation      *ValidationResult
 	CurrentRevision string
 }
@@ -38,8 +38,8 @@ const (
 	CodeExecutionsRunning = "executions_running"
 )
 
-func errf(code, format string, args ...any) *Error {
-	return &Error{Code: code, Message: fmt.Sprintf(format, args...)}
+func newError(code string, text domain.Text) *Error {
+	return &Error{Code: code, Text: text}
 }
 
 // Paths are the directories of one installation (architecture/configuration-layout.md).
@@ -253,7 +253,8 @@ func (a *App) RequestShutdown(force bool) error {
 	}
 	if n > 0 && !force {
 		a.mu.Unlock()
-		return errf(CodeExecutionsRunning, "%d executions are running; confirm to stop the daemon and cancel them", n)
+		return newError(CodeExecutionsRunning, domain.T("executions_running",
+			"{{count}} executions are running; confirm to stop the daemon and cancel them", "count", strconv.Itoa(n)))
 	}
 	for _, h := range a.running {
 		h.cancelRequested = true
@@ -293,7 +294,7 @@ func (a *App) ExecutionEvents(id string, after int64, limit int) ([]domain.Event
 	_, ok := a.executions[id]
 	a.mu.Unlock()
 	if !ok {
-		return nil, false, errf(CodeNotFound, "no execution %s", id)
+		return nil, false, newError(CodeNotFound, domain.T("execution_not_found", "no execution {{execution}}", "execution", id))
 	}
 	return a.d.Events.Replay(id, after, limit)
 }

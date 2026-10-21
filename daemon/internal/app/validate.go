@@ -63,7 +63,8 @@ func (a *App) validate(in TaskInput, mode catalogMode) *ValidationResult {
 	case len(in.Document) > 0 && string(in.Document) != "null":
 		v, err := schema.FromJSON(in.Document)
 		if err != nil {
-			r.Errors = append(r.Errors, schema.Issue{Message: "the document is not valid JSON: " + err.Error(), Code: "syntax"})
+			r.Errors = append(r.Errors, schema.Issue{Code: "syntax",
+				Text: domain.T("document_not_json", "the document is not valid JSON: {{detail}}", "detail", err.Error())})
 			return r
 		}
 		value = v
@@ -75,7 +76,8 @@ func (a *App) validate(in TaskInput, mode catalogMode) *ValidationResult {
 			}
 		}
 	default:
-		r.Errors = append(r.Errors, schema.Issue{Message: "send the task as yaml or as document", Code: "syntax"})
+		r.Errors = append(r.Errors, schema.Issue{Text: domain.T("task_input_missing", "send the task as yaml or as document"),
+			Code: "syntax"})
 		return r
 	}
 	r.Document = value
@@ -86,17 +88,17 @@ func (a *App) validate(in TaskInput, mode catalogMode) *ValidationResult {
 	var doc domain.TaskDocument
 	if r.content != nil {
 		if err := yaml.Unmarshal(r.content, &doc); err != nil {
-			r.Errors = append(r.Errors, schema.Issue{Message: err.Error(), Code: "syntax"})
+			r.Errors = append(r.Errors, schema.Issue{Text: domain.TextOf(err), Code: "syntax"})
 			return r
 		}
 	} else {
 		if err := json.Unmarshal(in.Document, &doc); err != nil {
-			r.Errors = append(r.Errors, schema.Issue{Message: err.Error(), Code: "syntax"})
+			r.Errors = append(r.Errors, schema.Issue{Text: domain.TextOf(err), Code: "syntax"})
 			return r
 		}
 		out, err := marshalYAML(doc)
 		if err != nil {
-			r.Errors = append(r.Errors, schema.Issue{Message: err.Error(), Code: "syntax"})
+			r.Errors = append(r.Errors, schema.Issue{Text: domain.TextOf(err), Code: "syntax"})
 			return r
 		}
 		r.content, r.YAML = out, string(out)
@@ -109,14 +111,14 @@ func (a *App) validate(in TaskInput, mode catalogMode) *ValidationResult {
 	return r
 }
 
-func (r *ValidationResult) addError(path, format string, args ...any) {
-	is := schema.Issue{Path: path, Message: fmt.Sprintf(format, args...), Code: "semantic"}
+func (r *ValidationResult) addError(path string, text domain.Text) {
+	is := schema.Issue{Path: path, Text: text, Code: "semantic"}
 	is.Line, is.Column = schema.LocatePointer(r.node, path)
 	r.Errors = append(r.Errors, is)
 }
 
-func (r *ValidationResult) addWarning(path, code, format string, args ...any) {
-	is := schema.Issue{Path: path, Message: fmt.Sprintf(format, args...), Code: code}
+func (r *ValidationResult) addWarning(path, code string, text domain.Text) {
+	is := schema.Issue{Path: path, Text: text, Code: code}
 	is.Line, is.Column = schema.LocatePointer(r.node, path)
 	r.Warnings = append(r.Warnings, is)
 }
@@ -126,7 +128,8 @@ func (r *ValidationResult) addWarning(path, code, format string, args ...any) {
 func (a *App) semanticChecks(r *ValidationResult, doc domain.TaskDocument, mode catalogMode) {
 	if s := doc.Spec.Schedule; s != nil {
 		if s.Cron == "" && s.Interval == "" {
-			r.addError("/spec/schedule", "a schedule needs a cron expression or an interval; remove it for a manual-only task")
+			r.addError("/spec/schedule", domain.T("schedule_missing",
+				"a schedule needs a cron expression or an interval; remove it for a manual-only task"))
 		} else if _, err := domain.ParseSchedule(*s, a.d.Location); err != nil {
 			path := "/spec/schedule/cron"
 			if s.Interval != "" {
@@ -135,7 +138,7 @@ func (a *App) semanticChecks(r *ValidationResult, doc domain.TaskDocument, mode 
 			if strings.Contains(err.Error(), "time zone") {
 				path = "/spec/schedule/timezone"
 			}
-			r.addError(path, "%s", err.Error())
+			r.addError(path, domain.TextOf(err))
 		}
 	}
 	profiles := doc.Profiles()
@@ -146,17 +149,19 @@ func (a *App) semanticChecks(r *ValidationResult, doc domain.TaskDocument, mode 
 		}
 		ad, ok := a.adapters[p.Provider]
 		if !ok {
-			r.addError(path+"/provider", "unknown harness %q", p.Provider)
+			r.addError(path+"/provider", domain.T("harness_unknown", `unknown harness "{{harness}}"`, "harness", p.Provider))
 			continue
 		}
 		info := a.harnessInfo(p.Provider)
 		if err := ad.ValidateProfile(info, p.Model, p.Effort); err != nil {
-			r.addError(path, "%s", err.Error())
+			r.addError(path, domain.TextOf(err))
 		}
 		if !info.Detected {
-			r.addWarning(path+"/provider", domain.WarningHarnessNotReady, "%s was not detected on this machine", ad.Name())
+			r.addWarning(path+"/provider", domain.WarningHarnessNotReady,
+				domain.T("harness_not_detected", "{{harness}} was not detected on this machine", "harness", ad.Name()))
 		} else if !info.Ready() {
-			r.addWarning(path+"/provider", domain.WarningHarnessNotReady, "%s is not ready: %s", ad.Name(), info.Diagnostic)
+			r.addWarning(path+"/provider", domain.WarningHarnessNotReady, domain.T("harness_not_ready",
+				"{{harness}} is not ready: {{detail}}", "harness", ad.Name(), "detail", info.Diagnostic))
 		}
 		// Agents and skills must be available to every harness of the chain (D-092).
 		missing := a.missingItems(doc, p.Provider)
@@ -168,12 +173,11 @@ func (a *App) semanticChecks(r *ValidationResult, doc domain.TaskDocument, mode 
 			}
 			switch {
 			case i == 0 && mode == catalogStrict:
-				r.addError(kindPath, "%s %q cannot be found for %s (%s)", m.kind, m.name, ad.Name(), m.where)
+				r.addError(kindPath, m.notFound(ad.Name()))
 			case i == 0:
-				r.addWarning(kindPath, code, "%s %q is missing on this machine for %s (%s)", m.kind, m.name, ad.Name(), m.where)
+				r.addWarning(kindPath, code, m.missing(ad.Name()))
 			default:
-				r.addWarning(path, domain.WarningInvalidFallback,
-					"%s is not a valid fallback: %s %q cannot be found for it (%s)", ad.Name(), m.kind, m.name, m.where)
+				r.addWarning(path, domain.WarningInvalidFallback, m.invalidFallback(ad.Name()))
 			}
 		}
 	}
@@ -181,7 +185,7 @@ func (a *App) semanticChecks(r *ValidationResult, doc domain.TaskDocument, mode 
 		for i, p := range profiles[1:] {
 			if p.Provider == profiles[0].Provider && p.Model == profiles[0].Model {
 				r.addWarning(fmt.Sprintf("/spec/harness/fallback/candidates/%d", i), domain.WarningOther,
-					"this fallback repeats the preferred harness and model")
+					domain.T("fallback_repeats_preferred", "this fallback repeats the preferred harness and model"))
 			}
 		}
 	}
@@ -189,25 +193,61 @@ func (a *App) semanticChecks(r *ValidationResult, doc domain.TaskDocument, mode 
 		path := fmt.Sprintf("/spec/githubIssueImplementation/repositories/%d/localPath", i)
 		p, err := a.expand(repo.LocalPath)
 		if err != nil {
-			r.addWarning(path, domain.WarningOther, "%s", err.Error())
+			r.addWarning(path, domain.WarningOther, domain.TextOf(err))
 			continue
 		}
 		if st, err := os.Stat(p); err != nil || !st.IsDir() {
-			r.addWarning(path, domain.WarningOther, "the local path %s does not exist on this machine", p)
+			r.addWarning(path, domain.WarningOther,
+				domain.T("local_path_missing", "the local path {{path}} does not exist on this machine", "path", p))
 		}
 	}
 	if w := doc.Spec.Workspace; w != nil && w.Path != "" {
 		if _, err := a.expand(w.Path); err != nil {
-			r.addWarning("/spec/workspace/path", domain.WarningOther, "%s", err.Error())
+			r.addWarning("/spec/workspace/path", domain.WarningOther, domain.TextOf(err))
 		}
 	}
 	for _, w := range a.policyWarnings(doc) {
-		r.addWarning("/spec/permissions", w.Code, "%s", w.Message)
+		r.addWarning("/spec/permissions", w.Code, w.Text)
 	}
 }
 
 type missingItem struct {
 	kind, name, where string
+}
+
+// notFound, missing, and invalidFallback say an item is missing for a harness: on save, on import, and for a fallback.
+// The source param names where it was looked for, for the desktop to translate.
+func (m missingItem) notFound(harness string) domain.Text {
+	if m.kind == "agent" {
+		return domain.T("agent_not_found", `agent "{{name}}" cannot be found for {{harness}} ({{where}})`, m.params(harness)...)
+	}
+	return domain.T("skill_not_found", `skill "{{name}}" cannot be found for {{harness}} ({{where}})`, m.params(harness)...)
+}
+
+func (m missingItem) missing(harness string) domain.Text {
+	if m.kind == "agent" {
+		return domain.T("agent_missing", `agent "{{name}}" is missing on this machine for {{harness}} ({{where}})`,
+			m.params(harness)...)
+	}
+	return domain.T("skill_missing", `skill "{{name}}" is missing on this machine for {{harness}} ({{where}})`,
+		m.params(harness)...)
+}
+
+func (m missingItem) invalidFallback(harness string) domain.Text {
+	if m.kind == "agent" {
+		return domain.T("fallback_agent_missing",
+			`{{harness}} is not a valid fallback: agent "{{name}}" cannot be found for it ({{where}})`, m.params(harness)...)
+	}
+	return domain.T("fallback_skill_missing",
+		`{{harness}} is not a valid fallback: skill "{{name}}" cannot be found for it ({{where}})`, m.params(harness)...)
+}
+
+func (m missingItem) params(harness string) []string {
+	source := "harness"
+	if strings.HasPrefix(m.name, "harmflow-") {
+		source = "builtin"
+	}
+	return []string{"name", m.name, "harness", harness, "where", m.where, "source", source}
 }
 
 func (a *App) missingItems(doc domain.TaskDocument, harness string) []missingItem {
@@ -240,8 +280,7 @@ func (a *App) policyWarnings(doc domain.TaskDocument) []domain.Warning {
 	var out []domain.Warning
 	for _, r := range inv.Restrictions {
 		if !r.Enforced {
-			out = append(out, domain.Warning{Code: domain.WarningPolicyUnenforced, Subject: r.Name,
-				Message: r.Message})
+			out = append(out, domain.Warning{Code: domain.WarningPolicyUnenforced, Subject: r.Name, Text: r.Text})
 		}
 	}
 	return out

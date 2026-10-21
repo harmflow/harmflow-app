@@ -36,6 +36,17 @@ describe("i18n resources", () => {
     expect(leaves(resource as unknown as Tree).sort()).toEqual(reference);
   });
 
+  // Broken interpolation is a known risk of FS-012: a translation keeps every placeholder and nested key of en-US.
+  it.each([
+    ["pt-BR", ptBR],
+    ["es-ES", esES],
+  ])("%s keeps the placeholders of en-US", (lang, resource) => {
+    const marks = (text: unknown) => [...new Set(String(text).match(/\{\{[^}]+\}\}|\$t\([^)]*\)/g) ?? [])].sort();
+    for (const key of reference) {
+      expect(marks(lookup(resource as unknown as Tree, key)), `${lang} ${key}`).toEqual(marks(lookup(enUS as unknown as Tree, key)));
+    }
+  });
+
   it("has no empty translation", () => {
     for (const resource of [enUS, ptBR, esES]) {
       for (const key of leaves(resource as unknown as Tree)) expect(lookup(resource as unknown as Tree, key), key).not.toBe("");

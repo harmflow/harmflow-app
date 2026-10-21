@@ -86,6 +86,35 @@ func TestSchedulesAreExclusive(t *testing.T) {
 	}
 }
 
+// FS-012 FR-005: a schema error carries a key and params the desktop translates, beside its en-US text.
+func TestSchemaErrorsAreTranslatable(t *testing.T) {
+	v, _ := New()
+	cases := []struct {
+		yaml, key, param, want string
+	}{
+		{valid + "  colour: red\n", "schema_additional_properties", "properties", `"colour"`},
+		{strings.Replace(valid, "  prompt: Summarize the week.\n", "", 1), "schema_required", "properties", `"prompt"`},
+		{strings.Replace(valid, "id: weekly-notes", "id: Weekly_Notes", 1), "schema_pattern", "value", `"Weekly_Notes"`},
+		{valid + "  enabled: maybe\n", "schema_type", "got", "string"},
+	}
+	for _, c := range cases {
+		doc, node, _ := ParseYAML([]byte(c.yaml))
+		issues := v.ValidateTask(doc, node)
+		if len(issues) == 0 {
+			t.Errorf("%s: no issue", c.key)
+			continue
+		}
+		got := issues[0]
+		if got.Key != c.key || got.Params[c.param] != c.want || !strings.Contains(got.Message, c.want) {
+			t.Errorf("%s: got %+v", c.key, got)
+		}
+	}
+	_, _, issues := ParseYAML([]byte("kind: [unclosed\n"))
+	if len(issues) != 1 || issues[0].Key != "yaml_syntax" || issues[0].Params["detail"] == "" {
+		t.Errorf("syntax error: %+v", issues)
+	}
+}
+
 func TestReportSchema(t *testing.T) {
 	v, _ := New()
 	good, _ := FromJSON([]byte(`{"outcome":"no_work","summary":"nothing eligible"}`))
