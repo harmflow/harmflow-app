@@ -49,6 +49,8 @@ func Start(inv ports.Invocation, raw io.Writer, onLine func([]byte)) (*Process, 
 	p := &Process{cmd: cmd, done: make(chan struct{}), stderr: &tail{max: 64 * 1024}}
 	var errw io.Writer = p.stderr
 	if raw != nil {
+		// The stdout reader below and os/exec's stderr copy write from their own goroutines.
+		raw = &lockedWriter{w: raw}
 		errw = io.MultiWriter(p.stderr, raw)
 	}
 	cmd.Stderr = errw
@@ -157,6 +159,18 @@ func (t *tail) String() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return string(t.buf)
+}
+
+// lockedWriter hands w one write at a time.
+type lockedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (l *lockedWriter) Write(b []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(b)
 }
 
 // LookPath finds a binary on PATH, then in the given known locations, returning every hit in order.
