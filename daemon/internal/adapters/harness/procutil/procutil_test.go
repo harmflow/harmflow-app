@@ -1,6 +1,7 @@
 package procutil
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"strconv"
@@ -47,6 +48,20 @@ func TestStopKillsTheProcessTree(t *testing.T) {
 	}
 	if len(lines) == 0 || lines[0] != "started" {
 		t.Errorf("stdout lines: %v", lines)
+	}
+}
+
+// The stdout reader and os/exec's stderr copy both write to raw, which gets one write at a time.
+func TestRawGetsOneWriteAtATime(t *testing.T) {
+	script := `i=0; while [ $i -lt 500 ]; do echo out $i; echo err $i >&2; i=$((i+1)); done`
+	var raw bytes.Buffer
+	p, err := Start(ports.Invocation{Path: "/bin/sh", Args: []string{"-c", script}}, &raw, func([]byte) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-p.Done()
+	if out, errs := strings.Count(raw.String(), "out "), strings.Count(raw.String(), "err "); out != 500 || errs != 500 {
+		t.Errorf("raw has %d stdout and %d stderr lines, want 500 each", out, errs)
 	}
 }
 
