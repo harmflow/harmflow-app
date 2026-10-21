@@ -2,6 +2,7 @@
 //! local API (ADR-0001, ADR-0002, ADR-0003). It never drives a harness and never decides an execution's state.
 
 mod daemon;
+mod notice;
 mod sse;
 mod state;
 mod tray;
@@ -120,6 +121,7 @@ pub fn run() {
         .manage(state.clone())
         .setup(move |app| {
             tray::create(app.handle())?;
+            notice::listen(app.handle())?;
             sse::spawn(app.handle().clone());
             tray::schedule_refresh(app.handle().clone());
             if start_hidden {

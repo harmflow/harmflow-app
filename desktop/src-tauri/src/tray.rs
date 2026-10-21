@@ -9,7 +9,7 @@ use serde_json::Value;
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 use crate::state::{ActiveExecution, AppState};
@@ -128,8 +128,7 @@ fn on_menu<R: Runtime>(app: &AppHandle<R>, id: &str) {
         "stop" => confirm_stop(app),
         other => {
             if let Some(exec_id) = other.strip_prefix("exec:") {
-                window::show_main(app);
-                let _ = app.emit("harmflow://navigate", serde_json::json!({ "executionId": exec_id }));
+                window::show_execution(app, exec_id);
             }
         }
     }
