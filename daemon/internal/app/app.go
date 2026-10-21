@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -132,6 +133,9 @@ type App struct {
 	accepting     bool
 	stopping      bool
 	adapters      map[string]ports.HarnessAdapter
+
+	// saveMu orders the saves of execution records, so the last copy taken is the last written.
+	saveMu sync.Mutex
 
 	stopOnce sync.Once
 	stopCh   chan struct{}
@@ -294,8 +298,22 @@ func (a *App) ExecutionEvents(id string, after int64, limit int) ([]domain.Event
 	return a.d.Events.Replay(id, after, limit)
 }
 
+// persistExecution saves a copy of the record taken under a.mu, since the executor may change it at the same time; the
+// caller must not hold a.mu.
 func (a *App) persistExecution(x *domain.Execution) {
-	if err := a.d.Executions.Save(x); err != nil {
+	a.saveMu.Lock()
+	defer a.saveMu.Unlock()
+	a.mu.Lock()
+	data, err := json.Marshal(x)
+	a.mu.Unlock()
+	var snapshot domain.Execution
+	if err == nil {
+		err = json.Unmarshal(data, &snapshot)
+	}
+	if err == nil {
+		err = a.d.Executions.Save(&snapshot)
+	}
+	if err != nil {
 		a.log.Printf("saving execution %s: %v", x.ID, err)
 	}
 }
