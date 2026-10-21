@@ -23,6 +23,7 @@ type Notification struct {
 	Params      map[string]string `json:"params"`
 }
 
+// maxNotifications is the size read notices are trimmed to; unread ones are never trimmed (FS-011 FR-005).
 const maxNotifications = 500
 
 // failureEvents pass the "failures and attention only" level.
@@ -101,15 +102,34 @@ func (a *App) notifyFor(e domain.Event) {
 		}
 	}
 	a.mu.Lock()
-	a.notifications = append([]Notification{n}, a.notifications...)
-	if len(a.notifications) > maxNotifications {
-		a.notifications = a.notifications[:maxNotifications]
-	}
+	a.notifications = trimNotifications(append([]Notification{n}, a.notifications...))
 	a.mu.Unlock()
 	a.saveNotifications()
 	payload, _ := toMap(n).(map[string]any)
 	a.d.Events.Append(domain.Event{Type: domain.EventNotificationCreated, TaskID: e.TaskID, ExecutionID: e.ExecutionID,
 		Timestamp: n.CreatedAt, Message: n.Title, Payload: payload})
+}
+
+// trimNotifications drops the oldest read notices of a newest-first list until it is back within maxNotifications. It
+// stops when no read notice is left, so a list of unread notices stays above the cap and none is lost (FS-011 FR-005).
+func trimNotifications(list []Notification) []Notification {
+	excess := len(list) - maxNotifications
+	if excess <= 0 {
+		return list
+	}
+	drop := map[int]bool{}
+	for i := len(list) - 1; i >= 0 && len(drop) < excess; i-- {
+		if list[i].Read {
+			drop[i] = true
+		}
+	}
+	out := make([]Notification, 0, len(list)-len(drop))
+	for i, n := range list {
+		if !drop[i] {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // englishNotice is the en-US fallback; the desktop translates from eventType and params (FS-012 FR-005).
