@@ -40,6 +40,7 @@ type run struct {
 	lastOperation  string
 	attempt        int
 	finalText      string // the agent's last message, the summary when the session leaves no report
+	hasContext     bool   // context.json holds parameters or history the session can use, not only the task's identity
 }
 
 func (a *App) launch(x *domain.Execution, h *runHandle) {
@@ -281,12 +282,16 @@ func (r *run) writeContext(prev []previousAttempt) error {
 	if len(history) > 50 {
 		history = history[:50]
 	}
+	params := r.eff.TypeParameters()
+	// Without any of these the file holds only the task's own name and past runs, which a session can mistake for
+	// the subject of the prompt.
+	r.hasContext = params != nil || len(items) > 0 || len(interrupted) > 0 || len(prev) > 0
 	ctxDoc := map[string]any{
 		"schemaVersion": "1",
 		"harmflow":      map[string]any{"version": a.d.Version},
 		"task": map[string]any{
 			"id": r.def.Metadata.ID, "name": r.def.Metadata.Name, "type": r.def.Spec.Type,
-			"parameters": r.eff.TypeParameters(),
+			"parameters": params,
 		},
 		"execution": map[string]any{"id": r.x.ID, "trigger": r.x.Trigger, "attempt": r.attempt + 1,
 			"timeoutAt": r.x.TimeoutAt},
@@ -675,18 +680,23 @@ func (r *run) resolve(ad ports.HarnessAdapter) ([]ports.ResolvedItem, []ports.Re
 }
 
 // harmflowContext is HarmFlow's orchestration context for the session: where to find the task's parameters and
-// history, and where to leave progress and the report. It never changes what the task does.
+// history, and where to leave progress and the report. It never changes what the task does, so it names neither the
+// task's id nor its name, which a prompt may share with its subject, and it points at context.json only when the
+// file holds more than those.
 func (r *run) harmflowContext(attempt int, prev []previousAttempt) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, `This session is run by HarmFlow, a local scheduler. HarmFlow only starts and records the session; it does not define the task. The task is the user's message: do what it asks, on its own terms. Never reinterpret it as being about HarmFlow, this note, or the files below — they are only the plumbing for reporting. Nobody reads this session live, so do not ask questions; decide, act, and report.
+	fmt.Fprintf(&b, `This session is run by HarmFlow, a local scheduler. HarmFlow only starts and records the session; it does not define the task. The task is the user's message: do what it asks, on its own terms. Never reinterpret it as being about HarmFlow, this note, or the files below — they are only the plumbing for reporting. A name in the task means what it names in the world, even when it matches a word in this note, a path, or a file. Nobody reads this session live, so do not ask questions; decide, act, and report.
 
-Plumbing for this run — execution %s, attempt %d, trigger %s, task id %s (type %s):
+Plumbing for this run — execution %s, attempt %d, trigger %s:
 Workspace: %s
 Execution directory: %s
-- context.json: the task's parameters and history — its work items with their status, resumes, and failures, interrupted executions with their last operation, and previous attempts of this execution. Read it when the task works on items such as issues.
-- progress.jsonl: append one JSON object per line as you reach each step, so the user can follow the execution. Types: step.started {"phase":"preparing|running|testing|publishing","message"}, work_item.selected {"workItem":"owner/repo#123","message":"<title>","repository"}, workspace.changed {"message","branch"}, test.started {"message":"<command>"}, test.completed {"status":"passed|failed|not_run","message"}, pull_request.created and pull_request.updated {"url","number","workItem","branch"}, repository.unprotected {"repository","message"}.
+`, r.x.ID, attempt, r.x.Trigger, r.work, r.dir)
+	if r.hasContext {
+		b.WriteString("- context.json: the task's parameters and history — its work items with their status, resumes, and failures, interrupted executions with their last operation, and previous attempts of this execution. Read it when the task works on items such as issues.\n")
+	}
+	b.WriteString(`- progress.jsonl: append one JSON object per line as you reach each step, so the user can follow the execution. Types: step.started {"phase":"preparing|running|testing|publishing","message"}, work_item.selected {"workItem":"owner/repo#123","message":"<title>","repository"}, workspace.changed {"message","branch"}, test.started {"message":"<command>"}, test.completed {"status":"passed|failed|not_run","message"}, pull_request.created and pull_request.updated {"url","number","workItem","branch"}, repository.unprotected {"repository","message"}.
 - report.json: write it once, at the end, following execution-report.schema.json in the same directory: {"outcome":"completed|no_work|needs_attention|failed","summary","lastOperation","workItems":[...],"warnings":[...]}. The summary is your answer to the task in a few sentences. Use no_work when nothing was eligible; it is not a failure.
-`, r.x.ID, attempt, r.x.Trigger, r.def.Metadata.ID, r.def.Spec.Type, r.work, r.dir)
+`)
 	if len(r.extra) > 0 {
 		b.WriteString("Repositories, by local path:\n")
 		for name, path := range r.repositoryPaths() {

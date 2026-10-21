@@ -66,7 +66,7 @@ What is still missing or needs a reviewer's decision.
 Managed by HarmFlow task <task-id> (execution <execution-id>).
 ```
 
-Then append:
+`<task-id>` and `<execution-id>` are `task.id` and `execution.id` in `context.json`. Then append:
 
 ```json
 {"type":"pull_request.created","workItem":"OWNER/REPO#123","url":"<url>","number":<n>,"branch":"<branch>"}

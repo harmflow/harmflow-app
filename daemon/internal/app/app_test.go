@@ -436,6 +436,74 @@ func TestQuotaFailover(t *testing.T) {
 	}
 }
 
+// HarmFlow's context never names the task, since a prompt may name the same thing as the task's id or name, and it
+// points at context.json only once the file holds a previous attempt, work items, or parameters.
+func TestContextNeverNamesTheTask(t *testing.T) {
+	e := newEnv(t)
+	if _, err := e.app.CreateTask(TaskInput{YAML: `apiVersion: harmflow/v1alpha1
+kind: Task
+metadata:
+  id: napoleon
+  name: Napoleon
+spec:
+  type: general
+  prompt: Who is the napoleon?
+  harness:
+    preferred:
+      provider: claude-code
+    fallback:
+      candidates:
+        - provider: codex
+`}); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var contexts []string
+	capture := func(req ports.RunRequest) {
+		mu.Lock()
+		contexts = append(contexts, req.Context)
+		mu.Unlock()
+	}
+	e.claude.setScript(func(req ports.RunRequest) string { capture(req); return "echo 'END quota'" })
+	e.codex.setScript(func(req ports.RunRequest) string {
+		capture(req)
+		return fmt.Sprintf(`printf '{"outcome":"completed","workItems":[{"key":"o/r#1"}]}' > %s/report.json; echo 'END ok'`,
+			req.ExecutionDir)
+	})
+	r, _ := e.app.RunTask("napoleon")
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	e.claude.setScript(func(req ports.RunRequest) string { capture(req); return "echo 'END ok'" })
+	r, _ = e.app.RunTask("napoleon")
+	e.wait(r.ExecutionID, domain.StatusCompleted)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(contexts) != 3 {
+		t.Fatalf("%d attempts, want 3", len(contexts))
+	}
+	// The default workspace is named after the task id, and the harness shows it as the working directory anyway.
+	first := strings.ReplaceAll(contexts[0], x.WorkspacePath, "")
+	if strings.Contains(strings.ToLower(first), "napoleon") || strings.Contains(first, "context.json") {
+		t.Errorf("the first attempt of a general task with no history names the task or context.json:\n%s", contexts[0])
+	}
+	if !strings.Contains(contexts[1], "context.json") {
+		t.Errorf("an attempt after a previous one does not point at context.json:\n%s", contexts[1])
+	}
+	if !strings.Contains(contexts[2], "context.json") {
+		t.Errorf("an execution of a task with work items does not point at context.json:\n%s", contexts[2])
+	}
+	// context.json still carries the task's identity for the skills that sign their work with it.
+	data, err := os.ReadFile(filepath.Join(x.ExecutionDir, "context.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Task struct{ ID string } `json:"task"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil || doc.Task.ID != "napoleon" {
+		t.Errorf("context.json task id %q (%v)", doc.Task.ID, err)
+	}
+}
+
 // A record is saved from a copy taken under the lock, since the executor may change it at the same time: a queued
 // firing is saved while the execution it waited for ends and starts it. go test -race catches an unlocked save.
 func TestSaveWhileTheExecutionChanges(t *testing.T) {
