@@ -276,6 +276,10 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 	}
 	args = append(args, "-")
 
+	req, err := deliverBuiltins(req)
+	if err != nil {
+		return ports.Invocation{}, nil, err
+	}
 	prompt, err := a.instructions(req)
 	if err != nil {
 		return ports.Invocation{}, nil, err
@@ -283,6 +287,37 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 	inv := ports.Invocation{Path: info.Path, Args: args, Env: req.Env, Dir: req.WorkDir, Stdin: prompt,
 		Restrictions: restrictions}
 	return inv, &parser{}, nil
+}
+
+// deliverBuiltins copies the built-in skills, and the built-in agents other than the main one (whose body the
+// instructions inline), into the execution's directory, and points the request at the copies, so an app update
+// during the execution cannot change what the session reads. The user's own items stay where they are.
+func deliverBuiltins(req ports.RunRequest) (ports.RunRequest, error) {
+	dir := filepath.Join(req.ExecutionDir, "codex-builtins")
+	skills := append([]ports.ResolvedItem{}, req.Skills...)
+	for i, s := range skills {
+		if !s.Builtin {
+			continue
+		}
+		dst := filepath.Join(dir, "skills", s.Name)
+		if err := catalog.CopyTree(s.Path, dst); err != nil {
+			return req, fmt.Errorf("delivering skill %s: %w", s.Name, err)
+		}
+		skills[i].Path = dst
+	}
+	agents := append([]ports.ResolvedItem{}, req.Agents...)
+	for i := 1; i < len(agents); i++ {
+		if !agents[i].Builtin {
+			continue
+		}
+		dst := filepath.Join(dir, "agents", agents[i].Name+".md")
+		if err := catalog.CopyTree(agents[i].Path, dst); err != nil {
+			return req, fmt.Errorf("delivering agent %s: %w", agents[i].Name, err)
+		}
+		agents[i].Path = dst
+	}
+	req.Skills, req.Agents = skills, agents
+	return req, nil
 }
 
 // instructions composes the session's input: HarmFlow's context, the agent's role, the skills to use, and the task's
