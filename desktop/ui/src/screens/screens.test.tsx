@@ -2,8 +2,10 @@
 import { renderToString } from "react-dom/server";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { Execution, ExecutionSummary, HarmflowEvent, Harness, Settings, TaskSummary, WorkItem } from "../api/types";
+import { RawCaptures } from "../components/ExecutionDetail";
 import { TaskForm } from "../components/TaskForm";
 import i18n from "../i18n";
+import { formatBytes } from "../lib/format";
 import { newTaskDocument } from "../lib/taskForm";
 import { patchStateForTests } from "../state/store";
 import { ExecutionsScreen } from "./ExecutionsScreen";
@@ -181,6 +183,28 @@ describe("screens", () => {
     expect(renderToString(<HistoryScreen openId={null} onOpen={() => {}} />)).toContain("Estado");
     expect(renderToString(<SettingsScreen />)).toContain("Agentes instalados");
     expect(renderToString(<OnboardingScreen onFinish={() => {}} onCreateTask={() => {}} onImport={() => {}} />)).toContain("Boas-vindas");
+  });
+
+  it("shows the harness's capture attempt by attempt, saying when its start is left out (FS-008 FR-008)", () => {
+    const MB = 1024 * 1024;
+    const html = renderToString(
+      <RawCaptures
+        output={{
+          logExpired: false,
+          attempts: [
+            { attempt: 1, harness: "claude-code", size: 3 * MB, offset: 2 * MB, text: "usage limit reached\n" },
+            { attempt: 2, harness: "codex", size: 26, offset: 0, text: "pushed with [REDACTED]\n" },
+          ],
+        }}
+      />,
+    );
+    expect(html).toContain("Tentativa 1 · Claude Code");
+    expect(html).toContain(`mostrando os últimos ${formatBytes(MB, "pt-BR")} de ${formatBytes(3 * MB, "pt-BR")}`);
+    expect(html).toContain("usage limit reached");
+    expect(html).toContain("Tentativa 2 · Codex");
+    expect(html).toContain("pushed with [REDACTED]");
+    const empty = { logExpired: false, attempts: [{ attempt: 1, harness: "codex", size: 0, offset: 0, text: "" }] };
+    expect(renderToString(<RawCaptures output={empty} />)).toContain("Nenhuma saída capturada ainda.");
   });
 
   it("asks for repositories only for the GitHub type (FS-001 FR-008)", () => {

@@ -124,6 +124,42 @@ func (a *App) GetExecution(id string) (ExecutionView, error) {
 	}, nil
 }
 
+// ExecutionOutput is what the harness printed, attempt by attempt, as captured and redacted (FS-008 FR-008).
+type ExecutionOutput struct {
+	Attempts   []AttemptOutput `json:"attempts"`
+	LogExpired bool            `json:"logExpired"`
+}
+
+type AttemptOutput struct {
+	Attempt int    `json:"attempt"`
+	Harness string `json:"harness"`
+	Size    int64  `json:"size"`
+	Offset  int64  `json:"offset"`
+	Text    string `json:"text"`
+}
+
+// ExecutionOutput reads the end of each attempt's capture, at most limit bytes of each.
+func (a *App) ExecutionOutput(id string, limit int64) (ExecutionOutput, error) {
+	a.mu.Lock()
+	x, ok := a.executions[id]
+	if !ok {
+		a.mu.Unlock()
+		return ExecutionOutput{}, errf(CodeNotFound, "no execution %s", id)
+	}
+	attempts := append([]domain.Attempt(nil), x.Attempts...)
+	out := ExecutionOutput{Attempts: []AttemptOutput{}, LogExpired: x.LogExpired}
+	a.mu.Unlock()
+	for _, at := range attempts {
+		c, err := a.d.Events.ReadRaw(id, at.Number, limit)
+		if err != nil {
+			return ExecutionOutput{}, err
+		}
+		out.Attempts = append(out.Attempts, AttemptOutput{Attempt: at.Number, Harness: at.Harness, Size: c.Size,
+			Offset: c.Offset, Text: c.Text})
+	}
+	return out, nil
+}
+
 type Activity struct {
 	Running   []int `json:"running"`
 	Queued    []int `json:"queued"`

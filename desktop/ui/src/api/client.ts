@@ -8,6 +8,7 @@ import type {
   CleanResult,
   Diagnostics,
   Execution,
+  ExecutionOutput,
   ExecutionSummary,
   FiringResult,
   Harness,
@@ -110,6 +111,8 @@ export const api = {
       "GET",
       `/executions/${enc(id)}/events${query({ after: after || undefined, limit })}`,
     ),
+  executionOutput: (id: string, limit?: number) =>
+    call<ExecutionOutput>("GET", `/executions/${enc(id)}/output${query({ limit })}`),
 
   queue: () => call<Queue>("GET", "/queue"),
 

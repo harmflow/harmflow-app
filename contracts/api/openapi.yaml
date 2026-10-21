@@ -472,6 +472,30 @@ paths:
                   logExpired: { type: boolean }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /executions/{executionId}/output:
+    parameters:
+      - $ref: "#/components/parameters/ExecutionId"
+    get:
+      tags: [executions]
+      operationId: getExecutionOutput
+      summary: The harness's raw output, one capture per attempt, redacted (FS-008 FR-008)
+      description: |
+        What the CLI printed on stdout and stderr, as the daemon captured it, with secrets masked. Each capture is the
+        end of its attempt's output, at most `limit` bytes, starting at a line. While the execution runs the captures
+        grow; ask again for a live view.
+      parameters:
+        - name: limit
+          in: query
+          description: Bytes of each attempt's capture to return, counted from its end.
+          schema: { type: integer, minimum: 1, maximum: 8388608, default: 1048576 }
+      responses:
+        "200":
+          description: One capture per attempt, in order; logExpired is true when retention removed them (D-073).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExecutionOutput" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /events/stream:
     get:
       tags: [events]
@@ -1012,6 +1036,23 @@ components:
                   attempt: { type: integer }
             lastOperation: { type: string }
             logExpired: { type: boolean }
+
+    ExecutionOutput:
+      type: object
+      required: [attempts, logExpired]
+      properties:
+        attempts: { type: array, items: { $ref: "#/components/schemas/AttemptOutput" } }
+        logExpired: { type: boolean }
+
+    AttemptOutput:
+      type: object
+      required: [attempt, harness, size, offset, text]
+      properties:
+        attempt: { type: integer }
+        harness: { type: string }
+        size: { type: integer, description: Bytes in the whole capture. }
+        offset: { type: integer, description: Where text starts in the capture; above 0 when its beginning is left out. }
+        text: { type: string }
 
     Event:
       description: contracts/schemas/event.schema.json.

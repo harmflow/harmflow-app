@@ -52,8 +52,17 @@ type EventLog interface {
 	Replay(executionID string, after int64, limit int) ([]domain.Event, bool, error)
 	Subscribe(after int64) (events <-chan domain.Event, replayGap bool, cancel func())
 	RawWriter(executionID string, attempt int) (io.WriteCloser, error)
+	// ReadRaw returns the end of an attempt's raw capture, at most limit bytes; a capture never written reads empty.
+	ReadRaw(executionID string, attempt int, limit int64) (RawCapture, error)
 	DeleteLog(executionID string) error
 	LogModTime(executionID string) (time.Time, bool)
+}
+
+// RawCapture is the end of one attempt's raw output: Text starts at byte Offset of a capture of Size bytes.
+type RawCapture struct {
+	Size   int64
+	Offset int64
+	Text   string
 }
 
 // SecretStore keeps the local API token in the operating system's credential store (D-090).

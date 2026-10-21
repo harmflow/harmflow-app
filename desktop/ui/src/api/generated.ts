@@ -427,6 +427,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/executions/{executionId}/output": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                executionId: components["parameters"]["ExecutionId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * The harness's raw output, one capture per attempt, redacted (FS-008 FR-008)
+         * @description What the CLI printed on stdout and stderr, as the daemon captured it, with secrets masked. Each capture is the
+         *     end of its attempt's output, at most `limit` bytes, starting at a line. While the execution runs the captures
+         *     grow; ask again for a live view.
+         */
+        get: operations["getExecutionOutput"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/events/stream": {
         parameters: {
             query?: never;
@@ -866,6 +890,19 @@ export interface components {
             }[];
             lastOperation?: string;
             logExpired?: boolean;
+        };
+        ExecutionOutput: {
+            attempts: components["schemas"]["AttemptOutput"][];
+            logExpired: boolean;
+        };
+        AttemptOutput: {
+            attempt: number;
+            harness: string;
+            /** @description Bytes in the whole capture. */
+            size: number;
+            /** @description Where text starts in the capture; above 0 when its beginning is left out. */
+            offset: number;
+            text: string;
         };
         /** @description contracts/schemas/event.schema.json. */
         Event: {
@@ -1658,6 +1695,32 @@ export interface operations {
                         events: components["schemas"]["Event"][];
                         logExpired: boolean;
                     };
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getExecutionOutput: {
+        parameters: {
+            query?: {
+                /** @description Bytes of each attempt's capture to return, counted from its end. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                executionId: components["parameters"]["ExecutionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One capture per attempt, in order; logExpired is true when retention removed them (D-073). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionOutput"];
                 };
             };
             404: components["responses"]["NotFound"];

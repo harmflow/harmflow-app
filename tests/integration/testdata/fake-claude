@@ -1,6 +1,6 @@
 #!/bin/bash
 # A stand-in for the Claude Code CLI that speaks its stream-json format. The task's prompt picks the scenario:
-# SCENARIO=ok (default), SCENARIO=quota, SCENARIO=slow, SCENARIO=report.
+# SCENARIO=ok (default), SCENARIO=quota, SCENARIO=slow, SCENARIO=report, SCENARIO=secret.
 case "$1" in
   --version) echo "2.1.239 (Claude Code)"; exit 0 ;;
   --help) cat <<'HELP'
@@ -33,6 +33,10 @@ case "$SCENARIO" in
     echo '{"type":"test.completed","status":"passed","message":"12 passed"}' >> "$HARMFLOW_EXECUTION_DIR/progress.jsonl"
     sleep 1.5
     printf '%s' '{"outcome":"completed","summary":"done","workItems":[{"key":"o/r#3","outcome":"completed","pullRequest":{"url":"https://github.com/o/r/pull/4","created":true,"draft":true},"tests":{"status":"passed"}}]}' > "$HARMFLOW_EXECUTION_DIR/report.json" ;;
+  secret)
+    TOKEN="ghp_$(printf 'x%.0s' {1..36})"
+    echo "warning: signing in with $TOKEN" >&2
+    echo '{"type":"assistant","message":{"content":[{"type":"text","text":"Pushed with '"$TOKEN"'"}]}}' ;;
 esac
 echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"echo hi","description":"Say hi"}}]}}'
 echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"hi","is_error":false}]}}'
