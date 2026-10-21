@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { HarmflowEvent } from "../api/types";
-import { buildTimeline, changedFilesFromEvents, currentStepFrom, rawLines } from "./timeline";
+import { buildTimeline, changedFilesFromEvents, currentStepFrom } from "./timeline";
 
 let nextId = 1;
 function ev(type: string, extra: Partial<HarmflowEvent> = {}): HarmflowEvent {
@@ -42,7 +42,6 @@ describe("buildTimeline", () => {
     const items = buildTimeline([b, raw, a]);
     expect(items.map((i) => i.event.type)).toEqual(["harness.started", "step.started"]);
     expect(items[1]).toMatchObject({ title: "Creating worktree", detail: "git worktree add ../123-agent" });
-    expect(rawLines([b, raw, a]).map((e) => e.message)).toEqual(["> Task :compileJava"]);
   });
 
   it("shows failovers and unenforced restrictions with their own tone", () => {

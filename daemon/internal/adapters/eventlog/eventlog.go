@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
+	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
 const ringSize = 20000
@@ -191,17 +192,54 @@ func (l *Log) Subscribe(after int64) (<-chan domain.Event, bool, func()) {
 	return ch, gap, cancel
 }
 
+func (l *Log) rawPath(executionID string, attempt int) string {
+	return filepath.Join(l.dir, executionID, "attempt-"+itoa(attempt)+".raw")
+}
+
 // RawWriter captures an attempt's raw output for diagnosis, redacted line by line.
 func (l *Log) RawWriter(executionID string, attempt int) (io.WriteCloser, error) {
-	dir := filepath.Join(l.dir, executionID)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	path := l.rawPath(executionID, attempt)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(filepath.Join(dir, "attempt-"+itoa(attempt)+".raw"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, err
 	}
 	return &redactingWriter{f: f}, nil
+}
+
+// ReadRaw reads the last limit bytes of an attempt's capture, from the start of a line. The text is redacted again,
+// whole, so a secret that spans lines is masked too.
+func (l *Log) ReadRaw(executionID string, attempt int, limit int64) (ports.RawCapture, error) {
+	f, err := os.Open(l.rawPath(executionID, attempt))
+	if errors.Is(err, os.ErrNotExist) {
+		return ports.RawCapture{}, nil
+	}
+	if err != nil {
+		return ports.RawCapture{}, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return ports.RawCapture{}, err
+	}
+	size, offset := info.Size(), int64(0)
+	if limit > 0 && size > limit {
+		offset = size - limit
+	}
+	data := make([]byte, size-offset)
+	n, err := f.ReadAt(data, offset)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return ports.RawCapture{}, err
+	}
+	data = data[:n]
+	if offset > 0 {
+		if i := bytes.IndexByte(data, '\n'); i >= 0 {
+			data, offset = data[i+1:], offset+int64(i+1)
+		}
+	}
+	return ports.RawCapture{Size: size, Offset: offset, Text: Redact(string(data))}, nil
 }
 
 // DeleteLog removes an execution's JSONL and raw output; the execution record is kept (D-073).
@@ -223,12 +261,16 @@ func (l *Log) LogModTime(executionID string) (time.Time, bool) {
 	return info.ModTime(), true
 }
 
+// redactingWriter is safe for concurrent use: the process's stdout and stderr are copied into it at the same time.
 type redactingWriter struct {
+	mu  sync.Mutex
 	f   *os.File
 	buf []byte
 }
 
 func (w *redactingWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	w.buf = append(w.buf, p...)
 	for {
 		i := bytes.IndexByte(w.buf, '\n')
@@ -244,6 +286,8 @@ func (w *redactingWriter) Write(p []byte) (int, error) {
 }
 
 func (w *redactingWriter) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if len(w.buf) > 0 {
 		_, _ = w.f.WriteString(Redact(string(w.buf)))
 	}

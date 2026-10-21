@@ -281,6 +281,8 @@ export const enUS = {
       logExpired: "This execution's log has expired under the retention period; its record is kept.",
       noEvents: "No events yet.",
       noRaw: "No output captured yet.",
+      rawAttempt: "Attempt {{number}} · {{harness}}",
+      rawTruncated: "… showing the last {{shown}} of {{size}}",
       noFiles: "No changed files identified.",
       noCommands: "No commands run.",
       noResults: "No results reported yet.",

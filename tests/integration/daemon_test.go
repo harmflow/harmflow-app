@@ -381,6 +381,37 @@ func TestRunStreamAndReplay(t *testing.T) {
 	}
 }
 
+// FS-008 AC-008: the raw output of a completed execution is what the CLI printed, stdout and stderr, with the token
+// it contained redacted.
+func TestRawOutputRedacted(t *testing.T) {
+	d := startDaemon(t, t.TempDir())
+	d.call("POST", "/tasks", map[string]any{"yaml": task("leaky", "SCENARIO=secret", "")}, 201)
+	id := d.call("POST", "/tasks/leaky/run", nil, 202)["executionId"].(string)
+	d.waitStatus(id, "completed")
+	out := d.call("GET", "/executions/"+id+"/output", nil, 200)
+	attempts, _ := out["attempts"].([]any)
+	if len(attempts) != 1 || out["logExpired"] != false {
+		t.Fatalf("output %v", out)
+	}
+	a := attempts[0].(map[string]any)
+	text, _ := a["text"].(string)
+	if a["attempt"] != float64(1) || a["harness"] != "claude-code" || a["offset"] != float64(0) {
+		t.Errorf("attempt %v harness %v offset %v", a["attempt"], a["harness"], a["offset"])
+	}
+	// The result line becomes events, never harness.output: finding it proves this is the capture.
+	for _, want := range []string{`"type":"result"`, "warning: signing in with [REDACTED]", "Pushed with [REDACTED]"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the capture lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "ghp_") {
+		t.Errorf("the token survived:\n%s", text)
+	}
+	if status, _ := d.request("GET", "/executions/no-such-execution/output", nil, nil); status != 404 {
+		t.Errorf("an unknown execution answered %d", status)
+	}
+}
+
 // FS-005 §5.1: Claude Code exhausts its quota; Codex finishes the same execution.
 func TestFailoverAcrossHarnesses(t *testing.T) {
 	d := startDaemon(t, t.TempDir())

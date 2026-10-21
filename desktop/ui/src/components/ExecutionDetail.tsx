@@ -2,12 +2,13 @@
 // results, and attempts (FS-008 FR-002, FR-008). Observe and cancel only — no input reaches the agent (FS-003 FR-003).
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { api } from "../api/client";
 import { native } from "../api/native";
-import type { Execution, ExecutionSummary, HarmflowEvent } from "../api/types";
+import type { Execution, ExecutionOutput, ExecutionSummary, HarmflowEvent } from "../api/types";
 import { isActive } from "../api/types";
-import { formatDateTime, formatDuration, formatElapsed, formatTime, elapsedMs } from "../lib/format";
+import { formatBytes, formatDateTime, formatDuration, formatElapsed, formatTime, elapsedMs } from "../lib/format";
 import { useNow } from "../lib/hooks";
-import { buildTimeline, changedFilesFromEvents, rawLines, toolKey, type TimelineItem } from "../lib/timeline";
+import { buildTimeline, changedFilesFromEvents, toolKey, type TimelineItem } from "../lib/timeline";
 import { actions, useStore } from "../state/store";
 import { useCancel } from "./ExecutionCard";
 import { HarnessLabel } from "./Shell";
@@ -36,7 +37,6 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
 
   const exec: (Execution | ExecutionSummary) | undefined = detail ?? summary;
   const timeline = useMemo(() => buildTimeline(events ?? []), [events]);
-  const raw = useMemo(() => rawLines(events ?? []), [events]);
   const files = useMemo(() => {
     const fromRecord = detail?.changedFiles ?? [];
     const merged = [...fromRecord];
@@ -136,7 +136,7 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
             <EventDetails item={selected} events={events ?? []} locale={i18n.language} />
           </div>
         ) : null}
-        {tab === "raw" ? <RawOutput lines={raw} fallback={events ?? []} locale={i18n.language} /> : null}
+        {tab === "raw" ? <RawOutput key={executionId} executionId={executionId} active={active} /> : null}
         {tab === "files" ? <FileList files={files} /> : null}
         {tab === "commands" ? <CommandList commands={commands} locale={i18n.language} /> : null}
         {tab === "results" ? <Results detail={detail} summary={exec} /> : null}
@@ -322,26 +322,77 @@ function EventDetails({ item, events, locale }: { item?: TimelineItem; events: H
   );
 }
 
-function RawOutput({ lines, fallback, locale }: { lines: HarmflowEvent[]; fallback: HarmflowEvent[]; locale: string }) {
-  const { t } = useTranslation();
-  const ref = useRef<HTMLPreElement | null>(null);
-  const shown = lines.length ? lines : fallback.filter((e) => e.message);
+const RAW_POLL_MS = 2000;
+
+/** Reads the capture from the daemon, and again every few seconds while the execution runs. */
+function RawOutput({ executionId, active }: { executionId: string; active: boolean }) {
+  const [output, setOutput] = useState<ExecutionOutput>();
   useEffect(() => {
-    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-  }, [shown.length]);
-  if (shown.length === 0) return <EmptyState icon="terminal" title={t("executions.detail.noRaw")} />;
-  const text = shown.map((e) => `${formatTime(e.timestamp, locale)}  ${e.message ?? ""}`).join("\n");
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = async () => {
+      // An unreachable daemon keeps the last capture shown; the next read retries.
+      const next = await api.executionOutput(executionId).catch(() => undefined);
+      if (stopped) return;
+      if (next) setOutput(next);
+      if (active) timer = setTimeout(() => void load(), RAW_POLL_MS);
+    };
+    void load();
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [executionId, active]);
+  return <RawCaptures output={output} />;
+}
+
+/** What the harness printed, attempt by attempt, as the daemon captured and redacted it (FS-008 FR-008). */
+export function RawCaptures({ output }: { output?: ExecutionOutput }) {
+  const { t, i18n } = useTranslation();
+  const ref = useRef<HTMLPreElement | null>(null);
+  // Follows the end of the output until the user scrolls up to read.
+  const following = useRef(true);
+  const captures = (output?.attempts ?? []).filter((c) => c.text !== "");
+  const text = captures.map((c) => c.text).join("\n");
+  useEffect(() => {
+    if (ref.current && following.current) ref.current.scrollTop = ref.current.scrollHeight;
+  }, [text]);
+  if (!output) return <EmptyState icon="terminal" title={t("common.loading")} />;
+  if (output.logExpired) return null; // the banner above says why
+  if (captures.length === 0) return <EmptyState icon="terminal" title={t("executions.detail.noRaw")} />;
+  const several = output.attempts.length > 1;
   return (
     <div className="codebox codebox--tall">
       <div className="codebox__tools">
         <CopyButton text={text} />
       </div>
-      <pre className="mono" ref={ref}>
-        {shown.map((e) => (
-          <span key={e.id} className={cx("raw-line", `raw-line--${e.severity}`)}>
-            <span className="raw-line__time">{formatTime(e.timestamp, locale)}</span>
-            {e.message ?? ""}
-            {"\n"}
+      <pre
+        className="mono"
+        ref={ref}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+        }}
+      >
+        {captures.map((c) => (
+          <span key={c.attempt} className="raw-attempt">
+            {several ? (
+              <span className="raw-note">
+                {t("executions.detail.rawAttempt", {
+                  number: c.attempt,
+                  harness: t(`harness.names.${c.harness}` as never, { defaultValue: c.harness }) as string,
+                })}
+              </span>
+            ) : null}
+            {c.offset > 0 ? (
+              <span className="raw-note">
+                {t("executions.detail.rawTruncated", {
+                  shown: formatBytes(c.size - c.offset, i18n.language),
+                  size: formatBytes(c.size, i18n.language),
+                })}
+              </span>
+            ) : null}
+            {c.text}
           </span>
         ))}
       </pre>

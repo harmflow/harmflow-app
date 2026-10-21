@@ -283,6 +283,8 @@ export const ptBR: Resources = {
       logExpired: "O log desta execução expirou pelo período de retenção; o registro dela é mantido.",
       noEvents: "Nenhum evento ainda.",
       noRaw: "Nenhuma saída capturada ainda.",
+      rawAttempt: "Tentativa {{number}} · {{harness}}",
+      rawTruncated: "… mostrando os últimos {{shown}} de {{size}}",
       noFiles: "Nenhum arquivo alterado identificado.",
       noCommands: "Nenhum comando executado.",
       noResults: "Nenhum resultado informado ainda.",

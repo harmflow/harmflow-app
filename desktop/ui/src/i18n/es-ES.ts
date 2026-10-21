@@ -283,6 +283,8 @@ export const esES: Resources = {
       logExpired: "El log de esta ejecución caducó por el periodo de retención; su registro se conserva.",
       noEvents: "Aún no hay eventos.",
       noRaw: "Aún no se capturó salida.",
+      rawAttempt: "Intento {{number}} · {{harness}}",
+      rawTruncated: "… se muestran los últimos {{shown}} de {{size}}",
       noFiles: "No se identificaron archivos cambiados.",
       noCommands: "No se ejecutaron comandos.",
       noResults: "Aún no se informaron resultados.",

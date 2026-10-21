@@ -1738,21 +1738,17 @@ li:last-child .tl-item__rail::before {
   text-align: left;
 }
 
-.raw-line {
+.raw-attempt {
   display: block;
 }
 
-.raw-line__time {
-  margin-right: var(--hf-space-3);
+.raw-attempt + .raw-attempt {
+  margin-top: var(--hf-space-3);
+}
+
+.raw-note {
+  display: block;
   color: var(--hf-color-text-faint);
-}
-
-.raw-line--warning {
-  color: var(--hf-color-warning);
-}
-
-.raw-line--error {
-  color: var(--hf-color-danger);
 }
 
 .file-list {

@@ -219,11 +219,6 @@ export function buildTimeline(events: readonly HarmflowEvent[]): TimelineItem[] 
   return items;
 }
 
-/** The raw capture of the harness, line by line, as it produced it. */
-export function rawLines(events: readonly HarmflowEvent[]): HarmflowEvent[] {
-  return [...events].filter((e) => e.type === "harness.output").sort((a, b) => a.id - b.id);
-}
-
 /** Files the events say changed, deduplicated, in order of first mention. */
 export function changedFilesFromEvents(events: readonly HarmflowEvent[]): string[] {
   const files: string[] = [];

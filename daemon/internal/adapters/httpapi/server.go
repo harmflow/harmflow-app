@@ -106,6 +106,7 @@ func (s *Server) Handler() http.Handler {
 	h("GET /api/v1/executions/{executionId}", s.getExecution)
 	h("POST /api/v1/executions/{executionId}/cancel", s.cancelExecution)
 	h("GET /api/v1/executions/{executionId}/events", s.executionEvents)
+	h("GET /api/v1/executions/{executionId}/output", s.executionOutput)
 	h("GET /api/v1/events/stream", s.stream)
 	h("GET /api/v1/queue", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.App.Queue()) })
 
@@ -424,6 +425,19 @@ func (s *Server) executionEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"events": events, "logExpired": expired})
+}
+
+func (s *Server) executionOutput(w http.ResponseWriter, r *http.Request) {
+	limit, _ := strconv.ParseInt(r.URL.Query().Get("limit"), 10, 64)
+	if limit <= 0 || limit > 8<<20 {
+		limit = 1 << 20
+	}
+	v, err := s.App.ExecutionOutput(r.PathValue("executionId"), limit)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, 200, v)
 }
 
 // stream serves the SSE stream: buffered events after Last-Event-ID first, then live ones, with a heartbeat.
