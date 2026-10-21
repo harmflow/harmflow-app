@@ -15,8 +15,9 @@ import { useCancel } from "./ExecutionCard";
 import { HarnessLabel } from "./Shell";
 import { Icon } from "./Icon";
 import { Banner, Button, Chip, CopyButton, EmptyState, KeyValue, StatusChip, Tabs, cx, type TabDef } from "./ui";
+import { CostsTabPrototype, prototypeCostsRequested } from "./prototype/costs/CostsTab.prototype";
 
-type TabKey = "events" | "raw" | "files" | "commands" | "results" | "attempts";
+type TabKey = "events" | "raw" | "files" | "commands" | "results" | "attempts" | "costs";
 
 const PROMINENT = new Set(["harness.switched", "policy.unenforced", "repository.unprotected", "harness.no_alternative"]);
 
@@ -25,7 +26,7 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
   const detail = useStore((s) => s.details[executionId]);
   const events = useStore((s) => s.events[executionId]);
   const logExpired = useStore((s) => s.logExpired[executionId]);
-  const [tab, setTab] = useState<TabKey>("events");
+  const [tab, setTab] = useState<TabKey>(() => (prototypeCostsRequested() ? "costs" : "events"));
   const [selectedEvent, setSelectedEvent] = useState<number | null>(null);
   const now = useNow(1000);
   const { cancel, pending } = useCancel();
@@ -68,6 +69,8 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
     { key: "commands", label: t("executions.detail.tabs.commands"), icon: "prompt", count: commands.length },
     { key: "results", label: t("executions.detail.tabs.results"), icon: "pr" },
     { key: "attempts", label: t("executions.detail.tabs.attempts"), icon: "layers", count: attempts.length },
+    // PROTOTYPE — the Costs tab, dev builds only.
+    ...(import.meta.env.DEV ? [{ key: "costs" as const, label: "Costs", icon: "coin" as const }] : []),
   ];
 
   // With nothing chosen, the details follow the latest step.
@@ -142,6 +145,9 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
         {tab === "commands" ? <CommandList commands={commands} locale={i18n.language} /> : null}
         {tab === "results" ? <Results detail={detail} summary={exec} /> : null}
         {tab === "attempts" ? <Attempts detail={detail} locale={i18n.language} now={now} /> : null}
+        {tab === "costs" ? (
+          <CostsTabPrototype executionId={executionId} recordAttempts={attempts} active={active} startedAt={exec.startedAt ?? exec.createdAt} locale={i18n.language} />
+        ) : null}
       </div>
       <p className="detail__footnote">
         <Icon name="shield" size={13} /> {t("executions.detail.noConversation")}
