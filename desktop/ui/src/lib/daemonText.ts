@@ -13,7 +13,7 @@ export interface DaemonText {
 export function daemonText({ message, messageKey, params }: DaemonText): string {
   if (!messageKey) return message;
   const key = `messages.${messageKey}`;
-  const values = nested(params);
+  const values = translateNested(params);
   // i18next picks a plural form only from a numeric count.
   const options = { ...values, count: values?.count === undefined ? undefined : Number(values.count) };
   return i18n.exists(key, options) ? String(i18n.t(key as never, options as never)) : message;
@@ -30,8 +30,8 @@ export function fieldText(message: string | undefined, messageKey?: MessageKey, 
 }
 
 // A param beside a `<name>Key` param quotes another of the daemon's texts, whose own params are named `<name>.<param>`:
-// it is translated in place.
-function nested(params?: MessageParams): MessageParams | undefined {
+// it is translated in place. A notice's params quote the event's message this way.
+export function translateNested(params?: MessageParams): MessageParams | undefined {
   if (!params) return params;
   const out: MessageParams = { ...params };
   for (const name of Object.keys(params)) {

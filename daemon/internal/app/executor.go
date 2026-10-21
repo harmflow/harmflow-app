@@ -109,14 +109,15 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 	if !r.setStatus(domain.StatusPreparing, domain.T("step_checking_harness", "Checking the harness")) {
 		return
 	}
-	status, reason := r.attempts(func() error {
+	status, reason := r.attempts(func(harness string) error {
 		started := a.now()
 		a.mu.Lock()
 		x.StartedAt = &started
 		x.TimeoutAt = &deadline
 		a.mu.Unlock()
 		r.setStatus(domain.StatusPreparing, domain.T("step_preparing_workspace", "Preparing the workspace"))
-		r.event(domain.Event{Type: domain.EventExecutionStarted, Message: def.Metadata.Name,
+		// No attempt exists yet to name the harness, so the event names it itself.
+		r.event(domain.Event{Type: domain.EventExecutionStarted, Harness: harness, Message: def.Metadata.Name,
 			Payload: map[string]any{"trigger": string(x.Trigger), "timeoutAt": deadline, "definitionRevision": rev}})
 		return r.prepare()
 	})
@@ -318,9 +319,9 @@ func (r *run) repositoryPaths() map[string]string {
 
 // attempts runs the harness chain: quota exhaustion and an unavailable harness switch to the next profile, a rate
 // limit retries on the same one, and everything shares the execution's one timeout (D-067). start runs once, when the
-// first harness of the chain is found ready, so an execution with none ready never starts (FS-004 FR-003). It
-// returns a terminal status when the attempts themselves decide it, or "" when the report decides.
-func (r *run) attempts(start func() error) (domain.ExecutionStatus, domain.Text) {
+// first harness of the chain is found ready, and is given that harness, so an execution with none ready never starts
+// (FS-004 FR-003). It returns a terminal status when the attempts themselves decide it, or "" when the report decides.
+func (r *run) attempts(start func(harness string) error) (domain.ExecutionStatus, domain.Text) {
 	a := r.a
 	chain, invalid := r.chain()
 	for _, w := range invalid {
@@ -348,7 +349,7 @@ func (r *run) attempts(start func() error) (domain.ExecutionStatus, domain.Text)
 				Payload: map[string]any{"readiness": info.Readiness}}.Says(end.Error))
 		} else {
 			if !started {
-				if err := start(); err != nil {
+				if err := start(profile.Provider); err != nil {
 					return domain.StatusFailed, domain.TextOf(err)
 				}
 				started = true

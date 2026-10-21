@@ -32,6 +32,12 @@ var failureEvents = map[string]bool{
 	domain.EventHarnessUnavailable: true, domain.EventHarnessNoAlternative: true,
 }
 
+// reasonParam names the param a notice's text reads the event's message from: why it failed, or why it was sent.
+var reasonParam = map[string]string{
+	domain.EventExecutionFailed: "error", domain.EventExecutionNeedsAttention: "reason",
+	domain.EventHarnessUnavailable: "reason", domain.EventHarnessNoAlternative: "reason",
+}
+
 // notifiable maps an emitted event to the notifiable event a task chooses (FS-011 FR-002).
 func notifiable(e domain.Event) string {
 	switch e.Type {
@@ -88,11 +94,20 @@ func (a *App) notifyFor(e domain.Event) {
 	if url, ok := e.Payload["pullRequestUrl"].(string); ok && url != "" {
 		n.Params["url"] = url
 	}
-	if e.Message != "" {
-		n.Params["detail"] = trimTo(e.Message, 300)
-	}
 	if e.Harness != "" {
 		n.Params["harness"] = e.Harness
+	}
+	if name := reasonParam[kind]; name != "" && e.Message != "" {
+		// A message the daemon wrote is nested with its key, so the desktop translates it in place; the agent's words
+		// have no key and are quoted as they are. Its params are trimmed like it, so a translated notice stays short.
+		said := domain.Text{Message: trimTo(e.Message, 300), Key: e.MessageKey, Params: map[string]string{}}
+		for k, v := range e.Params {
+			said.Params[k] = trimTo(v, 300)
+		}
+		n.Params = domain.Text{Params: n.Params}.Nest(name, said).Params
+	}
+	if summary, _ := e.Payload["summary"].(string); kind == domain.EventExecutionCompleted && summary != "" {
+		n.Params["summary"] = trimTo(summary, 300) // the agent's own summary
 	}
 	n.Title, n.Body = englishNotice(kind, doc.Metadata.Name, n.Params)
 	if failureEvents[kind] {
@@ -140,11 +155,11 @@ func englishNotice(kind, task string, p map[string]string) (string, string) {
 	case domain.EventExecutionCompleted:
 		return "Execution completed", task + " completed."
 	case domain.EventExecutionFailed:
-		return "Execution failed", task + " failed: " + p["detail"]
+		return "Execution failed", task + " failed: " + p["error"]
 	case domain.EventExecutionCancelled:
 		return "Execution cancelled", task + " was cancelled."
 	case domain.EventExecutionNeedsAttention:
-		return "Needs your attention", task + " needs a human to act: " + p["detail"]
+		return "Needs your attention", task + " needs a human to act: " + p["reason"]
 	case domain.EventPullRequestCreated:
 		return "Draft pull request created", task + " opened " + p["url"]
 	case domain.EventPullRequestUpdated:
@@ -152,9 +167,9 @@ func englishNotice(kind, task string, p map[string]string) (string, string) {
 	case domain.EventTestFailed:
 		return "Tests failed", task + ": tests failed and need review."
 	case domain.EventHarnessUnavailable:
-		return "Harness unavailable", task + ": " + p["detail"]
+		return "Harness unavailable", task + ": " + p["reason"]
 	case domain.EventHarnessNoAlternative:
-		return "No harness available", task + ": " + p["detail"]
+		return "No harness available", task + ": " + p["reason"]
 	}
 	return kind, task
 }
