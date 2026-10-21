@@ -63,6 +63,26 @@ func TestParseQuota(t *testing.T) {
 	}
 }
 
+// A 429 is a rate limit only as an HTTP status; elsewhere it is part of the task's own failure.
+func TestParseRateLimit(t *testing.T) {
+	cases := []struct {
+		text string
+		want domain.ErrorClass
+	}{
+		{"thread 'main' panicked at src/client.rs:429:13", domain.ClassTaskError},
+		{"could not push: the pull request for issue #429 already exists", domain.ClassTaskError},
+		{"tests failed: 429 passed, 3 failed", domain.ClassTaskError},
+		{"unexpected status 429", domain.ClassRateLimited},
+		{"429 Too Many Requests", domain.ClassRateLimited},
+	}
+	for _, c := range cases {
+		p := &parser{}
+		if end := p.Finish(1, c.text, false, false); end.Class != c.want {
+			t.Errorf("%q: got %s, want %s", c.text, end.Class, c.want)
+		}
+	}
+}
+
 // D-068: Codex's sandbox enforces the workspace and the network; per-tool lists it cannot enforce are named.
 func TestPrepareSandbox(t *testing.T) {
 	a := &Adapter{Home: t.TempDir()}
