@@ -72,7 +72,7 @@ export function App() {
   useEffect(() => {
     setNotificationHandler((n) => {
       const text = noticeText(t, n);
-      void native.notify(text.title, text.body);
+      void native.notify(text.title, text.body, n.executionId);
     });
   }, [t]);
 

@@ -90,10 +90,11 @@ export const native = {
     return (await n.requestPermission()) === "granted";
   },
 
-  async notify(title: string, body: string): Promise<void> {
+  /** A click on the notice opens the execution it names; the shell handles the click (FS-011 FR-003). */
+  async notify(title: string, body: string, executionId?: string): Promise<void> {
     if (!isTauri()) return;
     const n = await import("@tauri-apps/plugin-notification");
-    if (await n.isPermissionGranted()) n.sendNotification({ title, body });
+    if (await n.isPermissionGranted()) n.sendNotification({ title, body, extra: executionId ? { executionId } : undefined });
   },
 
   async onNavigate(handler: (target: { executionId?: string; screen?: string }) => void): Promise<() => void> {
