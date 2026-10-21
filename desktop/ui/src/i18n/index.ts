@@ -19,7 +19,7 @@ export const resources = {
 declare module "i18next" {
   interface CustomTypeOptions {
     defaultNS: "translation";
-    resources: { translation: Omit<typeof enUS, "messages" | "cronFields" | "itemSource"> };
+    resources: { translation: Omit<typeof enUS, "messages" | "cronFields" | "itemSource" | "errorClass"> };
   }
 }
 

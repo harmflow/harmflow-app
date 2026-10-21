@@ -31,10 +31,32 @@ func TestTextRendersItsTemplate(t *testing.T) {
 	}
 }
 
+// A text that quotes another the daemon wrote keeps the quoted one's key and params, under the param's name, at every
+// depth; a harness's own error is quoted as it is.
+func TestTextNestsAnotherText(t *testing.T) {
+	signedOut := T("claude_not_signed_in", "Claude Code is not signed in")
+	unavailable := T("harness_unavailable", "{{harness}} is unavailable: {{detail}}", "harness", "Claude Code").
+		Nest("detail", signedOut)
+	failed := T("no_alternative_harness_detail", "{{harness}} cannot continue: {{detail}}", "harness", "Codex").
+		Nest("detail", unavailable)
+	if want := "Codex cannot continue: Claude Code is unavailable: Claude Code is not signed in"; failed.Message != want {
+		t.Errorf("message %q, want %q", failed.Message, want)
+	}
+	if p := failed.Params; p["detailKey"] != "harness_unavailable" || p["detail.harness"] != "Claude Code" ||
+		p["detail.detailKey"] != "claude_not_signed_in" || p["harness"] != "Codex" {
+		t.Errorf("params %v", p)
+	}
+	quoted := T("harness_unavailable", "{{harness}} is unavailable: {{detail}}", "harness", "Codex").
+		Nest("detail", Text{Message: "error: {{detail}} 429"})
+	if _, keyed := quoted.Params["detailKey"]; keyed || quoted.Message != "Codex is unavailable: error: {{detail}} 429" {
+		t.Errorf("a harness's own error: %+v", quoted)
+	}
+}
+
 // FS-012 FR-005: every key the daemon writes is one the contract declares, so the desktop has a text for it, and the
 // contract declares no key the daemon never writes.
 func TestMessageKeysMatchTheContract(t *testing.T) {
-	used := keysInSource(t, "..")
+	used := keysInSource(t, "../..")
 	data, err := os.ReadFile("../../../contracts/api/openapi.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -73,7 +95,7 @@ func TestMessageKeysMatchTheContract(t *testing.T) {
 	}
 }
 
-// keysInSource collects the literal key of every T and TextErr call in the daemon's non-test code.
+// keysInSource collects the literal key of every T and TextErr call in the daemon's non-test code, its command too.
 func keysInSource(t *testing.T, root string) map[string]bool {
 	keys := map[string]bool{}
 	fset := token.NewFileSet()

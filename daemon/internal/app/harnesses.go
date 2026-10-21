@@ -24,9 +24,10 @@ func (a *App) Harnesses() []ports.HarnessInfo {
 			out = append(out, info)
 		} else {
 			ad := a.adapters[id]
-			out = append(out, ports.HarnessInfo{ID: id, Name: ad.Name(), Authentication: "unknown", Readiness: "not_installed",
-				Installations: []string{}, Models: []ports.ModelInfo{}, Efforts: []string{}, EnforceableControls: []string{},
-				Diagnostic: "detection is running"})
+			info := ports.HarnessInfo{ID: id, Name: ad.Name(), Authentication: "unknown", Readiness: "not_installed",
+				Installations: []string{}, Models: []ports.ModelInfo{}, Efforts: []string{}, EnforceableControls: []string{}}
+			info.SetDiagnostic(domain.T("detection_running", "detection is running"))
+			out = append(out, info)
 		}
 	}
 	return out

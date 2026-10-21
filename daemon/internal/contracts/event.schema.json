@@ -22,10 +22,23 @@
     "type": { "$ref": "#/$defs/eventType" },
     "severity": { "type": "string", "enum": ["debug", "info", "warning", "error"] },
     "message": {
-      "description": "Short text in its original language: agent text and tool output are never translated (FS-012 FR-005). The dashboard translates the label of the type.",
+      "description": "Short text: the daemon's own in en-US, beside its messageKey, or the agent's text and tool output in their original language, which are never translated (FS-012 FR-005). The dashboard translates the label of the type.",
       "type": "string"
     },
-    "payload": { "type": "object" }
+    "messageKey": {
+      "description": "One of MessageKey in contracts/api/openapi.yaml: the dashboard shows the message in the interface's language from it and params (D-099).",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "params": {
+      "description": "The values of the messageKey's text, all strings (MessageParams in contracts/api/openapi.yaml).",
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "payload": {
+      "description": "An error in the payload is a text too: error in en-US, with errorKey and errorParams beside it.",
+      "type": "object"
+    }
   },
   "$defs": {
     "eventType": {

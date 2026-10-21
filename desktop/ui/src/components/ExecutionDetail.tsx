@@ -4,9 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
 import { native } from "../api/native";
-import type { Execution, ExecutionOutput, ExecutionSummary, HarmflowEvent } from "../api/types";
+import type { Execution, ExecutionOutput, ExecutionSummary, HarmflowEvent, MessageKey, MessageParams } from "../api/types";
 import { isActive } from "../api/types";
-import { daemonText } from "../lib/daemonText";
+import { daemonText, eventText, fieldText } from "../lib/daemonText";
 import { formatBytes, formatDateTime, formatDuration, formatElapsed, formatTime, elapsedMs } from "../lib/format";
 import { useNow } from "../lib/hooks";
 import { buildTimeline, changedFilesFromEvents, toolKey, type TimelineItem } from "../lib/timeline";
@@ -37,7 +37,8 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
   }, [executionId]);
 
   const exec: (Execution | ExecutionSummary) | undefined = detail ?? summary;
-  const timeline = useMemo(() => buildTimeline(events ?? []), [events]);
+  // The daemon's messages are translated as the timeline is built, so it is rebuilt when the language changes.
+  const timeline = useMemo(() => buildTimeline(events ?? []), [events, i18n.language]);
   const files = useMemo(() => {
     const fromRecord = detail?.changedFiles ?? [];
     const merged = [...fromRecord];
@@ -121,7 +122,7 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
           {prominent.slice(-3).map((e) => (
             <Banner key={e.id} tone={e.type === "harness.switched" ? "magenta" : e.type === "harness.no_alternative" ? "danger" : "warning"} icon={e.type === "harness.switched" ? "switch" : "shield"}>
               <strong>{t(`eventTypes.${e.type}` as never, { defaultValue: e.type }) as string}</strong>
-              {e.message ? <span className="mono"> — {e.message}</span> : null}
+              {e.message ? <span className="mono"> — {eventText(e)}</span> : null}
             </Banner>
           ))}
         </div>
@@ -252,13 +253,19 @@ function Timeline({
 function outputFor(item: TimelineItem, events: HarmflowEvent[]): string | undefined {
   const p = (item.event.payload ?? {}) as Record<string, unknown>;
   const pick = (o: Record<string, unknown>) =>
-    [o.output, o.result, o.stdout, o.text, o.error].find((v): v is string => typeof v === "string" && v !== "");
+    [o.output, o.result, o.stdout, o.text, payloadError(o)].find((v): v is string => typeof v === "string" && v !== "");
   if (item.event.type === "tool.started") {
     const key = toolKey(item.event);
     const done = key ? events.find((e) => e.type === "tool.completed" && toolKey(e) === key) : undefined;
-    if (done) return pick((done.payload ?? {}) as Record<string, unknown>) ?? done.message;
+    if (done) return pick((done.payload ?? {}) as Record<string, unknown>) ?? eventText(done);
   }
   return pick(p) ?? (item.event.type === "harness.message" ? item.event.message : undefined);
+}
+
+/** A payload's error: the daemon's text in the interface's language, a harness's own error as it is. */
+function payloadError(p: Record<string, unknown>): string | undefined {
+  if (typeof p.error !== "string") return undefined;
+  return daemonText({ message: p.error, messageKey: p.errorKey as MessageKey | undefined, params: p.errorParams as MessageParams | undefined });
 }
 
 function EventDetails({ item, events, locale }: { item?: TimelineItem; events: HarmflowEvent[]; locale: string }) {
@@ -452,7 +459,7 @@ function Results({ detail, summary }: { detail?: Execution; summary: ExecutionSu
   const { t } = useTranslation();
   const items = detail?.workItems ?? [];
   const warnings = detail?.warnings ?? [];
-  if (!items.length && !summary.summary && !summary.pullRequestUrl && !warnings.length && !detail?.lastOperation) {
+  if (!items.length && !summary.summary && !summary.errorMessage && !summary.pullRequestUrl && !warnings.length && !detail?.lastOperation) {
     return <EmptyState icon="pr" title={t("executions.detail.noResults")} />;
   }
   return (
@@ -465,7 +472,7 @@ function Results({ detail, summary }: { detail?: Execution; summary: ExecutionSu
       ) : null}
       {summary.errorMessage ? (
         <Banner tone="danger" icon="x">
-          <span className="mono">{summary.errorMessage}</span>
+          <span className="mono">{fieldText(summary.errorMessage, summary.errorKey, summary.errorParams)}</span>
         </Banner>
       ) : null}
       {items.map((w) => (
@@ -546,11 +553,14 @@ function Attempts({ detail, locale, now }: { detail?: Execution; locale: string;
               [t("executions.detail.model"), <span className="mono">{a.model}</span>],
               [t("executions.detail.effort"), <span className="mono">{a.effort}</span>],
               [t("executions.detail.harnessVersion"), a.harnessVersion ? <span className="mono">{a.harnessVersion}</span> : null],
-              [t("executions.detail.reason"), a.reason ?? null],
+              [t("executions.detail.reason"), fieldText(a.reason, a.reasonKey, a.reasonParams) ?? null],
               [t("executions.detail.started"), formatDateTime(a.startedAt, locale)],
               [t("executions.detail.duration"), formatElapsed(a.startedAt, a.endedAt, now)],
               [t("executions.detail.exitCode"), a.exitCode !== undefined ? <span className="mono">{a.exitCode}</span> : null],
-              [t("executions.detail.error"), a.errorMessage ? <span className="mono">{a.errorMessage}</span> : null],
+              [
+                t("executions.detail.error"),
+                a.errorMessage ? <span className="mono">{fieldText(a.errorMessage, a.errorKey, a.errorParams)}</span> : null,
+              ],
             ]}
           />
         </li>

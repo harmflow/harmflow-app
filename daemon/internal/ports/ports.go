@@ -83,23 +83,35 @@ type HostServiceManager interface {
 
 // HarnessInfo is what detection found (FS-004 FR-006, FR-007).
 type HarnessInfo struct {
-	ID                  string          `json:"id"`
-	Name                string          `json:"name"`
-	Detected            bool            `json:"detected"`
-	Path                string          `json:"path,omitempty"`
-	PathSource          string          `json:"pathSource,omitempty"`
-	Installations       []string        `json:"installations"`
-	Version             string          `json:"version,omitempty"`
-	VersionSupport      string          `json:"versionSupport,omitempty"`
-	Authentication      string          `json:"authentication"`
-	Readiness           string          `json:"readiness"`
-	Models              []ModelInfo     `json:"models"`
-	Efforts             []string        `json:"efforts"`
-	CapabilitySource    string          `json:"capabilitySource,omitempty"`
-	EnforceableControls []string        `json:"enforceableControls"`
-	LastCheckedAt       time.Time       `json:"lastCheckedAt"`
-	Diagnostic          string          `json:"diagnostic,omitempty"`
-	Features            map[string]bool `json:"-"`
+	ID                  string            `json:"id"`
+	Name                string            `json:"name"`
+	Detected            bool              `json:"detected"`
+	Path                string            `json:"path,omitempty"`
+	PathSource          string            `json:"pathSource,omitempty"`
+	Installations       []string          `json:"installations"`
+	Version             string            `json:"version,omitempty"`
+	VersionSupport      string            `json:"versionSupport,omitempty"`
+	Authentication      string            `json:"authentication"`
+	Readiness           string            `json:"readiness"`
+	Models              []ModelInfo       `json:"models"`
+	Efforts             []string          `json:"efforts"`
+	CapabilitySource    string            `json:"capabilitySource,omitempty"`
+	EnforceableControls []string          `json:"enforceableControls"`
+	LastCheckedAt       time.Time         `json:"lastCheckedAt"`
+	Diagnostic          string            `json:"diagnostic,omitempty"`
+	DiagnosticKey       string            `json:"diagnosticKey,omitempty"`
+	DiagnosticParams    map[string]string `json:"diagnosticParams,omitempty"`
+	Features            map[string]bool   `json:"-"`
+}
+
+// SetDiagnostic records what is wrong with the harness; Diagnostic is the en-US text (FS-012 FR-005).
+func (h *HarnessInfo) SetDiagnostic(t domain.Text) {
+	h.Diagnostic, h.DiagnosticKey, h.DiagnosticParams = t.Message, t.Key, t.Params
+}
+
+// DiagnosticText is the text SetDiagnostic recorded.
+func (h HarnessInfo) DiagnosticText() domain.Text {
+	return domain.Text{Key: h.DiagnosticKey, Params: h.DiagnosticParams, Message: h.Diagnostic}
 }
 
 type ModelInfo struct {
@@ -212,10 +224,17 @@ type ToolProber interface {
 }
 
 type ToolInfo struct {
-	ID             string `json:"id"`
-	Detected       bool   `json:"detected"`
-	Path           string `json:"path,omitempty"`
-	Version        string `json:"version,omitempty"`
-	Authentication string `json:"authentication,omitempty"`
-	Diagnostic     string `json:"diagnostic,omitempty"`
+	ID               string            `json:"id"`
+	Detected         bool              `json:"detected"`
+	Path             string            `json:"path,omitempty"`
+	Version          string            `json:"version,omitempty"`
+	Authentication   string            `json:"authentication,omitempty"`
+	Diagnostic       string            `json:"diagnostic,omitempty"`
+	DiagnosticKey    string            `json:"diagnosticKey,omitempty"`
+	DiagnosticParams map[string]string `json:"diagnosticParams,omitempty"`
+}
+
+// SetDiagnostic records what is wrong with the tool; Diagnostic is the en-US text (FS-012 FR-005).
+func (t *ToolInfo) SetDiagnostic(text domain.Text) {
+	t.Diagnostic, t.DiagnosticKey, t.DiagnosticParams = text.Message, text.Key, text.Params
 }

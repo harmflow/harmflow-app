@@ -577,11 +577,11 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
-         * @description Names a text the daemon writes for the user. The desktop shows it in the interface's language, filling it with its params; the message beside it is the same text in en-US, shown for a key the desktop does not know (FS-012 FR-005). The agent's text, tool output, and a tool's own error get no key and stay as they are.
+         * @description Names a text the daemon writes for the user. The desktop shows it in the interface's language, filling it with its params; the message beside it is the same text in en-US, shown for a key the desktop does not know (FS-012 FR-005). The agent's text, tool output, and a tool's own error get no key and stay as they are. A text is a message with messageKey and params, or a field such as errorMessage with errorKey and errorParams.
          * @enum {string}
          */
-        MessageKey: "host_forbidden" | "origin_forbidden" | "token_required" | "route_not_found" | "body_not_json" | "task_not_found" | "execution_not_found" | "harness_not_found" | "task_exists" | "task_file_exists" | "base_revision_required" | "task_changed_on_disk" | "task_invalid" | "task_disabled" | "task_being_deleted" | "daemon_stopping" | "execution_ended" | "executions_running" | "harness_path_not_absolute" | "harness_path_not_executable" | "settings_language_invalid" | "settings_notification_level_invalid" | "settings_log_retention_invalid" | "settings_path_variable_invalid" | "yaml_syntax" | "document_empty" | "document_not_json" | "document_not_representable" | "task_input_missing" | "schema_type" | "schema_const" | "schema_enum" | "schema_required" | "schema_additional_properties" | "schema_pattern" | "schema_min_length" | "schema_max_length" | "schema_minimum" | "schema_maximum" | "schema_min_items" | "schema_unique_items" | "schema_not" | "id_immutable" | "id_file_mismatch" | "task_file_invalid" | "schedule_missing" | "schedule_empty" | "schedule_cron_and_interval" | "timezone_unknown" | "interval_invalid" | "interval_unit_invalid" | "cron_seconds" | "cron_field_count" | "cron_step_invalid" | "cron_value_invalid" | "cron_value_out_of_range" | "harness_unknown" | "claude_model_unknown" | "claude_effort_unsupported" | "claude_effort_invalid" | "codex_model_unknown" | "codex_effort_invalid" | "harness_not_detected" | "harness_not_ready" | "agent_not_found" | "skill_not_found" | "agent_missing" | "skill_missing" | "fallback_agent_missing" | "fallback_skill_missing" | "fallback_repeats_preferred" | "path_variable_unterminated" | "path_variable_undefined" | "local_path_missing" | "restriction_claude_shell_workspace" | "restriction_claude_shell_network" | "restriction_codex_tool_lists" | "harness_version_untested" | "repository_unprotected" | "report_not_json" | "report_schema_invalid";
-        /** @description Values the desktop interpolates into the translated text of a messageKey; a count param picks its plural form. */
+        MessageKey: "host_forbidden" | "origin_forbidden" | "token_required" | "route_not_found" | "body_not_json" | "task_not_found" | "execution_not_found" | "harness_not_found" | "task_exists" | "task_file_exists" | "base_revision_required" | "task_changed_on_disk" | "task_invalid" | "task_disabled" | "task_being_deleted" | "daemon_stopping" | "execution_ended" | "executions_running" | "harness_path_not_absolute" | "harness_path_not_executable" | "settings_language_invalid" | "settings_notification_level_invalid" | "settings_log_retention_invalid" | "settings_path_variable_invalid" | "yaml_syntax" | "document_empty" | "document_not_json" | "document_not_representable" | "task_input_missing" | "schema_type" | "schema_const" | "schema_enum" | "schema_required" | "schema_additional_properties" | "schema_pattern" | "schema_min_length" | "schema_max_length" | "schema_minimum" | "schema_maximum" | "schema_min_items" | "schema_unique_items" | "schema_not" | "id_immutable" | "id_file_mismatch" | "task_file_invalid" | "schedule_missing" | "schedule_empty" | "schedule_cron_and_interval" | "timezone_unknown" | "interval_invalid" | "interval_unit_invalid" | "cron_seconds" | "cron_field_count" | "cron_step_invalid" | "cron_value_invalid" | "cron_value_out_of_range" | "harness_unknown" | "claude_model_unknown" | "claude_effort_unsupported" | "claude_effort_invalid" | "codex_model_unknown" | "codex_effort_invalid" | "harness_not_detected" | "harness_not_ready" | "agent_not_found" | "skill_not_found" | "agent_missing" | "skill_missing" | "fallback_agent_missing" | "fallback_skill_missing" | "fallback_repeats_preferred" | "path_variable_unterminated" | "path_variable_undefined" | "local_path_missing" | "restriction_claude_shell_workspace" | "restriction_claude_shell_network" | "restriction_codex_tool_lists" | "harness_version_untested" | "repository_unprotected" | "report_not_json" | "report_schema_invalid" | "step_checking_harness" | "step_preparing_workspace" | "step_starting_harness" | "step_switching_harness" | "step_waiting_rate_limit" | "attempt_first" | "attempt_rate_limit_retry" | "attempt_failover" | "daemon_started" | "daemon_signal" | "daemon_stop_requested" | "local_api_stopped" | "task_delete_pending" | "task_changed_externally" | "task_changed_externally_invalid" | "task_removed_externally" | "task_was_disabled" | "task_was_deleted" | "task_file_removed" | "task_gone" | "firing_queued" | "firing_coalesced" | "firing_skipped" | "firings_missed_catch_up" | "firings_missed_skipped" | "cancel_requested" | "cancelled_before_start" | "execution_cancelled" | "execution_timed_out" | "execution_status" | "daemon_stopped_execution" | "execution_dir_failed" | "workspace_create_failed" | "repository_path_missing" | "context_write_failed" | "harness_started" | "harness_session" | "harness_exited" | "harness_exit_code" | "harness_start_failed" | "harness_ended_with_error" | "harness_unavailable" | "harness_unavailable_readiness" | "harness_rate_limited" | "harness_quota_exhausted" | "harness_switched" | "no_alternative_harness" | "no_alternative_harness_detail" | "skill_delivery_failed" | "agent_delivery_failed" | "tool_succeeded" | "tool_failed" | "tests_failed" | "detection_running" | "harness_manual_path_invalid" | "claude_not_found" | "codex_not_found" | "git_not_found" | "gh_not_found" | "command_failed" | "harness_feature_missing" | "claude_not_signed_in" | "not_signed_in" | "authentication_unverified" | "gh_auth_problem";
+        /** @description Values the desktop interpolates into the translated text of a messageKey; a count param picks its plural form. A param that quotes another text the daemon wrote has a param named after it with Key appended, its key, and params prefixed with its name and a dot, its params, so it is translated in place too. */
         MessageParams: {
             [key: string]: string;
         };
@@ -681,7 +681,10 @@ export interface components {
             enforceableControls?: string[];
             /** Format: date-time */
             lastCheckedAt: string;
+            /** @description What is wrong with the harness, in en-US. */
             diagnostic?: string;
+            diagnosticKey?: components["schemas"]["MessageKey"];
+            diagnosticParams?: components["schemas"]["MessageParams"];
         };
         Tool: {
             /** @enum {string} */
@@ -691,7 +694,10 @@ export interface components {
             version?: string;
             /** @enum {string} */
             authentication?: "valid" | "invalid" | "unknown";
+            /** @description What is wrong with the tool, in en-US. */
             diagnostic?: string;
+            diagnosticKey?: components["schemas"]["MessageKey"];
+            diagnosticParams?: components["schemas"]["MessageParams"];
         };
         CatalogEntry: {
             name: string;
@@ -828,9 +834,14 @@ export interface components {
             outcome?: "running" | "succeeded" | "failed" | "quota_exhausted" | "rate_limited" | "harness_unavailable" | "timed_out" | "cancelled" | "interrupted";
             exitCode?: number;
             sessionId?: string;
+            /** @description Why the attempt ended: the daemon's text in en-US, or the harness's own error, which has no errorKey. */
             errorMessage?: string;
-            /** @description Why the attempt started — first */
+            errorKey?: components["schemas"]["MessageKey"];
+            errorParams?: components["schemas"]["MessageParams"];
+            /** @description Why the attempt started — first, failover, rate-limit retry — in en-US. */
             reason?: string;
+            reasonKey?: components["schemas"]["MessageKey"];
+            reasonParams?: components["schemas"]["MessageParams"];
         };
         WorkItemResult: {
             key: string;
@@ -872,15 +883,20 @@ export interface components {
             harness: string;
             model?: string;
             attemptCount?: number;
-            /** @description The latest step; no percentage is invented (FS-008 FR-009). */
+            /** @description The latest step; no percentage is invented (FS-008 FR-009). The daemon's own step is in en-US, beside its currentStepKey; the agent's and a tool's have none. */
             currentStep?: string;
+            currentStepKey?: components["schemas"]["MessageKey"];
+            currentStepParams?: components["schemas"]["MessageParams"];
             repository?: string;
             workItem?: string;
             pullRequestUrl?: string;
             /** @enum {string} */
             testsStatus?: "passed" | "failed" | "not_run";
             summary?: string;
+            /** @description Why the execution ended: the daemon's text in en-US, or the agent's or harness's own words, which have no errorKey. */
             errorMessage?: string;
+            errorKey?: components["schemas"]["MessageKey"];
+            errorParams?: components["schemas"]["MessageParams"];
             warningCount?: number;
         };
         Execution: components["schemas"]["ExecutionSummary"] & {
@@ -939,7 +955,11 @@ export interface components {
             type: string;
             /** @enum {string} */
             severity: "debug" | "info" | "warning" | "error";
+            /** @description The daemon's text in en-US, or the agent's or a tool's own words, which have no messageKey. */
             message?: string;
+            messageKey?: components["schemas"]["MessageKey"];
+            params?: components["schemas"]["MessageParams"];
+            /** @description An error in the payload is a text too, with errorKey and errorParams beside it. */
             payload?: {
                 [key: string]: unknown;
             };

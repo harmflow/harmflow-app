@@ -55,7 +55,9 @@ func (f *fakeHarness) Detect(context.Context, string) ports.HarnessInfo {
 	info := ports.HarnessInfo{ID: f.id, Name: f.id, Detected: true, Path: "/bin/sh", Version: "1.0.0",
 		Authentication: "valid", Readiness: "ready", Models: []ports.ModelInfo{{ID: "default"}}, Efforts: []string{"default"}}
 	if f.unavailable {
-		info.Readiness, info.Authentication, info.Diagnostic = "not_ready", "invalid", "signed out"
+		info.Readiness, info.Authentication = "not_ready", "invalid"
+		info.SetDiagnostic(domain.T("not_signed_in", "{{name}} is not signed in; run `{{command}}` in a terminal",
+			"name", f.id, "command", "login"))
 	}
 	return info
 }
@@ -108,11 +110,11 @@ func (p *fakeParser) Finish(exit int, _ string, timedOut, cancelled bool) domain
 	case "ok":
 		return domain.AttemptEnd{FinalText: "done"}
 	case "quota":
-		return domain.AttemptEnd{Class: domain.ClassQuotaExhausted, Message: "usage limit reached"}
+		return domain.AttemptEnd{Class: domain.ClassQuotaExhausted, Error: domain.Text{Message: "usage limit reached"}}
 	case "rate":
-		return domain.AttemptEnd{Class: domain.ClassRateLimited, Message: "429", RetryAfter: 10 * time.Millisecond}
+		return domain.AttemptEnd{Class: domain.ClassRateLimited, Error: domain.Text{Message: "429"}, RetryAfter: 10 * time.Millisecond}
 	}
-	return domain.AttemptEnd{Class: domain.ClassTaskError, Message: fmt.Sprintf("exit %d", exit)}
+	return domain.AttemptEnd{Class: domain.ClassTaskError, Error: domain.Text{Message: fmt.Sprintf("exit %d", exit)}}
 }
 
 // hookedEvents runs the test's hook on each event before it is appended, on the goroutine that emits it.
@@ -177,7 +179,7 @@ func newEnv(t *testing.T) *env {
 	if err := a.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { a.Stop("test done") })
+	t.Cleanup(func() { a.Stop(domain.Text{Message: "test done"}) })
 	return e
 }
 
@@ -713,6 +715,82 @@ func TestMessagesCarryKeys(t *testing.T) {
 		ae.Message != "the execution already ended as completed" {
 		t.Errorf("cancelling an ended execution: %#v", err)
 	}
+}
+
+// FS-012 FR-005: what the daemon writes about an execution — its events, its error and its attempts' errors and reasons,
+// its step — carries a key, and a text it quotes keeps its own; the agent's words and a harness's own error carry none.
+func TestExecutionTextsCarryKeys(t *testing.T) {
+	e := newEnv(t)
+	e.create("keyed", "    fallback:\n      candidates:\n        - provider: codex\n")
+	e.claude.setScript(func(ports.RunRequest) string { return "echo 'agent words'; echo 'END quota'" })
+	e.codex.setScript(func(ports.RunRequest) string { return "echo 'END ok'" })
+	r, _ := e.app.RunTask("keyed")
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	first, second := x.Attempts[0], x.Attempts[1]
+	if first.ReasonKey != "attempt_first" || first.ErrorKey != "" || first.ErrorMessage != "usage limit reached" {
+		t.Errorf("first attempt: %+v", first)
+	}
+	if second.ReasonKey != "attempt_failover" || second.ReasonParams["errorClass"] != "quota_exhausted" ||
+		second.Reason != "failover after quota exhausted" {
+		t.Errorf("second attempt: %+v", second)
+	}
+	keys := e.eventKeys(r.ExecutionID, domain.EventExecutionCompleted)
+	for _, want := range [][2]string{
+		{domain.EventExecutionStatusChanged, "step_starting_harness"},
+		{domain.EventHarnessStarted, "harness_started"},
+		{domain.EventHarnessQuotaExhausted, "harness_quota_exhausted"},
+		{domain.EventHarnessSwitched, "harness_switched"},
+		{domain.EventHarnessExited, "harness_exited"},
+		{domain.EventExecutionCompleted, "execution_status"},
+		{domain.EventHarnessMessage, ""},
+	} {
+		if got, ok := keys[want[0]]; !ok || got != want[1] {
+			t.Errorf("%s: key %q, want %q", want[0], got, want[1])
+		}
+	}
+
+	// With no harness ready, the error quotes the unavailable one, which quotes its diagnostic, each with its key.
+	e.create("unready", "")
+	e.claude.mu.Lock()
+	e.claude.unavailable = true
+	e.claude.mu.Unlock()
+	r, _ = e.app.RunTask("unready")
+	x = e.wait(r.ExecutionID, domain.StatusFailed)
+	if p := x.ErrorParams; x.ErrorKey != "no_alternative_harness_detail" || p["errorClass"] != "harness_unavailable" ||
+		p["detailKey"] != "harness_unavailable" || p["detail.detailKey"] != "not_signed_in" || p["detail.detail.command"] != "login" {
+		t.Errorf("error %s %v", x.ErrorKey, p)
+	}
+	if want := "claude-code cannot continue (harness unavailable) and no alternative harness is available: " +
+		"claude-code is unavailable: claude-code is not signed in; run `login` in a terminal"; x.ErrorMessage != want {
+		t.Errorf("en-US error %q, want %q", x.ErrorMessage, want)
+	}
+	if s := e.executions("unready")[0]; s.ErrorKey != x.ErrorKey || s.ErrorParams["detailKey"] != "harness_unavailable" {
+		t.Errorf("summary %+v", s)
+	}
+	keys = e.eventKeys(r.ExecutionID, domain.EventExecutionFailed)
+	if keys[domain.EventHarnessUnavailable] != "harness_unavailable" || keys[domain.EventExecutionFailed] != x.ErrorKey {
+		t.Errorf("events %v", keys)
+	}
+	if h := e.app.Harnesses()[0]; h.DiagnosticKey != "not_signed_in" {
+		t.Errorf("harness diagnostic %+v", h)
+	}
+}
+
+// eventKeys waits for the event that ends an execution's log and returns the key of the last event of each type.
+func (e *env) eventKeys(id, last string) map[string]string {
+	e.t.Helper()
+	keys := map[string]string{}
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		events, _, _ := e.app.ExecutionEvents(id, 0, 0)
+		for _, ev := range events {
+			keys[ev.Type] = ev.MessageKey
+		}
+		if _, ok := keys[last]; ok {
+			return keys
+		}
+	}
+	e.t.Fatalf("no %s event for %s: %v", last, id, keys)
+	return nil
 }
 
 // FS-001 AC-002: duplicate creates a disabled copy with a new identifier.

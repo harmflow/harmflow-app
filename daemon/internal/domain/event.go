@@ -62,20 +62,38 @@ const (
 const EventSchemaVersion = "1"
 
 // Event is a normalized event (architecture/event-model.md). Agent text and tool output keep their original
-// language; only the label of Type is translated by the dashboard.
+// language; the dashboard translates the label of Type, and a message the daemon wrote from its MessageKey and
+// Params (FS-012 FR-005).
 type Event struct {
-	ID            int64          `json:"id"`
-	SchemaVersion string         `json:"schemaVersion"`
-	Timestamp     time.Time      `json:"timestamp"`
-	TaskID        string         `json:"taskId,omitempty"`
-	ExecutionID   string         `json:"executionId,omitempty"`
-	WorkItemID    string         `json:"workItemId,omitempty"`
-	Attempt       int            `json:"attempt,omitempty"`
-	Harness       string         `json:"harness,omitempty"`
-	Type          string         `json:"type"`
-	Severity      Severity       `json:"severity"`
-	Message       string         `json:"message,omitempty"`
-	Payload       map[string]any `json:"payload,omitempty"`
+	ID            int64             `json:"id"`
+	SchemaVersion string            `json:"schemaVersion"`
+	Timestamp     time.Time         `json:"timestamp"`
+	TaskID        string            `json:"taskId,omitempty"`
+	ExecutionID   string            `json:"executionId,omitempty"`
+	WorkItemID    string            `json:"workItemId,omitempty"`
+	Attempt       int               `json:"attempt,omitempty"`
+	Harness       string            `json:"harness,omitempty"`
+	Type          string            `json:"type"`
+	Severity      Severity          `json:"severity"`
+	Message       string            `json:"message,omitempty"`
+	MessageKey    string            `json:"messageKey,omitempty"`
+	Params        map[string]string `json:"params,omitempty"`
+	Payload       map[string]any    `json:"payload,omitempty"`
+}
+
+// Says gives the event a text as its message.
+func (e Event) Says(t Text) Event {
+	e.Message, e.MessageKey, e.Params = t.Message, t.Key, t.Params
+	return e
+}
+
+// ErrorPayload puts a text in a payload as its error, as a schedule preview carries one: error is the en-US text.
+func ErrorPayload(p map[string]any, t Text) map[string]any {
+	p["error"] = t.Message
+	if t.Key != "" {
+		p["errorKey"], p["errorParams"] = t.Key, t.Params
+	}
+	return p
 }
 
 // TerminalEventFor maps a terminal status to the event that announces it.

@@ -29,6 +29,7 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/sysinfo"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/tools"
 	"github.com/harmflow/harmflow-app/daemon/internal/app"
+	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
@@ -169,13 +170,13 @@ func run(homeFlag, builtinsFlag string, port int) error {
 	select {
 	case s := <-sig:
 		logger.Printf("stopping on %s", s)
-		a.Stop("the daemon received " + s.String())
+		a.Stop(domain.T("daemon_signal", "the daemon received {{signal}}", "signal", s.String()))
 	case <-a.ShutdownRequested:
 		logger.Printf("stopping at the user's request")
 		time.Sleep(200 * time.Millisecond) // let the API answer the stop request
-		a.Stop("stopped at the user's request")
+		a.Stop(domain.T("daemon_stop_requested", "stopped at the user's request"))
 	case err := <-serveErr:
-		a.Stop("the local API stopped")
+		a.Stop(domain.T("local_api_stopped", "the local API stopped"))
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

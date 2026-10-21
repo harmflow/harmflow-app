@@ -3,6 +3,7 @@ import { renderToString } from "react-dom/server";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { Execution, ExecutionSummary, HarmflowEvent, Harness, Settings, TaskSummary, WorkItem } from "../api/types";
 import { RawCaptures } from "../components/ExecutionDetail";
+import { HarnessInventory } from "../components/Harnesses";
 import { ValidationPanel } from "../components/TaskEditor";
 import { TaskForm } from "../components/TaskForm";
 import i18n from "../i18n";
@@ -223,6 +224,37 @@ describe("screens", () => {
     );
     expect(html).toContain("a propriedade colour não é permitida");
     expect(html).toContain("agent output, untouched");
+  });
+
+  it("shows a harness's diagnostic and an execution's error in the interface's language (FS-012 FR-005)", () => {
+    const signedOut: Harness = {
+      ...harness,
+      authentication: "invalid",
+      readiness: "not_ready",
+      diagnostic: "Claude Code is not signed in; run `claude` in a terminal and sign in",
+      diagnosticKey: "claude_not_signed_in",
+    };
+    expect(renderToString(<HarnessInventory harness={signedOut} locale="pt-BR" />)).toContain(
+      "o Claude Code não está conectado; execute `claude` em um terminal e entre na conta",
+    );
+    patchStateForTests({
+      recent: [
+        {
+          ...finished,
+          id: "exec-timeout",
+          status: "failed",
+          errorMessage: "the execution timeout elapsed",
+          errorKey: "execution_timed_out",
+        },
+      ],
+    });
+    try {
+      expect(renderToString(<OverviewScreen onOpenExecution={() => {}} onNewTask={() => {}} onOpenTask={() => {}} />)).toContain(
+        "o tempo limite da execução se esgotou",
+      );
+    } finally {
+      patchStateForTests({ recent: [finished] });
+    }
   });
 
   it("asks for repositories only for the GitHub type (FS-001 FR-008)", () => {

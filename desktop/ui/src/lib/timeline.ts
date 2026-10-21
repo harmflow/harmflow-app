@@ -1,7 +1,9 @@
-// Turns normalized events into the steps of the execution timeline. The label of each type is translated; the agent's
-// text, commands, and tool output stay as the harness produced them (FS-012 FR-005).
+// Turns normalized events into the steps of the execution timeline. The label of each type and the daemon's own
+// messages are translated; the agent's text, commands, and tool output stay as the harness produced them
+// (FS-012 FR-005).
 import type { HarmflowEvent } from "../api/types";
 import type { Tone } from "../design/tokens";
+import { eventText } from "./daemonText";
 
 export type TimelineIcon =
   | "play"
@@ -30,7 +32,7 @@ export interface TimelineItem {
   labelKey: string;
   /** Text that replaces the label when the event carries a better one, such as a step's own name. */
   title?: string;
-  /** Monospaced detail: a command, a path, the agent's text. Never translated. */
+  /** Monospaced detail: a command, a path, the agent's text, never translated; or the daemon's message, translated. */
   detail?: string;
   tone: Tone;
   icon: TimelineIcon;
@@ -72,7 +74,7 @@ export function toolDetail(e: HarmflowEvent): string | undefined {
     str(input.pattern) ??
     str(p.description) ??
     str(input.description) ??
-    str(e.message)
+    str(eventText(e))
   );
 }
 
@@ -204,10 +206,10 @@ export function buildTimeline(events: readonly HarmflowEvent[]): TimelineItem[] 
       item.title = toolTitle(e);
       item.detail = toolDetail(e);
     } else if (e.type === "step.started") {
-      item.title = str(e.message);
+      item.title = str(eventText(e));
       item.detail = str(payloadOf(e).detail);
     } else {
-      item.detail = str(e.message);
+      item.detail = str(eventText(e));
     }
 
     items.push(item);

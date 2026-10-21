@@ -62,6 +62,7 @@ func (l *Log) Append(e domain.Event) domain.Event {
 		e.Severity = domain.SeverityInfo
 	}
 	e.Message = Redact(e.Message)
+	e.Params = redactParams(e.Params)
 	e.Payload = redactMap(e.Payload)
 
 	if e.ExecutionID != "" {
@@ -349,8 +350,22 @@ func redactValue(v any) any {
 			c[i] = Redact(t[i])
 		}
 		return c
+	case map[string]string:
+		return redactParams(t)
 	}
 	return v
+}
+
+// redactParams redacts the params of a text, which may quote a harness's output.
+func redactParams(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = Redact(v)
+	}
+	return out
 }
 
 func itoa(n int) string {

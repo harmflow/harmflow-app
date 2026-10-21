@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
@@ -167,8 +168,8 @@ func (a *App) Tick() {
 				policy = domain.MissedRunSkip
 			}
 			a.emit(domain.Event{Type: domain.EventFiringMissed, TaskID: f.taskID, Severity: domain.SeverityWarning,
-				Message: missedMessage(f.missed, f.skip),
-				Payload: map[string]any{"missed": f.missed, "policy": policy, "firstMissedAt": f.scheduledFor}})
+				Payload: map[string]any{"missed": f.missed, "policy": policy, "firstMissedAt": f.scheduledFor}}.Says(
+				missedText(f.missed, f.skip)))
 			if f.skip {
 				continue
 			}
@@ -178,18 +179,23 @@ func (a *App) Tick() {
 	}
 }
 
-func missedMessage(n int, skip bool) string {
+// missedText counts the missed firings; the desktop picks the plural form from the count, and so does the en-US text.
+func missedText(n int, skip bool) domain.Text {
+	count := strconv.Itoa(n)
 	if skip {
-		return plural(n, "firing was", "firings were") + " missed and skipped, per the task's missed-run policy"
+		if n == 1 {
+			return domain.T("firings_missed_skipped", "{{count}} firing was missed and skipped, per the task's missed-run policy",
+				"count", count)
+		}
+		return domain.T("firings_missed_skipped", "{{count}} firings were missed and skipped, per the task's missed-run policy",
+			"count", count)
 	}
-	return plural(n, "firing was", "firings were") + " missed; one catch-up execution runs for all of them"
-}
-
-func plural(n int, one, many string) string {
 	if n == 1 {
-		return "1 " + one
+		return domain.T("firings_missed_catch_up", "{{count}} firing was missed; a catch-up execution runs for it",
+			"count", count)
 	}
-	return itoa(n) + " " + many
+	return domain.T("firings_missed_catch_up", "{{count}} firings were missed; one catch-up execution runs for all of them",
+		"count", count)
 }
 
 // countMissed counts the occurrences between the first missed one and now, capped so a long absence stays cheap.
@@ -273,15 +279,15 @@ func (a *App) fire(taskID string, trigger domain.Trigger, scheduledFor *time.Tim
 			}
 			a.mu.Unlock()
 			a.emit(domain.Event{Type: domain.EventFiringSkipped, TaskID: taskID, ExecutionID: causeID,
-				Severity: domain.SeverityWarning,
-				Message:  "the task was running; this firing was skipped, per its overlap policy",
-				Payload:  map[string]any{"trigger": string(trigger)}})
+				Severity: domain.SeverityWarning, Payload: map[string]any{"trigger": string(trigger)}}.Says(
+				domain.T("firing_skipped", "the task was running; this firing was skipped, per its overlap policy")))
 			return FiringResult{Outcome: "skipped"}, nil
 		}
 		if waiting != nil {
 			a.mu.Unlock()
 			a.emit(domain.Event{Type: domain.EventFiringCoalesced, TaskID: taskID, ExecutionID: waiting.ID,
-				Message: "a firing already waits; this one coalesced into it", Payload: map[string]any{"trigger": string(trigger)}})
+				Payload: map[string]any{"trigger": string(trigger)}}.Says(
+				domain.T("firing_coalesced", "a firing already waits; this one coalesced into it")))
 			return FiringResult{Outcome: "coalesced", ExecutionID: waiting.ID}, nil
 		}
 		x := domain.NewExecution(doc, trigger, scheduledFor, now)
@@ -291,8 +297,8 @@ func (a *App) fire(taskID string, trigger domain.Trigger, scheduledFor *time.Tim
 		a.persistExecution(x)
 		a.emit(domain.Event{Type: domain.EventExecutionCreated, TaskID: taskID, ExecutionID: x.ID,
 			Payload: map[string]any{"trigger": string(trigger), "status": string(status)}})
-		a.emit(domain.Event{Type: domain.EventFiringQueued, TaskID: taskID, ExecutionID: x.ID,
-			Message: "the task is running; this firing waits for it"})
+		a.emit(domain.Event{Type: domain.EventFiringQueued, TaskID: taskID, ExecutionID: x.ID}.Says(
+			domain.T("firing_queued", "the task is running; this firing waits for it")))
 		return FiringResult{Outcome: "queued", ExecutionID: x.ID}, nil
 	}
 	x := domain.NewExecution(doc, trigger, scheduledFor, now)
@@ -346,7 +352,7 @@ func (a *App) startQueued() {
 }
 
 // dropQueued cancels the waiting firing of a task that was disabled or deleted (D-083).
-func (a *App) dropQueued(taskID, reason string) {
+func (a *App) dropQueued(taskID string, reason domain.Text) {
 	a.mu.Lock()
 	var dropped []*domain.Execution
 	now := a.now()
@@ -354,15 +360,15 @@ func (a *App) dropQueued(taskID, reason string) {
 		if x.TaskID == taskID && x.Status == domain.StatusQueued {
 			x.Status = domain.StatusCancelled
 			x.EndedAt = &now
-			x.ErrorMessage = reason
+			x.SetError(reason)
 			dropped = append(dropped, x)
 		}
 	}
 	a.mu.Unlock()
 	for _, x := range dropped {
 		a.persistExecution(x)
-		a.emit(domain.Event{Type: domain.EventExecutionCancelled, TaskID: taskID, ExecutionID: x.ID, Message: reason,
-			Payload: map[string]any{"status": string(domain.StatusCancelled)}})
+		a.emit(domain.Event{Type: domain.EventExecutionCancelled, TaskID: taskID, ExecutionID: x.ID,
+			Payload: map[string]any{"status": string(domain.StatusCancelled)}}.Says(reason))
 	}
 }
 

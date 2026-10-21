@@ -23,6 +23,25 @@ func TestRedact(t *testing.T) {
 	}
 }
 
+// A text's params quote a harness's output, so they are redacted as the message is.
+func TestAppendRedactsParams(t *testing.T) {
+	l, err := New(t.TempDir(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := "ghp_" + strings.Repeat("a", 36)
+	text := domain.T("command_failed", "{{command}} failed: {{detail}}", "command", "gh", "detail", token)
+	logged := l.Append(domain.Event{Type: domain.EventHarnessExited, ExecutionID: "e1"}.Says(text))
+	if strings.Contains(logged.Message, token) || strings.Contains(logged.Params["detail"], token) {
+		t.Errorf("message %q, params %v", logged.Message, logged.Params)
+	}
+	logged = l.Append(domain.Event{Type: domain.EventHarnessExited, ExecutionID: "e1",
+		Payload: domain.ErrorPayload(map[string]any{}, text)})
+	if p, _ := logged.Payload["errorParams"].(map[string]string); p == nil || strings.Contains(p["detail"], token) {
+		t.Errorf("payload %v", logged.Payload)
+	}
+}
+
 // FS-008 FR-008: an attempt's capture reads back redacted, its end from the start of a line when it is too long.
 func TestReadRaw(t *testing.T) {
 	l, err := New(t.TempDir(), time.Now)

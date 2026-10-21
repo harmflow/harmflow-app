@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import { native } from "../api/native";
 import type { ExecutionSummary } from "../api/types";
 import { isActive } from "../api/types";
+import { fieldText } from "../lib/daemonText";
 import { formatElapsed, formatTime } from "../lib/format";
 import { buildTimeline } from "../lib/timeline";
 import { useStore } from "../state/store";
@@ -46,7 +47,7 @@ export function useCurrentStep(execution: ExecutionSummary): string | undefined 
       return last.detail ? `${label} · ${last.detail}` : label;
     }
   }
-  return execution.currentStep;
+  return fieldText(execution.currentStep, execution.currentStepKey, execution.currentStepParams);
 }
 
 export function ExecutionCard({

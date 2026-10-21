@@ -18,10 +18,11 @@ const (
 	ClassUnknown            ErrorClass = "unknown"
 )
 
-// AttemptEnd is the classified end of one harness process.
+// AttemptEnd is the classified end of one harness process. Error is the daemon's text, with a key, or the harness's
+// own error, with none.
 type AttemptEnd struct {
 	Class      ErrorClass
-	Message    string
+	Error      Text
 	RetryAfter time.Duration // a reset time the harness reported, for rate limits
 	ExitCode   int
 	SessionID  string

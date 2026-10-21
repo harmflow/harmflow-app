@@ -161,7 +161,7 @@ func (a *App) semanticChecks(r *ValidationResult, doc domain.TaskDocument, mode 
 				domain.T("harness_not_detected", "{{harness}} was not detected on this machine", "harness", ad.Name()))
 		} else if !info.Ready() {
 			r.addWarning(path+"/provider", domain.WarningHarnessNotReady, domain.T("harness_not_ready",
-				"{{harness}} is not ready: {{detail}}", "harness", ad.Name(), "detail", info.Diagnostic))
+				"{{harness}} is not ready: {{detail}}", "harness", ad.Name()).Nest("detail", info.DiagnosticText()))
 		}
 		// Agents and skills must be available to every harness of the chain (D-092).
 		missing := a.missingItems(doc, p.Provider)

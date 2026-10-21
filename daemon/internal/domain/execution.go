@@ -82,18 +82,32 @@ const (
 )
 
 type Attempt struct {
-	Number         int            `json:"number"`
-	Harness        string         `json:"harness"`
-	HarnessVersion string         `json:"harnessVersion,omitempty"`
-	Model          string         `json:"model"`
-	Effort         string         `json:"effort"`
-	StartedAt      time.Time      `json:"startedAt"`
-	EndedAt        *time.Time     `json:"endedAt,omitempty"`
-	Outcome        AttemptOutcome `json:"outcome,omitempty"`
-	ExitCode       *int           `json:"exitCode,omitempty"`
-	SessionID      string         `json:"sessionId,omitempty"`
-	ErrorMessage   string         `json:"errorMessage,omitempty"`
-	Reason         string         `json:"reason,omitempty"`
+	Number         int               `json:"number"`
+	Harness        string            `json:"harness"`
+	HarnessVersion string            `json:"harnessVersion,omitempty"`
+	Model          string            `json:"model"`
+	Effort         string            `json:"effort"`
+	StartedAt      time.Time         `json:"startedAt"`
+	EndedAt        *time.Time        `json:"endedAt,omitempty"`
+	Outcome        AttemptOutcome    `json:"outcome,omitempty"`
+	ExitCode       *int              `json:"exitCode,omitempty"`
+	SessionID      string            `json:"sessionId,omitempty"`
+	ErrorMessage   string            `json:"errorMessage,omitempty"`
+	ErrorKey       string            `json:"errorKey,omitempty"`
+	ErrorParams    map[string]string `json:"errorParams,omitempty"`
+	Reason         string            `json:"reason,omitempty"`
+	ReasonKey      string            `json:"reasonKey,omitempty"`
+	ReasonParams   map[string]string `json:"reasonParams,omitempty"`
+}
+
+// SetError records why the attempt ended; ErrorMessage is the en-US text (FS-012 FR-005).
+func (a *Attempt) SetError(t Text) {
+	a.ErrorMessage, a.ErrorKey, a.ErrorParams = t.Message, t.Key, t.Params
+}
+
+// SetReason records why the attempt started.
+func (a *Attempt) SetReason(t Text) {
+	a.Reason, a.ReasonKey, a.ReasonParams = t.Message, t.Key, t.Params
 }
 
 type PullRequestRef struct {
@@ -153,39 +167,43 @@ type CommandRecord struct {
 
 // Execution is one concrete attempt to carry out a task; the record is kept with no time limit (D-073).
 type Execution struct {
-	SchemaVersion      string           `json:"schemaVersion"`
-	ID                 string           `json:"id"`
-	TaskID             string           `json:"taskId"`
-	TaskName           string           `json:"taskName"`
-	TaskType           string           `json:"taskType"`
-	Status             ExecutionStatus  `json:"status"`
-	Trigger            Trigger          `json:"trigger"`
-	ScheduledFor       *time.Time       `json:"scheduledFor,omitempty"`
-	CreatedAt          time.Time        `json:"createdAt"`
-	StartedAt          *time.Time       `json:"startedAt,omitempty"`
-	EndedAt            *time.Time       `json:"endedAt,omitempty"`
-	CancelRequestedAt  *time.Time       `json:"cancelRequestedAt,omitempty"`
-	TimeoutAt          *time.Time       `json:"timeoutAt,omitempty"`
-	DefinitionRevision string           `json:"definitionRevision,omitempty"`
-	WorkspacePath      string           `json:"workspacePath,omitempty"`
-	ExecutionDir       string           `json:"executionDir,omitempty"`
-	Harness            string           `json:"harness"`
-	Model              string           `json:"model,omitempty"`
-	CurrentStep        string           `json:"currentStep,omitempty"`
-	Repository         string           `json:"repository,omitempty"`
-	WorkItem           string           `json:"workItem,omitempty"`
-	PullRequestURL     string           `json:"pullRequestUrl,omitempty"`
-	TestsStatus        string           `json:"testsStatus,omitempty"`
-	Summary            string           `json:"summary,omitempty"`
-	ErrorMessage       string           `json:"errorMessage,omitempty"`
-	LastOperation      string           `json:"lastOperation,omitempty"`
-	HarnessSwitches    int              `json:"harnessSwitches"`
-	Attempts           []Attempt        `json:"attempts"`
-	WorkItems          []WorkItemResult `json:"workItems"`
-	Warnings           []Warning        `json:"warnings"`
-	ChangedFiles       []string         `json:"changedFiles"`
-	Commands           []CommandRecord  `json:"commands"`
-	LogExpired         bool             `json:"logExpired,omitempty"`
+	SchemaVersion      string            `json:"schemaVersion"`
+	ID                 string            `json:"id"`
+	TaskID             string            `json:"taskId"`
+	TaskName           string            `json:"taskName"`
+	TaskType           string            `json:"taskType"`
+	Status             ExecutionStatus   `json:"status"`
+	Trigger            Trigger           `json:"trigger"`
+	ScheduledFor       *time.Time        `json:"scheduledFor,omitempty"`
+	CreatedAt          time.Time         `json:"createdAt"`
+	StartedAt          *time.Time        `json:"startedAt,omitempty"`
+	EndedAt            *time.Time        `json:"endedAt,omitempty"`
+	CancelRequestedAt  *time.Time        `json:"cancelRequestedAt,omitempty"`
+	TimeoutAt          *time.Time        `json:"timeoutAt,omitempty"`
+	DefinitionRevision string            `json:"definitionRevision,omitempty"`
+	WorkspacePath      string            `json:"workspacePath,omitempty"`
+	ExecutionDir       string            `json:"executionDir,omitempty"`
+	Harness            string            `json:"harness"`
+	Model              string            `json:"model,omitempty"`
+	CurrentStep        string            `json:"currentStep,omitempty"`
+	CurrentStepKey     string            `json:"currentStepKey,omitempty"`
+	CurrentStepParams  map[string]string `json:"currentStepParams,omitempty"`
+	Repository         string            `json:"repository,omitempty"`
+	WorkItem           string            `json:"workItem,omitempty"`
+	PullRequestURL     string            `json:"pullRequestUrl,omitempty"`
+	TestsStatus        string            `json:"testsStatus,omitempty"`
+	Summary            string            `json:"summary,omitempty"`
+	ErrorMessage       string            `json:"errorMessage,omitempty"`
+	ErrorKey           string            `json:"errorKey,omitempty"`
+	ErrorParams        map[string]string `json:"errorParams,omitempty"`
+	LastOperation      string            `json:"lastOperation,omitempty"`
+	HarnessSwitches    int               `json:"harnessSwitches"`
+	Attempts           []Attempt         `json:"attempts"`
+	WorkItems          []WorkItemResult  `json:"workItems"`
+	Warnings           []Warning         `json:"warnings"`
+	ChangedFiles       []string          `json:"changedFiles"`
+	Commands           []CommandRecord   `json:"commands"`
+	LogExpired         bool              `json:"logExpired,omitempty"`
 }
 
 const ExecutionSchemaVersion = "1"
@@ -218,6 +236,21 @@ func NewExecutionID(now time.Time) string {
 	var b [3]byte
 	_, _ = rand.Read(b[:])
 	return fmt.Sprintf("exec-%s-%s", now.UTC().Format("20060102-150405"), hex.EncodeToString(b[:]))
+}
+
+// SetStep records the current step: the daemon's own, with a key, or the agent's or a tool's words, with none.
+func (x *Execution) SetStep(t Text) {
+	x.CurrentStep, x.CurrentStepKey, x.CurrentStepParams = t.Message, t.Key, t.Params
+}
+
+// SetError records why the execution ended; ErrorMessage is the en-US text (FS-012 FR-005).
+func (x *Execution) SetError(t Text) {
+	x.ErrorMessage, x.ErrorKey, x.ErrorParams = t.Message, t.Key, t.Params
+}
+
+// ErrorText is the text SetError recorded.
+func (x *Execution) ErrorText() Text {
+	return Text{Key: x.ErrorKey, Params: x.ErrorParams, Message: x.ErrorMessage}
 }
 
 // AddWarning records a warning once per code and subject.

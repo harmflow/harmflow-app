@@ -202,8 +202,8 @@ func (a *App) Start(ctx context.Context) error {
 		return err
 	}
 	a.refreshHarnessesAsync()
-	a.emit(domain.Event{Type: domain.EventDaemonStarted, Message: "HarmFlow daemon " + a.d.Version + " started",
-		Payload: map[string]any{"version": a.d.Version, "pid": os.Getpid()}})
+	a.emit(domain.Event{Type: domain.EventDaemonStarted, Payload: map[string]any{"version": a.d.Version, "pid": os.Getpid()}}.Says(
+		domain.T("daemon_started", "HarmFlow daemon {{version}} started", "version", a.d.Version)))
 	a.wg.Add(3)
 	go a.schedulerLoop()
 	go a.watchLoop()
@@ -213,7 +213,7 @@ func (a *App) Start(ctx context.Context) error {
 }
 
 // Stop ends the loops and interrupts running executions: a stopped daemon never continues them (D-089).
-func (a *App) Stop(reason string) {
+func (a *App) Stop(reason domain.Text) {
 	a.stopOnce.Do(func() {
 		a.mu.Lock()
 		a.accepting = false
@@ -227,7 +227,7 @@ func (a *App) Stop(reason string) {
 			dones = append(dones, h.done)
 		}
 		a.mu.Unlock()
-		a.emit(domain.Event{Type: domain.EventDaemonStopping, Message: reason})
+		a.emit(domain.Event{Type: domain.EventDaemonStopping}.Says(reason))
 		close(a.stopCh)
 		for _, cancel := range cancels {
 			cancel()

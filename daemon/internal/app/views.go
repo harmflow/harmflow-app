@@ -11,36 +11,54 @@ import (
 
 // ExecutionSummary is the row of an execution in lists; no progress percentage is invented (FS-008 FR-009).
 type ExecutionSummary struct {
-	ID             string                 `json:"id"`
-	TaskID         string                 `json:"taskId"`
-	TaskName       string                 `json:"taskName"`
-	TaskType       string                 `json:"taskType"`
-	Status         domain.ExecutionStatus `json:"status"`
-	Trigger        domain.Trigger         `json:"trigger"`
-	CreatedAt      time.Time              `json:"createdAt"`
-	StartedAt      *time.Time             `json:"startedAt,omitempty"`
-	EndedAt        *time.Time             `json:"endedAt,omitempty"`
-	Harness        string                 `json:"harness"`
-	Model          string                 `json:"model,omitempty"`
-	AttemptCount   int                    `json:"attemptCount"`
-	CurrentStep    string                 `json:"currentStep,omitempty"`
-	Repository     string                 `json:"repository,omitempty"`
-	WorkItem       string                 `json:"workItem,omitempty"`
-	PullRequestURL string                 `json:"pullRequestUrl,omitempty"`
-	TestsStatus    string                 `json:"testsStatus,omitempty"`
-	Summary        string                 `json:"summary,omitempty"`
-	ErrorMessage   string                 `json:"errorMessage,omitempty"`
-	WarningCount   int                    `json:"warningCount"`
+	ID                string                 `json:"id"`
+	TaskID            string                 `json:"taskId"`
+	TaskName          string                 `json:"taskName"`
+	TaskType          string                 `json:"taskType"`
+	Status            domain.ExecutionStatus `json:"status"`
+	Trigger           domain.Trigger         `json:"trigger"`
+	CreatedAt         time.Time              `json:"createdAt"`
+	StartedAt         *time.Time             `json:"startedAt,omitempty"`
+	EndedAt           *time.Time             `json:"endedAt,omitempty"`
+	Harness           string                 `json:"harness"`
+	Model             string                 `json:"model,omitempty"`
+	AttemptCount      int                    `json:"attemptCount"`
+	CurrentStep       string                 `json:"currentStep,omitempty"`
+	CurrentStepKey    string                 `json:"currentStepKey,omitempty"`
+	CurrentStepParams map[string]string      `json:"currentStepParams,omitempty"`
+	Repository        string                 `json:"repository,omitempty"`
+	WorkItem          string                 `json:"workItem,omitempty"`
+	PullRequestURL    string                 `json:"pullRequestUrl,omitempty"`
+	TestsStatus       string                 `json:"testsStatus,omitempty"`
+	Summary           string                 `json:"summary,omitempty"`
+	ErrorMessage      string                 `json:"errorMessage,omitempty"`
+	ErrorKey          string                 `json:"errorKey,omitempty"`
+	ErrorParams       map[string]string      `json:"errorParams,omitempty"`
+	WarningCount      int                    `json:"warningCount"`
 }
 
 func summarize(x *domain.Execution) ExecutionSummary {
 	return ExecutionSummary{
 		ID: x.ID, TaskID: x.TaskID, TaskName: x.TaskName, TaskType: x.TaskType, Status: x.Status, Trigger: x.Trigger,
 		CreatedAt: x.CreatedAt, StartedAt: x.StartedAt, EndedAt: x.EndedAt, Harness: x.Harness, Model: x.Model,
-		AttemptCount: len(x.Attempts), CurrentStep: x.CurrentStep, Repository: x.Repository, WorkItem: x.WorkItem,
+		AttemptCount: len(x.Attempts), CurrentStep: x.CurrentStep, CurrentStepKey: x.CurrentStepKey,
+		CurrentStepParams: x.CurrentStepParams, Repository: x.Repository, WorkItem: x.WorkItem,
 		PullRequestURL: x.PullRequestURL, TestsStatus: x.TestsStatus, Summary: trimTo(x.Summary, 300),
-		ErrorMessage: trimTo(x.ErrorMessage, 300), WarningCount: len(x.Warnings),
+		ErrorMessage: trimTo(x.ErrorMessage, 300), ErrorKey: x.ErrorKey, ErrorParams: trimParams(x.ErrorParams, 300),
+		WarningCount: len(x.Warnings),
 	}
+}
+
+// trimParams shortens each param as trimTo does the en-US text, for the rows of a list.
+func trimParams(p map[string]string, n int) map[string]string {
+	if p == nil {
+		return nil
+	}
+	out := make(map[string]string, len(p))
+	for k, v := range p {
+		out[k] = trimTo(v, n)
+	}
+	return out
 }
 
 type ExecutionFilter struct {

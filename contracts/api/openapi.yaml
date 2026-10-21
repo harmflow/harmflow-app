@@ -664,7 +664,8 @@ components:
       description: >-
         Names a text the daemon writes for the user. The desktop shows it in the interface's language, filling it with
         its params; the message beside it is the same text in en-US, shown for a key the desktop does not know
-        (FS-012 FR-005). The agent's text, tool output, and a tool's own error get no key and stay as they are.
+        (FS-012 FR-005). The agent's text, tool output, and a tool's own error get no key and stay as they are. A text
+        is a message with messageKey and params, or a field such as errorMessage with errorKey and errorParams.
       type: string
       enum:
         # Requests and their resources
@@ -753,9 +754,80 @@ components:
         - repository_unprotected
         - report_not_json
         - report_schema_invalid
+        # Execution steps and why an attempt started
+        - step_checking_harness
+        - step_preparing_workspace
+        - step_starting_harness
+        - step_switching_harness
+        - step_waiting_rate_limit
+        - attempt_first
+        - attempt_rate_limit_retry
+        - attempt_failover
+        # Event messages and why an execution or attempt ended
+        - daemon_started
+        - daemon_signal
+        - daemon_stop_requested
+        - local_api_stopped
+        - task_delete_pending
+        - task_changed_externally
+        - task_changed_externally_invalid
+        - task_removed_externally
+        - task_was_disabled
+        - task_was_deleted
+        - task_file_removed
+        - task_gone
+        - firing_queued
+        - firing_coalesced
+        - firing_skipped
+        - firings_missed_catch_up
+        - firings_missed_skipped
+        - cancel_requested
+        - cancelled_before_start
+        - execution_cancelled
+        - execution_timed_out
+        - execution_status
+        - daemon_stopped_execution
+        - execution_dir_failed
+        - workspace_create_failed
+        - repository_path_missing
+        - context_write_failed
+        - harness_started
+        - harness_session
+        - harness_exited
+        - harness_exit_code
+        - harness_start_failed
+        - harness_ended_with_error
+        - harness_unavailable
+        - harness_unavailable_readiness
+        - harness_rate_limited
+        - harness_quota_exhausted
+        - harness_switched
+        - no_alternative_harness
+        - no_alternative_harness_detail
+        - skill_delivery_failed
+        - agent_delivery_failed
+        - tool_succeeded
+        - tool_failed
+        - tests_failed
+        # Harness and tool diagnostics
+        - detection_running
+        - harness_manual_path_invalid
+        - claude_not_found
+        - codex_not_found
+        - git_not_found
+        - gh_not_found
+        - command_failed
+        - harness_feature_missing
+        - claude_not_signed_in
+        - not_signed_in
+        - authentication_unverified
+        - gh_auth_problem
 
     MessageParams:
-      description: Values the desktop interpolates into the translated text of a messageKey; a count param picks its plural form.
+      description: >-
+        Values the desktop interpolates into the translated text of a messageKey; a count param picks its plural form.
+        A param that quotes another text the daemon wrote has a param named after it with Key appended, its key, and
+        params prefixed with its name and a dot, its params, so it is translated in place too.
       type: object
       additionalProperties: { type: string }
 
@@ -875,7 +947,9 @@ components:
           type: array
           items: { type: string }
         lastCheckedAt: { type: string, format: date-time }
-        diagnostic: { type: string }
+        diagnostic: { type: string, description: "What is wrong with the harness, in en-US." }
+        diagnosticKey: { $ref: "#/components/schemas/MessageKey" }
+        diagnosticParams: { $ref: "#/components/schemas/MessageParams" }
 
     Tool:
       type: object
@@ -886,7 +960,9 @@ components:
         path: { type: string }
         version: { type: string }
         authentication: { type: string, enum: [valid, invalid, unknown] }
-        diagnostic: { type: string }
+        diagnostic: { type: string, description: "What is wrong with the tool, in en-US." }
+        diagnosticKey: { $ref: "#/components/schemas/MessageKey" }
+        diagnosticParams: { $ref: "#/components/schemas/MessageParams" }
 
     CatalogEntry:
       type: object
@@ -1057,8 +1133,12 @@ components:
         outcome: { type: string, enum: [running, succeeded, failed, quota_exhausted, rate_limited, harness_unavailable, timed_out, cancelled, interrupted] }
         exitCode: { type: integer }
         sessionId: { type: string }
-        errorMessage: { type: string }
-        reason: { type: string, description: Why the attempt started — first, failover, rate-limit retry. }
+        errorMessage: { type: string, description: "Why the attempt ended: the daemon's text in en-US, or the harness's own error, which has no errorKey." }
+        errorKey: { $ref: "#/components/schemas/MessageKey" }
+        errorParams: { $ref: "#/components/schemas/MessageParams" }
+        reason: { type: string, description: "Why the attempt started — first, failover, rate-limit retry — in en-US." }
+        reasonKey: { $ref: "#/components/schemas/MessageKey" }
+        reasonParams: { $ref: "#/components/schemas/MessageParams" }
 
     WorkItemResult:
       type: object
@@ -1103,13 +1183,21 @@ components:
         harness: { type: string, description: The harness of the current or last attempt. }
         model: { type: string }
         attemptCount: { type: integer }
-        currentStep: { type: string, description: The latest step; no percentage is invented (FS-008 FR-009). }
+        currentStep:
+          type: string
+          description: >-
+            The latest step; no percentage is invented (FS-008 FR-009). The daemon's own step is in en-US, beside its
+            currentStepKey; the agent's and a tool's have none.
+        currentStepKey: { $ref: "#/components/schemas/MessageKey" }
+        currentStepParams: { $ref: "#/components/schemas/MessageParams" }
         repository: { type: string }
         workItem: { type: string }
         pullRequestUrl: { type: string }
         testsStatus: { type: string, enum: [passed, failed, not_run] }
         summary: { type: string }
-        errorMessage: { type: string }
+        errorMessage: { type: string, description: "Why the execution ended: the daemon's text in en-US, or the agent's or harness's own words, which have no errorKey." }
+        errorKey: { $ref: "#/components/schemas/MessageKey" }
+        errorParams: { $ref: "#/components/schemas/MessageParams" }
         warningCount: { type: integer }
 
     Execution:
@@ -1176,8 +1264,13 @@ components:
         harness: { type: string }
         type: { type: string }
         severity: { type: string, enum: [debug, info, warning, error] }
-        message: { type: string }
-        payload: { type: object, additionalProperties: true }
+        message: { type: string, description: "The daemon's text in en-US, or the agent's or a tool's own words, which have no messageKey." }
+        messageKey: { $ref: "#/components/schemas/MessageKey" }
+        params: { $ref: "#/components/schemas/MessageParams" }
+        payload:
+          type: object
+          additionalProperties: true
+          description: An error in the payload is a text too, with errorKey and errorParams beside it.
 
     Queue:
       type: object

@@ -161,6 +161,71 @@ describe("execution detail", () => {
     for (const shown of ["Attempt 1", "Claude Code", "Attempt 2", "Codex"]) expect(attempts).toContain(shown);
   });
 
+  it("shows the daemon's texts in the interface's language, and the agent's and harness's as they are (FS-012 AC-005)", async () => {
+    await i18n.changeLanguage("pt-BR");
+    try {
+      // It failed before any result: the Results tab still shows why.
+      const failed: Execution = {
+        ...completed,
+        id: "exec-failed",
+        status: "failed",
+        workItems: [],
+        pullRequestUrl: undefined,
+        errorMessage: "Codex cannot continue (quota exhausted) and no alternative harness is available: You've hit your usage limit",
+        errorKey: "no_alternative_harness_detail",
+        errorParams: { harness: "Codex", reason: "quota exhausted", errorClass: "quota_exhausted", detail: "You've hit your usage limit" },
+        attempts: [
+          {
+            ...base.attempts[0],
+            reason: "first attempt",
+            reasonKey: "attempt_first",
+            errorMessage: "the execution timeout elapsed",
+            errorKey: "execution_timed_out",
+          },
+          {
+            ...base.attempts[1],
+            outcome: "quota_exhausted",
+            reason: "failover after quota exhausted",
+            reasonKey: "attempt_failover",
+            reasonParams: { reason: "quota exhausted", errorClass: "quota_exhausted" },
+            errorMessage: "You've hit your usage limit",
+          },
+        ],
+      };
+      await open(
+        failed,
+        [
+          event(1, "harness.switched", {
+            message: "switching from Claude Code to Codex",
+            messageKey: "harness_switched",
+            params: { from: "Claude Code", to: "Codex" },
+          }),
+          event(2, "harness.message", { message: "I could not finish the change." }),
+          event(3, "execution.failed", { message: failed.errorMessage, messageKey: failed.errorKey, params: failed.errorParams }),
+        ],
+        capture("You've hit your usage limit\n"),
+      );
+
+      const alerts = host!.querySelector(".detail__alerts")!.textContent;
+      expect(alerts).toContain("trocando de Claude Code para Codex");
+      const timeline = body();
+      expect(timeline).toContain("trocando de Claude Code para Codex");
+      expect(timeline).toContain("I could not finish the change.");
+      expect(timeline).toContain("Codex não pode continuar (cota esgotada) e nenhum harness alternativo está disponível: You've hit your usage limit");
+
+      expect(await choose("Resultados")).toContain(
+        "Codex não pode continuar (cota esgotada) e nenhum harness alternativo está disponível: You've hit your usage limit",
+      );
+      const attempts = await choose("Tentativas");
+      for (const shown of ["primeira tentativa", "o tempo limite da execução se esgotou", "troca de harness após cota esgotada", "You've hit your usage limit"]) {
+        expect(attempts).toContain(shown);
+      }
+      expect(attempts).not.toContain("first attempt");
+    } finally {
+      await i18n.changeLanguage("en-US");
+    }
+  });
+
   it("reads the raw output from the daemon's route again every 2 s while the execution runs (FS-008 FR-008)", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     const live: Execution = { ...base, id: "exec-live" };
