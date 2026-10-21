@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- HarmFlow app icon below 64 px: app-icon.svg simplified, since its grid, HUD ring, and blur turn to noise at 16
+       and 32 px. The H and its wave are larger and thicker, without bloom or packets, on the same tile. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#060a15"/>
+      <stop offset="1" stop-color="#0d1328"/>
+    </linearGradient>
+    <radialGradient id="glow-cyan">
+      <stop offset="0" stop-color="#22d3ee" stop-opacity=".26"/>
+      <stop offset="1" stop-color="#22d3ee" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow-magenta">
+      <stop offset="0" stop-color="#e040fb" stop-opacity=".24"/>
+      <stop offset="1" stop-color="#e040fb" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="neon" gradientUnits="userSpaceOnUse" x1="128" y1="0" x2="384" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset=".5" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#e040fb"/>
+    </linearGradient>
+    <linearGradient id="core" gradientUnits="userSpaceOnUse" x1="128" y1="0" x2="384" y2="0">
+      <stop offset="0" stop-color="#ecfeff"/>
+      <stop offset=".5" stop-color="#f1edff"/>
+      <stop offset="1" stop-color="#fdf2ff"/>
+    </linearGradient>
+
+    <linearGradient id="flow-fade" gradientUnits="userSpaceOnUse" x1="56" y1="0" x2="456" y2="0">
+      <stop offset="0" stop-color="#fff" stop-opacity="0"/>
+      <stop offset=".235" stop-color="#fff" stop-opacity="1"/>
+      <stop offset=".765" stop-color="#fff" stop-opacity="1"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <mask id="flow-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
+      <rect x="56" width="400" height="512" fill="url(#flow-fade)"/>
+    </mask>
+
+    <clipPath id="tile">
+      <rect width="512" height="512" rx="115"/>
+    </clipPath>
+
+    <path id="stems" d="M150 128V384M362 128V384"/>
+    <path id="wave" d="M44 256q53 104 106 0t106 0t106 0t106 0"/>
+  </defs>
+
+  <g transform="translate(100 100) scale(1.609375)">
+    <g clip-path="url(#tile)">
+      <rect width="512" height="512" fill="url(#bg)"/>
+      <circle cx="96" cy="80" r="340" fill="url(#glow-cyan)"/>
+      <circle cx="440" cy="448" r="340" fill="url(#glow-magenta)"/>
+
+      <g fill="none" stroke-linecap="round" transform="translate(256 256) scale(1.15) translate(-256 -256)">
+        <g stroke="url(#neon)">
+          <use href="#stems" stroke-width="60"/>
+          <use href="#wave" stroke-width="46" mask="url(#flow-mask)"/>
+        </g>
+        <g stroke="url(#core)">
+          <use href="#stems" stroke-width="20"/>
+          <use href="#wave" stroke-width="14" mask="url(#flow-mask)"/>
+        </g>
+      </g>
+    </g>
+
+    <rect x=".75" y=".75" width="510.5" height="510.5" rx="114.25" fill="none" stroke="#22d3ee" stroke-opacity=".18"
+          stroke-width="1.5"/>
+  </g>
+</svg>

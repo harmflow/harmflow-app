@@ -80,6 +80,15 @@
   --hf-color-claude: #f2895d;
   --hf-color-codex: #dfe6f3;
 
+  /* Logo — the mark's own colors, the app icon's (src-tauri/icons/source/app-icon.svg); the palette above can change
+     without them */
+  --hf-color-logo-cyan: #22d3ee;
+  --hf-color-logo-violet: #8b5cf6;
+  --hf-color-logo-magenta: #e040fb;
+  --hf-color-logo-core-cyan: #ecfeff;
+  --hf-color-logo-core-violet: #f1edff;
+  --hf-color-logo-core-magenta: #fdf2ff;
+
   /* Gradients */
   --hf-gradient-primary: linear-gradient(135deg, #1fb6d6 0%, #6d5df5 55%, #b04cf0 100%);
   --hf-gradient-active-nav: linear-gradient(90deg, rgba(34, 211, 238, 0.2) 0%, rgba(167, 139, 250, 0.12) 100%);

@@ -32,7 +32,10 @@ make dev-daemon        # the daemon on .harmflow-dev/home
 make dev-ui            # the interface in a browser, proxied to that daemon (http://localhost:1420)
 make dev-desktop       # the desktop shell against that daemon
 make app               # HarmFlow.app and the DMG, unsigned
+make icons             # every app and tray icon, from the SVGs in desktop/src-tauri/icons/source
 ```
+
+`make icons` needs `rsvg-convert` (`brew install librsvg`); the rendered icons are committed, so a build does not.
 
 `HARMFLOW_HOME` selects the data directory (default `~/Library/Application Support/HarmFlow`), and
 `HARMFLOW_TOKEN_STORE=file` keeps the local API token in a user-only file instead of the Keychain.

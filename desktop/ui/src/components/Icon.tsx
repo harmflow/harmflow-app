@@ -1,5 +1,5 @@
 // Line icons drawn for HarmFlow on a 24px grid; stroke follows the text color.
-import type { ReactNode, SVGProps } from "react";
+import { useId, type ReactNode, type SVGProps } from "react";
 
 const paths: Record<string, ReactNode> = {
   grid: (
@@ -236,24 +236,59 @@ export function HarnessMark({ harness, size = 16 }: { harness?: string; size?: n
   );
 }
 
+// The logo's H and wave, in the coordinates of the app icon (src-tauri/icons/source/app-icon.svg).
+const LOGO_STEMS = "M150 128V384M362 128V384";
+const LOGO_WAVE = "M44 256q53 104 106 0t106 0t106 0t106 0";
+
+/** The HarmFlow logo: a neon H whose crossbar is a wave, drawn like the app icon's mark without its tile and ring. */
 export function Logo({ size = 34 }: { size?: number }) {
+  // Ids per copy: a duplicate id resolves to the first copy, and stops resolving while that copy is hidden.
+  const id = useId().replace(/[^\w-]/g, "");
+  const ref = (name: string) => `url(#${id}-${name})`;
+  // The view box holds the whole wave fade and bloom, which a tighter box would cut at its edges
   return (
-    <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden="true" className="logo">
+    <svg width={size} height={size} viewBox="48 48 416 416" aria-hidden="true" className="logo">
       <defs>
-        <linearGradient id="hf-logo-g" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="var(--hf-color-cyan)" />
-          <stop offset="0.55" stopColor="var(--hf-color-violet)" />
-          <stop offset="1" stopColor="var(--hf-color-magenta)" />
+        {/* The colors run left to right, as on the app icon */}
+        <linearGradient id={`${id}-neon`} gradientUnits="userSpaceOnUse" x1="128" y1="0" x2="384" y2="0">
+          <stop offset="0" stopColor="var(--hf-color-logo-cyan)" />
+          <stop offset="0.5" stopColor="var(--hf-color-logo-violet)" />
+          <stop offset="1" stopColor="var(--hf-color-logo-magenta)" />
         </linearGradient>
+        <linearGradient id={`${id}-core`} gradientUnits="userSpaceOnUse" x1="128" y1="0" x2="384" y2="0">
+          <stop offset="0" stopColor="var(--hf-color-logo-core-cyan)" />
+          <stop offset="0.5" stopColor="var(--hf-color-logo-core-violet)" />
+          <stop offset="1" stopColor="var(--hf-color-logo-core-magenta)" />
+        </linearGradient>
+        {/* The wave fades in before the H and out after it */}
+        <linearGradient id={`${id}-fade`} gradientUnits="userSpaceOnUse" x1="56" y1="0" x2="456" y2="0">
+          <stop offset="0" stopColor="#fff" stopOpacity="0" />
+          <stop offset="0.235" stopColor="#fff" stopOpacity="1" />
+          <stop offset="0.765" stopColor="#fff" stopOpacity="1" />
+          <stop offset="1" stopColor="#fff" stopOpacity="0" />
+        </linearGradient>
+        <mask id={`${id}-flow`} maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
+          <rect x="56" width="400" height="512" fill={ref("fade")} />
+        </mask>
+        {/* A user-space region: the stems are vertical lines, whose bounding box has no width */}
+        <filter id={`${id}-bloom`} filterUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
+          <feGaussianBlur stdDeviation="16" />
+        </filter>
       </defs>
-      <path d="M24 4 41.3 14v20L24 44 6.7 34V14L24 4Z" fill="none" stroke="url(#hf-logo-g)" strokeWidth="2.6" strokeLinejoin="round" />
-      <path
-        d="M15.5 17.5c4.5-3.4 12.5-3.4 17 0M15.5 24c4.5-3.4 12.5-3.4 17 0M15.5 30.5c4.5-3.4 12.5-3.4 17 0"
-        fill="none"
-        stroke="url(#hf-logo-g)"
-        strokeWidth="2.6"
-        strokeLinecap="round"
-      />
+      <g fill="none" strokeLinecap="round">
+        <g stroke={ref("neon")} opacity="0.7" filter={ref("bloom")}>
+          <path d={LOGO_STEMS} strokeWidth="56" />
+          <path d={LOGO_WAVE} strokeWidth="44" mask={ref("flow")} />
+        </g>
+        <g stroke={ref("neon")}>
+          <path d={LOGO_STEMS} strokeWidth="44" />
+          <path d={LOGO_WAVE} strokeWidth="32" mask={ref("flow")} />
+        </g>
+        <g stroke={ref("core")}>
+          <path d={LOGO_STEMS} strokeWidth="15" />
+          <path d={LOGO_WAVE} strokeWidth="10" mask={ref("flow")} />
+        </g>
+      </g>
     </svg>
   );
 }
