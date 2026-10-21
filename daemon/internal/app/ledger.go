@@ -2,7 +2,6 @@ package app
 
 import (
 	"sort"
-	"strconv"
 	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
@@ -123,8 +122,8 @@ func (a *App) recover() error {
 		if x.Status.IsActive() {
 			x.Status = domain.StatusInterrupted
 			x.EndedAt = &now
-			x.CurrentStep = ""
-			x.ErrorMessage = "the daemon stopped before the execution finished"
+			x.SetStep(domain.Text{})
+			x.SetError(daemonStopped())
 			if at := x.CurrentAttempt(); at != nil && at.EndedAt == nil {
 				at.EndedAt = &now
 				at.Outcome = domain.AttemptInterrupted
@@ -140,8 +139,9 @@ func (a *App) recover() error {
 			a.failWorkItem(x.TaskID, x.WorkItem, x.ID, x.LastOperation, limits)
 		}
 		a.emit(domain.Event{Type: domain.EventExecutionInterrupted, TaskID: x.TaskID, ExecutionID: x.ID,
-			WorkItemID: x.WorkItem, Severity: domain.SeverityError, Message: x.ErrorMessage,
-			Payload: map[string]any{"status": string(domain.StatusInterrupted), "lastOperation": x.LastOperation}})
+			WorkItemID: x.WorkItem, Severity: domain.SeverityError,
+			Payload: map[string]any{"status": string(domain.StatusInterrupted), "lastOperation": x.LastOperation}}.Says(
+			x.ErrorText()))
 	}
 	return nil
 }
@@ -161,7 +161,5 @@ func (a *App) taskLimits(taskID string) domain.WorkItemLimits {
 func sortByCreated(xs []*domain.Execution) {
 	sort.Slice(xs, func(i, j int) bool { return xs[i].CreatedAt.Before(xs[j].CreatedAt) })
 }
-
-func itoa(n int) string { return strconv.Itoa(n) }
 
 var _ = time.Second

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/procutil"
+	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
@@ -36,12 +37,12 @@ func (p *Prober) git(ctx context.Context) ports.ToolInfo {
 	t := ports.ToolInfo{ID: "git", Authentication: "unknown"}
 	t.Path = p.find("git")
 	if t.Path == "" {
-		t.Diagnostic = "git was not found"
+		t.SetDiagnostic(domain.T("git_not_found", "git was not found"))
 		return t
 	}
 	out, _, err := procutil.Output(ctx, 10*time.Second, p.Env, t.Path, "--version")
 	if err != nil {
-		t.Diagnostic = "git --version failed: " + err.Error()
+		t.SetDiagnostic(commandFailed("git --version", err))
 		return t
 	}
 	t.Detected = true
@@ -55,12 +56,12 @@ func (p *Prober) gh(ctx context.Context) ports.ToolInfo {
 	t := ports.ToolInfo{ID: "gh", Authentication: "unknown"}
 	t.Path = p.find("gh")
 	if t.Path == "" {
-		t.Diagnostic = "the GitHub CLI (gh) was not found; the GitHub issue type needs it"
+		t.SetDiagnostic(domain.T("gh_not_found", "the GitHub CLI (gh) was not found; the GitHub issue type needs it"))
 		return t
 	}
 	out, _, err := procutil.Output(ctx, 10*time.Second, p.Env, t.Path, "--version")
 	if err != nil {
-		t.Diagnostic = "gh --version failed: " + err.Error()
+		t.SetDiagnostic(commandFailed("gh --version", err))
 		return t
 	}
 	t.Detected = true
@@ -73,10 +74,16 @@ func (p *Prober) gh(ctx context.Context) ports.ToolInfo {
 		t.Authentication = "valid"
 	case strings.Contains(stdout+stderr, "not logged"):
 		t.Authentication = "invalid"
-		t.Diagnostic = "gh is not signed in; run `gh auth login` in a terminal"
+		t.SetDiagnostic(domain.T("not_signed_in", "{{name}} is not signed in; run `{{command}}` in a terminal",
+			"name", "gh", "command", "gh auth login"))
 	default:
 		t.Authentication = "invalid"
-		t.Diagnostic = "gh auth status reported a problem"
+		t.SetDiagnostic(domain.T("gh_auth_problem", "gh auth status reported a problem"))
 	}
 	return t
+}
+
+// commandFailed says a check could not run; the command's own error is quoted as it is.
+func commandFailed(command string, err error) domain.Text {
+	return domain.T("command_failed", "{{command}} failed: {{detail}}", "command", command, "detail", err.Error())
 }

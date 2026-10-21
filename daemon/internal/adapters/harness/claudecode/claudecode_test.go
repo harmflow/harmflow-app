@@ -50,7 +50,23 @@ func TestParseSuccess(t *testing.T) {
 func TestParseQuota(t *testing.T) {
 	p, _ := replay(t, "quota.jsonl")
 	if end := p.Finish(1, "", false, false); end.Class != domain.ClassQuotaExhausted {
-		t.Errorf("got %s (%s), want quota_exhausted", end.Class, end.Message)
+		t.Errorf("got %s (%s), want quota_exhausted", end.Class, end.Error.Message)
+	}
+}
+
+// FS-012 FR-005: the CLI's own error stays as it printed it, with no key; the daemon's text stands in, with one, when
+// the CLI printed nothing, and for a timeout.
+func TestFinishKeysOnlyTheDaemonsText(t *testing.T) {
+	p := &parser{tools: map[string]toolUse{}}
+	if end := p.Finish(2, "Error: boom", false, false); end.Error.Key != "" || end.Error.Message != "Error: boom" {
+		t.Errorf("the CLI's error: %+v", end.Error)
+	}
+	if end := p.Finish(2, "", false, false); end.Error.Key != "harness_exit_code" || end.Error.Params["code"] != "2" ||
+		end.Error.Message != "Claude Code exited with code 2" {
+		t.Errorf("no output: %+v", end.Error)
+	}
+	if end := p.Finish(-1, "", true, false); end.Class != domain.ClassTimeout || end.Error.Key != "execution_timed_out" {
+		t.Errorf("timeout: %+v", end)
 	}
 }
 

@@ -59,7 +59,7 @@ func TestParseSuccess(t *testing.T) {
 func TestParseQuota(t *testing.T) {
 	p, _ := replay(t, "quota.jsonl")
 	if end := p.Finish(1, "", false, false); end.Class != domain.ClassQuotaExhausted {
-		t.Errorf("got %s: %s", end.Class, end.Message)
+		t.Errorf("got %s: %s", end.Class, end.Error.Message)
 	}
 }
 

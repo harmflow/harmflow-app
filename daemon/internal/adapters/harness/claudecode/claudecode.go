@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -72,7 +73,7 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 	case manualPath != "":
 		info.Path, info.PathSource = manualPath, "manual"
 		if st, err := os.Stat(manualPath); err != nil || st.IsDir() {
-			info.Diagnostic = "the path set by hand does not exist or is not a file"
+			info.SetDiagnostic(domain.T("harness_manual_path_invalid", "the path set by hand does not exist or is not a file"))
 			return info
 		}
 	case len(found) > 0:
@@ -82,7 +83,7 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 			info.PathSource = "path"
 		}
 	default:
-		info.Diagnostic = "claude was not found on PATH or in the usual install locations"
+		info.SetDiagnostic(domain.T("claude_not_found", "claude was not found on PATH or in the usual install locations"))
 		return info
 	}
 	if real, err := filepath.EvalSymlinks(info.Path); err == nil {
@@ -92,7 +93,8 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 	info.Readiness = "installed"
 	out, _, err := procutil.Output(ctx, 15*time.Second, a.Env, info.Path, "--version")
 	if err != nil {
-		info.Diagnostic = "claude --version failed: " + err.Error()
+		info.SetDiagnostic(domain.T("command_failed", "{{command}} failed: {{detail}}", "command", "claude --version",
+			"detail", err.Error()))
 		return info
 	}
 	if m := versionRe.FindStringSubmatch(out); m != nil {
@@ -109,7 +111,8 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 		if !info.Features[f] {
 			info.VersionSupport = "below_minimum"
 			info.Readiness = "not_ready"
-			info.Diagnostic = "this Claude Code version lacks " + f + ", which HarmFlow needs"
+			info.SetDiagnostic(domain.T("harness_feature_missing", "this {{harness}} version lacks {{feature}}, which HarmFlow needs",
+				"harness", Name, "feature", f))
 		}
 	}
 	if info.VersionSupport == "supported" && compareVersions(info.Version, TestedUpTo) > 0 {
@@ -147,11 +150,11 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 		info.Readiness = "ready"
 	case "invalid":
 		info.Readiness = "not_ready"
-		info.Diagnostic = "Claude Code is not signed in; run `claude` in a terminal and sign in"
+		info.SetDiagnostic(domain.T("claude_not_signed_in", "Claude Code is not signed in; run `claude` in a terminal and sign in"))
 	default:
 		// The CLI cannot tell; let the first execution prove it rather than blocking on an unknown.
 		info.Readiness = "ready"
-		info.Diagnostic = "authentication could not be verified"
+		info.SetDiagnostic(domain.T("authentication_unverified", "authentication could not be verified"))
 	}
 	return info
 }
@@ -224,7 +227,8 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 		}
 		for _, s := range builtinSkills {
 			if err := catalog.CopyTree(s.Path, filepath.Join(dir, "skills", s.Name)); err != nil {
-				return ports.Invocation{}, nil, fmt.Errorf("delivering skill %s: %w", s.Name, err)
+				return ports.Invocation{}, nil, domain.TextErr("skill_delivery_failed", "delivering skill {{name}}: {{detail}}",
+					"name", s.Name, "detail", err.Error())
 			}
 		}
 		args = append(args, "--plugin-dir", dir)
@@ -238,7 +242,8 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 		}
 		data, err := os.ReadFile(ag.Path)
 		if err != nil {
-			return ports.Invocation{}, nil, fmt.Errorf("delivering agent %s: %w", ag.Name, err)
+			return ports.Invocation{}, nil, domain.TextErr("agent_delivery_failed", "delivering agent {{name}}: {{detail}}",
+				"name", ag.Name, "detail", err.Error())
 		}
 		fm, body := catalog.Parse(data)
 		def := map[string]any{"description": fm.Description, "prompt": body}
@@ -522,10 +527,10 @@ func (p *parser) Finish(exitCode int, stderrTail string, timedOut, cancelled boo
 	end := domain.AttemptEnd{ExitCode: exitCode, SessionID: p.sessionID, FinalText: p.lastText}
 	switch {
 	case cancelled:
-		end.Class, end.Message = domain.ClassCancelled, "cancelled"
+		end.Class, end.Error = domain.ClassCancelled, domain.T("execution_cancelled", "cancelled")
 		return end
 	case timedOut:
-		end.Class, end.Message = domain.ClassTimeout, "the execution timeout elapsed"
+		end.Class, end.Error = domain.ClassTimeout, domain.T("execution_timed_out", "the execution timeout elapsed")
 		return end
 	}
 	if p.result != nil && !p.result.IsError && exitCode == 0 {
@@ -538,10 +543,14 @@ func (p *parser) Finish(exitCode int, stderrTail string, timedOut, cancelled boo
 	if p.result != nil && p.result.Result != "" {
 		text = p.result.Result + "\n" + text
 	}
+	// The CLI's own error stays as it is; the daemon's text stands in when it printed none.
 	if text == "" {
-		text = fmt.Sprintf("Claude Code exited with code %d", exitCode)
+		end.Error = domain.T("harness_exit_code", "{{harness}} exited with code {{code}}", "harness", Name,
+			"code", strconv.Itoa(exitCode))
+		text = end.Error.Message
+	} else {
+		end.Error = domain.Text{Message: classify.Tail(text, 2000)}
 	}
-	end.Message = classify.Tail(text, 2000)
 	end.Class = patterns.Text(text)
 	if p.rateStatus == "rejected" {
 		// The stream itself said the limit rejected the session: a plan window is a quota, anything else a rate limit.

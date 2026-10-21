@@ -306,7 +306,7 @@ func (a *App) afterWrite(f ports.TaskFile, eventType string, r *ValidationResult
 	a.mu.Unlock()
 	a.rescheduleTask(f.ID)
 	if !enabled {
-		a.dropQueued(f.ID, "the task was disabled")
+		a.dropQueued(f.ID, domain.T("task_was_disabled", "the task was disabled"))
 	}
 	a.emit(domain.Event{Type: eventType, TaskID: f.ID, Message: r.doc.Metadata.Name,
 		Payload: map[string]any{"revision": f.Revision}})
@@ -323,13 +323,13 @@ func (a *App) DeleteTask(id string) (bool, error) {
 	if _, running := a.running[id]; running {
 		e.deletePending = true
 		a.mu.Unlock()
-		a.dropQueued(id, "the task is being deleted")
-		a.emit(domain.Event{Type: domain.EventTaskUpdated, TaskID: id, Message: "deletion waits for the running execution",
-			Payload: map[string]any{"deletePending": true}})
+		a.dropQueued(id, domain.T("task_being_deleted", "the task is being deleted"))
+		a.emit(domain.Event{Type: domain.EventTaskUpdated, TaskID: id, Payload: map[string]any{"deletePending": true}}.Says(
+			domain.T("task_delete_pending", "deletion waits for the running execution")))
 		return true, nil
 	}
 	a.mu.Unlock()
-	a.dropQueued(id, "the task was deleted")
+	a.dropQueued(id, domain.T("task_was_deleted", "the task was deleted"))
 	return false, a.removeTask(id)
 }
 
@@ -444,12 +444,12 @@ func (a *App) scanTaskFiles() {
 		a.mu.Unlock()
 		if invalid != nil {
 			a.emit(domain.Event{Type: domain.EventTaskInvalid, TaskID: f.ID, Severity: domain.SeverityWarning,
-				Message: "the task file was changed outside HarmFlow and fails validation; the last valid definition stays",
-				Payload: map[string]any{"errors": invalid.Errors, "revision": f.Revision}})
+				Payload: map[string]any{"errors": invalid.Errors, "revision": f.Revision}}.Says(domain.T("task_changed_externally_invalid",
+				"the task file was changed outside HarmFlow and fails validation; the last valid definition stays")))
 			continue
 		}
-		a.emit(domain.Event{Type: domain.EventTaskChangedExternally, TaskID: f.ID,
-			Message: "the task file was changed outside HarmFlow", Payload: map[string]any{"revision": f.Revision}})
+		a.emit(domain.Event{Type: domain.EventTaskChangedExternally, TaskID: f.ID, Payload: map[string]any{"revision": f.Revision}}.Says(
+			domain.T("task_changed_externally", "the task file was changed outside HarmFlow")))
 	}
 	a.mu.Lock()
 	var gone []string
@@ -468,8 +468,9 @@ func (a *App) scanTaskFiles() {
 	}
 	a.mu.Unlock()
 	for _, id := range gone {
-		a.dropQueued(id, "the task file was removed")
-		a.emit(domain.Event{Type: domain.EventTaskDeleted, TaskID: id, Message: "the task file was removed outside HarmFlow"})
+		a.dropQueued(id, domain.T("task_file_removed", "the task file was removed"))
+		a.emit(domain.Event{Type: domain.EventTaskDeleted, TaskID: id}.Says(
+			domain.T("task_removed_externally", "the task file was removed outside HarmFlow")))
 	}
 }
 

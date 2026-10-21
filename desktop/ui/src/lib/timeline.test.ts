@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { HarmflowEvent } from "../api/types";
+import i18n from "../i18n";
 import { buildTimeline, changedFilesFromEvents, currentStepFrom } from "./timeline";
 
 let nextId = 1;
@@ -33,6 +34,30 @@ describe("buildTimeline", () => {
       ev("tool.completed", { payload: { toolUseId: "t2", exitCode: 1 } }),
     ]);
     expect(items[0].completed?.ok).toBe(false);
+  });
+
+  it("shows the daemon's messages in the interface's language, the agent's and tools' as they are (FS-012 FR-005)", async () => {
+    await i18n.changeLanguage("pt-BR");
+    try {
+      const items = buildTimeline([
+        ev("harness.rate_limited", {
+          message: "rate limited; retrying on Codex in 30s (retry 1 of 3)",
+          messageKey: "harness_rate_limited",
+          params: { harness: "Codex", wait: "30s", retry: "1", max: "3" },
+        }),
+        ev("harness.message", { message: "I opened the draft pull request." }),
+        ev("tool.completed", { message: "Bash failed", messageKey: "tool_failed", params: { tool: "Bash" }, payload: { tool: "Bash" } }),
+        ev("step.started", { message: "Running the tests" }),
+      ]);
+      expect(items.map((i) => i.detail ?? i.title)).toEqual([
+        "limite de taxa; nova tentativa em Codex daqui a 30s (tentativa 1 de 3)",
+        "I opened the draft pull request.",
+        "Bash falhou",
+        "Running the tests",
+      ]);
+    } finally {
+      await i18n.changeLanguage("en-US");
+    }
   });
 
   it("keeps raw output out of the timeline and orders by id", () => {

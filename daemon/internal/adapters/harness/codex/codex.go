@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -69,7 +70,7 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 	case manualPath != "":
 		info.Path, info.PathSource = manualPath, "manual"
 		if st, err := os.Stat(manualPath); err != nil || st.IsDir() {
-			info.Diagnostic = "the path set by hand does not exist or is not a file"
+			info.SetDiagnostic(domain.T("harness_manual_path_invalid", "the path set by hand does not exist or is not a file"))
 			return info
 		}
 	case len(found) > 0:
@@ -80,14 +81,16 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 			}
 		}
 	default:
-		info.Diagnostic = "codex was not found on PATH, in Codex.app, or in the usual install locations"
+		info.SetDiagnostic(domain.T("codex_not_found",
+			"codex was not found on PATH, in Codex.app, or in the usual install locations"))
 		return info
 	}
 	info.Detected = true
 	info.Readiness = "installed"
 	out, _, err := procutil.Output(ctx, 15*time.Second, a.Env, info.Path, "--version")
 	if err != nil {
-		info.Diagnostic = "codex --version failed: " + err.Error()
+		info.SetDiagnostic(domain.T("command_failed", "{{command}} failed: {{detail}}", "command", "codex --version",
+			"detail", err.Error()))
 		return info
 	}
 	if m := versionRe.FindStringSubmatch(out); m != nil {
@@ -103,7 +106,8 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 		if !info.Features[f] {
 			info.VersionSupport = "below_minimum"
 			info.Readiness = "not_ready"
-			info.Diagnostic = "this Codex version lacks exec " + f + ", which HarmFlow needs"
+			info.SetDiagnostic(domain.T("harness_feature_missing", "this {{harness}} version lacks {{feature}}, which HarmFlow needs",
+				"harness", Name, "feature", "exec "+f))
 		}
 	}
 	if info.VersionSupport == "supported" && compareVersions(info.Version, TestedUpTo) > 0 {
@@ -123,7 +127,8 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 	}
 	if info.Authentication == "invalid" {
 		info.Readiness = "not_ready"
-		info.Diagnostic = "Codex is not signed in; run `codex login` in a terminal"
+		info.SetDiagnostic(domain.T("not_signed_in", "{{name}} is not signed in; run `{{command}}` in a terminal",
+			"name", Name, "command", "codex login"))
 		return info
 	}
 	info.Readiness = "ready"
@@ -309,7 +314,8 @@ func deliverBuiltins(req ports.RunRequest) (ports.RunRequest, error) {
 		}
 		dst := filepath.Join(dir, "skills", s.Name)
 		if err := catalog.CopyTree(s.Path, dst); err != nil {
-			return req, fmt.Errorf("delivering skill %s: %w", s.Name, err)
+			return req, domain.TextErr("skill_delivery_failed", "delivering skill {{name}}: {{detail}}",
+				"name", s.Name, "detail", err.Error())
 		}
 		skills[i].Path = dst
 	}
@@ -320,7 +326,8 @@ func deliverBuiltins(req ports.RunRequest) (ports.RunRequest, error) {
 		}
 		dst := filepath.Join(dir, "agents", agents[i].Name+".md")
 		if err := catalog.CopyTree(agents[i].Path, dst); err != nil {
-			return req, fmt.Errorf("delivering agent %s: %w", agents[i].Name, err)
+			return req, domain.TextErr("agent_delivery_failed", "delivering agent {{name}}: {{detail}}",
+				"name", agents[i].Name, "detail", err.Error())
 		}
 		agents[i].Path = dst
 	}
@@ -340,7 +347,8 @@ func (a *Adapter) instructions(req ports.RunRequest) (string, error) {
 		main := req.Agents[0]
 		data, err := os.ReadFile(main.Path)
 		if err != nil {
-			return "", fmt.Errorf("delivering agent %s: %w", main.Name, err)
+			return "", domain.TextErr("agent_delivery_failed", "delivering agent {{name}}: {{detail}}",
+				"name", main.Name, "detail", err.Error())
 		}
 		_, body := catalog.Parse(data)
 		fmt.Fprintf(&b, "## Your role: agent %s\n\n%s\n\n", main.Name, strings.TrimSpace(body))
@@ -495,19 +503,23 @@ func (p *parser) Finish(exitCode int, stderrTail string, timedOut, cancelled boo
 	end := domain.AttemptEnd{ExitCode: exitCode, SessionID: p.sessionID, FinalText: p.lastText}
 	switch {
 	case cancelled:
-		end.Class, end.Message = domain.ClassCancelled, "cancelled"
+		end.Class, end.Error = domain.ClassCancelled, domain.T("execution_cancelled", "cancelled")
 		return end
 	case timedOut:
-		end.Class, end.Message = domain.ClassTimeout, "the execution timeout elapsed"
+		end.Class, end.Error = domain.ClassTimeout, domain.T("execution_timed_out", "the execution timeout elapsed")
 		return end
 	case p.completed && p.failure == "" && exitCode == 0:
 		return end
 	}
 	text := strings.TrimSpace(p.failure + "\n" + lastLines(stderrTail, 20))
+	// The CLI's own error stays as it is; the daemon's text stands in when it printed none.
 	if text == "" {
-		text = fmt.Sprintf("Codex exited with code %d", exitCode)
+		end.Error = domain.T("harness_exit_code", "{{harness}} exited with code {{code}}", "harness", Name,
+			"code", strconv.Itoa(exitCode))
+		text = end.Error.Message
+	} else {
+		end.Error = domain.Text{Message: classify.Tail(text, 2000)}
 	}
-	end.Message = classify.Tail(text, 2000)
 	end.Class = patterns.Text(text)
 	return end
 }

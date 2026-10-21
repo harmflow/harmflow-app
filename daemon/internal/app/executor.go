@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -71,7 +72,7 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 	e := a.tasks[x.TaskID]
 	if e == nil {
 		a.mu.Unlock()
-		a.finish(&run{a: a, x: x, h: h}, domain.StatusCancelled, "the task no longer exists")
+		a.finish(&run{a: a, x: x, h: h}, domain.StatusCancelled, domain.T("task_gone", "the task no longer exists"))
 		return
 	}
 	def := e.doc
@@ -100,12 +101,12 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 	x.TaskType = def.Spec.Type
 	a.mu.Unlock()
 	if cancelled {
-		r.finish(domain.StatusCancelled, "cancelled before it started")
+		r.finish(domain.StatusCancelled, domain.T("cancelled_before_start", "cancelled before it started"))
 		return
 	}
 	// Leave queued before the harness check: the scheduler and cancellation take a queued execution for a waiting firing.
 	// One cancelled or dropped while still queued, after its task was claimed for it, has already ended: it never starts.
-	if !r.setStatus(domain.StatusPreparing, "Checking the harness") {
+	if !r.setStatus(domain.StatusPreparing, domain.T("step_checking_harness", "Checking the harness")) {
 		return
 	}
 	status, reason := r.attempts(func() error {
@@ -114,7 +115,7 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 		x.StartedAt = &started
 		x.TimeoutAt = &deadline
 		a.mu.Unlock()
-		r.setStatus(domain.StatusPreparing, "Preparing the workspace")
+		r.setStatus(domain.StatusPreparing, domain.T("step_preparing_workspace", "Preparing the workspace"))
 		r.event(domain.Event{Type: domain.EventExecutionStarted, Message: def.Metadata.Name,
 			Payload: map[string]any{"trigger": string(x.Trigger), "timeoutAt": deadline, "definitionRevision": rev}})
 		return r.prepare()
@@ -123,7 +124,7 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 		status, reason = r.outcomeFromReport()
 	} else if r.daemonStopping() && !r.cancelRequested() {
 		// A daemon that stops never continues the execution: it is interrupted (D-089).
-		status, reason = domain.StatusInterrupted, "the daemon stopped before the execution finished"
+		status, reason = domain.StatusInterrupted, daemonStopped()
 	}
 	r.finish(status, reason)
 }
@@ -166,9 +167,9 @@ func (r *run) save(force bool) {
 	r.a.persistExecution(r.x)
 }
 
-// setStatus moves the execution to s and records the step. It changes nothing and returns false once the execution
-// has ended.
-func (r *run) setStatus(s domain.ExecutionStatus, step string) bool {
+// setStatus moves the execution to s and records the step, unless it is empty. It changes nothing and returns false
+// once the execution has ended.
+func (r *run) setStatus(s domain.ExecutionStatus, step domain.Text) bool {
 	r.a.mu.Lock()
 	from := r.x.Status
 	if from.IsTerminal() {
@@ -176,20 +177,20 @@ func (r *run) setStatus(s domain.ExecutionStatus, step string) bool {
 		return false
 	}
 	if from == s || from.CanTransition(s) != nil {
-		if step != "" {
-			r.x.CurrentStep = step
+		if step.Message != "" {
+			r.x.SetStep(step)
 		}
 		r.a.mu.Unlock()
 		return true
 	}
 	r.x.Status = s
-	if step != "" {
-		r.x.CurrentStep = step
+	if step.Message != "" {
+		r.x.SetStep(step)
 	}
 	r.a.mu.Unlock()
 	r.save(true)
-	r.event(domain.Event{Type: domain.EventExecutionStatusChanged, Message: step,
-		Payload: map[string]any{"from": string(from), "status": string(s)}})
+	r.event(domain.Event{Type: domain.EventExecutionStatusChanged,
+		Payload: map[string]any{"from": string(from), "status": string(s)}}.Says(step))
 	return true
 }
 
@@ -198,7 +199,7 @@ func (r *run) prepare() error {
 	a := r.a
 	r.dir = filepath.Join(a.d.Paths.Runs, r.x.ID)
 	if err := os.MkdirAll(r.dir, 0o700); err != nil {
-		return fmt.Errorf("creating the execution directory: %w", err)
+		return domain.TextErr("execution_dir_failed", "creating the execution directory: {{detail}}", "detail", err.Error())
 	}
 	work := filepath.Join(a.d.Paths.Workspace, r.x.TaskID)
 	if p := r.eff.Spec.Workspace.Path; p != "" {
@@ -209,7 +210,8 @@ func (r *run) prepare() error {
 		work = expanded
 	}
 	if err := os.MkdirAll(work, 0o700); err != nil {
-		return fmt.Errorf("creating the workspace %s: %w", work, err)
+		return domain.TextErr("workspace_create_failed", "creating the workspace {{path}}: {{detail}}", "path", work,
+			"detail", err.Error())
 	}
 	r.work = work
 	for _, repo := range r.eff.Repositories() {
@@ -218,7 +220,8 @@ func (r *run) prepare() error {
 			return err
 		}
 		if st, err := os.Stat(p); err != nil || !st.IsDir() {
-			return fmt.Errorf("the local path %s of %s does not exist", p, repo.Name)
+			return domain.TextErr("repository_path_missing", "the local path {{path}} of {{repository}} does not exist",
+				"path", p, "repository", repo.Name)
 		}
 		r.extra = append(r.extra, p)
 	}
@@ -317,7 +320,7 @@ func (r *run) repositoryPaths() map[string]string {
 // limit retries on the same one, and everything shares the execution's one timeout (D-067). start runs once, when the
 // first harness of the chain is found ready, so an execution with none ready never starts (FS-004 FR-003). It
 // returns a terminal status when the attempts themselves decide it, or "" when the report decides.
-func (r *run) attempts(start func() error) (domain.ExecutionStatus, string) {
+func (r *run) attempts(start func() error) (domain.ExecutionStatus, domain.Text) {
 	a := r.a
 	chain, invalid := r.chain()
 	for _, w := range invalid {
@@ -325,45 +328,45 @@ func (r *run) attempts(start func() error) (domain.ExecutionStatus, string) {
 	}
 	fallback := r.eff.Spec.Harness.Fallback
 	idx, rateRetries := 0, 0
-	reason := "first attempt"
+	reason := domain.T("attempt_first", "first attempt")
 	var prev []previousAttempt
 	started := false
 	for {
 		if r.cancelRequested() {
-			return domain.StatusCancelled, "cancelled"
+			return domain.StatusCancelled, domain.T("execution_cancelled", "cancelled")
 		}
 		if r.ctx.Err() != nil {
-			return domain.StatusFailed, "the execution timeout elapsed"
+			return domain.StatusFailed, domain.T("execution_timed_out", "the execution timeout elapsed")
 		}
 		profile := chain[idx]
 		ad := a.adapters[profile.Provider]
 		info := a.detect(r.ctx, profile.Provider) // revalidate before every attempt (FS-004 FR-003)
 		var end domain.AttemptEnd
 		if !info.Ready() {
-			end = domain.AttemptEnd{Class: domain.ClassHarnessUnavailable, Message: unavailableMessage(ad, info)}
+			end = domain.AttemptEnd{Class: domain.ClassHarnessUnavailable, Error: unavailableText(ad, info)}
 			r.event(domain.Event{Type: domain.EventHarnessUnavailable, Harness: profile.Provider, Severity: domain.SeverityWarning,
-				Message: end.Message, Payload: map[string]any{"readiness": info.Readiness}})
+				Payload: map[string]any{"readiness": info.Readiness}}.Says(end.Error))
 		} else {
 			if !started {
 				if err := start(); err != nil {
-					return domain.StatusFailed, err.Error()
+					return domain.StatusFailed, domain.TextOf(err)
 				}
 				started = true
 			}
 			if err := r.writeContext(prev); err != nil {
-				return domain.StatusFailed, "writing context.json: " + err.Error()
+				return domain.StatusFailed, domain.T("context_write_failed", "writing context.json: {{detail}}", "detail", err.Error())
 			}
 			end = r.runAttempt(ad, info, profile, reason, prev)
 			if end.Class == domain.ClassCancelled {
-				return domain.StatusCancelled, "cancelled"
+				return domain.StatusCancelled, domain.T("execution_cancelled", "cancelled")
 			}
 			if end.Class == domain.ClassTimeout {
-				return domain.StatusFailed, "the execution timeout elapsed"
+				return domain.StatusFailed, domain.T("execution_timed_out", "the execution timeout elapsed")
 			}
 			a.mu.Lock()
 			at := r.x.CurrentAttempt()
 			prev = append(prev, previousAttempt{Number: at.Number, Harness: at.Harness, Model: at.Model,
-				Outcome: string(at.Outcome), Error: end.Message, LastOperation: r.lastOperation,
+				Outcome: string(at.Outcome), Error: end.Error.Message, LastOperation: r.lastOperation,
 				LastMessage: trimTo(end.FinalText, 1500)})
 			a.mu.Unlock()
 		}
@@ -378,63 +381,80 @@ func (r *run) attempts(start func() error) (domain.ExecutionStatus, string) {
 		switch action {
 		case domain.ActionFinish:
 			r.finalText = end.FinalText
-			return "", ""
+			return "", domain.Text{}
 		case domain.ActionRetrySame:
 			rl := r.eff.Spec.Execution.RateLimit
 			wait := domain.RateLimitWait(rateRetries, end.RetryAfter, time.Duration(*rl.InitialWaitSeconds)*time.Second,
 				time.Duration(*rl.MaxWaitSeconds)*time.Second)
 			rateRetries++
 			r.event(domain.Event{Type: domain.EventHarnessRateLimited, Harness: profile.Provider, Severity: domain.SeverityWarning,
-				Message: fmt.Sprintf("rate limited; retrying on %s in %s (retry %d of %d)", ad.Name(), wait.Round(time.Second),
-					rateRetries, *rl.MaxRetries), Payload: map[string]any{"waitSeconds": int(wait.Seconds()), "retry": rateRetries}})
-			r.setStatus(domain.StatusRunning, "Waiting for the rate limit")
+				Payload: map[string]any{"waitSeconds": int(wait.Seconds()), "retry": rateRetries}}.Says(domain.T("harness_rate_limited",
+				"rate limited; retrying on {{harness}} in {{wait}} (retry {{retry}} of {{max}})", "harness", ad.Name(),
+				"wait", wait.Round(time.Second).String(), "retry", strconv.Itoa(rateRetries), "max", strconv.Itoa(*rl.MaxRetries))))
+			r.setStatus(domain.StatusRunning, domain.T("step_waiting_rate_limit", "Waiting for the rate limit"))
 			select {
 			case <-time.After(wait):
 			case <-r.ctx.Done():
 			}
-			reason = "retry after a rate limit"
+			reason = domain.T("attempt_rate_limit_retry", "retry after a rate limit")
 		case domain.ActionSwitch:
 			next := chain[idx+1]
+			nextName := a.adapters[next.Provider].Name()
 			if end.Class == domain.ClassQuotaExhausted {
-				r.event(domain.Event{Type: domain.EventHarnessQuotaExhausted, Harness: profile.Provider, Severity: domain.SeverityWarning,
-					Message: ad.Name() + " exhausted its quota", Payload: map[string]any{"error": end.Message}})
+				r.quotaExhausted(ad, profile.Provider, end)
 			}
 			a.mu.Lock()
 			r.x.HarnessSwitches++
 			a.mu.Unlock()
-			r.setStatus(domain.StatusSwitchingHarness, "Switching to "+a.adapters[next.Provider].Name())
+			r.setStatus(domain.StatusSwitchingHarness, domain.T("step_switching_harness", "Switching to {{harness}}",
+				"harness", nextName))
 			r.event(domain.Event{Type: domain.EventHarnessSwitched, Severity: domain.SeverityWarning,
-				Message: fmt.Sprintf("switching from %s to %s", ad.Name(), a.adapters[next.Provider].Name()),
 				Payload: map[string]any{"from": profile.Provider, "to": next.Provider, "reason": string(end.Class),
-					"model": next.Model, "effort": next.Effort}})
+					"model": next.Model, "effort": next.Effort}}.Says(domain.T("harness_switched",
+				"switching from {{from}} to {{to}}", "from", ad.Name(), "to", nextName)))
 			idx++
 			rateRetries = 0
-			reason = "failover after " + strings.ReplaceAll(string(end.Class), "_", " ")
+			reason = domain.T("attempt_failover", "failover after {{reason}}", classParams(end.Class)...)
 		case domain.ActionNoAlternative:
 			if end.Class == domain.ClassQuotaExhausted {
-				r.event(domain.Event{Type: domain.EventHarnessQuotaExhausted, Harness: profile.Provider, Severity: domain.SeverityWarning,
-					Message: ad.Name() + " exhausted its quota", Payload: map[string]any{"error": end.Message}})
+				r.quotaExhausted(ad, profile.Provider, end)
 			}
-			msg := fmt.Sprintf("%s cannot continue (%s) and no alternative harness is available", ad.Name(),
-				strings.ReplaceAll(string(end.Class), "_", " "))
-			r.event(domain.Event{Type: domain.EventHarnessNoAlternative, Severity: domain.SeverityError, Message: msg,
-				Payload: map[string]any{"harness": profile.Provider, "reason": string(end.Class), "error": end.Message}})
-			return domain.StatusFailed, msg + ": " + end.Message
+			r.event(domain.Event{Type: domain.EventHarnessNoAlternative, Severity: domain.SeverityError,
+				Payload: domain.ErrorPayload(map[string]any{"harness": profile.Provider, "reason": string(end.Class)},
+					end.Error)}.Says(domain.T("no_alternative_harness",
+				"{{harness}} cannot continue ({{reason}}) and no alternative harness is available",
+				append([]string{"harness", ad.Name()}, classParams(end.Class)...)...)))
+			return domain.StatusFailed, domain.T("no_alternative_harness_detail",
+				"{{harness}} cannot continue ({{reason}}) and no alternative harness is available: {{detail}}",
+				append([]string{"harness", ad.Name()}, classParams(end.Class)...)...).Nest("detail", end.Error)
 		default:
-			msg := end.Message
-			if msg == "" {
-				msg = "the harness ended with an error"
+			if end.Error.Message == "" {
+				return domain.StatusFailed, domain.T("harness_ended_with_error", "the harness ended with an error")
 			}
-			return domain.StatusFailed, msg
+			return domain.StatusFailed, end.Error
 		}
 	}
 }
 
-func unavailableMessage(ad ports.HarnessAdapter, info ports.HarnessInfo) string {
+// classParams name an error class: in words for the en-US text, and as the value the desktop translates.
+func classParams(c domain.ErrorClass) []string {
+	return []string{"reason", strings.ReplaceAll(string(c), "_", " "), "errorClass", string(c)}
+}
+
+// unavailableText says why a harness cannot run, quoting its diagnostic.
+func unavailableText(ad ports.HarnessAdapter, info ports.HarnessInfo) domain.Text {
 	if info.Diagnostic != "" {
-		return ad.Name() + " is unavailable: " + info.Diagnostic
+		return domain.T("harness_unavailable", "{{harness}} is unavailable: {{detail}}", "harness", ad.Name()).
+			Nest("detail", info.DiagnosticText())
 	}
-	return ad.Name() + " is unavailable (" + info.Readiness + ")"
+	return domain.T("harness_unavailable_readiness", "{{harness}} is unavailable ({{readiness}})", "harness", ad.Name(),
+		"readiness", info.Readiness)
+}
+
+func (r *run) quotaExhausted(ad ports.HarnessAdapter, harness string, end domain.AttemptEnd) {
+	r.event(domain.Event{Type: domain.EventHarnessQuotaExhausted, Harness: harness, Severity: domain.SeverityWarning,
+		Payload: domain.ErrorPayload(map[string]any{}, end.Error)}.Says(domain.T("harness_quota_exhausted",
+		"{{harness}} exhausted its quota", "harness", ad.Name())))
 }
 
 // chain returns the preferred profile and the fallbacks that can load the task's agents and skills (D-092).
@@ -468,28 +488,30 @@ func (r *run) warn(w domain.Warning, eventType string, emit bool) {
 	added := r.x.AddWarning(w)
 	r.a.mu.Unlock()
 	if added && emit {
-		r.event(domain.Event{Type: eventType, Severity: domain.SeverityWarning, Message: w.Message,
-			Payload: map[string]any{"code": w.Code, "subject": w.Subject}})
+		r.event(domain.Event{Type: eventType, Severity: domain.SeverityWarning,
+			Payload: map[string]any{"code": w.Code, "subject": w.Subject}}.Says(w.Text))
 	}
 }
 
 // runAttempt starts one harness process and follows it to its end.
-func (r *run) runAttempt(ad ports.HarnessAdapter, info ports.HarnessInfo, p domain.HarnessProfile, reason string,
+func (r *run) runAttempt(ad ports.HarnessAdapter, info ports.HarnessInfo, p domain.HarnessProfile, reason domain.Text,
 	prev []previousAttempt) domain.AttemptEnd {
 	a := r.a
-	agents, skills, err := r.resolve(p.Provider)
+	agents, skills, err := r.resolve(ad)
 	if err != nil {
-		return domain.AttemptEnd{Class: domain.ClassTaskError, Message: err.Error()}
+		return domain.AttemptEnd{Class: domain.ClassTaskError, Error: domain.TextOf(err)}
 	}
 	now := a.now()
 	a.mu.Lock()
 	n := len(r.x.Attempts) + 1
 	r.attempt = n
-	r.x.Attempts = append(r.x.Attempts, domain.Attempt{Number: n, Harness: p.Provider, HarnessVersion: info.Version,
-		Model: p.Model, Effort: p.Effort, StartedAt: now, Outcome: domain.AttemptRunning, Reason: reason})
+	at := domain.Attempt{Number: n, Harness: p.Provider, HarnessVersion: info.Version, Model: p.Model, Effort: p.Effort,
+		StartedAt: now, Outcome: domain.AttemptRunning}
+	at.SetReason(reason)
+	r.x.Attempts = append(r.x.Attempts, at)
 	r.x.Harness, r.x.Model = p.Provider, p.Model
 	a.mu.Unlock()
-	r.setStatus(domain.StatusRunning, "Starting "+ad.Name())
+	r.setStatus(domain.StatusRunning, domain.T("step_starting_harness", "Starting {{harness}}", "harness", ad.Name()))
 	r.save(true)
 
 	req := ports.RunRequest{
@@ -500,7 +522,7 @@ func (r *run) runAttempt(ad ports.HarnessAdapter, info ports.HarnessInfo, p doma
 	}
 	inv, parser, err := ad.Prepare(info, req)
 	if err != nil {
-		end := domain.AttemptEnd{Class: domain.ClassTaskError, Message: err.Error()}
+		end := domain.AttemptEnd{Class: domain.ClassTaskError, Error: domain.TextOf(err)}
 		r.endAttempt(end, -1)
 		return end
 	}
@@ -531,14 +553,15 @@ func (r *run) runAttempt(ad ports.HarnessAdapter, info ports.HarnessInfo, p doma
 		if raw != nil {
 			raw.Close()
 		}
-		end := domain.AttemptEnd{Class: domain.ClassHarnessUnavailable, Message: "starting " + ad.Name() + ": " + err.Error()}
+		end := domain.AttemptEnd{Class: domain.ClassHarnessUnavailable, Error: domain.T("harness_start_failed",
+			"starting {{harness}}: {{detail}}", "harness", ad.Name(), "detail", err.Error())}
 		r.endAttempt(end, -1)
 		return end
 	}
 	r.event(domain.Event{Type: domain.EventHarnessStarted, Harness: p.Provider,
-		Message: fmt.Sprintf("%s %s started", ad.Name(), info.Version),
 		Payload: map[string]any{"model": p.Model, "effort": p.Effort, "version": info.Version, "pid": proc.Pid(),
-			"reason": reason, "path": info.Path}})
+			"reason": reason.Message, "path": info.Path}}.Says(domain.T("harness_started", "{{harness}} {{version}} started",
+		"harness", ad.Name(), "version", info.Version)))
 
 	stopProgress := make(chan struct{})
 	progressDone := make(chan struct{})
@@ -585,7 +608,7 @@ func (r *run) endAttempt(end domain.AttemptEnd, exit int) {
 		at.ExitCode = &code
 	}
 	at.SessionID = end.SessionID
-	at.ErrorMessage = end.Message
+	at.SetError(end.Error)
 	at.Outcome = attemptOutcome(end.Class)
 	harness := at.Harness
 	outcome := at.Outcome
@@ -601,9 +624,14 @@ func (r *run) endAttempt(end domain.AttemptEnd, exit int) {
 	if end.Class != domain.ClassNone {
 		sev = domain.SeverityWarning
 	}
+	name := harness
+	if ad, ok := a.adapters[harness]; ok {
+		name = ad.Name()
+	}
 	r.event(domain.Event{Type: domain.EventHarnessExited, Harness: harness, Severity: sev,
-		Message: fmt.Sprintf("%s ended: %s", harness, strings.ReplaceAll(string(outcome), "_", " ")),
-		Payload: map[string]any{"exitCode": exit, "outcome": string(outcome), "error": end.Message}})
+		Payload: domain.ErrorPayload(map[string]any{"exitCode": exit, "outcome": string(outcome)}, end.Error)}.Says(
+		domain.T("harness_exited", "{{harness}} ended: {{outcome}}", "harness", name,
+			"outcome", strings.ReplaceAll(string(outcome), "_", " "), "attemptOutcome", string(outcome))))
 	r.save(true)
 }
 
@@ -627,19 +655,19 @@ func attemptOutcome(c domain.ErrorClass) domain.AttemptOutcome {
 }
 
 // resolve finds the task's agents and skills for one harness.
-func (r *run) resolve(harness string) ([]ports.ResolvedItem, []ports.ResolvedItem, error) {
+func (r *run) resolve(ad ports.HarnessAdapter) ([]ports.ResolvedItem, []ports.ResolvedItem, error) {
 	var agents, skills []ports.ResolvedItem
 	for _, name := range r.eff.Spec.Agents {
-		it, where, ok := r.a.resolveItem("agent", name, harness)
+		it, where, ok := r.a.resolveItem("agent", name, ad.ID())
 		if !ok {
-			return nil, nil, fmt.Errorf("agent %q cannot be found in %s", name, where)
+			return nil, nil, &domain.TextError{Text: missingItem{"agent", name, where}.notFound(ad.Name())}
 		}
 		agents = append(agents, it)
 	}
 	for _, name := range r.eff.Spec.Skills {
-		it, where, ok := r.a.resolveItem("skill", name, harness)
+		it, where, ok := r.a.resolveItem("skill", name, ad.ID())
 		if !ok {
-			return nil, nil, fmt.Errorf("skill %q cannot be found in %s", name, where)
+			return nil, nil, &domain.TextError{Text: missingItem{"skill", name, where}.notFound(ad.Name())}
 		}
 		skills = append(skills, it)
 	}
@@ -720,8 +748,8 @@ func (r *run) onHarnessEvent(he ports.HarnessEvent) {
 		a.mu.Unlock()
 		if he.Model != "" {
 			r.event(domain.Event{Type: domain.EventHarnessOutput, Severity: domain.SeverityDebug,
-				Message: "session " + he.SessionID + " on model " + he.Model,
-				Payload: map[string]any{"sessionId": he.SessionID, "model": he.Model}})
+				Payload: map[string]any{"sessionId": he.SessionID, "model": he.Model}}.Says(domain.T("harness_session",
+				"session {{session}} on model {{model}}", "session", he.SessionID, "model", he.Model)))
 		}
 	case ports.HarnessMessage:
 		r.event(domain.Event{Type: domain.EventHarnessMessage, Message: trimTo(he.Message, 8000)})
@@ -733,7 +761,7 @@ func (r *run) onHarnessEvent(he ports.HarnessEvent) {
 			title = he.Tool + ": " + he.Message
 		}
 		a.mu.Lock()
-		r.x.CurrentStep = trimTo(firstNonEmpty(he.Message, title), 160)
+		r.x.SetStep(domain.Text{Message: trimTo(firstNonEmpty(he.Message, title), 160)})
 		if he.Command != "" {
 			r.commandIndex[he.ToolID] = len(r.x.Commands)
 			r.x.Commands = append(r.x.Commands, domain.CommandRecord{ID: he.ToolID, Command: trimTo(he.Command, 2000),
@@ -761,14 +789,16 @@ func (r *run) onHarnessEvent(he ports.HarnessEvent) {
 		}
 		a.mu.Unlock()
 		sev := domain.SeverityInfo
+		text := domain.T("tool_succeeded", "{{tool}} succeeded", "tool", he.Tool)
 		if he.IsError {
 			sev = domain.SeverityWarning
+			text = domain.T("tool_failed", "{{tool}} failed", "tool", he.Tool)
 		}
 		payload := map[string]any{"toolId": he.ToolID, "tool": he.Tool, "status": status, "output": he.Output}
 		if he.ExitCode != nil {
 			payload["exitCode"] = *he.ExitCode
 		}
-		r.event(domain.Event{Type: domain.EventToolCompleted, Severity: sev, Message: he.Tool + " " + status, Payload: payload})
+		r.event(domain.Event{Type: domain.EventToolCompleted, Severity: sev, Payload: payload}.Says(text))
 	case ports.HarnessFileChanged:
 		path := he.Path
 		if strings.HasPrefix(filepath.Clean(path), r.dir+string(filepath.Separator)) {
@@ -833,10 +863,10 @@ func (r *run) onProgress(p domain.ProgressLine) {
 	case domain.EventStepStarted:
 		if s := domain.ExecutionStatus(p.Phase); s == domain.StatusPreparing || s == domain.StatusRunning ||
 			s == domain.StatusTesting || s == domain.StatusPublishing {
-			r.setStatus(s, msg)
+			r.setStatus(s, domain.Text{Message: msg})
 		} else {
 			a.mu.Lock()
-			r.x.CurrentStep = msg
+			r.x.SetStep(domain.Text{Message: msg})
 			a.mu.Unlock()
 		}
 	case domain.EventWorkItemSelected:
@@ -845,16 +875,16 @@ func (r *run) onProgress(p domain.ProgressLine) {
 		if p.Repository != "" {
 			r.x.Repository = p.Repository
 		}
-		r.x.CurrentStep = msg
+		r.x.SetStep(domain.Text{Message: msg})
 		a.mu.Unlock()
 		a.trackWorkItem(r.x.TaskID, p.WorkItem, msg, p.Repository, r.x.ID)
 	case domain.EventTestStarted:
-		r.setStatus(domain.StatusTesting, msg)
+		r.setStatus(domain.StatusTesting, domain.Text{Message: msg})
 	case domain.EventTestCompleted:
 		a.mu.Lock()
 		r.x.TestsStatus = p.Status
 		a.mu.Unlock()
-		r.setStatus(domain.StatusRunning, msg)
+		r.setStatus(domain.StatusRunning, domain.Text{Message: msg})
 	case domain.EventPullRequestCreated, domain.EventPullRequestUpdated:
 		a.mu.Lock()
 		if p.URL != "" {
@@ -863,7 +893,7 @@ func (r *run) onProgress(p domain.ProgressLine) {
 		r.lastOperation = p.Type + " " + p.URL
 		r.x.LastOperation = r.lastOperation
 		a.mu.Unlock()
-		r.setStatus(domain.StatusPublishing, msg)
+		r.setStatus(domain.StatusPublishing, domain.Text{Message: msg})
 	case domain.EventRepositoryUnprotected:
 		// The agent's own words stay as they are; the daemon's text stands in when it wrote none.
 		text := domain.Text{Message: msg}
@@ -890,35 +920,35 @@ func (r *run) onProgress(p domain.ProgressLine) {
 }
 
 // outcomeFromReport reads report.json: the session's agents and skills decide the outcome, the daemon records it.
-func (r *run) outcomeFromReport() (domain.ExecutionStatus, string) {
+func (r *run) outcomeFromReport() (domain.ExecutionStatus, domain.Text) {
 	data, err := os.ReadFile(filepath.Join(r.dir, "report.json"))
 	if err != nil {
 		r.a.mu.Lock()
 		r.x.Summary = trimTo(r.finalText, 4000)
 		r.a.mu.Unlock()
-		return domain.StatusCompleted, ""
+		return domain.StatusCompleted, domain.Text{}
 	}
 	value, err := schema.FromJSON(data)
 	if err != nil {
 		r.warn(domain.Warning{Code: domain.WarningOther,
 			Text: domain.T("report_not_json", "report.json is not valid JSON; it was ignored")}, "", false)
-		return domain.StatusCompleted, ""
+		return domain.StatusCompleted, domain.Text{}
 	}
 	if issues := r.a.d.Validator.ValidateReport(value); len(issues) > 0 {
 		r.warn(domain.Warning{Code: domain.WarningOther, Text: domain.T("report_schema_invalid",
 			"report.json does not follow its schema ({{path}}: {{detail}}); it was ignored",
 			"path", issues[0].Path, "detail", issues[0].Message)}, "", false)
-		return domain.StatusCompleted, ""
+		return domain.StatusCompleted, domain.Text{}
 	}
 	var rep domain.ExecutionReport
 	if err := json.Unmarshal(data, &rep); err != nil {
-		return domain.StatusCompleted, ""
+		return domain.StatusCompleted, domain.Text{}
 	}
 	r.applyReport(&rep)
 	status := domain.StatusForReport(&rep)
-	reason := ""
+	var reason domain.Text // the agent's own summary, as it wrote it
 	if status == domain.StatusFailed || status == domain.StatusNeedsAttention {
-		reason = trimTo(rep.Summary, 500)
+		reason.Message = trimTo(rep.Summary, 500)
 	}
 	return status, reason
 }
@@ -972,9 +1002,13 @@ func (r *run) applyReport(rep *domain.ExecutionReport) {
 			}
 		}
 		if w.Tests != nil && w.Tests.Status == "failed" {
+			// The agent's own summary stays as it is; the daemon's text stands in when it wrote none.
+			text := domain.Text{Message: w.Tests.Summary}
+			if strings.TrimSpace(w.Tests.Summary) == "" {
+				text = domain.T("tests_failed", "tests failed; the draft pull request documents them")
+			}
 			r.event(domain.Event{Type: domain.EventTestFailed, WorkItemID: w.Key, Severity: domain.SeverityWarning,
-				Message: firstNonEmpty(w.Tests.Summary, "tests failed; the draft pull request documents them"),
-				Payload: map[string]any{"url": prURL(w)}})
+				Payload: map[string]any{"url": prURL(w)}}.Says(text))
 		}
 	}
 }
@@ -1008,12 +1042,12 @@ func (r *run) limits() domain.WorkItemLimits {
 	return l
 }
 
-func (a *App) finish(r *run, status domain.ExecutionStatus, reason string) {
+func (a *App) finish(r *run, status domain.ExecutionStatus, reason domain.Text) {
 	r.finish(status, reason)
 }
 
 // finish records the terminal state and its event. A failed or interrupted work item counts toward its retry limit.
-func (r *run) finish(status domain.ExecutionStatus, reason string) {
+func (r *run) finish(status domain.ExecutionStatus, reason domain.Text) {
 	a := r.a
 	now := a.now()
 	a.mu.Lock()
@@ -1023,13 +1057,14 @@ func (r *run) finish(status domain.ExecutionStatus, reason string) {
 	}
 	r.x.Status = status
 	r.x.EndedAt = &now
-	if reason != "" && (status == domain.StatusFailed || status == domain.StatusCancelled || status == domain.StatusNeedsAttention) {
-		r.x.ErrorMessage = trimTo(reason, 2000)
+	if reason.Message != "" && (status == domain.StatusFailed || status == domain.StatusCancelled || status == domain.StatusNeedsAttention) {
+		reason.Message = trimTo(reason.Message, 2000)
+		r.x.SetError(reason)
 	}
 	if status == domain.StatusCancelled && r.x.CancelRequestedAt == nil && r.h != nil && r.h.cancelRequested {
 		r.x.CancelRequestedAt = &now
 	}
-	r.x.CurrentStep = ""
+	r.x.SetStep(domain.Text{})
 	workItem := r.x.WorkItem
 	hasResult := len(r.x.WorkItems) > 0
 	a.mu.Unlock()
@@ -1045,11 +1080,13 @@ func (r *run) finish(status domain.ExecutionStatus, reason string) {
 		sev = domain.SeverityWarning
 	}
 	a.mu.Lock()
-	payload := map[string]any{"status": string(status), "testsStatus": r.x.TestsStatus, "pullRequestUrl": r.x.PullRequestURL,
-		"summary": r.x.Summary, "error": r.x.ErrorMessage, "attempts": len(r.x.Attempts)}
+	payload := domain.ErrorPayload(map[string]any{"status": string(status), "testsStatus": r.x.TestsStatus,
+		"pullRequestUrl": r.x.PullRequestURL, "summary": r.x.Summary, "attempts": len(r.x.Attempts)}, r.x.ErrorText())
 	a.mu.Unlock()
-	r.event(domain.Event{Type: domain.TerminalEventFor(status), Severity: sev, Message: firstNonEmpty(reason, string(status)),
-		Payload: payload})
+	if strings.TrimSpace(reason.Message) == "" {
+		reason = domain.T("execution_status", "{{status}}", "status", string(status))
+	}
+	r.event(domain.Event{Type: domain.TerminalEventFor(status), Severity: sev, Payload: payload}.Says(reason))
 }
 
 func (r *run) limitsOrDefault() domain.WorkItemLimits {
@@ -1081,15 +1118,16 @@ func (a *App) CancelExecution(id string) error {
 		a.mu.Unlock()
 		a.persistExecution(x)
 		a.emit(domain.Event{Type: domain.EventExecutionCancelled, TaskID: x.TaskID, ExecutionID: x.ID,
-			Message: "cancelled before it started", Payload: map[string]any{"status": string(domain.StatusCancelled)}})
+			Payload: map[string]any{"status": string(domain.StatusCancelled)}}.Says(
+			domain.T("cancelled_before_start", "cancelled before it started")))
 		return nil
 	}
 	h := a.running[x.TaskID]
 	x.CancelRequestedAt = &now
 	a.mu.Unlock()
 	a.persistExecution(x)
-	a.emit(domain.Event{Type: domain.EventExecutionCancelRequest, TaskID: x.TaskID, ExecutionID: x.ID,
-		Message: "cancellation requested"})
+	a.emit(domain.Event{Type: domain.EventExecutionCancelRequest, TaskID: x.TaskID, ExecutionID: x.ID}.Says(
+		domain.T("cancel_requested", "cancellation requested")))
 	if h != nil {
 		a.mu.Lock()
 		h.cancelRequested = true
@@ -1100,6 +1138,11 @@ func (a *App) CancelExecution(id string) error {
 		}
 	}
 	return nil
+}
+
+// daemonStopped is why an execution the daemon did not finish was interrupted (D-089).
+func daemonStopped() domain.Text {
+	return domain.T("daemon_stopped_execution", "the daemon stopped before the execution finished")
 }
 
 func firstNonEmpty(s ...string) string {

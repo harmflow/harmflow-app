@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import i18n from "../i18n";
-import { daemonText } from "./daemonText";
+import { daemonText, eventText } from "./daemonText";
 
 describe("daemonText", () => {
   beforeAll(async () => {
@@ -32,6 +32,37 @@ describe("daemonText", () => {
     const running = (count: string) => daemonText({ message: "", messageKey: "executions_running", params: { count } });
     expect(running("1")).toBe("1 execução está em andamento; confirme para parar o daemon e cancelá-la");
     expect(running("3")).toBe("3 execuções estão em andamento; confirme para parar o daemon e cancelá-las");
+  });
+
+  it("translates a daemon text quoted in another, at every depth, and quotes a harness's own error as it is", () => {
+    const unavailable = {
+      harness: "Codex",
+      reason: "harness unavailable",
+      errorClass: "harness_unavailable",
+      detail: "Codex is unavailable: Codex is not signed in; run `codex login` in a terminal",
+      detailKey: "harness_unavailable",
+      "detail.harness": "Codex",
+      "detail.detail": "Codex is not signed in; run `codex login` in a terminal",
+      "detail.detailKey": "not_signed_in",
+      "detail.detail.name": "Codex",
+      "detail.detail.command": "codex login",
+    };
+    expect(daemonText({ message: "", messageKey: "no_alternative_harness_detail", params: unavailable })).toBe(
+      "Codex não pode continuar (harness indisponível) e nenhum harness alternativo está disponível: " +
+        "Codex está indisponível: Codex não está conectado; execute `codex login` em um terminal",
+    );
+    const quota = { harness: "Codex", reason: "quota exhausted", errorClass: "quota_exhausted", detail: "You've hit your usage limit" };
+    expect(daemonText({ message: "", messageKey: "no_alternative_harness_detail", params: quota })).toBe(
+      "Codex não pode continuar (cota esgotada) e nenhum harness alternativo está disponível: You've hit your usage limit",
+    );
+  });
+
+  it("translates an event's message, and leaves the agent's words as they are", () => {
+    expect(eventText({ message: "switching from Claude Code to Codex", messageKey: "harness_switched", params: { from: "Claude Code", to: "Codex" } })).toBe(
+      "trocando de Claude Code para Codex",
+    );
+    expect(eventText({ message: "I opened the draft pull request." })).toBe("I opened the draft pull request.");
+    expect(eventText({})).toBe("");
   });
 
   it("keeps the daemon's text when it has no key, or a key with no translation", () => {

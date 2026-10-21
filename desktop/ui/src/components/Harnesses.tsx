@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
 import type { Harness, Tool } from "../api/types";
 import type { Tone } from "../design/tokens";
+import { fieldText } from "../lib/daemonText";
 import { formatRelative } from "../lib/format";
 import { actions } from "../state/store";
 import { HarnessMark, Icon } from "./Icon";
@@ -54,7 +55,7 @@ export function ToolRow({ tool }: { tool: Tool }) {
         <strong>{t(`tools.${tool.id}`)}</strong>
         <span className="mono muted">{tool.detected ? `${tool.version ?? "?"} · ${tool.path ?? ""}` : t("harness.notDetected")}</span>
       </span>
-      <Chip tone={tone} icon={tool.detected ? "check" : "circle"}>
+      <Chip tone={tone} icon={tool.detected ? "check" : "circle"} title={fieldText(tool.diagnostic, tool.diagnosticKey, tool.diagnosticParams)}>
         {tool.detected
           ? tool.authentication && tool.authentication !== "unknown"
             ? t(`harness.authentication.${tool.authentication}`)
@@ -125,7 +126,12 @@ export function HarnessInventory({ harness, locale }: { harness: Harness; locale
               {harness.capabilitySource ? <span className="muted"> · {t(`harness.capabilitySource.${harness.capabilitySource}`)}</span> : null}
             </span>,
           ],
-          [t("harness.diagnostic"), harness.diagnostic ? <span className="mono">{harness.diagnostic}</span> : null],
+          [
+            t("harness.diagnostic"),
+            harness.diagnostic ? (
+              <span className="mono">{fieldText(harness.diagnostic, harness.diagnosticKey, harness.diagnosticParams)}</span>
+            ) : null,
+          ],
         ]}
       />
       {editing ? (

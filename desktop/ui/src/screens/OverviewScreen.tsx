@@ -4,6 +4,7 @@ import { Counters } from "../components/Aside";
 import { HarnessRow, ToolRow } from "../components/Harnesses";
 import { HarnessLabel, noticeText } from "../components/Shell";
 import { Button, Chip, EmptyState, Panel, StatusMark } from "../components/ui";
+import { fieldText } from "../lib/daemonText";
 import { formatDuration, formatRelative } from "../lib/format";
 import { useNow } from "../lib/hooks";
 import { actions, useStore } from "../state/store";
@@ -125,7 +126,7 @@ export function OverviewScreen({
                   <StatusMark status={e.status} />
                   <span className="simple-row__main">
                     <strong>{e.taskName}</strong>
-                    <span className="mono muted">{e.errorMessage ?? e.summary ?? e.workItem ?? e.id}</span>
+                    <span className="mono muted">{fieldText(e.errorMessage, e.errorKey, e.errorParams) ?? e.summary ?? e.workItem ?? e.id}</span>
                   </span>
                   <span className="simple-row__aside">{formatRelative(e.endedAt ?? e.createdAt, locale, now)}</span>
                 </button>
