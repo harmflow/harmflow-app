@@ -1376,6 +1376,9 @@ components:
         severity: { type: string, enum: [info, warning, error] }
         read: { type: boolean }
         params:
-          description: Values the desktop interpolates into its translated text for eventType; title and body are the en-US fallback.
+          description: >-
+            Values the desktop interpolates into its translated text for eventType; title and body are the en-US
+            fallback. The event's message is in the param the text names, error or reason, nested as in MessageParams
+            when the daemon wrote it; a completed execution's summary is in summary.
           type: object
           additionalProperties: { type: string }

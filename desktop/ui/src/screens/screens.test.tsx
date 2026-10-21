@@ -1,7 +1,7 @@
 // Renders each screen from a known state, to catch rendering errors without a browser or a daemon.
 import { renderToString } from "react-dom/server";
 import { beforeAll, describe, expect, it } from "vitest";
-import type { Execution, ExecutionSummary, HarmflowEvent, Harness, Settings, TaskSummary, WorkItem } from "../api/types";
+import type { Execution, ExecutionSummary, HarmflowEvent, Harness, Notification, Settings, TaskSummary, WorkItem } from "../api/types";
 import { RawCaptures } from "../components/ExecutionDetail";
 import { HarnessInventory } from "../components/Harnesses";
 import { ValidationPanel } from "../components/TaskEditor";
@@ -9,7 +9,7 @@ import { TaskForm } from "../components/TaskForm";
 import i18n from "../i18n";
 import { formatBytes } from "../lib/format";
 import { newTaskDocument } from "../lib/taskForm";
-import { patchStateForTests } from "../state/store";
+import { getState, patchStateForTests } from "../state/store";
 import { ExecutionsScreen } from "./ExecutionsScreen";
 import { HistoryScreen } from "./HistoryScreen";
 import { OnboardingScreen } from "./OnboardingScreen";
@@ -254,6 +254,28 @@ describe("screens", () => {
       );
     } finally {
       patchStateForTests({ recent: [finished] });
+    }
+  });
+
+  it("reads a failed execution's notice with its reason in the interface's language (FS-012 FR-005)", () => {
+    const failed: Notification = {
+      id: "n2",
+      createdAt: "2026-10-20T19:05:00-03:00",
+      eventType: "execution.failed",
+      title: "Execution failed",
+      body: "Core failed: the execution timeout elapsed",
+      severity: "error",
+      read: false,
+      params: { taskName: "Core", error: "the execution timeout elapsed", errorKey: "execution_timed_out" },
+    };
+    const unread = getState().unread;
+    patchStateForTests({ unread: [failed] });
+    try {
+      expect(renderToString(<OverviewScreen onOpenExecution={() => {}} onNewTask={() => {}} onOpenTask={() => {}} />)).toContain(
+        "A execução falhou: o tempo limite da execução se esgotou",
+      );
+    } finally {
+      patchStateForTests({ unread });
     }
   });
 

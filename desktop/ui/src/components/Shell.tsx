@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
 import { native } from "../api/native";
 import type { Notification } from "../api/types";
+import { translateNested } from "../lib/daemonText";
 import { formatBytes, formatNumber, formatRelative, formatTime } from "../lib/format";
 import { useNow } from "../lib/hooks";
 import { actions, useStore } from "../state/store";
@@ -237,9 +238,13 @@ function NotificationBell({ onOpenExecution }: { onOpenExecution: (id: string) =
 
 type TFn = ReturnType<typeof useTranslation>["t"];
 
-/** The translated text of a notice, from its event type and parameters; the daemon's text is the fallback. */
+/**
+ * The translated text of a notice, from its event type and parameters; the daemon's text is the fallback. The reason
+ * it quotes is translated too when the daemon wrote it.
+ */
 export function noticeText(t: TFn, n: Notification): { title: string; body: string } {
-  const params: Record<string, string> = { taskName: "", harness: "", summary: "", error: "", reason: "", url: "", ...n.params };
+  const values = translateNested(n.params);
+  const params: Record<string, string> = { taskName: "", harness: "", summary: "", error: "", reason: "", url: "", ...values };
   const key = `notify.${n.eventType}`;
   const title = t(`${key}.title` as never, { ...params, defaultValue: n.title }) as string;
   const body = t(`${key}.body` as never, { ...params, defaultValue: n.body }) as string;

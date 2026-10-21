@@ -1020,6 +1020,65 @@ func TestNotificationCapKeepsUnread(t *testing.T) {
 	}
 }
 
+// FS-012 FR-005: a notice sends the params its text reads. A message the daemon wrote is nested with its key, so the
+// desktop translates it in place; the agent's words are quoted as they are.
+func TestNoticeSendsTheParamsItsTextReads(t *testing.T) {
+	e := newEnv(t)
+	e.create("loud", "  notifications:\n    native:\n      events: [execution.started, execution.completed, "+
+		"execution.failed, execution.needs_attention, harness.unavailable]\n")
+	r, _ := e.app.RunTask("loud")
+	e.wait(r.ExecutionID, domain.StatusCompleted)
+	if p := e.noticeParams(domain.EventExecutionStarted); p["harness"] != domain.HarnessClaudeCode {
+		t.Errorf("started: %v", p)
+	}
+	if p := e.noticeParams(domain.EventExecutionCompleted); p["summary"] != "done" {
+		t.Errorf("completed: %v", p)
+	}
+
+	e.claude.setScript(func(req ports.RunRequest) string {
+		return fmt.Sprintf(`printf '{"outcome":"needs_attention","summary":"approve the plan"}' > %s/report.json; `+
+			`echo 'END ok'`, req.ExecutionDir)
+	})
+	r, _ = e.app.RunTask("loud")
+	e.wait(r.ExecutionID, domain.StatusNeedsAttention)
+	if p := e.noticeParams(domain.EventExecutionNeedsAttention); p["reason"] != "approve the plan" || p["reasonKey"] != "" {
+		t.Errorf("needs attention: %v", p)
+	}
+
+	// With no harness ready, the notices quote the daemon's texts, which quote the harness's diagnostic.
+	e.claude.mu.Lock()
+	e.claude.unavailable = true
+	e.claude.mu.Unlock()
+	r, _ = e.app.RunTask("loud")
+	e.wait(r.ExecutionID, domain.StatusFailed)
+	if p := e.noticeParams(domain.EventHarnessUnavailable); p["reasonKey"] != "harness_unavailable" ||
+		p["reason.harness"] != domain.HarnessClaudeCode || p["reason.detailKey"] != "not_signed_in" {
+		t.Errorf("harness unavailable: %v", p)
+	}
+	p := e.noticeParams(domain.EventExecutionFailed)
+	if p["errorKey"] != "no_alternative_harness_detail" || p["error.detailKey"] != "harness_unavailable" ||
+		p["error.detail.detail.command"] != "login" || !strings.HasPrefix(p["error"], "claude-code cannot continue") {
+		t.Errorf("failed: %v", p)
+	}
+	if _, ok := p["detail"]; ok {
+		t.Errorf("failed: a detail no text reads: %v", p)
+	}
+}
+
+// noticeParams waits for the newest notice of an event type and returns its params.
+func (e *env) noticeParams(eventType string) map[string]string {
+	e.t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		for _, n := range e.app.Notifications(false) {
+			if n.EventType == eventType {
+				return n.Params
+			}
+		}
+	}
+	e.t.Fatalf("no %s notice", eventType)
+	return nil
+}
+
 // FS-009 FR-010: an unenforced restriction runs with a warning on the task and on the execution.
 func TestPolicyWarningIsShown(t *testing.T) {
 	e := newEnv(t)

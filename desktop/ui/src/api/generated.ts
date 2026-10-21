@@ -1055,7 +1055,7 @@ export interface components {
             /** @enum {string} */
             severity: "info" | "warning" | "error";
             read: boolean;
-            /** @description Values the desktop interpolates into its translated text for eventType; title and body are the en-US fallback. */
+            /** @description Values the desktop interpolates into its translated text for eventType; title and body are the en-US fallback. The event's message is in the param the text names, error or reason, nested as in MessageParams when the daemon wrote it; a completed execution's summary is in summary. */
             params?: {
                 [key: string]: string;
             };
