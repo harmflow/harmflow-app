@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/harmflow/harmflow-app/daemon/internal/adapters/eventlog"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/procutil"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/schema"
 	"github.com/harmflow/harmflow-app/daemon/internal/contracts"
@@ -527,6 +528,12 @@ func (r *run) runAttempt(ad ports.HarnessAdapter, info ports.HarnessInfo, p doma
 		WorkDir: r.work, AdditionalDirs: r.extra, Permissions: *r.eff.Spec.Permissions, ExecutionDir: r.dir,
 		Env: r.env(),
 	}
+	// Recorded before Prepare, so a running attempt, and one whose harness never started, shows its input (FS-008 FR-010).
+	a.mu.Lock()
+	if at := r.x.CurrentAttempt(); at != nil {
+		at.Prompt, at.SessionContext = eventlog.Redact(req.Prompt), eventlog.Redact(req.Context)
+	}
+	a.mu.Unlock()
 	inv, parser, err := ad.Prepare(info, req)
 	if err != nil {
 		end := domain.AttemptEnd{Class: domain.ClassTaskError, Error: domain.TextOf(err)}

@@ -851,6 +851,10 @@ export interface components {
             reasonKey?: components["schemas"]["MessageKey"];
             reasonParams?: components["schemas"]["MessageParams"];
             usage?: components["schemas"]["AttemptUsage"];
+            /** @description The task's prompt as the attempt sent it to the harness, redacted like the raw output; a later edit of the task does not change it. Absent on older records. */
+            prompt?: string;
+            /** @description HarmFlow's session context the attempt sent with the prompt, composed for that attempt and redacted like the raw output. Absent on older records. */
+            sessionContext?: string;
         };
         /** @description What the harness reported of the attempt's token use: the count so far while it runs, the final one when it ends. The cost is stamped when the attempt ends — the harness's own figure, or an estimate from the adapter's dated table of API list prices — so a later table never reprices it. Numbers and enums only; the desktop words them (D-099). Absent when the attempt started no harness process; older records have none. */
         AttemptUsage: {

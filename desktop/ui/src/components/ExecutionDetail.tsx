@@ -1,6 +1,6 @@
 // The selected execution: its events as they happen and replayed from the log, its raw output, files, commands,
-// results, attempts (FS-008 FR-002, FR-008), and estimated token costs (harmflow-app#39). Observe and cancel only — no
-// input reaches the agent (FS-003 FR-003).
+// results, attempts with the prompt and session context each sent (FS-008 FR-002, FR-008), and estimated token costs
+// (harmflow-app#39). Observe and cancel only — no input reaches the agent (FS-003 FR-003).
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
@@ -567,6 +567,10 @@ function Attempts({ detail, locale, now }: { detail?: Execution; locale: string;
               ],
             ]}
           />
+          <div className="attempt__input">
+            <AttemptInput label={t("executions.detail.prompt")} text={a.prompt} />
+            <AttemptInput label={t("executions.detail.sessionContext")} text={a.sessionContext} />
+          </div>
         </li>
       ))}
     </ol>
@@ -583,5 +587,32 @@ function UsedValue({ used, configured }: { used?: string; configured: string }) 
         <span className="muted"> · {t("executions.detail.configured", { value: configured })}</span>
       ) : null}
     </>
+  );
+}
+
+/** What the attempt sent the harness, as the daemon recorded and redacted it; older records have none (FS-008 FR-008). */
+function AttemptInput({ label, text }: { label: string; text?: string }) {
+  const { t } = useTranslation();
+  if (!text) {
+    return (
+      <div className="attempt-input attempt-input--empty">
+        <span>{label}</span>
+        <span className="muted">{t("executions.detail.notRecorded")}</span>
+      </div>
+    );
+  }
+  return (
+    <details className="attempt-input">
+      <summary>
+        <Icon name="chevronRight" size={14} />
+        {label}
+      </summary>
+      <div className="codebox">
+        <div className="codebox__tools">
+          <CopyButton text={text} />
+        </div>
+        <pre className="mono">{text}</pre>
+      </div>
+    </details>
   );
 }

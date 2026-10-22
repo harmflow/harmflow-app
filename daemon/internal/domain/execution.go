@@ -104,6 +104,10 @@ type Attempt struct {
 	ReasonParams     map[string]string `json:"reasonParams,omitempty"`
 	// Usage is what the harness reported of its token use, as it runs and when it ends; absent when it reported none.
 	Usage *Usage `json:"usage,omitempty"`
+	// Prompt and SessionContext are what the attempt sent the harness, redacted like the raw output, since the task can
+	// be edited afterwards and the context is composed per attempt (FS-008 FR-010, D-104); older records have neither.
+	Prompt         string `json:"prompt,omitempty"`
+	SessionContext string `json:"sessionContext,omitempty"`
 }
 
 // SetError records why the attempt ended; ErrorMessage is the en-US text (FS-012 FR-005).

@@ -1143,6 +1143,16 @@ components:
         reasonKey: { $ref: "#/components/schemas/MessageKey" }
         reasonParams: { $ref: "#/components/schemas/MessageParams" }
         usage: { $ref: "#/components/schemas/AttemptUsage" }
+        prompt:
+          type: string
+          description: >-
+            The task's prompt as the attempt sent it to the harness, redacted like the raw output; a later edit of the task
+            does not change it. Absent on older records.
+        sessionContext:
+          type: string
+          description: >-
+            HarmFlow's session context the attempt sent with the prompt, composed for that attempt and redacted like the
+            raw output. Absent on older records.
 
     AttemptUsage:
       type: object
