@@ -10,9 +10,9 @@ executions. Read `task.parameters.queue` from `context.json`:
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `maxDiscoveredPerCycle` | 10 | How many new issues to look at, per repository |
+| `maxDiscoveredPerCycle` | 10 | How many eligible new issues to collect, per repository; excluded and already-processed issues do not count |
 | `maxItemsPerCycle` | 1 | How many work items this execution processes |
-| `ordering` | `oldest_first` | `oldest_first` or `newest_first`, by issue creation |
+| `ordering` | `oldest_first` | `oldest_first` or `newest_first`, by issue creation — the order discovery reads issues in (§2) |
 | `resumeStrategy` | `resume_first` | `resume_first`, `new_first`, or `alternate` between the two lists |
 | `maxResumeAttempts` | 3 | Resumptions of one item before it needs a human |
 | `maxFailedRetries` | 3 | Operational failures of one item before it needs a human |
@@ -35,12 +35,41 @@ reads `needs_attention`, or when its `resumes` reached `maxResumeAttempts` or it
 
 ## 2. New issues
 
-For each repository, list open issues with the criteria of the task's prompt (labels with `--label`, a search with
-`--search`, or one specific issue with `gh issue view`):
+New work is, for each repository, the first `maxDiscoveredPerCycle` **eligible** issues in the task's `ordering`: the
+oldest ones for `oldest_first`, the newest ones for `newest_first`. Eligibility is decided before the list is cut — an
+issue the prompt's criteria exclude, or one already processed, does not count against the limit, so read past it.
+
+When the prompt names one specific issue, read it with
+`gh issue view <n> --repo OWNER/REPO --json number,title,url,labels,state,createdAt` instead of listing. Otherwise,
+read the repository's open issues one page at a time, from page 1, in the task's order:
 
 ```bash
-gh issue list --repo OWNER/REPO --state open --limit <maxDiscoveredPerCycle> --json number,title,url,labels,createdAt
+gh api "repos/OWNER/REPO/issues?state=open&sort=created&direction=<asc|desc>&per_page=100&page=<n>" \
+  --jq '{fetched: length, issues: [.[] | select(.pull_request | not) | {number, title, url: .html_url, labels: [.labels[].name], createdAt: .created_at}]}'
 ```
+
+- `direction` is `asc` for `oldest_first` and `desc` for `newest_first`. Always set it: the endpoint's default is
+  newest first.
+- The endpoint lists pull requests too. The `--jq` filter drops them; `fetched` counts what the page held before that.
+- Narrow the listing with the prompt's criteria where the endpoint can: `labels=a,b` (an issue must carry every label
+  listed; URL-encode the names), `milestone=`, `assignee=`, `creator=`, `mentioned=`. Check the other criteria on
+  each issue yourself — one label out of several, an excluded label, words in the title or the body (add `body` to
+  the `--jq` projection).
+- Do not list with `gh issue list`: it cannot return the oldest issues first, and with `--label` or `--search` it
+  reads GitHub's search index, which can lag behind or return nothing for issues that exist. Search only for a
+  criterion the listing cannot check, such as words in comments, and put the order in the query
+  (`sort:created-desc` for `newest_first`):
+
+  ```bash
+  gh issue list --repo OWNER/REPO --state open --search "<terms> sort:created-asc" --limit 1000 --json number,title,url,labels,createdAt
+  ```
+
+  Read its result in order as below. An empty result does not prove that no issue matches.
+
+Go through the issues in the order they came, page after page, and keep each one that meets the prompt's criteria and
+is not already processed (below). Stop when you have `maxDiscoveredPerCycle` of them, when a page's `fetched` is below
+100 (it was the last page), or after 10 pages — 1,000 open issues and pull requests. If you stop at that cap, go on
+with what you kept and say so in the report's `summary`.
 
 An issue is **already processed**, and is not new work, when any of these holds:
 
@@ -52,7 +81,7 @@ Exclusions the prompt states apply on top of that. No issue is safe just because
 
 ## 3. Order and select
 
-Sort new issues by `ordering`. Merge the two lists by `resumeStrategy`, then take the first `maxItemsPerCycle` items.
+New issues keep the order of §2. Merge the two lists by `resumeStrategy`, then take the first `maxItemsPerCycle` items.
 
 For each selected item, append one line to `progress.jsonl`:
 
