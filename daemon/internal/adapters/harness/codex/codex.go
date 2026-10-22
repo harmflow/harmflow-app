@@ -35,6 +35,8 @@ type Adapter struct {
 	Home    string
 	PathEnv string
 	Env     []string
+	// KnownLocations are searched after PATH; nil is the usual install locations, an empty list none.
+	KnownLocations []string
 }
 
 func (a *Adapter) ID() string   { return ID }
@@ -48,6 +50,9 @@ func (a *Adapter) codexHome() string {
 }
 
 func (a *Adapter) knownLocations() []string {
+	if a.KnownLocations != nil {
+		return a.KnownLocations
+	}
 	return []string{
 		"/Applications/Codex.app/Contents/Resources/codex-cli/bin/codex",
 		filepath.Join(a.Home, "Applications", "Codex.app", "Contents", "Resources", "codex-cli", "bin", "codex"),

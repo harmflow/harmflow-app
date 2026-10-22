@@ -77,6 +77,20 @@ describe("buildTimeline", () => {
     expect(items.map((i) => i.tone)).toEqual(["magenta", "warning"]);
   });
 
+  it("shows a run on an untested harness version as a warning naming the version (FS-004 FR-008, AC-009)", () => {
+    const [item] = buildTimeline([
+      ev("harness.version_untested", {
+        severity: "warning",
+        harness: "codex",
+        message: "Codex 0.999.0 is newer than the versions HarmFlow was tested with",
+        messageKey: "harness_version_untested",
+        params: { harness: "Codex", version: "0.999.0" },
+      }),
+    ]);
+    expect(item).toMatchObject({ tone: "warning", icon: "alert" });
+    expect(item.detail ?? item.title).toContain("0.999.0");
+  });
+
   it("drops duplicates delivered twice by replay and live stream", () => {
     const e = ev("execution.started");
     expect(buildTimeline([e, e])).toHaveLength(1);

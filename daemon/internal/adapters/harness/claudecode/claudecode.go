@@ -39,6 +39,8 @@ type Adapter struct {
 	Home    string // the user's home directory
 	PathEnv string
 	Env     []string
+	// KnownLocations are searched after PATH; nil is the usual install locations, an empty list none.
+	KnownLocations []string
 }
 
 func (a *Adapter) ID() string   { return ID }
@@ -52,6 +54,9 @@ func (a *Adapter) configDir() string {
 }
 
 func (a *Adapter) knownLocations() []string {
+	if a.KnownLocations != nil {
+		return a.KnownLocations
+	}
 	return []string{
 		filepath.Join(a.Home, ".claude", "local", "claude"),
 		filepath.Join(a.Home, ".local", "bin", "claude"),
