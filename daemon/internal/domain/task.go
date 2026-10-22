@@ -142,7 +142,7 @@ type HarnessSelection struct {
 }
 
 type FallbackPolicy struct {
-	On          []string         `yaml:"on,omitempty" json:"on,omitempty"`
+	On          ChosenList       `yaml:"on,omitempty" json:"on,omitzero"`
 	Candidates  []HarnessProfile `yaml:"candidates,omitempty" json:"candidates,omitempty"`
 	MaxSwitches *int             `yaml:"maxSwitches,omitempty" json:"maxSwitches,omitempty"`
 }
@@ -177,9 +177,16 @@ type Notifications struct {
 }
 
 type NativeNotifications struct {
-	Enabled *bool    `yaml:"enabled,omitempty" json:"enabled,omitempty"`
-	Events  []string `yaml:"events,omitempty" json:"events,omitempty"`
+	Enabled *bool      `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	Events  ChosenList `yaml:"events,omitempty" json:"events,omitzero"`
 }
+
+// ChosenList is a list whose empty value is a choice: a task that chose none says `[]`, and only a list left out (nil)
+// takes the default. The file and the API keep `[]`, since yaml.v3's omitempty and encoding/json's omitzero ask
+// IsZero, which is true for nil alone.
+type ChosenList []string
+
+func (l ChosenList) IsZero() bool { return l == nil }
 
 type RepositoryTarget struct {
 	Name       string `yaml:"name" json:"name"`
@@ -206,7 +213,8 @@ type Delivery struct {
 	TestRepairAttempts *int `yaml:"testRepairAttempts,omitempty" json:"testRepairAttempts,omitempty"`
 }
 
-// DefaultNotifiedEvents are the events a task notifies when it chooses none (FS-011 FR-002).
+// DefaultNotifiedEvents are the events a task notifies when it leaves its events out; an empty list notifies none
+// (FS-011 FR-002).
 var DefaultNotifiedEvents = []string{
 	EventExecutionCompleted, EventExecutionFailed, EventExecutionNeedsAttention, EventPullRequestCreated,
 	EventHarnessNoAlternative,
@@ -586,9 +594,11 @@ func clonePtr[T any](p *T) *T {
 	return &v
 }
 
+// cloneSlice keeps nil apart from an empty list: nil is a list left out, which Effective fills in, and an empty one is
+// a choice it keeps.
 func cloneSlice[T any](s []T) []T {
 	if s == nil {
 		return nil
 	}
-	return append([]T(nil), s...)
+	return append(make([]T, 0, len(s)), s...)
 }

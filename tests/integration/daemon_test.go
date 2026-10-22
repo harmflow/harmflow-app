@@ -257,6 +257,18 @@ func TestTaskLifecycle(t *testing.T) {
 	if created["nextFireAt"] == nil {
 		t.Error("no next firing")
 	}
+	// An empty list the form sends is a choice the file keeps, not a key dropped for its default (FS-011 FR-002).
+	empty := map[string]any{"apiVersion": "harmflow/v1alpha1", "kind": "Task",
+		"metadata": map[string]any{"id": "form-empty", "name": "Form empty"},
+		"spec": map[string]any{"type": "general", "prompt": "p",
+			"harness": map[string]any{"preferred": map[string]any{"provider": "claude-code"},
+				"fallback": map[string]any{"on": []any{}}},
+			"notifications": map[string]any{"native": map[string]any{"events": []any{}}}}}
+	d.call("POST", "/tasks", map[string]any{"document": empty}, 201)
+	if data, err := os.ReadFile(filepath.Join(d.home, "tasks", "form-empty.yaml")); err != nil ||
+		!strings.Contains(string(data), "events: []") {
+		t.Errorf("the file dropped the empty events list (%v):\n%s", err, data)
+	}
 	// The same schema error from the form and from the editor.
 	bad := map[string]any{"document": map[string]any{"apiVersion": "harmflow/v1alpha1", "kind": "Task",
 		"metadata": map[string]any{"id": "Bad ID", "name": "x"}, "spec": doc["spec"]}}

@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"slices"
 	"testing"
 	"time"
 )
@@ -50,6 +51,28 @@ func TestEffectiveDefaults(t *testing.T) {
 	// Effective never mutates the document it came from.
 	if g.Spec.GitHubIssueImplementation.Queue != nil || g.Spec.Permissions != nil {
 		t.Error("Effective mutated the original")
+	}
+}
+
+// FS-011 FR-002, FS-005 FR-001 and FR-009: an empty list of notified events or failover triggers is a choice and stays
+// empty; only an absent one takes the default.
+func TestEffectiveKeepsEmptyLists(t *testing.T) {
+	d := minimalTask()
+	d.Spec.Harness.Fallback = &FallbackPolicy{On: []string{}}
+	d.Spec.Notifications = &Notifications{Native: &NativeNotifications{Events: []string{}}}
+	s := d.Effective().Spec
+	if s.Harness.Fallback.On == nil || len(s.Harness.Fallback.On) != 0 {
+		t.Errorf("fallback.on = %#v, want an empty list", s.Harness.Fallback.On)
+	}
+	if s.Notifications.Native.Events == nil || len(s.Notifications.Native.Events) != 0 {
+		t.Errorf("notifications.native.events = %#v, want an empty list", s.Notifications.Native.Events)
+	}
+	s = minimalTask().Effective().Spec
+	if !slices.Equal(s.Harness.Fallback.On, []string{FallbackOnQuota, FallbackOnUnavailable}) {
+		t.Errorf("absent fallback.on = %v, want both triggers", s.Harness.Fallback.On)
+	}
+	if !slices.Equal(s.Notifications.Native.Events, DefaultNotifiedEvents) {
+		t.Errorf("absent notifications.native.events = %v, want %v", s.Notifications.Native.Events, DefaultNotifiedEvents)
 	}
 }
 
