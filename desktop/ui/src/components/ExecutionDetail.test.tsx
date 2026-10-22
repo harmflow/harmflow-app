@@ -139,6 +139,7 @@ describe("execution detail", () => {
       "Commands(1)",
       "Results",
       "Attempts(2)",
+      "Costs",
     ]);
 
     expect(host!.querySelectorAll(".tl-item").length).toBeGreaterThanOrEqual(3);
@@ -224,6 +225,67 @@ describe("execution detail", () => {
     } finally {
       await i18n.changeLanguage("en-US");
     }
+  });
+
+  // harmflow-app#39: a failover's attempts and their sum, each figure with its source, the estimate said as such, and
+  // the itemized receipt inside the tab.
+  it("shows each attempt's token use and estimated cost, their sum, and the receipt", async () => {
+    const tokens = (input: number, cacheWriteLong: number, cacheRead: number, output: number) => ({ input, cacheWriteShort: 0, cacheWriteLong, cacheRead, output });
+    const costly: Execution = {
+      ...completed,
+      id: "exec-costly",
+      attempts: [
+        {
+          ...base.attempts[0],
+          usage: { status: "partial", modelSource: "harness", models: [{ model: "claude-haiku-4-5-20251001", tokens: tokens(9, 11511, 14129, 0) }] },
+        },
+        {
+          ...base.attempts[1],
+          usage: {
+            status: "reported",
+            modelSource: "config",
+            costSource: "estimated",
+            costUsd: 0.0477,
+            pricesAsOf: "2026-10-22",
+            models: [{ model: "gpt-test", tokens: tokens(24355, 0, 135680, 1194), price: { input: 1, cacheWriteShort: 1, cacheWriteLong: 1, cacheRead: 0.1, output: 10 }, costUsd: 0.0477 }],
+          },
+        },
+      ],
+    };
+    await open(costly, [], capture());
+    const summary = await choose("Costs");
+    for (const shown of [
+      "Estimated cost",
+      "$0.0477",
+      "Claude Code → Codex",
+      "partial · ended before the final count",
+      "estimated · price table",
+      "Quota exhausted",
+      "Total",
+      "24,355",
+      "149,809", // the cache reads of both attempts
+      "An estimate at API list prices of Oct 22, 2026",
+      "not billed one by one",
+      "Attempt 1 ended before Claude Code reported its final count",
+      "Attempt 2 is priced as gpt-test, the model the Codex configuration sets.",
+    ]) {
+      expect(summary).toContain(shown);
+    }
+
+    const receiptButton = [...host!.querySelectorAll<HTMLButtonElement>(".detail__body button")].find((b) => b.textContent === "Receipt");
+    await act(async () => receiptButton!.click());
+    const receipt = body();
+    for (const shown of ["HarmFlow · token estimate", "prices as of Oct 22, 2026", "Attempt 1", "Attempt 2", "Cache write (1 h)", "Cache read", "135,680", "$0.10/M", "$0.0136", "Total (estimate)", "+ unpriced"]) {
+      expect(receipt).toContain(shown);
+    }
+    const back = [...host!.querySelectorAll<HTMLButtonElement>(".detail__body button")].find((b) => b.textContent === "← Summary");
+    await act(async () => back!.click());
+    expect(body()).toContain("By attempt");
+  });
+
+  it("says when an execution's harness reported no usage, instead of showing zero", async () => {
+    await open({ ...completed, id: "exec-unreported" }, [], capture());
+    expect(await choose("Costs")).toContain("No token usage for this execution");
   });
 
   it("reads the raw output from the daemon's route again every 2 s while the execution runs (FS-008 FR-008)", async () => {

@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -88,7 +89,11 @@ func (f *fakeHarness) setScript(s func(ports.RunRequest) string) {
 	f.mu.Unlock()
 }
 
-type fakeParser struct{ last string }
+// fakeParser also reads "USAGE <input tokens>", the usage so far, which is final once the attempt ends well.
+type fakeParser struct {
+	last  string
+	input int64
+}
 
 func (p *fakeParser) Line(b []byte) []ports.HarnessEvent {
 	s := string(b)
@@ -96,21 +101,33 @@ func (p *fakeParser) Line(b []byte) []ports.HarnessEvent {
 		p.last = strings.TrimPrefix(s, "END ")
 		return nil
 	}
+	if n, ok := strings.CutPrefix(s, "USAGE "); ok {
+		p.input, _ = strconv.ParseInt(n, 10, 64)
+		return []ports.HarnessEvent{{Kind: ports.HarnessUsage, Usage: p.usage(domain.UsagePartial)}}
+	}
 	return []ports.HarnessEvent{{Kind: ports.HarnessMessage, Message: s}}
+}
+
+func (p *fakeParser) usage(s domain.UsageStatus) *domain.Usage {
+	if p.input == 0 {
+		return domain.NotReported()
+	}
+	return &domain.Usage{Status: s, Models: []domain.ModelUsage{{Model: "fake", Tokens: domain.Tokens{Input: p.input}}}}
 }
 
 func (p *fakeParser) Finish(exit int, _ string, timedOut, cancelled bool) domain.AttemptEnd {
 	switch {
 	case cancelled:
-		return domain.AttemptEnd{Class: domain.ClassCancelled}
+		return domain.AttemptEnd{Class: domain.ClassCancelled, Usage: p.usage(domain.UsagePartial)}
 	case timedOut:
 		return domain.AttemptEnd{Class: domain.ClassTimeout}
 	}
 	switch p.last {
 	case "ok":
-		return domain.AttemptEnd{FinalText: "done"}
+		return domain.AttemptEnd{FinalText: "done", Usage: p.usage(domain.UsageReported)}
 	case "quota":
-		return domain.AttemptEnd{Class: domain.ClassQuotaExhausted, Error: domain.Text{Message: "usage limit reached"}}
+		return domain.AttemptEnd{Class: domain.ClassQuotaExhausted, Error: domain.Text{Message: "usage limit reached"},
+			Usage: p.usage(domain.UsagePartial)}
 	case "rate":
 		return domain.AttemptEnd{Class: domain.ClassRateLimited, Error: domain.Text{Message: "429"}, RetryAfter: 10 * time.Millisecond}
 	}
@@ -433,6 +450,42 @@ func TestQuotaFailover(t *testing.T) {
 	x = e.wait(r.ExecutionID, domain.StatusFailed)
 	if !strings.Contains(x.ErrorMessage, "no alternative") {
 		t.Errorf("error %q", x.ErrorMessage)
+	}
+}
+
+// harmflow-app#39: each attempt of a failover keeps its own usage — the count so far while it runs, the final one when
+// it ends — and the record on disk carries it.
+func TestUsagePerAttempt(t *testing.T) {
+	e := newEnv(t)
+	e.create("usage", "    fallback:\n      candidates:\n        - provider: codex\n")
+	e.claude.setScript(func(ports.RunRequest) string { return "echo 'USAGE 100'; echo 'END quota'" })
+	e.codex.setScript(func(ports.RunRequest) string { return "echo 'USAGE 40'; sleep 1; echo 'USAGE 50'; echo 'END ok'" })
+	r, _ := e.app.RunTask("usage")
+	live := false
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline) && !live; time.Sleep(20 * time.Millisecond) {
+		x, _ := e.app.GetExecution(r.ExecutionID)
+		live = len(x.Attempts) == 2 && x.Attempts[1].Usage != nil && x.Attempts[1].Usage.Status == domain.UsagePartial &&
+			x.Attempts[1].Usage.Total().Input == 40
+	}
+	if !live {
+		t.Error("the running attempt did not show its usage so far")
+	}
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	first, second := x.Attempts[0].Usage, x.Attempts[1].Usage
+	if first == nil || first.Status != domain.UsagePartial || first.Total().Input != 100 {
+		t.Errorf("attempt 1: %+v", first)
+	}
+	if second == nil || second.Status != domain.UsageReported || second.Total().Input != 50 {
+		t.Errorf("attempt 2: %+v", second)
+	}
+	e.idle("usage")
+	data, err := os.ReadFile(filepath.Join(e.home, "state", "executions", r.ExecutionID+".json"))
+	var saved domain.Execution
+	if err == nil {
+		err = json.Unmarshal(data, &saved)
+	}
+	if err != nil || len(saved.Attempts) != 2 || saved.Attempts[1].Usage == nil || saved.Attempts[1].Usage.Total().Input != 50 {
+		t.Errorf("the record on disk lacks the usage (%v):\n%s", err, data)
 	}
 }
 

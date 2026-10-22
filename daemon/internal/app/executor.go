@@ -614,6 +614,9 @@ func (r *run) endAttempt(end domain.AttemptEnd, exit int) {
 		at.ExitCode = &code
 	}
 	at.SessionID = end.SessionID
+	if end.Usage != nil {
+		at.Usage = end.Usage
+	}
 	at.SetError(end.Error)
 	at.Outcome = attemptOutcome(end.Class)
 	harness := at.Harness
@@ -829,6 +832,13 @@ func (r *run) onHarnessEvent(he ports.HarnessEvent) {
 		r.event(domain.Event{Type: domain.EventHarnessOutput, Severity: domain.SeverityDebug, Message: trimTo(he.Message, 2000)})
 	case ports.HarnessRateLimit:
 		r.event(domain.Event{Type: domain.EventHarnessOutput, Severity: domain.SeverityWarning, Message: he.Message})
+	case ports.HarnessUsage:
+		// No event of its own: the record is saved every second, and an open detail reloads on the attempt's next event.
+		a.mu.Lock()
+		if at := r.x.CurrentAttempt(); at != nil && he.Usage != nil {
+			at.Usage = he.Usage
+		}
+		a.mu.Unlock()
 	}
 }
 

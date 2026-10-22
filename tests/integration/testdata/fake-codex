@@ -19,4 +19,4 @@ fi
 echo '{"type":"item.started","item":{"id":"i1","type":"command_execution","command":"/bin/zsh -lc '"'"'echo codex'"'"'","status":"in_progress"}}'
 echo '{"type":"item.completed","item":{"id":"i1","type":"command_execution","command":"/bin/zsh -lc '"'"'echo codex'"'"'","aggregated_output":"codex\n","exit_code":0,"status":"completed"}}'
 echo '{"type":"item.completed","item":{"id":"i2","type":"agent_message","text":"Codex finished."}}'
-echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
+echo '{"type":"turn.completed","usage":{"input_tokens":160035,"cached_input_tokens":135680,"cache_write_input_tokens":0,"output_tokens":1194,"reasoning_output_tokens":244}}'

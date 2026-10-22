@@ -56,7 +56,8 @@ func startDaemon(t *testing.T, home string) *daemon {
 	t.Helper()
 	_ = os.Remove(filepath.Join(home, "run", "daemon.json"))
 	cmd := exec.Command(binary, "--home", home, "--builtins", repoRoot())
-	cmd.Env = append(os.Environ(), "HARMFLOW_TOKEN_STORE=file")
+	// Codex's configuration is the test's own, never the user's.
+	cmd.Env = append(os.Environ(), "HARMFLOW_TOKEN_STORE=file", "CODEX_HOME="+filepath.Join(home, "codex"))
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := cmd.Start(); err != nil {
@@ -395,6 +396,12 @@ func TestRunStreamAndReplay(t *testing.T) {
 	if x["pullRequestUrl"] != "https://github.com/o/r/pull/4" || x["testsStatus"] != "passed" {
 		t.Errorf("execution %v", x)
 	}
+	// harmflow-app#39: the record and the API carry the attempt's usage, at the cost the CLI reported.
+	usage, _ := x["attempts"].([]any)[0].(map[string]any)["usage"].(map[string]any)
+	if usage["status"] != "reported" || usage["costSource"] != "reported" || usage["costUsd"] != 0.0364015 ||
+		tokensOf(usage)["output"] != float64(866) || usage["models"].([]any)[0].(map[string]any)["price"] == nil {
+		t.Errorf("usage %v", usage)
+	}
 	replay := d.call("GET", "/executions/"+id+"/events", nil, 200)
 	stored := replay["events"].([]any)
 	if len(stored) < len(seen) {
@@ -447,6 +454,8 @@ func TestRawOutputRedacted(t *testing.T) {
 // FS-005 §5.1: Claude Code exhausts its quota; Codex finishes the same execution.
 func TestFailoverAcrossHarnesses(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
+	_ = os.MkdirAll(filepath.Join(d.home, "codex"), 0o700)
+	_ = os.WriteFile(filepath.Join(d.home, "codex", "config.toml"), []byte("model = \"gpt-from-config\"\n"), 0o600)
 	d.call("POST", "/tasks", map[string]any{"yaml": task("failover", "SCENARIO=quota",
 		"    fallback:\n      candidates:\n        - provider: codex\n")}, 201)
 	run := d.call("POST", "/tasks/failover/run", nil, 202)
@@ -470,6 +479,30 @@ func TestFailoverAcrossHarnesses(t *testing.T) {
 	if strings.Join(order, ",") != "harness.started,harness.quota_exhausted,harness.switched,harness.started" {
 		t.Errorf("visible switch: %v", order)
 	}
+	// harmflow-app#39: each attempt keeps its own usage. Claude Code stopped before its result line, so its count is
+	// partial; Codex ran the model its configuration sets, which the price table does not know.
+	u1, _ := a1["usage"].(map[string]any)
+	u2, _ := a2["usage"].(map[string]any)
+	if u1["status"] != "partial" || u1["costUsd"] != nil || tokensOf(u1)["cacheWriteLong"] != float64(11511) {
+		t.Errorf("attempt 1 usage: %v", u1)
+	}
+	if u2["status"] != "reported" || u2["modelSource"] != "config" || u2["costSource"] != "unpriced" ||
+		tokensOf(u2)["input"] != float64(160035-135680) || tokensOf(u2)["cacheRead"] != float64(135680) {
+		t.Errorf("attempt 2 usage: %v", u2)
+	}
+	if m := u2["models"].([]any)[0].(map[string]any); m["model"] != "gpt-from-config" {
+		t.Errorf("attempt 2 model: %v", m)
+	}
+}
+
+// tokensOf is the first model's token counts of an attempt's usage.
+func tokensOf(usage map[string]any) map[string]any {
+	models, _ := usage["models"].([]any)
+	if len(models) == 0 {
+		return nil
+	}
+	tokens, _ := models[0].(map[string]any)["tokens"].(map[string]any)
+	return tokens
 }
 
 // FS-003 AC-007, AC-006: cancelling ends the harness and its children; another task keeps running.

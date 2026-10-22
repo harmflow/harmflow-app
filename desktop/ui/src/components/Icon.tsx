@@ -173,6 +173,12 @@ const paths: Record<string, ReactNode> = {
     </>
   ),
   sparkle: <path d="M12 3.5 13.8 10l6.7 2-6.7 2L12 20.5 10.2 14l-6.7-2 6.7-2L12 3.5Z" />,
+  coin: (
+    <>
+      <ellipse cx="12" cy="7" rx="7" ry="3" />
+      <path d="M5 7v5c0 1.66 3.13 3 7 3s7-1.34 7-3V7M5 12v5c0 1.66 3.13 3 7 3s7-1.34 7-3v-5" />
+    </>
+  ),
   sidebarCollapse: (
     <>
       <rect x="3.5" y="4.5" width="17" height="15" rx="2" />

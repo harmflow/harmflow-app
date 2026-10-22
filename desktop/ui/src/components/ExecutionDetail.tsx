@@ -1,5 +1,6 @@
 // The selected execution: its events as they happen and replayed from the log, its raw output, files, commands,
-// results, and attempts (FS-008 FR-002, FR-008). Observe and cancel only — no input reaches the agent (FS-003 FR-003).
+// results, attempts (FS-008 FR-002, FR-008), and estimated token costs (harmflow-app#39). Observe and cancel only — no
+// input reaches the agent (FS-003 FR-003).
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
@@ -11,12 +12,13 @@ import { formatBytes, formatDateTime, formatDuration, formatElapsed, formatTime,
 import { useNow } from "../lib/hooks";
 import { buildTimeline, changedFilesFromEvents, toolKey, type TimelineItem } from "../lib/timeline";
 import { actions, useStore } from "../state/store";
+import { CostsTab } from "./CostsTab";
 import { useCancel } from "./ExecutionCard";
 import { HarnessLabel } from "./Shell";
 import { Icon } from "./Icon";
 import { Banner, Button, Chip, CopyButton, EmptyState, KeyValue, StatusChip, Tabs, cx, type TabDef } from "./ui";
 
-type TabKey = "events" | "raw" | "files" | "commands" | "results" | "attempts";
+type TabKey = "events" | "raw" | "files" | "commands" | "results" | "attempts" | "costs";
 
 const PROMINENT = new Set(["harness.switched", "policy.unenforced", "repository.unprotected", "harness.no_alternative"]);
 
@@ -69,6 +71,7 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
     { key: "commands", label: t("executions.detail.tabs.commands"), icon: "prompt", count: commands.length },
     { key: "results", label: t("executions.detail.tabs.results"), icon: "pr" },
     { key: "attempts", label: t("executions.detail.tabs.attempts"), icon: "layers", count: attempts.length },
+    { key: "costs", label: t("executions.detail.tabs.costs"), icon: "coin" },
   ];
 
   // With nothing chosen, the details follow the latest step.
@@ -143,6 +146,7 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
         {tab === "commands" ? <CommandList commands={commands} locale={i18n.language} /> : null}
         {tab === "results" ? <Results detail={detail} summary={exec} /> : null}
         {tab === "attempts" ? <Attempts detail={detail} locale={i18n.language} now={now} /> : null}
+        {tab === "costs" ? <CostsTab key={executionId} attempts={attempts} active={active} now={now} /> : null}
       </div>
       <p className="detail__footnote">
         <Icon name="shield" size={13} /> {t("executions.detail.noConversation")}

@@ -2,6 +2,7 @@ package claudecode
 
 import (
 	"bufio"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -168,6 +169,102 @@ func TestPrepareDeliversBuiltins(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(a.Home, ".claude")); err == nil {
 		t.Error("the user's configuration was touched")
+	}
+}
+
+// The Costs tab (harmflow-app#39), on a real Claude Code 2.1.239 run: the messages count once each while it runs,
+// and the result line's modelUsage settles the output and the cost the CLI printed.
+func TestUsageFromTheResultLine(t *testing.T) {
+	p, events := replay(t, "usage.jsonl")
+	var live []*domain.Usage
+	for _, e := range events {
+		if e.Kind == ports.HarnessUsage {
+			live = append(live, e.Usage)
+		}
+	}
+	// Three messages, each repeated on two or three lines: one update per message.
+	if len(live) != 3 {
+		t.Fatalf("%d live updates, want 3", len(live))
+	}
+	last := live[2]
+	want := domain.Tokens{Input: 25, CacheWriteLong: 12752, CacheRead: 65425}
+	if last.Status != domain.UsagePartial || len(last.Models) != 1 || last.Models[0].Tokens != want || last.CostUSD != nil {
+		t.Errorf("live usage: %+v", last)
+	}
+
+	u := p.Finish(0, "", false, false).Usage
+	want.Output = 866
+	if u.Status != domain.UsageReported || u.ModelSource != domain.ModelFromHarness || len(u.Models) != 1 {
+		t.Fatalf("final usage: %+v", u)
+	}
+	m := u.Models[0]
+	if m.Model != "claude-haiku-4-5-20251001" || m.Tokens != want {
+		t.Errorf("model usage: %+v", m)
+	}
+	if u.CostSource != domain.CostReported || u.CostUSD == nil || *u.CostUSD != 0.0364015 || u.PricesAsOf != Prices.AsOf {
+		t.Errorf("cost: %+v", u)
+	}
+	// The price table reproduces the CLI's figure: it gives the split by token class.
+	if m.Price == nil || math.Abs(m.Price.Cost(m.Tokens)-0.0364015) > 1e-9 {
+		t.Errorf("the table's estimate for %+v is not the CLI's $0.0364015", m)
+	}
+}
+
+// A cancelled attempt has no result line: its input and cache counts are partial, without output or cost.
+func TestUsageOfACancelledAttempt(t *testing.T) {
+	p, _ := replay(t, "cancelled.jsonl")
+	u := p.Finish(143, "", false, true).Usage
+	if u.Status != domain.UsagePartial || len(u.Models) != 1 || u.CostUSD != nil || u.CostSource != "" {
+		t.Fatalf("usage: %+v", u)
+	}
+	if got := u.Models[0].Tokens; got != (domain.Tokens{Input: 9, CacheWriteLong: 11511, CacheRead: 14129}) {
+		t.Errorf("tokens: %+v", got)
+	}
+	// A CLI that printed no usage at all reports none, which is not zero.
+	q, _ := replay(t, "success.jsonl")
+	if u := q.Finish(0, "", false, false).Usage; u.Status != domain.UsageNotReported || len(u.Models) != 0 {
+		t.Errorf("no usage: %+v", u)
+	}
+	// An error's result line that counts nothing does not erase what the messages counted.
+	p.Line([]byte(`{"type":"result","subtype":"error_during_execution","is_error":true,"result":"limit","total_cost_usd":0,` +
+		`"usage":{"input_tokens":0,"output_tokens":0},"modelUsage":{}}`))
+	if u := p.Finish(1, "", false, false).Usage; u.Status != domain.UsagePartial || u.Models[0].Tokens.CacheRead != 14129 {
+		t.Errorf("an empty result line: %+v", u)
+	}
+}
+
+// modelUsage keys each model by its full id; their cache writes are split by the result line's lifetimes, and a model
+// the table has no price for keeps the cost the CLI reported for it.
+func TestUsageAcrossModels(t *testing.T) {
+	defer func(old domain.PriceTable) { Prices = old }(Prices)
+	Prices = domain.PriceTable{AsOf: "2026-01-02", Prices: map[string]domain.Price{
+		"claude-main-1": {Input: 3, CacheWriteShort: 3.75, CacheWriteLong: 6, CacheRead: 0.3, Output: 15}}}
+	p := &parser{tools: map[string]toolUse{}}
+	for _, l := range []string{
+		`{"type":"system","subtype":"init","session_id":"s","model":"claude-main-1-20260101"}`,
+		`{"type":"result","subtype":"success","is_error":false,"result":"ok","total_cost_usd":0.5,
+		  "usage":{"input_tokens":10,"cache_creation_input_tokens":4000,"cache_read_input_tokens":0,"output_tokens":10,
+		    "cache_creation":{"ephemeral_5m_input_tokens":1000,"ephemeral_1h_input_tokens":3000}},
+		  "modelUsage":{
+		    "claude-aux-1":{"inputTokens":900,"outputTokens":40,"cacheReadInputTokens":0,"cacheCreationInputTokens":400,"costUSD":0.01},
+		    "claude-main-1-20260101":{"inputTokens":10,"outputTokens":500,"cacheReadInputTokens":2000,"cacheCreationInputTokens":4000,"costUSD":0.49}}}`,
+	} {
+		p.Line([]byte(strings.ReplaceAll(l, "\n", "")))
+	}
+	u := p.Finish(0, "", false, false).Usage
+	if len(u.Models) != 2 || u.Models[0].Model != "claude-main-1-20260101" || u.Models[1].Model != "claude-aux-1" {
+		t.Fatalf("the session's model comes first: %+v", u.Models)
+	}
+	main, aux := u.Models[0], u.Models[1]
+	if main.Tokens.CacheWriteLong != 3000 || main.Tokens.CacheWriteShort != 1000 || aux.Tokens.CacheWriteLong != 300 ||
+		aux.Tokens.CacheWriteShort != 100 {
+		t.Errorf("cache writes by lifetime: %+v %+v", main.Tokens, aux.Tokens)
+	}
+	if main.Price == nil || aux.Price != nil || aux.CostUSD == nil || *aux.CostUSD != 0.01 {
+		t.Errorf("prices: %+v %+v", main, aux)
+	}
+	if u.CostSource != domain.CostReported || *u.CostUSD != 0.5 {
+		t.Errorf("the CLI's total is the attempt's cost: %+v", u)
 	}
 }
 

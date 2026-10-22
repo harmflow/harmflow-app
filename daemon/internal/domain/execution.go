@@ -98,6 +98,8 @@ type Attempt struct {
 	Reason         string            `json:"reason,omitempty"`
 	ReasonKey      string            `json:"reasonKey,omitempty"`
 	ReasonParams   map[string]string `json:"reasonParams,omitempty"`
+	// Usage is what the harness reported of its token use, as it runs and when it ends; absent when it reported none.
+	Usage *Usage `json:"usage,omitempty"`
 }
 
 // SetError records why the attempt ended; ErrorMessage is the en-US text (FS-012 FR-005).

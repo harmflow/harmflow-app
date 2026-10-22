@@ -16,9 +16,13 @@ esac
 PROMPT=$(cat)
 SCENARIO=ok
 [[ "$PROMPT" =~ SCENARIO=([a-z]+) ]] && SCENARIO=${BASH_REMATCH[1]}
-echo '{"type":"system","subtype":"init","session_id":"fake-session","model":"fake-model","permissionMode":"acceptEdits"}'
+echo '{"type":"system","subtype":"init","session_id":"fake-session","model":"claude-haiku-4-5-20251001","permissionMode":"acceptEdits"}'
 case "$SCENARIO" in
   quota)
+    # A message's usage, repeated on each of its lines as the CLI does, and no result line to settle it.
+    for block in thinking tool_use; do
+      echo '{"type":"assistant","message":{"id":"msg_q1","model":"claude-haiku-4-5-20251001","content":[{"type":"'"$block"'"}],"usage":{"input_tokens":9,"cache_creation_input_tokens":11511,"cache_read_input_tokens":14129,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":11511},"output_tokens":3}}}'
+    done
     echo '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rateLimitType":"five_hour","resetsAt":1}}'
     echo '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Claude AI usage limit reached"}'
     exit 1 ;;
@@ -41,4 +45,4 @@ esac
 echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"echo hi","description":"Say hi"}}]}}'
 echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"hi","is_error":false}]}}'
 echo '{"type":"assistant","message":{"content":[{"type":"text","text":"All done."}]}}'
-echo '{"type":"result","subtype":"success","is_error":false,"result":"All done.","session_id":"fake-session"}'
+echo '{"type":"result","subtype":"success","is_error":false,"result":"All done.","session_id":"fake-session","total_cost_usd":0.0364015,"usage":{"input_tokens":25,"cache_creation_input_tokens":12752,"cache_read_input_tokens":65425,"output_tokens":866,"cache_creation":{"ephemeral_1h_input_tokens":12752,"ephemeral_5m_input_tokens":0}},"modelUsage":{"claude-haiku-4-5-20251001":{"inputTokens":25,"outputTokens":866,"cacheReadInputTokens":65425,"cacheCreationInputTokens":12752,"costUSD":0.0364015}}}'
