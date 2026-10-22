@@ -735,6 +735,7 @@ components:
         - claude_effort_invalid
         - codex_model_unknown
         - codex_effort_invalid
+        - codex_profile_unchecked
         - harness_not_detected
         - harness_not_ready
         - agent_not_found

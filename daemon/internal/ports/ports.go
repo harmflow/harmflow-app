@@ -218,6 +218,12 @@ type HarnessAdapter interface {
 	UserItems(kind string) []ResolvedItem
 }
 
+// ProfileWarner is a HarnessAdapter whose capabilities cannot always check a model and effort: ProfileWarning says so,
+// and the save keeps them with that warning (FS-004 FR-005).
+type ProfileWarner interface {
+	ProfileWarning(info HarnessInfo, model, effort string) (domain.Text, bool)
+}
+
 // SystemInfo reads the gauges of the sidebar.
 type SystemInfo interface {
 	Snapshot(dir string) map[string]any

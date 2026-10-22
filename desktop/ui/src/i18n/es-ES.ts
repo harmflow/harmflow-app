@@ -304,6 +304,8 @@ export const esES: Resources = {
       'Claude Code {{version}} no acepta el esfuerzo "{{effort}}"; acepta {{efforts}}',
     codex_model_unknown: 'Codex {{version}} no ofrece el modelo "{{model}}"; ofrece {{models}}',
     codex_effort_invalid: 'el modelo de Codex "{{model}}" no acepta el esfuerzo "{{effort}}"; acepta {{efforts}}',
+    codex_profile_unchecked:
+      "no se pudo leer la lista de modelos de Codex, así que el modelo y el esfuerzo no se comprobaron",
     harness_not_detected: "{{harness}} no se detectó en esta máquina",
     harness_not_ready: "{{harness}} no está listo: {{detail}}",
     agent_not_found: 'no se encuentra el agente "{{name}}" para {{harness}} ($t(itemSource.{{source}}))',

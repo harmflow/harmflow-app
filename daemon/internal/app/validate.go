@@ -155,6 +155,10 @@ func (a *App) semanticChecks(r *ValidationResult, doc domain.TaskDocument, mode 
 		info := a.harnessInfo(p.Provider)
 		if err := ad.ValidateProfile(info, p.Model, p.Effort); err != nil {
 			r.addError(path, domain.TextOf(err))
+		} else if w, ok := ad.(ports.ProfileWarner); ok {
+			if text, unchecked := w.ProfileWarning(info, p.Model, p.Effort); unchecked {
+				r.addWarning(path, domain.WarningOther, text)
+			}
 		}
 		if !info.Detected {
 			r.addWarning(path+"/provider", domain.WarningHarnessNotReady,
