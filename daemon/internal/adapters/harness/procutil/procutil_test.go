@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -69,6 +70,41 @@ func TestRawGetsOneWriteAtATime(t *testing.T) {
 	<-p.Done()
 	if out, errs := strings.Count(raw.String(), "out "), strings.Count(raw.String(), "err "); out != 500 || errs != 500 {
 		t.Errorf("raw has %d stdout and %d stderr lines, want 500 each", out, errs)
+	}
+}
+
+// FS-013 FR-008, D-112: every line of both streams is recorded at one point, so each stream keeps its order and the
+// raw capture holds the lines in the order the callbacks got them.
+func TestStreamsAreRecordedInOneOrder(t *testing.T) {
+	const n = 500
+	script := `i=0; while [ $i -lt ` + strconv.Itoa(n) + ` ]; do echo out $i; echo err $i >&2; i=$((i+1)); done`
+	var raw bytes.Buffer
+	var mu sync.Mutex
+	var got []string
+	record := func(b []byte) {
+		mu.Lock()
+		got = append(got, string(b))
+		mu.Unlock()
+	}
+	p, err := StartLines(ports.Invocation{Path: "/bin/sh", Args: []string{"-c", script}}, &raw, record, record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-p.Done()
+	captured := strings.Split(strings.TrimSuffix(raw.String(), "\n"), "\n")
+	if len(got) != 2*n || len(captured) != 2*n {
+		t.Fatalf("%d lines to the callbacks and %d in the raw capture, want %d each", len(got), len(captured), 2*n)
+	}
+	next := map[string]int{}
+	for i, line := range got {
+		stream, number, _ := strings.Cut(line, " ")
+		if number != strconv.Itoa(next[stream]) {
+			t.Fatalf("line %d is %q, want %s %d: a stream lost its order", i, line, stream, next[stream])
+		}
+		next[stream]++
+		if captured[i] != line {
+			t.Fatalf("line %d is %q for the callbacks and %q in the raw capture", i, line, captured[i])
+		}
 	}
 }
 

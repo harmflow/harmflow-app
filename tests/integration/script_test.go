@@ -83,8 +83,10 @@ func TestScriptTaskOverTheAPI(t *testing.T) {
     inline:
       interpreter: [/bin/sh]
       source: |
-        echo "to stdout"
+        echo one
+        echo two
         echo "%s" >&2
+        echo three >&2
         exit 3
 `, token)
 	created := d.call("POST", "/tasks", map[string]any{"yaml": scriptTask("audit", inline)}, 201)
@@ -100,14 +102,24 @@ func TestScriptTaskOverTheAPI(t *testing.T) {
 	if attempts := x["attempts"].([]any); len(attempts) != 1 || attempts[0].(map[string]any)["harness"] != "" {
 		t.Errorf("attempts %v", attempts)
 	}
+	// D-112: each stream keeps its own order, and the events hold the lines in the raw capture's order. Across the two
+	// streams the order is the one they arrived in, which nothing here fixes.
 	lines := d.outputLines(id)
-	if strings.Join(lines, "|") != "stdout: to stdout|stderr: [REDACTED]" {
+	streams := map[string][]string{}
+	var order []string
+	for _, line := range lines {
+		stream, text, _ := strings.Cut(line, ": ")
+		streams[stream] = append(streams[stream], text)
+		order = append(order, text)
+	}
+	if strings.Join(streams["stdout"], "|") != "one|two" || strings.Join(streams["stderr"], "|") != "[REDACTED]|three" ||
+		len(streams) != 2 {
 		t.Errorf("output %q", lines)
 	}
 	output := d.call("GET", "/executions/"+id+"/output", nil, 200)
 	text := output["attempts"].([]any)[0].(map[string]any)["text"].(string)
-	if strings.Contains(text, token) || !strings.Contains(text, "to stdout") {
-		t.Errorf("raw capture %q", text)
+	if strings.Contains(text, token) || text != strings.Join(order, "\n")+"\n" {
+		t.Errorf("raw capture %q, events %q", text, lines)
 	}
 
 	d.call("POST", "/tasks", map[string]any{"yaml": scriptTask("echo", "  script:\n    command: [/bin/echo, \"$HOME; echo injected\"]\n")}, 201)
