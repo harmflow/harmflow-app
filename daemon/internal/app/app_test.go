@@ -229,6 +229,35 @@ func newEnv(t *testing.T) *env {
 	return e
 }
 
+// restart stops the daemon, if it still runs, and starts a new App on the same data directory, fake clock, and
+// stand-in harnesses, as a daemon restart does.
+func (e *env) restart(t *testing.T) *env {
+	t.Helper()
+	e.app.Stop(domain.Text{Message: "test restart"})
+	paths := e.app.Paths()
+	tasks, _ := fsstore.NewTasks(paths.Tasks)
+	state, _ := fsstore.NewState(paths.State)
+	execs, _ := fsstore.NewExecutions(paths.Executions)
+	events, _ := eventlog.New(paths.Logs, time.Now)
+	v, err := schema.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := &env{t: t, clock: e.clock, home: e.home, events: &hookedEvents{Log: events}, claude: e.claude, codex: e.codex}
+	a, err := New(Deps{Paths: paths, Version: "test", Clock: e.clock, Location: time.UTC, Tasks: tasks, State: state,
+		Executions: execs, Events: n.events, Validator: v, Harnesses: []ports.HarnessAdapter{n.claude, n.codex},
+		TickInterval: time.Hour, Logger: log.New(io.Discard, "", 0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n.app = a
+	if err := a.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { a.Stop(domain.Text{Message: "test done"}) })
+	return n
+}
+
 func taskYAML(id string, extra string) string {
 	return fmt.Sprintf(`apiVersion: harmflow/v1alpha1
 kind: Task
@@ -1086,6 +1115,115 @@ func TestDisableAndDeleteWhileRunning(t *testing.T) {
 	}
 	if len(e.executions("going")) != 1 {
 		t.Error("the execution record was lost")
+	}
+}
+
+// FS-001 FR-015, D-083: a running task disabled or deleted by a change of its file drops its waiting firing, as one
+// disabled or deleted through the API does, and the firing never starts.
+func TestExternalChangeDropsTheWaitingFiring(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(t *testing.T, path string)
+		reason string
+	}{
+		{"disabled", disableTaskFile, "task_was_disabled"},
+		{"deleted", removeTaskFile, "task_file_removed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.create("changed", "")
+			e.claude.setScript(func(ports.RunRequest) string { return slow })
+			first, _ := e.app.RunTask("changed")
+			e.wait(first.ExecutionID, domain.StatusRunning)
+			second, _ := e.app.RunTask("changed")
+			if second.Outcome != "queued" {
+				t.Fatalf("second run: %+v", second)
+			}
+			view, _ := e.app.GetTask("changed")
+			tc.change(t, view.Path)
+			e.app.scanTaskFiles()
+			if x, _ := e.app.GetExecution(second.ExecutionID); x.Status != domain.StatusCancelled || x.ErrorKey != tc.reason {
+				t.Errorf("the waiting execution is %s (%q), want cancelled (%s)", x.Status, x.ErrorKey, tc.reason)
+			}
+			e.claude.setScript(func(ports.RunRequest) string { return "echo 'END ok'" })
+			_ = e.app.CancelExecution(first.ExecutionID)
+			e.wait(first.ExecutionID, domain.StatusCancelled)
+			e.idle("changed")
+			e.claude.mu.Lock()
+			prompts := len(e.claude.prompts)
+			e.claude.mu.Unlock()
+			if prompts != 1 {
+				t.Errorf("the harness was prepared %d times, want 1: the dropped firing started", prompts)
+			}
+		})
+	}
+}
+
+func disableTaskFile(t *testing.T, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err == nil {
+		data, err = setYAMLField(data, "spec", "enabled", false)
+	}
+	if err == nil {
+		err = os.WriteFile(path, data, 0o600)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func removeTaskFile(t *testing.T, path string) {
+	t.Helper()
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// FS-003 FR-007, AC-009; FS-001 FR-015 (D-083): a firing waiting when the daemon stopped still waits after the
+// restart, then starts; when its task file was disabled or deleted while the daemon was down, it is cancelled instead,
+// never starts, and leaves the queue.
+func TestWaitingFiringAcrossRestart(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(t *testing.T, path string)
+		want   domain.ExecutionStatus
+		reason string
+	}{
+		{"kept", func(*testing.T, string) {}, domain.StatusCompleted, ""},
+		{"disabled", disableTaskFile, domain.StatusCancelled, "task_was_disabled"},
+		{"deleted", removeTaskFile, domain.StatusCancelled, "task_file_removed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.create("waits", "")
+			e.claude.setScript(func(ports.RunRequest) string { return slow })
+			first, _ := e.app.RunTask("waits")
+			e.wait(first.ExecutionID, domain.StatusRunning)
+			second, _ := e.app.RunTask("waits")
+			if second.Outcome != "queued" {
+				t.Fatalf("second run: %+v", second)
+			}
+			e.claude.setScript(func(ports.RunRequest) string { return "echo 'END ok'" })
+			view, _ := e.app.GetTask("waits")
+			// The change is made while no daemon runs, so only the start can see it.
+			e.app.Stop(domain.Text{Message: "test restart"})
+			tc.change(t, view.Path)
+			e = e.restart(t)
+			if x, _ := e.app.GetExecution(first.ExecutionID); x.Status != domain.StatusInterrupted {
+				t.Errorf("the running execution is %s, want interrupted", x.Status)
+			}
+			x := e.wait(second.ExecutionID, tc.want)
+			if x.ErrorKey != tc.reason {
+				t.Errorf("the waiting execution's reason is %q, want %q", x.ErrorKey, tc.reason)
+			}
+			if tc.want == domain.StatusCancelled && (x.StartedAt != nil || len(x.Attempts) != 0) {
+				t.Errorf("the dropped firing started: started at %v, %d attempts", x.StartedAt, len(x.Attempts))
+			}
+			if q := e.app.Queue(); len(q.Waiting) != 0 {
+				t.Errorf("the queue still lists %d waiting firings", len(q.Waiting))
+			}
+		})
 	}
 }
 
