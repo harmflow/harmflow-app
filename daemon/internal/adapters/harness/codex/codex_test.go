@@ -60,6 +60,16 @@ func TestParseSuccess(t *testing.T) {
 	}
 }
 
+// FS-009 FR-005: the CLI's error is redacted before the 2000-character tail cuts it; cut first, a secret would keep
+// part of itself, too little to match its pattern.
+func TestFinishRedactsBeforeTheTail(t *testing.T) {
+	token := "ghp_" + strings.Repeat("a", 36)
+	end := (&parser{}).Finish(2, "Error: "+token+" "+strings.Repeat("y", 1969), false, false)
+	if strings.Contains(end.Error.Message, strings.Repeat("a", 20)) || !strings.Contains(end.Error.Message, "[REDACTED]") {
+		t.Errorf("the error keeps part of the token: %q", end.Error.Message)
+	}
+}
+
 func TestParseQuota(t *testing.T) {
 	p, _ := replay(t, "quota.jsonl")
 	if end := p.Finish(1, "", false, false); end.Class != domain.ClassQuotaExhausted {

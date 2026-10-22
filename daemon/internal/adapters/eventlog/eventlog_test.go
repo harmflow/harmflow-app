@@ -1,6 +1,7 @@
 package eventlog
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"sync"
@@ -20,6 +21,50 @@ func TestRedact(t *testing.T) {
 	}
 	if !strings.Contains(out, "Authorization: Bearer [REDACTED]") {
 		t.Errorf("header prefix lost: %s", out)
+	}
+}
+
+// The agent's and the harness's text reaches the daemon as structs, so every string in one is redacted in place, however
+// deep it sits; numbers, times, and unexported fields are left alone (FS-009 FR-005, FR-007).
+func TestRedactFields(t *testing.T) {
+	token := "ghp_" + strings.Repeat("a", 36)
+	type kind string
+	type inner struct {
+		Text   string
+		Params map[string]string
+	}
+	type outer struct {
+		Message string
+		Kind    kind
+		Inner   inner
+		Ptr     *inner
+		Nil     *inner
+		List    []inner
+		Strings []string
+		Payload map[string]any
+		When    time.Time
+		Count   int
+		hidden  string
+	}
+	v := outer{Message: "pushed with " + token, Kind: kind(token),
+		Inner: inner{Text: token, Params: map[string]string{"detail": token}}, Ptr: &inner{Text: token},
+		List: []inner{{Text: token}}, Strings: []string{token},
+		Payload: map[string]any{"nested": map[string]any{"text": token}, "list": []any{token, 3}, "count": 3},
+		When:    time.Unix(1, 0), Count: 7, hidden: token}
+	if !RedactFields(&v) {
+		t.Error("it reported nothing redacted")
+	}
+	data, _ := json.Marshal(v)
+	if strings.Contains(string(data), "ghp_") {
+		t.Errorf("a secret survived: %s", data)
+	}
+	if v.Message != "pushed with [REDACTED]" || v.Payload["count"] != 3 || v.Count != 7 || !v.When.Equal(time.Unix(1, 0)) ||
+		v.hidden != token {
+		t.Errorf("redacted more or less than the strings: %+v", v)
+	}
+	clean := outer{Message: "nothing to hide", Payload: map[string]any{"text": "plain"}}
+	if RedactFields(&clean) || clean.Message != "nothing to hide" {
+		t.Errorf("it reported a change in clean text: %+v", clean)
 	}
 }
 

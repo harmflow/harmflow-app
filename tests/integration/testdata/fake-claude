@@ -46,7 +46,12 @@ case "$SCENARIO" in
   secret)
     TOKEN="ghp_$(printf 'x%.0s' {1..36})"
     echo "warning: signing in with $TOKEN" >&2
-    echo '{"type":"assistant","message":{"content":[{"type":"text","text":"Pushed with '"$TOKEN"'"}]}}' ;;
+    echo '{"type":"assistant","message":{"content":[{"type":"text","text":"Pushed with '"$TOKEN"'"}]}}'
+    # The token in a command and in the final text, which the record keeps as its commands and summary.
+    echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"git push https://x-access-token:'"$TOKEN"'@github.com/o/r","description":"Push"}}]}}'
+    echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t2","content":"pushed","is_error":false}]}}'
+    echo '{"type":"result","subtype":"success","is_error":false,"result":"Pushed with '"$TOKEN"'","session_id":"fake-session"}'
+    exit 0 ;;
 esac
 echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"echo hi","description":"Say hi"}}]}}'
 echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"hi","is_error":false}]}}'
