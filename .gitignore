@@ -4,6 +4,7 @@
 desktop/src-tauri/target/
 desktop/src-tauri/binaries/
 desktop/ui/dist/
+desktop/ui/coverage/
 node_modules/
 *.tsbuildinfo
 

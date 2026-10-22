@@ -28,7 +28,13 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	binary = filepath.Join(dir, "harmflowd")
-	build := exec.Command("go", "build", "-o", binary, "./cmd/harmflowd")
+	args := []string{"build", "-o", binary}
+	// make coverage-daemon sets GOCOVERDIR: each daemon then writes its counters there when it exits, to be merged
+	// with the unit tests' own, in the same counter mode (ADR-015).
+	if os.Getenv("GOCOVERDIR") != "" {
+		args = append(args, "-cover", "-covermode=atomic")
+	}
+	build := exec.Command("go", append(args, "./cmd/harmflowd")...)
 	build.Dir = filepath.Join(repoRoot(), "daemon")
 	build.Stdout, build.Stderr = os.Stdout, os.Stderr
 	if err := build.Run(); err != nil {
