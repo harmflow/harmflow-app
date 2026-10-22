@@ -124,7 +124,7 @@
     </g>
 
     <!-- Prompt -->
-    <text x="64" y="78" class="mono" font-size="16" letter-spacing="2" fill="#22d3ee">&gt;_ make dev-desktop<tspan
+    <text x="64" y="78" class="mono" font-size="16" letter-spacing="2" fill="#22d3ee">&gt;_ Agent Scheduler<tspan
         class="cursor" fill="#22d3ee"> &#x258C;</tspan></text>
 
     <!-- Wordmark -->
