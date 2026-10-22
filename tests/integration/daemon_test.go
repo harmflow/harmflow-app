@@ -214,6 +214,30 @@ func TestAPIProtection(t *testing.T) {
 	}
 }
 
+// GET /health names the commit go build stamped in the binary, and leaves it out when go build stamped none: outside
+// a checkout, or in a git worktree.
+func TestHealthNamesTheCommit(t *testing.T) {
+	out, err := exec.Command("go", "version", "-m", binary).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var revision string
+	for _, line := range strings.Split(string(out), "\n") {
+		if f := strings.Fields(line); len(f) == 2 && f[0] == "build" && strings.HasPrefix(f[1], "vcs.revision=") {
+			revision = strings.TrimPrefix(f[1], "vcs.revision=")
+		}
+	}
+	d := startDaemon(t, t.TempDir())
+	health := d.call("GET", "/health", nil, 200)
+	commit, present := health["commit"].(string)
+	switch {
+	case revision == "" && present:
+		t.Errorf("commit %q, but go build stamped none", commit)
+	case revision != "" && commit != revision[:7] && commit != revision[:7]+"-dirty":
+		t.Errorf("commit %q, want %s with or without -dirty", commit, revision[:7])
+	}
+}
+
 // FS-001 AC-001, AC-003, AC-004, AC-005, AC-006, AC-007, AC-008: the daemon is the only writer; form and YAML go
 // through one validation; files and dashboard converge; conflicts are reported.
 func TestTaskLifecycle(t *testing.T) {

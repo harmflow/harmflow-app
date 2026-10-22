@@ -2,10 +2,14 @@
 
 SHELL := /bin/bash
 VERSION := 0.1.0
+# The commit a build comes from, "-dirty" with uncommitted changes, and empty outside a checkout. The daemon gets it
+# here because go build stamps none in a git worktree; the interface reads it itself (desktop/ui/vite.config.ts).
+COMMIT := $(shell git rev-parse --verify --quiet HEAD 2>/dev/null | cut -c1-7)
+COMMIT := $(COMMIT)$(if $(COMMIT),$(if $(shell git status --porcelain),-dirty))
 TRIPLE := $(shell rustc -vV 2>/dev/null | sed -n 's/^host: //p')
 DEV_HOME := $(CURDIR)/.harmflow-dev/home
 SIDECAR := desktop/src-tauri/binaries/harmflowd-$(TRIPLE)
-LDFLAGS := -s -w -X main.Version=$(VERSION)
+LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.Commit=$(COMMIT)
 
 .PHONY: help
 help: ## List the targets

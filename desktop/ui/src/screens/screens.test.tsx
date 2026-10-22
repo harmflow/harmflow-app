@@ -1,7 +1,7 @@
 // Renders each screen from a known state, to catch rendering errors without a browser or a daemon.
 import { renderToString } from "react-dom/server";
 import { beforeAll, describe, expect, it } from "vitest";
-import type { Execution, ExecutionSummary, HarmflowEvent, Harness, Notification, Settings, TaskSummary, WorkItem } from "../api/types";
+import type { Execution, ExecutionSummary, HarmflowEvent, Harness, Health, Notification, Settings, TaskSummary, WorkItem } from "../api/types";
 import { RawCaptures } from "../components/ExecutionDetail";
 import { HarnessInventory } from "../components/Harnesses";
 import { ValidationPanel } from "../components/TaskEditor";
@@ -185,6 +185,23 @@ describe("screens", () => {
     expect(renderToString(<HistoryScreen openId={null} onOpen={() => {}} />)).toContain("Estado");
     expect(renderToString(<SettingsScreen />)).toContain("Agentes instalados");
     expect(renderToString(<OnboardingScreen onFinish={() => {}} onCreateTask={() => {}} onImport={() => {}} />)).toContain("Boas-vindas");
+  });
+
+  it("names in About the commit each build comes from, and shows the version alone without one", () => {
+    const health: Health = { status: "ok", version: "0.1.0", apiVersion: "v1", pid: 7, startedAt: "2026-10-20T19:00:00-03:00", acceptingFirings: true };
+    const { appVersion, appCommit } = getState();
+    patchStateForTests({ appVersion: "0.1.0", appCommit: "45a57bb", health: { ...health, commit: "ca16cd7-dirty" } });
+    try {
+      const html = renderToString(<SettingsScreen />);
+      expect(html).toContain('<span class="mono">0.1.0 (45a57bb)</span>');
+      expect(html).toContain('<span class="mono">0.1.0 (ca16cd7-dirty)</span>');
+      patchStateForTests({ appCommit: "", health });
+      const bare = renderToString(<SettingsScreen />);
+      expect(bare.match(/<span class="mono">0\.1\.0<\/span>/g)).toHaveLength(2);
+      expect(bare).not.toContain("0.1.0 (");
+    } finally {
+      patchStateForTests({ appVersion, appCommit, health: undefined });
+    }
   });
 
   it("shows the harness's capture attempt by attempt, saying when its start is left out (FS-008 FR-008)", () => {

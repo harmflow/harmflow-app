@@ -214,8 +214,12 @@ func decode(r *http.Request, v any) error {
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"status": "ok", "version": s.App.Version(), "apiVersion": "v1",
-		"pid": pid(), "startedAt": s.App.StartedAt(), "acceptingFirings": s.App.AcceptingFirings()})
+	body := map[string]any{"status": "ok", "version": s.App.Version(), "apiVersion": "v1",
+		"pid": pid(), "startedAt": s.App.StartedAt(), "acceptingFirings": s.App.AcceptingFirings()}
+	if commit := s.App.Commit(); commit != "" {
+		body["commit"] = commit
+	}
+	writeJSON(w, 200, body)
 }
 
 func (s *Server) stop(w http.ResponseWriter, r *http.Request) {

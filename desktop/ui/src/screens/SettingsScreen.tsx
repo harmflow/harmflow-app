@@ -22,6 +22,7 @@ export function SettingsScreen() {
   const tools = useStore((s) => s.tools);
   const health = useStore((s) => s.health);
   const appVersion = useStore((s) => s.appVersion);
+  const appCommit = useStore((s) => s.appCommit);
   const running = useStore((s) => s.stats?.running ?? 0);
   const connection = useStore((s) => s.connection);
   const now = useNow(1000);
@@ -261,14 +262,19 @@ export function SettingsScreen() {
         <Panel title={t("settings.sections.about")} icon="sparkle">
           <KeyValue
             items={[
-              [t("settings.appVersion"), <span className="mono">{appVersion}</span>],
-              [t("settings.daemonVersion"), health ? <span className="mono">{health.version}</span> : null],
+              [t("settings.appVersion"), <span className="mono">{build(appVersion, appCommit)}</span>],
+              [t("settings.daemonVersion"), health ? <span className="mono">{build(health.version, health.commit)}</span> : null],
             ]}
           />
         </Panel>
       </div>
     </div>
   );
+}
+
+/** A version with the commit it was built from, such as `0.1.0 (45a57bb)`; the version alone without a commit. */
+function build(version: string, commit?: string): string {
+  return commit ? `${version} (${commit})` : version;
 }
 
 function RetentionField({ value, onSave }: { value?: number; onSave: (days: number) => void }) {
