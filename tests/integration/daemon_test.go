@@ -681,3 +681,104 @@ func TestRestartInterrupts(t *testing.T) {
 	}
 	d2.call("POST", "/executions/"+run["executionId"].(string)+"/cancel", nil, 202)
 }
+
+// FS-003 FR-007, AC-009; FS-001 FR-015 (D-083): a firing waiting when the daemon is killed starts after the restart;
+// when its task file was disabled or deleted while the daemon was down, it is cancelled instead and never starts.
+func TestWaitingFiringAcrossKill(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(t *testing.T, path string)
+		want   string
+		reason string
+	}{
+		{"kept", func(*testing.T, string) {}, "running", ""},
+		{"disabled", func(t *testing.T, path string) {
+			data, err := os.ReadFile(path)
+			if err == nil {
+				err = os.WriteFile(path, []byte(strings.Replace(string(data), "spec:\n", "spec:\n  enabled: false\n", 1)), 0o600)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		}, "cancelled", "task_was_disabled"},
+		{"deleted", func(t *testing.T, path string) {
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+		}, "cancelled", "task_file_removed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			d := startDaemon(t, home)
+			d.call("POST", "/tasks", map[string]any{"yaml": task("waits", "SCENARIO=slow", "")}, 201)
+			first := d.call("POST", "/tasks/waits/run", nil, 202)["executionId"].(string)
+			x := d.waitStatus(first, "running")
+			second := d.call("POST", "/tasks/waits/run", nil, 202)
+			if second["outcome"] != "queued" {
+				t.Fatalf("second run: %v", second)
+			}
+			waiting := second["executionId"].(string)
+			killHarnessGroup(t, x["executionDir"].(string))
+			waitRecord(t, home, first, "running")
+			d.kill()
+			tc.change(t, filepath.Join(home, "tasks", "waits.yaml"))
+			d2 := startDaemon(t, home)
+			if got := d2.call("GET", "/executions/"+first, nil, 200); got["status"] != "interrupted" {
+				t.Errorf("the running execution is %v, want interrupted", got["status"])
+			}
+			got := d2.waitStatus(waiting, tc.want)
+			if tc.want == "running" {
+				killHarnessGroup(t, got["executionDir"].(string))
+				d2.call("POST", "/executions/"+waiting+"/cancel", nil, 202)
+				return
+			}
+			if got["errorKey"] != tc.reason || got["startedAt"] != nil || len(got["attempts"].([]any)) != 0 {
+				t.Errorf("the dropped firing: reason %v, started at %v, attempts %v", got["errorKey"], got["startedAt"],
+					got["attempts"])
+			}
+			if waits := d2.call("GET", "/queue", nil, 200)["waiting"].([]any); len(waits) != 0 {
+				t.Errorf("GET /queue still lists %d waiting firings", len(waits))
+			}
+			if tc.name == "disabled" {
+				if view := d2.call("GET", "/tasks/waits", nil, 200); view["enabled"] != false {
+					t.Errorf("the task reads enabled %v", view["enabled"])
+				}
+			}
+		})
+	}
+}
+
+// killHarnessGroup ends the stand-in harness's process group when the test ends. A daemon killed with SIGKILL leaves
+// its harness running, since it does not yet find or stop it after the restart (harmflow/harmflow-app#12).
+func killHarnessGroup(t *testing.T, executionDir string) {
+	t.Helper()
+	var child int
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline) && child == 0; time.Sleep(100 * time.Millisecond) {
+		data, _ := os.ReadFile(filepath.Join(executionDir, "child.pid"))
+		child, _ = strconv.Atoi(strings.TrimSpace(string(data)))
+	}
+	if child == 0 {
+		t.Fatal("the fake harness did not start its child")
+	}
+	pgid, err := syscall.Getpgid(child)
+	if err != nil || pgid <= 1 || pgid == syscall.Getpgrp() {
+		t.Fatalf("the fake harness's process group: %d, %v", pgid, err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(-pgid, syscall.SIGKILL) })
+}
+
+// waitRecord waits until the execution's record on disk has the status: the daemon saves a running record at most
+// every second, and a kill before that leaves it queued.
+func waitRecord(t *testing.T, home, id, status string) {
+	t.Helper()
+	var rec struct {
+		Status string `json:"status"`
+	}
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		data, err := os.ReadFile(filepath.Join(home, "state", "executions", id+".json"))
+		if err == nil && json.Unmarshal(data, &rec) == nil && rec.Status == status {
+			return
+		}
+	}
+	t.Fatalf("the record of %s on disk is %q, want %q", id, rec.Status, status)
+}

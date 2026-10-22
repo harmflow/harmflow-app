@@ -332,11 +332,14 @@ func (a *App) claimLocked(taskID string) *runHandle {
 	return h
 }
 
-// startQueued starts the waiting firing of each task that is free, with the definition current now (D-083).
+// startQueued starts the waiting firing of each task that is free, with the definition current now (D-083). A firing
+// whose task is disabled or gone never starts: it is dropped, however the change arrived, even while the daemon was
+// down (FS-001 FR-015, FS-003 FR-007).
 func (a *App) startQueued() {
 	a.mu.Lock()
 	var start []*domain.Execution
 	var handles []*runHandle
+	var drops []droppedFiring
 	if a.accepting {
 		var queued []*domain.Execution
 		for _, x := range a.executions {
@@ -350,37 +353,58 @@ func (a *App) startQueued() {
 				continue
 			}
 			e := a.tasks[x.TaskID]
-			if e == nil || e.deletePending {
-				continue
+			switch {
+			case e == nil:
+				drops = append(drops, a.dropQueuedLocked(x.TaskID, domain.T("task_file_removed", "the task file was removed"))...)
+			case e.deletePending: // the task goes as its execution ends; its deletion already dropped the firing
+			case !e.doc.IsEnabled():
+				drops = append(drops, a.dropQueuedLocked(x.TaskID, domain.T("task_was_disabled", "the task was disabled"))...)
+			default:
+				start = append(start, x)
+				handles = append(handles, a.claimLocked(x.TaskID))
 			}
-			start = append(start, x)
-			handles = append(handles, a.claimLocked(x.TaskID))
 		}
 	}
 	a.mu.Unlock()
+	a.announceDropped(drops)
 	for i, x := range start {
 		a.launch(x, handles[i])
 	}
 }
 
+// droppedFiring is a waiting firing cancelled under a.mu, to save and announce once a.mu is released.
+type droppedFiring struct {
+	x      *domain.Execution
+	reason domain.Text
+}
+
 // dropQueued cancels the waiting firing of a task that was disabled or deleted (D-083).
 func (a *App) dropQueued(taskID string, reason domain.Text) {
 	a.mu.Lock()
-	var dropped []*domain.Execution
+	drops := a.dropQueuedLocked(taskID, reason)
+	a.mu.Unlock()
+	a.announceDropped(drops)
+}
+
+func (a *App) dropQueuedLocked(taskID string, reason domain.Text) []droppedFiring {
+	var drops []droppedFiring
 	now := a.now()
 	for _, x := range a.executions {
 		if x.TaskID == taskID && x.Status == domain.StatusQueued {
 			x.Status = domain.StatusCancelled
 			x.EndedAt = &now
 			x.SetError(reason)
-			dropped = append(dropped, x)
+			drops = append(drops, droppedFiring{x: x, reason: reason})
 		}
 	}
-	a.mu.Unlock()
-	for _, x := range dropped {
-		a.persistExecution(x)
-		a.emit(domain.Event{Type: domain.EventExecutionCancelled, TaskID: taskID, ExecutionID: x.ID,
-			Payload: map[string]any{"status": string(domain.StatusCancelled)}}.Says(reason))
+	return drops
+}
+
+func (a *App) announceDropped(drops []droppedFiring) {
+	for _, d := range drops {
+		a.persistExecution(d.x)
+		a.emit(domain.Event{Type: domain.EventExecutionCancelled, TaskID: d.x.TaskID, ExecutionID: d.x.ID,
+			Payload: map[string]any{"status": string(domain.StatusCancelled)}}.Says(d.reason))
 	}
 }
 

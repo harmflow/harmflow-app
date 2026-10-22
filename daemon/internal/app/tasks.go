@@ -466,6 +466,7 @@ func (a *App) scanTaskFiles() {
 		a.rescheduleTask(f.ID)
 		a.mu.Lock()
 		invalid := ne.invalid
+		enabled := ne.doc.IsEnabled()
 		a.mu.Unlock()
 		if invalid != nil {
 			a.emit(domain.Event{Type: domain.EventTaskInvalid, TaskID: f.ID, Severity: domain.SeverityWarning,
@@ -473,18 +474,27 @@ func (a *App) scanTaskFiles() {
 				"the task file was changed outside HarmFlow and fails validation; the last valid definition stays")))
 			continue
 		}
+		// Disabled in its file, a task drops its waiting firing as one disabled through the API does (D-083).
+		if !enabled {
+			a.dropQueued(f.ID, domain.T("task_was_disabled", "the task was disabled"))
+		}
 		a.emit(domain.Event{Type: domain.EventTaskChangedExternally, TaskID: f.ID, Payload: map[string]any{"revision": f.Revision}}.Says(
 			domain.T("task_changed_externally", "the task file was changed outside HarmFlow")))
 	}
+	removed := domain.T("task_file_removed", "the task file was removed")
 	a.mu.Lock()
 	var gone []string
+	var drops []droppedFiring
 	for id, e := range a.tasks {
 		if !seen[id] {
 			if _, running := a.running[id]; running {
+				// The task goes once its execution finishes; its waiting firing goes now, as DeleteTask's does.
 				e.deletePending = true
+				drops = append(drops, a.dropQueuedLocked(id, removed)...)
 				continue
 			}
 			gone = append(gone, id)
+			drops = append(drops, a.dropQueuedLocked(id, removed)...)
 		}
 	}
 	for _, id := range gone {
@@ -492,8 +502,8 @@ func (a *App) scanTaskFiles() {
 		delete(a.sched, id)
 	}
 	a.mu.Unlock()
+	a.announceDropped(drops)
 	for _, id := range gone {
-		a.dropQueued(id, domain.T("task_file_removed", "the task file was removed"))
 		a.emit(domain.Event{Type: domain.EventTaskDeleted, TaskID: id}.Says(
 			domain.T("task_removed_externally", "the task file was removed outside HarmFlow")))
 	}
