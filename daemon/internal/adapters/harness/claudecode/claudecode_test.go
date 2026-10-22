@@ -187,6 +187,53 @@ func TestPrepareDeliversBuiltins(t *testing.T) {
 	}
 }
 
+// FS-004 FR-004, AC-005: a task's model and effort reach Claude Code as --model and --effort. A task that sets neither,
+// or sets default, passes neither flag, so the CLI's own default applies.
+func TestPrepareModelAndEffort(t *testing.T) {
+	a := &Adapter{Home: t.TempDir()}
+	info := ports.HarnessInfo{Path: "/bin/claude", Features: map[string]bool{"--model": true, "--effort": true}}
+	perm := *domain.TaskDocument{}.Effective().Spec.Permissions
+	cases := []struct {
+		name, model, effort   string
+		wantModel, wantEffort string // "" for a flag that must be absent
+	}{
+		{"set", "sonnet", "high", "sonnet", "high"},
+		{"default", domain.DefaultModel, domain.DefaultEffort, "", ""},
+		{"unset", "", "", "", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, ExecutionDir: t.TempDir(),
+				Prompt: "hi", Model: c.model, Effort: c.effort})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for flag, want := range map[string]string{"--model": c.wantModel, "--effort": c.wantEffort} {
+				got, passed := flagValue(inv.Args, flag)
+				switch {
+				case want == "" && passed:
+					t.Errorf("%s %q was passed: %q", flag, got, inv.Args)
+				case want != "" && got != want:
+					t.Errorf("%s %q (passed %t), want %q: %q", flag, got, passed, want, inv.Args)
+				}
+			}
+		})
+	}
+}
+
+// flagValue is the argument that follows flag, and whether flag was passed at all.
+func flagValue(args []string, flag string) (string, bool) {
+	for i, arg := range args {
+		if arg == flag {
+			if i+1 < len(args) {
+				return args[i+1], true
+			}
+			return "", true
+		}
+	}
+	return "", false
+}
+
 // The Costs tab (harmflow-app#39), on a real Claude Code 2.1.239 run: the messages count once each while it runs,
 // and the result line's modelUsage settles the output and the cost the CLI printed.
 func TestUsageFromTheResultLine(t *testing.T) {
