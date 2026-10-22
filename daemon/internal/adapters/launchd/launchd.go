@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/fsstore"
@@ -20,7 +19,8 @@ const Label = "com.harmflow.daemon"
 type Agent struct {
 	PlistPath string
 	LogPath   string
-	// Launchctl runs launchctl with its arguments. Tests replace it, so none reaches the user's launchd session.
+	// Launchctl runs launchctl with its arguments. Enable and Disable make no call through it; tests replace it to show
+	// that, and so none reaches the user's launchd session.
 	Launchctl func(args ...string) error
 }
 
@@ -39,20 +39,18 @@ func (a *Agent) Enabled() bool {
 	return err == nil
 }
 
-// Enable writes the user agent and loads it for the next login. RunAtLoad starts the daemon at login; it does not
-// restart a daemon that was stopped on purpose, so KeepAlive restarts it only after a crash.
+// Enable writes the user agent, and launchd loads it at the next login. RunAtLoad starts the daemon at login; it does
+// not restart a daemon that was stopped on purpose, so KeepAlive restarts it only after a crash. Enable calls no
+// launchctl: the daemon running now goes on, whoever started it (harmflow-app#81).
 func (a *Agent) Enable(executable string, args []string, env map[string]string) error {
 	plist := renderPlist(executable, args, env, a.LogPath)
-	if err := fsstore.WriteAtomic(a.PlistPath, []byte(plist), 0o644); err != nil {
-		return err
-	}
-	// Register it with the current session without starting a second daemon: launchd starts it at the next login.
-	_ = a.Launchctl("bootout", "gui/"+strconv.Itoa(os.Getuid())+"/"+Label)
-	return nil
+	return fsstore.WriteAtomic(a.PlistPath, []byte(plist), 0o644)
 }
 
+// Disable deletes the user agent, so the next login does not start the daemon. It calls no launchctl: a bootout would
+// stop the daemon launchd started, the very one serving the request, and end its executions (harmflow-app#81). The job
+// launchd already loaded stays until logout, so until then KeepAlive may still restart a daemon that crashes.
 func (a *Agent) Disable() error {
-	_ = a.Launchctl("bootout", "gui/"+strconv.Itoa(os.Getuid())+"/"+Label)
 	if err := os.Remove(a.PlistPath); err != nil && !os.IsNotExist(err) {
 		return err
 	}
