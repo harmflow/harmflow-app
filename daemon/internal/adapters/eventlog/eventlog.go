@@ -304,6 +304,12 @@ var secretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`AKIA[0-9A-Z]{16}`),
 	regexp.MustCompile(`(?i)(authorization:\s*bearer\s+)[A-Za-z0-9._\-]{16,}`),
 	regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----`),
+	// A password, cookie, or session value counts only after its key and separator, on the same line: the words alone,
+	// or inside another word, are ordinary text. A value stops before a quote or a backslash, so a masked value never
+	// closes the string that holds it, in a task's YAML or anywhere else.
+	regexp.MustCompile(`(?i)(\b(?:password|passwd|pwd)\b[ \t]*[:=][ \t]*["']?)[^\s"'\\]+`),
+	regexp.MustCompile(`(?i)(\b(?:set-)?cookie[ \t]*:[ \t]*)[^\r\n"'\\]+`),
+	regexp.MustCompile(`(?i)(\b(?:sessionid|session|sid)\b[ \t]*[:=][ \t]*["']?)[^\s"'\\;&,]+`),
 }
 
 // Redact masks credentials in text written to logs and events (FS-009 FR-005).

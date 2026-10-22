@@ -1250,6 +1250,55 @@ func TestDuplicate(t *testing.T) {
 	}
 }
 
+// FS-001 FR-006, AC-008: an export masks a password, a cookie, and a session value wherever the file holds one — the
+// prompt, the description, or a comment — leaves the words around them, and still validates.
+func TestExportMasksCredentials(t *testing.T) {
+	e := newEnv(t)
+	task := `apiVersion: harmflow/v1alpha1
+kind: Task
+metadata:
+  id: sign-in
+  name: Sign in
+  description: "Uses pwd=desc-s3cret for the staging account"
+# the old one was password=comment-s3cret
+spec:
+  type: general
+  prompt: |
+    Sign in with password: hunter2 and keep the session.
+    Send Cookie: sessionid=abc123def456; theme=dark
+    Then open https://example.test/home?sid=xyz789&tab=1 and check the password field.
+  harness:
+    preferred:
+      provider: claude-code
+`
+	if _, err := e.app.CreateTask(TaskInput{YAML: task}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := e.app.ExportTask("sign-in")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exported := string(data)
+	for _, secret := range []string{"hunter2", "abc123def456", "theme=dark", "xyz789", "desc-s3cret", "comment-s3cret"} {
+		if strings.Contains(exported, secret) {
+			t.Errorf("the export holds %q", secret)
+		}
+	}
+	for _, kept := range []string{"Sign in with password: [REDACTED] and keep the session.", "Send Cookie: [REDACTED]\n",
+		"home?sid=[REDACTED]&tab=1 and check the password field.", "Uses pwd=[REDACTED] for the staging account",
+		"# the old one was password=[REDACTED]"} {
+		if !strings.Contains(exported, kept) {
+			t.Errorf("the export lacks %q", kept)
+		}
+	}
+	if r := e.app.Validate(TaskInput{YAML: exported}); !r.Valid {
+		t.Errorf("the exported file does not validate: %+v", r.Errors)
+	}
+	if t.Failed() {
+		t.Logf("the export:\n%s", exported)
+	}
+}
+
 // FS-001 AC-005, AC-006: an external edit converges and is announced; an invalid one keeps the last valid definition.
 func TestExternalEdits(t *testing.T) {
 	e := newEnv(t)
