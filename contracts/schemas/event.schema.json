@@ -36,7 +36,7 @@
       "additionalProperties": { "type": "string" }
     },
     "payload": {
-      "description": "An error in the payload is a text too: error in en-US, with errorKey and errorParams beside it.",
+      "description": "An error in the payload is a text too: error in en-US, with errorKey and errorParams beside it. A harness.checked event, sent when a harness's check ends, carries the readiness found in payload.readiness, and no message (D-102).",
       "type": "object"
     }
   },
@@ -75,6 +75,7 @@
         "harness.switched",
         "harness.no_alternative",
         "harness.version_untested",
+        "harness.checked",
         "script.started",
         "script.output",
         "script.exited",

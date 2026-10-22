@@ -8,7 +8,7 @@ import type { Tone } from "../design/tokens";
 import { fieldText } from "../lib/daemonText";
 import { formatRelative } from "../lib/format";
 import { actions } from "../state/store";
-import { HarnessMark, Icon } from "./Icon";
+import { HarnessMark, Icon, type IconName } from "./Icon";
 import { toast } from "./toast";
 import { Button, Chip, KeyValue, TextInput } from "./ui";
 
@@ -20,6 +20,7 @@ export function readinessTone(h: Harness): Tone {
       return h.versionSupport === "untested_newer" || h.versionSupport === "unknown" || h.authentication === "unknown" || h.diagnostic
         ? "warning"
         : "success";
+    case "checking":
     case "not_installed":
       return "neutral";
     case "not_ready":
@@ -29,6 +30,20 @@ export function readinessTone(h: Harness): Tone {
   }
 }
 
+function readinessIcon(h: Harness): IconName {
+  switch (h.readiness) {
+    case "ready":
+      return "check";
+    case "checking":
+      return "clock";
+    case "not_installed":
+      return "circle";
+    default:
+      return "alert";
+  }
+}
+
+// While its first check runs, a harness is neither detected nor missing yet (FS-004 FR-007, D-102).
 export function HarnessRow({ harness }: { harness: Harness }) {
   const { t } = useTranslation();
   return (
@@ -38,13 +53,15 @@ export function HarnessRow({ harness }: { harness: Harness }) {
       </span>
       <span className="harness-row__text">
         <strong>{harness.name || t(`harness.names.${harness.id}`)}</strong>
-        <span className="mono muted">{harness.detected ? `${harness.version ?? "?"} · ${harness.path ?? ""}` : t("harness.notDetected")}</span>
+        <span className="mono muted">
+          {harness.readiness === "checking"
+            ? t("harness.readiness.checking")
+            : harness.detected
+              ? `${harness.version ?? "?"} · ${harness.path ?? ""}`
+              : t("harness.notDetected")}
+        </span>
       </span>
-      <Chip
-        tone={readinessTone(harness)}
-        icon={harness.readiness === "ready" ? "check" : harness.readiness === "not_installed" ? "circle" : "alert"}
-        title={fieldText(harness.diagnostic, harness.diagnosticKey, harness.diagnosticParams)}
-      >
+      <Chip tone={readinessTone(harness)} icon={readinessIcon(harness)} title={fieldText(harness.diagnostic, harness.diagnosticKey, harness.diagnosticParams)}>
         {t(`harness.readiness.${harness.readiness}`)}
       </Chip>
     </div>
@@ -93,12 +110,14 @@ export function HarnessInventory({ harness, locale }: { harness: Harness; locale
     }
   };
 
+  // A harness still being checked has no check time yet.
+  const checking = harness.readiness === "checking";
   return (
     <div className="inventory">
       <HarnessRow harness={harness} />
       <KeyValue
         items={[
-          [t("harness.detected"), harness.detected ? t("common.yes") : t("common.no")],
+          [t("harness.detected"), checking ? t("harness.readiness.checking") : harness.detected ? t("common.yes") : t("common.no")],
           [
             t("harness.path"),
             harness.path ? (
@@ -144,10 +163,12 @@ export function HarnessInventory({ harness, locale }: { harness: Harness; locale
           [t("harness.controls"), harness.enforceableControls?.length ? <span className="mono">{harness.enforceableControls.join(", ")}</span> : null],
           [
             t("harness.lastCheck"),
-            <span>
-              {formatRelative(harness.lastCheckedAt, locale)}
-              {harness.capabilitySource ? <span className="muted"> · {t(`harness.capabilitySource.${harness.capabilitySource}`)}</span> : null}
-            </span>,
+            checking ? null : (
+              <span>
+                {formatRelative(harness.lastCheckedAt, locale)}
+                {harness.capabilitySource ? <span className="muted"> · {t(`harness.capabilitySource.${harness.capabilitySource}`)}</span> : null}
+              </span>
+            ),
           ],
           [
             t("harness.diagnostic"),

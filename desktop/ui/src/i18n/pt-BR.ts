@@ -196,6 +196,7 @@ export const ptBR: Resources = {
       switched: "Trocando de harness",
       no_alternative: "Nenhum harness alternativo disponível",
       version_untested: "Versão do harness não testada",
+      checked: "Harness verificado",
     },
     script: { started: "Programa iniciado", output: "Saída do programa", exited: "Programa encerrado" },
     tool: { started: "Ferramenta iniciada", completed: "Ferramenta concluída" },
@@ -691,6 +692,7 @@ export const ptBR: Resources = {
     names: { "claude-code": "Claude Code", codex: "Codex" },
     scriptLabel: "Programa",
     readiness: {
+      checking: "Verificando…",
       not_installed: "Não instalado",
       installed: "Instalado",
       version_identified: "Versão identificada",

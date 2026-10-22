@@ -35,6 +35,7 @@ const (
 	EventHarnessSwitched         = "harness.switched"
 	EventHarnessNoAlternative    = "harness.no_alternative"
 	EventHarnessVersionUntested  = "harness.version_untested"
+	EventHarnessChecked          = "harness.checked"
 	EventScriptStarted           = "script.started"
 	EventScriptOutput            = "script.output"
 	EventScriptExited            = "script.exited"

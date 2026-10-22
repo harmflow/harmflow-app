@@ -929,9 +929,9 @@ components:
             failed: { type: array, items: { type: integer } }
 
     ReadinessState:
-      description: FS-004 FR-006.
+      description: FS-004 FR-006. checking while a harness's first check runs; a later check keeps the previous state (D-102).
       type: string
-      enum: [not_installed, installed, version_identified, authenticated, ready, not_ready]
+      enum: [checking, not_installed, installed, version_identified, authenticated, ready, not_ready]
 
     Harness:
       type: object

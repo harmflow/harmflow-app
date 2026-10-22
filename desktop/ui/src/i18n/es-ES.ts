@@ -196,6 +196,7 @@ export const esES: Resources = {
       switched: "Cambiando de harness",
       no_alternative: "Ningún harness alternativo disponible",
       version_untested: "Versión del harness no probada",
+      checked: "Harness comprobado",
     },
     script: { started: "Programa iniciado", output: "Salida del programa", exited: "Programa terminado" },
     tool: { started: "Herramienta iniciada", completed: "Herramienta finalizada" },
@@ -693,6 +694,7 @@ export const esES: Resources = {
     names: { "claude-code": "Claude Code", codex: "Codex" },
     scriptLabel: "Programa",
     readiness: {
+      checking: "Comprobando…",
       not_installed: "No instalado",
       installed: "Instalado",
       version_identified: "Versión identificada",

@@ -657,10 +657,10 @@ export interface components {
             };
         };
         /**
-         * @description FS-004 FR-006.
+         * @description FS-004 FR-006. checking while a harness's first check runs; a later check keeps the previous state (D-102).
          * @enum {string}
          */
-        ReadinessState: "not_installed" | "installed" | "version_identified" | "authenticated" | "ready" | "not_ready";
+        ReadinessState: "checking" | "not_installed" | "installed" | "version_identified" | "authenticated" | "ready" | "not_ready";
         Harness: {
             /** @enum {string} */
             id: "claude-code" | "codex";

@@ -14,7 +14,9 @@ import (
 
 type schemaIssue = schema.Issue
 
-// Harnesses returns the inventory in a stable order (FS-004 FR-007). Credentials are never part of it.
+// Harnesses returns the inventory in a stable order (FS-004 FR-007). Credentials are never part of it. A harness whose
+// first check is still running is checking, never not installed; a later check keeps the previous result until the new
+// one lands (FS-004 FR-006, D-102).
 func (a *App) Harnesses() []ports.HarnessInfo {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -24,7 +26,7 @@ func (a *App) Harnesses() []ports.HarnessInfo {
 			out = append(out, info)
 		} else {
 			ad := a.adapters[id]
-			info := ports.HarnessInfo{ID: id, Name: ad.Name(), Authentication: "unknown", Readiness: "not_installed",
+			info := ports.HarnessInfo{ID: id, Name: ad.Name(), Authentication: "unknown", Readiness: "checking",
 				Installations: []string{}, Models: []ports.ModelInfo{}, Efforts: []string{}, EnforceableControls: []string{}}
 			info.SetDiagnostic(domain.T("detection_running", "detection is running"))
 			out = append(out, info)
@@ -54,7 +56,8 @@ func (a *App) refreshHarnessesAsync() {
 	}
 }
 
-// detect revalidates one harness and stores what it found, including the resolved path (FS-004 FR-006).
+// detect revalidates one harness and stores what it found, including the resolved path (FS-004 FR-006), then
+// announces it, so the dashboard reads the inventory again (FS-004 FR-007).
 func (a *App) detect(ctx context.Context, id string) ports.HarnessInfo {
 	ad := a.adapters[id]
 	a.mu.Lock()
@@ -65,6 +68,8 @@ func (a *App) detect(ctx context.Context, id string) ports.HarnessInfo {
 	a.mu.Lock()
 	a.inventory[id] = info
 	a.mu.Unlock()
+	a.emit(domain.Event{Type: domain.EventHarnessChecked, Harness: id, Severity: domain.SeverityInfo,
+		Payload: map[string]any{"readiness": info.Readiness}})
 	return info
 }
 
