@@ -95,7 +95,8 @@ type Deps struct {
 	OS string
 	// TickInterval is how often the scheduler looks for due firings.
 	TickInterval time.Duration
-	// MisfireAfter is how late a firing may be before it counts as missed.
+	// MisfireAfter is how late a firing may be before it counts as missed though no unavailability was seen: the clock
+	// jumped, or the daemon could not run.
 	MisfireAfter time.Duration
 	// DaemonExecutable and DaemonArgs are what autostart launches.
 	DaemonExecutable string
@@ -137,7 +138,12 @@ type App struct {
 	accepting     bool
 	stopping      bool
 	adapters      map[string]ports.HarnessAdapter
+	// unavailableUntil is when the daemon last became available again: a firing scheduled before it and still due came
+	// due while the daemon was down, and is a misfire however late it is.
+	unavailableUntil time.Time
 
+	// tickMu runs one Tick at a time, whole.
+	tickMu sync.Mutex
 	// saveMu orders the saves of execution records, so the last copy taken is the last written.
 	saveMu sync.Mutex
 
@@ -211,6 +217,9 @@ func (a *App) Start(ctx context.Context) error {
 	a.refreshHarnessesAsync()
 	a.emit(domain.Event{Type: domain.EventDaemonStarted, Payload: map[string]any{"version": a.d.Version, "pid": os.Getpid()}}.Says(
 		domain.T("daemon_started", "HarmFlow daemon {{version}} started", "version", a.d.Version)))
+	a.mu.Lock()
+	a.unavailableUntil = a.now() // the daemon was down until now (D-080)
+	a.mu.Unlock()
 	a.wg.Add(3)
 	go a.schedulerLoop()
 	go a.watchLoop()

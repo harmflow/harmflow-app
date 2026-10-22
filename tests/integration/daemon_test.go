@@ -2107,3 +2107,23 @@ func waitLogEnd(t *testing.T, home, id string, timeout time.Duration, each func(
 	t.Fatalf("no execution log in logs/ ended within %v; logs/ holds %v; daemon.log ends:\n%s", timeout, names, daemonLog)
 	return "", nil
 }
+
+// FS-002 AC-004, AC-005, D-080: a firing that came due while the daemon was down follows the missed-run policy, even
+// when the daemon is back a minute later.
+func TestMisfireAcrossShortRestart(t *testing.T) {
+	home := t.TempDir()
+	d := startDaemon(t, home)
+	d.call("POST", "/tasks", map[string]any{"yaml": task("short", "Say hi.", daily)}, 201)
+	d.call("POST", "/tasks", map[string]any{"yaml": task("short-skip", "Say hi.", daily+"    missedRun:\n      policy: skip\n")}, 201)
+	d.stop()
+	setNextFire(t, home, time.Now().Add(-60*time.Second), "short", "short-skip")
+	d = startDaemon(t, home)
+	// Both firings are decided in the same check, so the catch-up shows the skip was decided too.
+	runs := d.waitExecutions("short", 1)
+	if len(runs) != 1 || runs[0]["trigger"] != "catch_up" {
+		t.Errorf("short: %v", runs)
+	}
+	if runs := d.list("/executions?taskId=short-skip"); len(runs) != 0 {
+		t.Errorf("the skip policy ran %v", runs)
+	}
+}
