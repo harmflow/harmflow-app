@@ -1041,6 +1041,12 @@ export const ptBR: Resources = {
     failed: "O daemon não iniciou: {{message}}",
     browserHint: "Inicie-o num terminal com `harmflowd` e recarregue esta página.",
   },
+  crash: {
+    screenTitle: "Não foi possível mostrar esta tela",
+    rootTitle: "Não foi possível mostrar a interface",
+    hint: "Recarregue para tentar de novo. Se voltar a acontecer, copie os detalhes num relato de bug.",
+    details: "Detalhes do erro",
+  },
   time: {
     justNow: "agora mesmo",
   },

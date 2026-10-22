@@ -1,14 +1,47 @@
 // @vitest-environment happy-dom
 // Drives the dashboard's shell in a DOM: ⌘B and the sidebar's own control collapse the sidebar to its icons and expand
-// it again, the choice outlives a restart, and the daemon's connection state is the topbar's alone.
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+// it again, the choice outlives a restart, and the daemon's connection state is the topbar's alone. A render error
+// never leaves the window empty, and the interface tells the shell when it has painted (harmflow-app#96).
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { act, createElement } from "react";
+import { flushSync } from "react-dom";
+import { createRoot, type Root as ReactRoot } from "react-dom/client";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
+import { native } from "./api/native";
 import type { Settings } from "./api/types";
-import { App } from "./App";
+import { Root } from "./App";
+import { rootOptions } from "./components/ErrorBoundary";
 import { YamlEditor } from "./components/YamlEditor";
 import i18n from "./i18n";
 import { patchStateForTests } from "./state/store";
+
+// Which component throws during render; none unless a test says so.
+const boom = vi.hoisted(() => ({ screen: false, sidebar: false }));
+
+vi.mock("./screens/ExecutionsScreen", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./screens/ExecutionsScreen")>();
+  const { createElement } = await import("react");
+  return {
+    ...original,
+    ExecutionsScreen: (props: Parameters<typeof original.ExecutionsScreen>[0]) => {
+      if (boom.screen) throw new Error("Boom in a screen");
+      return createElement(original.ExecutionsScreen, props);
+    },
+  };
+});
+
+vi.mock("./components/Shell", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./components/Shell")>();
+  const { createElement } = await import("react");
+  return {
+    ...original,
+    Sidebar: (props: Parameters<typeof original.Sidebar>[0]) => {
+      if (boom.sidebar) throw new Error("Boom in the sidebar");
+      return createElement(original.Sidebar, props);
+    },
+  };
+});
 
 vi.mock("./api/transport", () => ({
   isTauri: () => false,
@@ -35,7 +68,7 @@ const settings: Settings = {
   onboardingCompleted: true,
 };
 
-let root: Root | undefined;
+let root: ReactRoot | undefined;
 let host: HTMLElement | undefined;
 
 beforeAll(async () => {
@@ -64,10 +97,11 @@ afterEach(() => {
   quit();
 });
 
-async function launch() {
-  host = document.body.appendChild(document.createElement("div"));
-  root = createRoot(host);
-  await act(async () => root!.render(<App />));
+/** Mounts the interface as main.tsx does, with the same root options. */
+async function launch(element = createElement(Root)) {
+  host ??= document.body.appendChild(document.createElement("div"));
+  root = createRoot(host, rootOptions);
+  await act(async () => root!.render(element));
 }
 
 function quit() {
@@ -218,5 +252,115 @@ describe("sidebar", () => {
     } finally {
       await act(async () => patchStateForTests({ connection: "connected" }));
     }
+  });
+});
+
+describe("render errors", () => {
+  let logged: MockInstance<typeof console.error>;
+
+  beforeEach(() => {
+    logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    boom.screen = boom.sidebar = false;
+    logged.mockRestore();
+  });
+
+  const alert = () => host!.querySelector<HTMLElement>('[role="alert"]');
+  const button = (label: string) => [...alert()!.querySelectorAll("button")].find((b) => b.textContent === label);
+
+  it("replaces only the screen that throws, below the sidebar and the header", async () => {
+    boom.screen = true;
+    await launch();
+    expect(alert()!.closest(".app__content")).not.toBeNull();
+    expect(alert()!.textContent).toContain("This screen could not be shown");
+    expect(alert()!.textContent).toContain("Boom in a screen");
+    expect(button("Reload")).toBeDefined();
+    expect(alert()!.querySelector('button[aria-label="Copy"]')).not.toBeNull();
+    // The copied details hold the stack and React's component stack too.
+    expect(alert()!.querySelector("pre")!.textContent).toMatch(/Boom in a screen[\s\S]+ExecutionsScreen/);
+
+    expect(sidebar().querySelectorAll(".nav__item")).toHaveLength(5);
+    expect(host!.querySelector(".topbar")!.textContent).toContain("Daemon connected");
+  });
+
+  it("leaves the error behind when the sidebar opens another screen", async () => {
+    boom.screen = true;
+    await launch();
+    await act(async () => navButton("Settings").click());
+    expect(alert()).toBeNull();
+    expect(host!.querySelector(".screen.settings")).not.toBeNull();
+  });
+
+  it("shows the message and a reload over the whole window when the sidebar throws", async () => {
+    boom.sidebar = true;
+    await launch();
+    expect(host!.querySelector(".sidebar")).toBeNull();
+    expect(alert()!.closest(".crash-root")).not.toBeNull();
+    expect(alert()!.textContent).toContain("The interface could not be shown");
+    expect(alert()!.textContent).toContain("Boom in the sidebar");
+    expect(button("Reload")).toBeDefined();
+    expect(host!.textContent).not.toBe("");
+  });
+
+  it("logs a caught error with its component stack", async () => {
+    boom.screen = true;
+    await launch();
+    expect(logged).toHaveBeenCalledWith(
+      "HarmFlow: render error",
+      expect.objectContaining({ message: "Boom in a screen" }),
+      expect.stringContaining("ExecutionsScreen"),
+    );
+  });
+
+  it("logs an error that no boundary catches", async () => {
+    function Thrower(): never {
+      throw new Error("Boom outside every boundary");
+    }
+    // Inside act(), React rethrows an uncaught error instead of passing it to the root's handler.
+    const scope = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    scope.IS_REACT_ACT_ENVIRONMENT = false;
+    try {
+      host = document.body.appendChild(document.createElement("div"));
+      root = createRoot(host, rootOptions);
+      flushSync(() => root!.render(createElement(Thrower)));
+    } finally {
+      scope.IS_REACT_ACT_ENVIRONMENT = true;
+    }
+    expect(host.textContent).toBe("");
+    expect(logged).toHaveBeenCalledWith(
+      "HarmFlow: uncaught render error",
+      expect.objectContaining({ message: "Boom outside every boundary" }),
+      expect.stringContaining("Thrower"),
+    );
+  });
+});
+
+describe("startup", () => {
+  it("tells the shell once, after the first commit, that the interface is ready", async () => {
+    const ready = vi.spyOn(native, "interfaceReady");
+    try {
+      await launch();
+      expect(ready).toHaveBeenCalledTimes(1);
+      await press(); // a render after the first one
+      expect(ready).toHaveBeenCalledTimes(1);
+    } finally {
+      ready.mockRestore();
+    }
+  });
+
+  it("paints a text-free placeholder with no inline style, which the first render replaces", async () => {
+    const html = readFileSync(join(__dirname, "..", "index.html"), "utf8");
+    expect(html).not.toMatch(/<style|\sstyle=/i);
+    const placeholder = new DOMParser().parseFromString(html, "text/html").getElementById("root")!;
+    expect(placeholder.querySelector(".boot svg")).not.toBeNull();
+    expect(placeholder.textContent!.trim()).toBe("");
+
+    host = document.body.appendChild(document.createElement("div"));
+    host.innerHTML = placeholder.innerHTML;
+    await launch();
+    expect(host.querySelector(".boot")).toBeNull();
+    expect(host.querySelector(".app")).not.toBeNull();
   });
 });
