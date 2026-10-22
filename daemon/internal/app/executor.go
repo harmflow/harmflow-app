@@ -241,7 +241,7 @@ func (r *run) prepare() error {
 type previousAttempt struct {
 	Number        int    `json:"number"`
 	Harness       string `json:"harness"`
-	Model         string `json:"model"`
+	Model         string `json:"model,omitempty"`
 	Outcome       string `json:"outcome"`
 	Error         string `json:"error,omitempty"`
 	LastOperation string `json:"lastOperation,omitempty"`
@@ -416,7 +416,7 @@ func (r *run) attempts(start func(harness string) error) (domain.ExecutionStatus
 				"harness", nextName))
 			r.event(domain.Event{Type: domain.EventHarnessSwitched, Severity: domain.SeverityWarning,
 				Payload: map[string]any{"from": profile.Provider, "to": next.Provider, "reason": string(end.Class),
-					"model": next.Model, "effort": next.Effort}}.Says(domain.T("harness_switched",
+					"configuredModel": next.Model, "configuredEffort": next.Effort}}.Says(domain.T("harness_switched",
 				"switching from {{from}} to {{to}}", "from", ad.Name(), "to", nextName)))
 			idx++
 			rateRetries = 0
@@ -511,11 +511,12 @@ func (r *run) runAttempt(ad ports.HarnessAdapter, info ports.HarnessInfo, p doma
 	a.mu.Lock()
 	n := len(r.x.Attempts) + 1
 	r.attempt = n
-	at := domain.Attempt{Number: n, Harness: p.Provider, HarnessVersion: info.Version, Model: p.Model, Effort: p.Effort,
-		StartedAt: now, Outcome: domain.AttemptRunning}
+	// The model and effort used stay unreported until the harness reports them (D-105).
+	at := domain.Attempt{Number: n, Harness: p.Provider, HarnessVersion: info.Version, ConfiguredModel: p.Model,
+		ConfiguredEffort: p.Effort, StartedAt: now, Outcome: domain.AttemptRunning}
 	at.SetReason(reason)
 	r.x.Attempts = append(r.x.Attempts, at)
-	r.x.Harness, r.x.Model = p.Provider, p.Model
+	r.x.Harness, r.x.Model = p.Provider, ""
 	a.mu.Unlock()
 	r.setStatus(domain.StatusRunning, domain.T("step_starting_harness", "Starting {{harness}}", "harness", ad.Name()))
 	r.save(true)
@@ -565,9 +566,9 @@ func (r *run) runAttempt(ad ports.HarnessAdapter, info ports.HarnessInfo, p doma
 		return end
 	}
 	r.event(domain.Event{Type: domain.EventHarnessStarted, Harness: p.Provider,
-		Payload: map[string]any{"model": p.Model, "effort": p.Effort, "version": info.Version, "pid": proc.Pid(),
-			"reason": reason.Message, "path": info.Path}}.Says(domain.T("harness_started", "{{harness}} {{version}} started",
-		"harness", ad.Name(), "version", info.Version)))
+		Payload: map[string]any{"configuredModel": p.Model, "configuredEffort": p.Effort, "version": info.Version,
+			"pid": proc.Pid(), "reason": reason.Message, "path": info.Path}}.Says(domain.T("harness_started",
+		"{{harness}} {{version}} started", "harness", ad.Name(), "version", info.Version)))
 
 	stopProgress := make(chan struct{})
 	progressDone := make(chan struct{})
@@ -709,9 +710,13 @@ Execution directory: %s
 	}
 	if len(prev) > 0 {
 		last := prev[len(prev)-1]
+		ranOn := last.Harness
+		if last.Model != "" {
+			ranOn += " (" + last.Model + ")"
+		}
 		fmt.Fprintf(&b, `
-This is a new session continuing the same execution. The previous attempt ran on %s (%s) and ended: %s.`, last.Harness,
-			last.Model, strings.ReplaceAll(last.Outcome, "_", " "))
+This is a new session continuing the same execution. The previous attempt ran on %s and ended: %s.`, ranOn,
+			strings.ReplaceAll(last.Outcome, "_", " "))
 		if last.LastOperation != "" {
 			fmt.Fprintf(&b, " Its last recorded operation: %s.", last.LastOperation)
 		}
@@ -756,10 +761,22 @@ func (r *run) onHarnessEvent(he ports.HarnessEvent) {
 	switch he.Kind {
 	case ports.HarnessStarted:
 		a.mu.Lock()
-		if at := r.x.CurrentAttempt(); at != nil && he.SessionID != "" {
-			at.SessionID = he.SessionID
+		if at := r.x.CurrentAttempt(); at != nil {
+			if he.SessionID != "" {
+				at.SessionID = he.SessionID
+			}
+			// Only the harness's own report says what was used; the configured values stay apart (D-105).
+			if he.Model != "" {
+				at.Model, r.x.Model = he.Model, he.Model
+			}
+			if he.Effort != "" {
+				at.Effort = he.Effort
+			}
 		}
 		a.mu.Unlock()
+		if he.Model != "" || he.Effort != "" {
+			r.save(true)
+		}
 		if he.Model != "" {
 			r.event(domain.Event{Type: domain.EventHarnessOutput, Severity: domain.SeverityDebug,
 				Payload: map[string]any{"sessionId": he.SessionID, "model": he.Model}}.Says(domain.T("harness_session",

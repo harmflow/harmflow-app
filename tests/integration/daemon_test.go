@@ -468,6 +468,16 @@ func TestFailoverAcrossHarnesses(t *testing.T) {
 	if a1["harness"] != "claude-code" || a1["outcome"] != "quota_exhausted" || a2["harness"] != "codex" || a2["outcome"] != "succeeded" {
 		t.Errorf("attempts %v %v", a1, a2)
 	}
+	// FS-005 AC-008 (D-105): Claude Code's init line names its model; Codex's stream names none, and neither names its
+	// effort, so those are absent, and the configured default is kept apart, never in their place.
+	if a1["model"] != "claude-haiku-4-5-20251001" || a2["model"] != nil || a1["effort"] != nil || a2["effort"] != nil ||
+		a1["configuredModel"] != "default" || a2["configuredModel"] != "default" ||
+		a2["configuredEffort"] != "default" {
+		t.Errorf("models and efforts: %v %v", a1, a2)
+	}
+	if x["model"] != nil {
+		t.Errorf("the execution's model %v is not its current attempt's", x["model"])
+	}
 	events := d.call("GET", "/executions/"+run["executionId"].(string)+"/events", nil, 200)["events"].([]any)
 	var order []string
 	for _, e := range events {

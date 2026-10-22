@@ -503,6 +503,8 @@ export const esES: Resources = {
       attempt: "Intento {{number}}",
       model: "Modelo",
       effort: "Esfuerzo",
+      notReported: "No informado",
+      configured: "configurado: {{value}}",
       harnessVersion: "Versión",
       reason: "Motivo",
       exitCode: "Código de salida",

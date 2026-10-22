@@ -491,6 +491,8 @@ export const enUS = {
       attempt: "Attempt {{number}}",
       model: "Model",
       effort: "Effort",
+      notReported: "Not reported",
+      configured: "configured: {{value}}",
       harnessVersion: "Version",
       reason: "Reason",
       exitCode: "Exit code",

@@ -39,12 +39,12 @@ const base: Execution = {
   createdAt: started,
   startedAt: started,
   harness: "codex",
-  model: "default",
   repository: "org/core-banking",
   workItem: "org/core-banking#123",
+  // Claude Code reports its model; Codex reports none, and neither its effort (D-105).
   attempts: [
-    { number: 1, harness: "claude-code", model: "default", effort: "high", startedAt: started, endedAt: started, outcome: "quota_exhausted" },
-    { number: 2, harness: "codex", model: "default", effort: "high", startedAt: started, endedAt: ended, outcome: "succeeded" },
+    { number: 1, harness: "claude-code", model: "claude-sonnet-4-5", configuredModel: "default", configuredEffort: "high", startedAt: started, endedAt: started, outcome: "quota_exhausted" },
+    { number: 2, harness: "codex", configuredModel: "default", configuredEffort: "high", startedAt: started, endedAt: ended, outcome: "succeeded" },
   ],
   workItems: [
     {
@@ -160,6 +160,18 @@ describe("execution detail", () => {
 
     const attempts = await choose("Attempts");
     for (const shown of ["Attempt 1", "Claude Code", "Attempt 2", "Codex"]) expect(attempts).toContain(shown);
+  });
+
+  it("names the model and effort each attempt's harness reported, and the rest as not reported (FS-005 AC-008)", async () => {
+    await open(completed, [], capture());
+    await choose("Attempts");
+    const [claude, codex] = [...host!.querySelectorAll(".attempt")].map((li) => li.textContent ?? "");
+    expect(claude).toContain("Modelclaude-sonnet-4-5 · configured: default");
+    expect(claude).toContain("EffortNot reported · configured: high");
+    expect(codex).toContain("ModelNot reported · configured: default");
+    expect(codex).toContain("EffortNot reported · configured: high");
+    // The configured value is never shown as the one used.
+    expect(codex).not.toMatch(/Model(default|high)/);
   });
 
   it("shows the daemon's texts in the interface's language, and the agent's and harness's as they are (FS-012 AC-005)", async () => {

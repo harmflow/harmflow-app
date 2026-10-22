@@ -1122,13 +1122,15 @@ components:
 
     Attempt:
       type: object
-      required: [number, harness, model, effort, startedAt]
+      required: [number, harness, configuredModel, configuredEffort, startedAt]
       properties:
         number: { type: integer }
         harness: { type: string }
         harnessVersion: { type: string }
-        model: { type: string }
-        effort: { type: string }
+        model: { type: string, description: "The model the harness reported using; absent when it reported none (D-105)." }
+        effort: { type: string, description: "The effort the harness reported using; absent when it reported none (D-105)." }
+        configuredModel: { type: string, description: "The model the task asked for, default when it set none. Never the one used." }
+        configuredEffort: { type: string, description: "The effort the task asked for, default when it set none. Never the one used." }
         startedAt: { type: string, format: date-time }
         endedAt: { type: string, format: date-time }
         outcome: { type: string, enum: [running, succeeded, failed, quota_exhausted, rate_limited, harness_unavailable, timed_out, cancelled, interrupted] }
@@ -1244,7 +1246,7 @@ components:
         startedAt: { type: string, format: date-time }
         endedAt: { type: string, format: date-time }
         harness: { type: string, description: The harness of the current or last attempt. }
-        model: { type: string }
+        model: { type: string, description: "The model the current or last attempt's harness reported using; absent when it reported none (D-105)." }
         attemptCount: { type: integer }
         currentStep:
           type: string
