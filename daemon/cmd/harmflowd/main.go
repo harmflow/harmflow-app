@@ -5,7 +5,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -87,24 +86,10 @@ func run(homeFlag, builtinsFlag string, port int) error {
 	pathEnv := userPath(userHome)
 	harnessEnv := withPath(os.Environ(), pathEnv)
 
-	secrets := tokenStore(paths, logger)
-	token, err := secrets.Get()
-	if errors.Is(err, secret.ErrNoToken) {
-		if token, err = secret.NewToken(); err == nil {
-			err = secrets.Set(token)
-		}
-	}
+	secrets, leftover := tokenStore(paths)
+	token, err := startupToken(secrets, leftover, logger, time.Sleep)
 	if err != nil {
-		logger.Printf("credential store %s unavailable (%v); using a user-only file", secrets.Kind(), err)
-		secrets = secret.File{Path: filepath.Join(paths.Run, "token")}
-		if token, err = secrets.Get(); errors.Is(err, secret.ErrNoToken) {
-			if token, err = secret.NewToken(); err == nil {
-				err = secrets.Set(token)
-			}
-		}
-		if err != nil {
-			return fmt.Errorf("token: %w", err)
-		}
+		return err
 	}
 
 	tasks, err := fsstore.NewTasks(paths.Tasks)
@@ -189,13 +174,6 @@ func run(homeFlag, builtinsFlag string, port int) error {
 	srv.Shutdown(ctx)
 	logger.Printf("stopped")
 	return nil
-}
-
-func tokenStore(p app.Paths, logger *log.Logger) ports.SecretStore {
-	if os.Getenv("HARMFLOW_TOKEN_STORE") == "file" {
-		return secret.File{Path: filepath.Join(p.Run, "token")}
-	}
-	return secret.Keychain{Service: secret.KeychainService, Account: secret.KeychainAccount}
 }
 
 // writeRuntime publishes the address in a file only the user can read (D-090).
