@@ -1,7 +1,7 @@
 // The selected execution: its events as they happen and replayed from the log, its raw output, files, commands,
 // results, attempts with the prompt and session context each sent (FS-008 FR-002, FR-008), and estimated token costs
 // (harmflow-app#39). Observe and cancel only — no input reaches the agent (FS-003 FR-003).
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
 import { native } from "../api/native";
@@ -486,22 +486,21 @@ function ScriptProgram({ detail, active }: { detail?: Execution; active: boolean
         {s.signal ? t("executions.detail.script.signal", { signal: s.signal }) : t("executions.detail.script.exitCode", { code: s.exitCode })}
       </Chip>
     );
+  // A row that does not apply to the program's form is left out rather than shown empty.
+  const rows: [string, ReactNode][] = [
+    [t("executions.detail.script.exitStatus"), status],
+    [t("executions.detail.script.program"), <span className="mono">{s.program}</span>],
+  ];
+  if (s.command?.length) rows.push([t("executions.detail.script.command"), <ArgList args={s.command} />]);
+  if (s.interpreter?.length) rows.push([t("executions.detail.script.interpreter"), <ArgList args={s.interpreter} />]);
+  if (s.scriptPath) rows.push([t("executions.detail.script.scriptPath"), <span className="mono">{s.scriptPath}</span>]);
+  rows.push([t("executions.detail.script.workingDirectory"), <span className="mono">{s.workingDirectory}</span>]);
+  if (env.length) {
+    rows.push([t("executions.detail.script.environment"), <span className="mono">{env.map(([k, v]) => `${k}=${v}`).join("\n")}</span>]);
+  }
   return (
     <div className="results">
-      <KeyValue
-        items={[
-          [t("executions.detail.script.exitStatus"), status],
-          [t("executions.detail.script.program"), <span className="mono">{s.program}</span>],
-          [t("executions.detail.script.command"), s.command?.length ? <ArgList args={s.command} /> : null],
-          [t("executions.detail.script.interpreter"), s.interpreter?.length ? <ArgList args={s.interpreter} /> : null],
-          [t("executions.detail.script.scriptPath"), s.scriptPath ? <span className="mono">{s.scriptPath}</span> : null],
-          [t("executions.detail.script.workingDirectory"), <span className="mono">{s.workingDirectory}</span>],
-          [
-            t("executions.detail.script.environment"),
-            env.length ? <span className="mono">{env.map(([k, v]) => `${k}=${v}`).join("\n")}</span> : null,
-          ],
-        ]}
-      />
+      <KeyValue items={rows} />
       {s.source ? (
         <div className="results__block">
           <h4>{t("executions.detail.script.source")}</h4>
