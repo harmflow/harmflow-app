@@ -2257,6 +2257,111 @@ loop:
 	}
 }
 
+// invalidEvents collects the task.invalid events the app emits from now on.
+func (e *env) invalidEvents() func() []domain.Event {
+	var mu sync.Mutex
+	var got []domain.Event
+	e.events.setHook(func(ev domain.Event) {
+		if ev.Type == domain.EventTaskInvalid {
+			mu.Lock()
+			got = append(got, ev)
+			mu.Unlock()
+		}
+	})
+	return func() []domain.Event {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]domain.Event(nil), got...)
+	}
+}
+
+// namesFile fails unless the text names the file before the text it quotes, which keeps its own key.
+func namesFile(t *testing.T, what string, text domain.Text, file, innerKey string) {
+	t.Helper()
+	if text.Key != "task_file_error" || text.Params["file"] != file || text.Params["detailKey"] != innerKey ||
+		!strings.HasPrefix(text.Message, file+": ") {
+		t.Errorf("%s does not name %s: %+v", what, file, text)
+	}
+}
+
+// FS-001 FR-007, AC-009: a task file found broken at start is named, beside its line, in the task's warning and its
+// validation errors, and announced by task.invalid as one the watcher finds. The file is broken.yml, not the
+// broken.yaml its id would give, so the name is the file's own.
+func TestBrokenFileAtStartIsNamed(t *testing.T) {
+	var invalid func() []domain.Event
+	e := newEnv(t, func(e *env) {
+		broken := "apiVersion: harmflow/v1alpha1\nkind: Task\nmetadata:\n  id: [unclosed\n"
+		if err := os.WriteFile(filepath.Join(e.home, "tasks", "broken.yml"), []byte(broken), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		invalid = e.invalidEvents()
+	})
+	tasks := e.app.ListTasks()
+	if len(tasks) != 1 || tasks[0].ID != "broken" || !tasks[0].Invalid || len(tasks[0].Warnings) != 1 ||
+		tasks[0].Warnings[0].Code != domain.WarningExternalEditInvalid {
+		t.Fatalf("listed %+v", tasks)
+	}
+	warning := tasks[0].Warnings[0]
+	namesFile(t, "the warning", warning.Text, "broken.yml", "yaml_syntax")
+	view, _ := e.app.GetTask("broken")
+	if view.Validation == nil || len(view.Validation.Errors) != 1 || view.Validation.Errors[0].Line == 0 {
+		t.Fatalf("validation %+v", view.Validation)
+	}
+	first := view.Validation.Errors[0]
+	namesFile(t, "the validation error", first.Text, "broken.yml", "yaml_syntax")
+	if line := fmt.Sprintf("line %d", first.Line); !strings.Contains(warning.Message, line) {
+		t.Errorf("the warning %q does not give the %s", warning.Message, line)
+	}
+	evs := invalid()
+	if len(evs) != 1 || evs[0].TaskID != "broken" || evs[0].MessageKey != "task_file_invalid" ||
+		evs[0].Params["file"] != "broken.yml" || evs[0].Payload["file"] != "broken.yml" {
+		t.Fatalf("task.invalid at start: %+v", evs)
+	}
+	if errs, _ := evs[0].Payload["errors"].([]schemaIssue); len(errs) != 1 || errs[0].Params["file"] != "broken.yml" {
+		t.Errorf("the event's errors %+v", evs[0].Payload["errors"])
+	}
+}
+
+// FS-001 FR-007, AC-009: the watcher names a loaded task's file once it breaks, for a syntax error and for a schema
+// rule, which keeps its JSON pointer and line.
+func TestBrokenFileFromTheWatcherIsNamed(t *testing.T) {
+	e := newEnv(t)
+	e.create("ext", "")
+	view, _ := e.app.GetTask("ext")
+	invalid := e.invalidEvents()
+	for i, c := range []struct {
+		name, yaml, key, path string
+		line                  int
+	}{
+		{"a syntax error", "apiVersion: [broken", "yaml_syntax", "", 1},
+		{"a schema rule", strings.Replace(view.YAML, "kind: Task", "kind: Job", 1), "schema_const", "/kind", 2},
+	} {
+		_ = os.WriteFile(view.Path, []byte(c.yaml), 0o600)
+		e.app.scanTaskFiles()
+		got, _ := e.app.GetTask("ext")
+		if !got.Invalid || len(got.Warnings) != 1 || got.Validation == nil || len(got.Validation.Errors) == 0 {
+			t.Fatalf("%s: %+v", c.name, got)
+		}
+		namesFile(t, c.name+": the warning", got.Warnings[0].Text, "ext.yaml", c.key)
+		if got.Warnings[0].Subject != c.path {
+			t.Errorf("%s: the warning's subject %q, want %q", c.name, got.Warnings[0].Subject, c.path)
+		}
+		first := got.Validation.Errors[0]
+		namesFile(t, c.name+": the validation error", first.Text, "ext.yaml", c.key)
+		if first.Path != c.path || first.Line != c.line {
+			t.Errorf("%s: path %q line %d, want %q and %d", c.name, first.Path, first.Line, c.path, c.line)
+		}
+		evs := invalid()
+		if len(evs) != i+1 {
+			t.Fatalf("%s: %d task.invalid events, want %d", c.name, len(evs), i+1)
+		}
+		if ev := evs[i]; ev.MessageKey != "task_changed_externally_invalid" || ev.Params["file"] != "ext.yaml" ||
+			ev.Payload["file"] != "ext.yaml" {
+			t.Errorf("%s: task.invalid %+v", c.name, ev)
+		}
+	}
+}
+
 // FS-009 FR-007: a record or a ledger saved before the agent's text was redacted on arrival would keep a credential
 // with no time limit, so the daemon redacts both as it loads them, and saves them back.
 func TestRedactsWhatWasKeptBefore(t *testing.T) {

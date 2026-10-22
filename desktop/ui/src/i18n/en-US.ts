@@ -282,7 +282,8 @@ export const enUS = {
     schema_false: "this property is not allowed here",
     id_immutable: "the identifier cannot change; duplicate the task instead",
     id_file_mismatch: 'metadata.id "{{id}}" must match the file name {{file}}.yaml',
-    task_file_invalid: "the task file fails validation",
+    task_file_invalid: "the task file {{file}} fails validation",
+    task_file_error: "{{file}}: {{detail}}",
     schedule_missing: "a schedule needs a cron expression or an interval; remove it for a manual-only task",
     schedule_empty: "a schedule needs a cron expression or an interval",
     schedule_cron_and_interval: "a schedule is a cron expression or an interval, not both",
@@ -351,7 +352,7 @@ export const enUS = {
     task_delete_pending: "deletion waits for the running execution",
     task_changed_externally: "the task file was changed outside HarmFlow",
     task_changed_externally_invalid:
-      "the task file was changed outside HarmFlow and fails validation; the last valid definition stays",
+      "the task file {{file}} was changed outside HarmFlow and fails validation; the last valid definition stays",
     task_removed_externally: "the task file was removed outside HarmFlow",
     task_was_disabled: "the task was disabled",
     task_was_deleted: "the task was deleted",

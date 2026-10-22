@@ -57,6 +57,21 @@ describe("daemonText", () => {
     );
   });
 
+  it("names a task file before the error it quotes (FS-001 FR-007)", () => {
+    const syntax = {
+      file: "broken.yml",
+      detail: "YAML syntax error: line 3: did not find expected ',' or ']'",
+      detailKey: "yaml_syntax",
+      "detail.detail": "line 3: did not find expected ',' or ']'",
+    };
+    expect(daemonText({ message: "", messageKey: "task_file_error", params: syntax })).toBe(
+      "broken.yml: erro de sintaxe YAML: line 3: did not find expected ',' or ']'",
+    );
+    expect(daemonText({ message: "", messageKey: "task_file_invalid", params: { file: "broken.yml" } })).toBe(
+      "o arquivo da tarefa broken.yml não passa na validação",
+    );
+  });
+
   it("translates an event's message, and leaves the agent's words as they are", () => {
     expect(eventText({ message: "switching from Claude Code to Codex", messageKey: "harness_switched", params: { from: "Claude Code", to: "Codex" } })).toBe(
       "trocando de Claude Code para Codex",
