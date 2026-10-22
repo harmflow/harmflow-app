@@ -1508,6 +1508,88 @@ func valueAt(v any, keys ...string) any {
 	return v
 }
 
+// FS-001 FR-012, AC-014: every default of D-082 stays adjustable per task, through the YAML key the schema names. A
+// task that sets each one, 0 included wherever the schema allows it, keeps it; a task that sets none gets every
+// default; one that sets only its timeout keeps it and gets the others. Each value is read from the effective
+// definition the API returns, by its key, so a key that drifted between the schema, the file, and the API fails here.
+func TestDefaultsAndOverridesFromYAML(t *testing.T) {
+	e := newEnv(t)
+	params := []struct {
+		key      string // under spec
+		def, set any
+	}{
+		{"execution.timeoutMinutes", 60, 90},
+		{"githubIssueImplementation.delivery.testRepairAttempts", 2, 0},
+		{"githubIssueImplementation.queue.maxResumeAttempts", 3, 0},
+		{"githubIssueImplementation.queue.resumeStrategy", "resume_first", "alternate"},
+		{"githubIssueImplementation.queue.maxDiscoveredPerCycle", 10, 25},
+		{"githubIssueImplementation.queue.maxItemsPerCycle", 1, 2},
+		{"githubIssueImplementation.queue.ordering", "oldest_first", "newest_first"},
+		{"githubIssueImplementation.queue.maxFailedRetries", 3, 0},
+		{"execution.rateLimit.initialWaitSeconds", 60, 15},
+		{"execution.rateLimit.maxWaitSeconds", 900, 120},
+		{"execution.rateLimit.maxRetries", 5, 0},
+		{"harness.fallback.maxSwitches", 1, 0},
+		{"execution.cancelGraceSeconds", 30, 5},
+	}
+	task := func(id, fallback, execution, queue string) string {
+		return fmt.Sprintf(`apiVersion: harmflow/v1alpha1
+kind: Task
+metadata:
+  id: %s
+  name: Task %s
+spec:
+  type: github-issue-implementation
+  prompt: Implement the oldest eligible issue.
+  harness:
+    preferred:
+      provider: claude-code
+%s%s  githubIssueImplementation:
+    repositories:
+      - name: octo/repo
+        localPath: %s
+%s`, id, id, fallback, execution, e.home, queue)
+	}
+	effective := func(id, yamlText string) any {
+		t.Helper()
+		v, err := e.app.CreateTask(TaskInput{YAML: yamlText})
+		if err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+		return v.Effective
+	}
+	check := func(id string, eff any, want func(i int) any) {
+		t.Helper()
+		for i, p := range params {
+			got := valueAt(eff, append([]string{"spec"}, strings.Split(p.key, ".")...)...)
+			if fmt.Sprint(got) != fmt.Sprint(want(i)) {
+				t.Errorf("%s: effective spec.%s = %v, want %v", id, p.key, got, want(i))
+			}
+		}
+	}
+	for _, p := range params {
+		if fmt.Sprint(p.set) == fmt.Sprint(p.def) {
+			t.Fatalf("the override of %s is its default", p.key)
+		}
+	}
+
+	overridden := task("overridden", "    fallback:\n      maxSwitches: 0\n",
+		"  execution:\n    timeoutMinutes: 90\n    cancelGraceSeconds: 5\n"+
+			"    rateLimit:\n      maxRetries: 0\n      initialWaitSeconds: 15\n      maxWaitSeconds: 120\n",
+		"    queue:\n      ordering: newest_first\n      maxDiscoveredPerCycle: 25\n      maxItemsPerCycle: 2\n"+
+			"      resumeStrategy: alternate\n      maxResumeAttempts: 0\n      maxFailedRetries: 0\n"+
+			"    delivery:\n      testRepairAttempts: 0\n")
+	check("overridden", effective("overridden", overridden), func(i int) any { return params[i].set })
+	check("bare", effective("bare", task("bare", "", "", "")), func(i int) any { return params[i].def })
+	timed := task("timed", "", "  execution:\n    timeoutMinutes: 20\n", "")
+	check("timed", effective("timed", timed), func(i int) any {
+		if params[i].key == "execution.timeoutMinutes" {
+			return 20
+		}
+		return params[i].def
+	})
+}
+
 // FS-001 AC-005, AC-006: an external edit converges and is announced; an invalid one keeps the last valid definition.
 func TestExternalEdits(t *testing.T) {
 	e := newEnv(t)
