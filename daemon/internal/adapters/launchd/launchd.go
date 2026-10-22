@@ -20,11 +20,16 @@ const Label = "com.harmflow.daemon"
 type Agent struct {
 	PlistPath string
 	LogPath   string
+	// Launchctl runs launchctl with its arguments. Tests replace it, so none reaches the user's launchd session.
+	Launchctl func(args ...string) error
 }
 
 func NewAgent(home, logPath string) *Agent {
-	return &Agent{PlistPath: filepath.Join(home, "Library", "LaunchAgents", Label+".plist"), LogPath: logPath}
+	return &Agent{PlistPath: filepath.Join(home, "Library", "LaunchAgents", Label+".plist"), LogPath: logPath,
+		Launchctl: runLaunchctl}
 }
+
+func runLaunchctl(args ...string) error { return exec.Command("/bin/launchctl", args...).Run() }
 
 func (a *Agent) Mechanism() string { return "launchd" }
 func (a *Agent) Location() string  { return a.PlistPath }
@@ -42,12 +47,12 @@ func (a *Agent) Enable(executable string, args []string, env map[string]string) 
 		return err
 	}
 	// Register it with the current session without starting a second daemon: launchd starts it at the next login.
-	_ = exec.Command("/bin/launchctl", "bootout", "gui/"+strconv.Itoa(os.Getuid())+"/"+Label).Run()
+	_ = a.Launchctl("bootout", "gui/"+strconv.Itoa(os.Getuid())+"/"+Label)
 	return nil
 }
 
 func (a *Agent) Disable() error {
-	_ = exec.Command("/bin/launchctl", "bootout", "gui/"+strconv.Itoa(os.Getuid())+"/"+Label).Run()
+	_ = a.Launchctl("bootout", "gui/"+strconv.Itoa(os.Getuid())+"/"+Label)
 	if err := os.Remove(a.PlistPath); err != nil && !os.IsNotExist(err) {
 		return err
 	}
