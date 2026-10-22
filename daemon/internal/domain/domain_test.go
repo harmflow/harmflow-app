@@ -54,6 +54,25 @@ func TestEffectiveDefaults(t *testing.T) {
 	}
 }
 
+// FS-004 FR-004, AC-005: a preferred or fallback profile that sets no model or effort reads default for both, which
+// leaves each harness its own; a value a profile sets is kept.
+func TestProfilesReadDefaults(t *testing.T) {
+	d := minimalTask()
+	d.Spec.Harness.Fallback = &FallbackPolicy{Candidates: []HarnessProfile{{Provider: HarnessCodex},
+		{Provider: HarnessCodex, Model: "gpt-x"}}}
+	want := []HarnessProfile{
+		{Provider: HarnessClaudeCode, Model: DefaultModel, Effort: DefaultEffort},
+		{Provider: HarnessCodex, Model: DefaultModel, Effort: DefaultEffort},
+		{Provider: HarnessCodex, Model: "gpt-x", Effort: DefaultEffort},
+	}
+	if got := d.Profiles(); !slices.Equal(got, want) {
+		t.Errorf("profiles %+v, want %+v", got, want)
+	}
+	if d.Spec.Harness.Preferred.Model != "" || d.Spec.Harness.Fallback.Candidates[0].Effort != "" {
+		t.Error("Profiles mutated the document")
+	}
+}
+
 // FS-011 FR-002, FS-005 FR-001 and FR-009: an empty list of notified events or failover triggers is a choice and stays
 // empty; only an absent one takes the default.
 func TestEffectiveKeepsEmptyLists(t *testing.T) {

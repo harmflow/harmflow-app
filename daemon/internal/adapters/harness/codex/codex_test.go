@@ -192,6 +192,33 @@ func TestPrepareSandbox(t *testing.T) {
 	}
 }
 
+// FS-004 FR-004, AC-005: a task that sets no model or effort, or sets default, passes Codex no model and no reasoning
+// effort, so those of Codex's own configuration apply. TestPrepareSandbox shows a set model and effort reaching it.
+func TestPrepareLeavesTheDefaultsToCodex(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	a := &Adapter{Home: t.TempDir()}
+	info := ports.HarnessInfo{Path: "/bin/codex", Features: map[string]bool{"--model": true}}
+	perm := *domain.TaskDocument{}.Effective().Spec.Permissions
+	for _, c := range []struct{ name, model, effort string }{
+		{"default", domain.DefaultModel, domain.DefaultEffort},
+		{"unset", "", ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, Prompt: "do it",
+				Model: c.model, Effort: c.effort})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, arg := range inv.Args {
+				if arg == "--model" || arg == "-m" || strings.HasPrefix(arg, "model=") ||
+					strings.HasPrefix(arg, "model_reasoning_effort=") {
+					t.Errorf("%q was passed: %q", arg, inv.Args)
+				}
+			}
+		})
+	}
+}
+
 // D-092: built-ins are read from copies in the execution's directory, never from the app; the user's own items stay put.
 func TestPrepareDeliversBuiltins(t *testing.T) {
 	root := t.TempDir()
