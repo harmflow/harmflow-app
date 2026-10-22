@@ -666,9 +666,9 @@ func TestRunningAttemptShowsItsInput(t *testing.T) {
 	e.wait(r.ExecutionID, domain.StatusCancelled)
 }
 
-// FS-008 FR-008, FR-010: the record redacts the session context like the prompt. A failover's context quotes the
-// previous attempt's last message as the harness printed it, so a secret the agent wrote reaches the next harness, and
-// only the record's redaction keeps it out of the history.
+// FS-008 FR-008, FR-010; FS-009 FR-007: a failover's context quotes the previous attempt's last message, so a secret
+// the agent printed would reach the next harness, perhaps another provider's. The daemon redacts it as it reads it, so
+// the next harness, the record, and the record on disk all show [REDACTED].
 func TestFailoverContextRedacted(t *testing.T) {
 	e := newEnv(t)
 	token := "ghp_" + strings.Repeat("b", 36)
@@ -689,26 +689,126 @@ func TestFailoverContextRedacted(t *testing.T) {
 	e.idle("leak")
 	mu.Lock()
 	defer mu.Unlock()
-	if !strings.Contains(sent, "Its last message: Pushed with "+token) {
-		t.Fatalf("the failover's context does not quote the previous attempt's last message:\n%s", sent)
+	if !strings.Contains(sent, "Its last message: Pushed with [REDACTED]") || strings.Contains(sent, token) {
+		t.Fatalf("the failover's context does not quote the previous attempt's last message redacted:\n%s", sent)
 	}
 	if len(x.Attempts) != 2 {
 		t.Fatalf("%d attempts, want 2", len(x.Attempts))
 	}
-	want := strings.ReplaceAll(sent, token, "[REDACTED]")
-	if got := x.Attempts[1].SessionContext; got != want {
-		t.Errorf("the record keeps the context\n%s\nwant\n%s", got, want)
+	if got := x.Attempts[1].SessionContext; got != sent {
+		t.Errorf("the record keeps the context\n%s\nwant the one the harness received\n%s", got, sent)
 	}
 	data, err := os.ReadFile(filepath.Join(e.home, "state", "executions", r.ExecutionID+".json"))
 	var saved domain.Execution
 	if err == nil {
 		err = json.Unmarshal(data, &saved)
 	}
-	if err != nil || len(saved.Attempts) != 2 || saved.Attempts[1].SessionContext != want {
+	if err != nil || len(saved.Attempts) != 2 || saved.Attempts[1].SessionContext != sent {
 		t.Errorf("the record on disk lacks the redacted context (%v):\n%s", err, data)
 	}
 	if strings.Contains(string(data), "ghp_") {
 		t.Errorf("the token survived in the record:\n%s", data)
+	}
+}
+
+// FS-008 FR-010: what the harness needs verbatim, such as its workspace path, reaches it as is, and the record keeps it
+// redacted like the prompt. No agent text reaches the context unredacted, so this is the record's own redaction.
+func TestContextRedactedInTheRecord(t *testing.T) {
+	e := newEnv(t)
+	token := "ghp_" + strings.Repeat("d", 36)
+	work := filepath.Join(t.TempDir(), token)
+	e.create("odd-path", "  workspace:\n    path: "+work+"\n")
+	var mu sync.Mutex
+	var sent string
+	e.claude.setScript(func(req ports.RunRequest) string {
+		if req.Prompt != "" { // validation's policy check prepares with no prompt
+			mu.Lock()
+			sent = req.Context
+			mu.Unlock()
+		}
+		return "echo 'END ok'"
+	})
+	r, _ := e.app.RunTask("odd-path")
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	mu.Lock()
+	defer mu.Unlock()
+	if !strings.Contains(sent, "Workspace: "+work) {
+		t.Fatalf("the harness did not get its workspace path as is:\n%s", sent)
+	}
+	if got, want := x.Attempts[0].SessionContext, strings.ReplaceAll(sent, token, "[REDACTED]"); got != want {
+		t.Errorf("the record keeps the context\n%s\nwant\n%s", got, want)
+	}
+}
+
+// FS-009 FR-005, FR-007: what the agent writes — its progress, its last message, its report — is redacted before
+// HarmFlow keeps or relays it: in the record and the API, the work-item ledger, context.json, the event log, and the
+// next attempt's context. It is redacted before it is trimmed, so a token cut short by a trim leaves no prefix behind.
+func TestAgentTextRedactedEverywhere(t *testing.T) {
+	e := newEnv(t)
+	token := "ghp_" + strings.Repeat("c", 36)
+	e.create("agent-secret", "    fallback:\n      candidates:\n        - provider: codex\n")
+	var progress []string
+	for _, p := range []map[string]string{
+		{"type": "step.started", "phase": "running", "message": "Signing in with " + token},
+		{"type": "work_item.selected", "workItem": "o/r#7", "message": "Fix " + token},
+		// Trimmed to 1000 characters first, the token would keep 10 of its characters, too few to match.
+		{"type": "workspace.changed", "branch": "work", "message": strings.Repeat("x", 990) + token},
+	} {
+		line, _ := json.Marshal(p)
+		progress = append(progress, "'"+string(line)+"'")
+	}
+	report, _ := json.Marshal(map[string]any{"outcome": "completed", "summary": "Opened it with " + token,
+		"lastOperation": "git push " + token,
+		"workItems": []any{map[string]any{"key": "o/r#7", "outcome": "completed", "title": "Fix " + token,
+			"tests": map[string]any{"status": "failed", "summary": token + " in the output"}}},
+		"warnings": []any{map[string]any{"code": "other", "message": "saw " + token}}})
+	var mu sync.Mutex
+	var second string
+	e.claude.setScript(func(req ports.RunRequest) string {
+		return fmt.Sprintf("printf '%%s\\n' %s >> %s/progress.jsonl\necho 'Pushed with %s'\necho 'END quota'",
+			strings.Join(progress, " "), req.ExecutionDir, token)
+	})
+	e.codex.setScript(func(req ports.RunRequest) string {
+		if req.Prompt != "" { // validation's policy check prepares with no prompt
+			mu.Lock()
+			second = req.Context
+			mu.Unlock()
+		}
+		return fmt.Sprintf("printf '%%s' '%s' > %s/report.json\necho 'END ok'", report, req.ExecutionDir)
+	})
+	r, _ := e.app.RunTask("agent-secret")
+	e.wait(r.ExecutionID, domain.StatusCompleted, domain.StatusNeedsAttention)
+	e.idle("agent-secret")
+	x, _ := e.app.GetExecution(r.ExecutionID)
+	if len(x.Attempts) != 2 || len(x.WorkItems) != 1 {
+		t.Fatalf("%d attempts and %d work items, want 2 and 1", len(x.Attempts), len(x.WorkItems))
+	}
+	view, _ := json.Marshal(x)
+	kept := map[string]string{"the API's record": string(view)}
+	for name, path := range map[string]string{
+		"the record on disk":   filepath.Join(e.home, "state", "executions", r.ExecutionID+".json"),
+		"the work-item ledger": filepath.Join(e.home, "state", "workitems.json"),
+		"context.json":         filepath.Join(x.ExecutionDir, "context.json"),
+		"the event log":        filepath.Join(e.home, "logs", r.ExecutionID+".jsonl"),
+	} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		kept[name] = string(data)
+	}
+	mu.Lock()
+	kept["attempt 2's context"] = second
+	mu.Unlock()
+	for name, text := range kept {
+		if strings.Contains(text, "ghp_") {
+			t.Errorf("%s keeps the token, or part of it:\n%s", name, text)
+		}
+		// A field that was dropped would also hold no token; [REDACTED] shows the text was kept, redacted.
+		if !strings.Contains(text, "[REDACTED]") {
+			t.Errorf("%s has no [REDACTED]:\n%s", name, text)
+		}
 	}
 }
 
@@ -1187,6 +1287,48 @@ loop:
 }
 
 // FS-003 AC-009, AC-013: a restart marks active executions interrupted and counts the failure against the item.
+// FS-009 FR-007: a record or a ledger saved before the agent's text was redacted on arrival would keep a credential
+// with no time limit, so the daemon redacts both as it loads them, and saves them back.
+func TestRedactsWhatWasKeptBefore(t *testing.T) {
+	e := newEnv(t)
+	token := "ghp_" + strings.Repeat("e", 36)
+	x := domain.NewExecution(domain.TaskDocument{Metadata: domain.TaskMetadata{ID: "old"}}, domain.TriggerManual, nil,
+		time.Now())
+	x.Status = domain.StatusCompleted
+	x.Summary = "Pushed with " + token
+	x.LastOperation = "git push https://x-access-token:" + token + "@github.com/o/r"
+	if err := e.app.d.Executions.Save(x); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.app.d.State.Save("workitems", ledgerFile{SchemaVersion: "1", Tasks: map[string]map[string]*domain.WorkItem{
+		"old": {"o/r#1": {TaskID: "old", Key: "o/r#1", Title: "Fix " + token, Status: domain.WorkItemInProgress}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.app.recover(); err != nil {
+		t.Fatal(err)
+	}
+	e.app.loadLedger()
+	got, _ := e.app.GetExecution(x.ID)
+	if got.Summary != "Pushed with [REDACTED]" || got.LastOperation != "git push https://x-access-token:[REDACTED]@github.com/o/r" {
+		t.Errorf("the loaded record: summary %q, last operation %q", got.Summary, got.LastOperation)
+	}
+	e.app.mu.Lock()
+	title := e.app.ledger["old"]["o/r#1"].Title
+	e.app.mu.Unlock()
+	if title != "Fix [REDACTED]" {
+		t.Errorf("the loaded ledger's title %q", title)
+	}
+	for name, path := range map[string]string{
+		"the record": filepath.Join(e.home, "state", "executions", x.ID+".json"),
+		"the ledger": filepath.Join(e.home, "state", "workitems.json"),
+	} {
+		data, err := os.ReadFile(path)
+		if err != nil || strings.Contains(string(data), "ghp_") || !strings.Contains(string(data), "[REDACTED]") {
+			t.Errorf("%s on disk was not saved back redacted (%v):\n%s", name, err, data)
+		}
+	}
+}
+
 func TestRecoveryMarksInterrupted(t *testing.T) {
 	e := newEnv(t)
 	e.create("crash", "")

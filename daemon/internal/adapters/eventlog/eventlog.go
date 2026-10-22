@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sync"
 	"time"
@@ -366,6 +367,66 @@ func redactParams(m map[string]string) map[string]string {
 		out[k] = Redact(v)
 	}
 	return out
+}
+
+// RedactFields redacts, in place, every string reachable from ptr — through struct fields, slices, arrays, maps,
+// pointers, and interfaces — and reports whether any changed. The agent's and the harness's text reaches the daemon as
+// such values; redacted as they arrive, nothing the daemon keeps or relays from them holds a credential, and a field
+// trimmed later cannot cut a secret short of its pattern (FS-009 FR-005, FR-007). Unexported fields are left alone,
+// and the values must hold no pointer cycle.
+func RedactFields(ptr any) bool {
+	v := reflect.ValueOf(ptr)
+	if v.Kind() != reflect.Pointer || v.IsNil() {
+		return false
+	}
+	return redactReflect(v.Elem())
+}
+
+func redactReflect(v reflect.Value) bool {
+	changed := false
+	switch v.Kind() {
+	case reflect.String:
+		if s := v.String(); v.CanSet() {
+			if r := Redact(s); r != s {
+				v.SetString(r)
+				changed = true
+			}
+		}
+	case reflect.Pointer:
+		if !v.IsNil() {
+			changed = redactReflect(v.Elem())
+		}
+	case reflect.Interface:
+		// What an interface holds cannot be set in place: redact a copy and put it back.
+		if !v.IsNil() && v.CanSet() {
+			c := reflect.New(v.Elem().Type()).Elem()
+			c.Set(v.Elem())
+			if redactReflect(c) {
+				v.Set(c)
+				changed = true
+			}
+		}
+	case reflect.Struct:
+		for i := 0; i < v.NumField(); i++ {
+			if f := v.Field(i); f.CanSet() {
+				changed = redactReflect(f) || changed
+			}
+		}
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < v.Len(); i++ {
+			changed = redactReflect(v.Index(i)) || changed
+		}
+	case reflect.Map:
+		for it := v.MapRange(); it.Next(); {
+			c := reflect.New(it.Value().Type()).Elem()
+			c.Set(it.Value())
+			if redactReflect(c) {
+				v.SetMapIndex(it.Key(), c)
+				changed = true
+			}
+		}
+	}
+	return changed
 }
 
 func itoa(n int) string {

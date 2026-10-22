@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/catalog"
+	"github.com/harmflow/harmflow-app/daemon/internal/adapters/eventlog"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/classify"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/procutil"
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
@@ -581,7 +582,8 @@ func (p *parser) Finish(exitCode int, stderrTail string, timedOut, cancelled boo
 			"code", strconv.Itoa(exitCode))
 		text = end.Error.Message
 	} else {
-		end.Error = domain.Text{Message: classify.Tail(text, 2000)}
+		// Redacted before the tail cuts it, so no secret is cut short of its pattern (FS-009 FR-005).
+		end.Error = domain.Text{Message: classify.Tail(eventlog.Redact(text), 2000)}
 	}
 	end.Class = patterns.Text(text)
 	return end

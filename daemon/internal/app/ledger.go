@@ -4,6 +4,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/harmflow/harmflow-app/daemon/internal/adapters/eventlog"
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 )
 
@@ -17,9 +18,14 @@ func (a *App) loadLedger() {
 	if ok, err := a.d.State.Load("workitems", &f); err != nil {
 		a.log.Printf("work items: %v", err)
 	} else if ok && f.Tasks != nil {
+		// A ledger saved before the agent's text was redacted on arrival may keep a credential in a title.
+		redacted := eventlog.RedactFields(&f)
 		a.mu.Lock()
 		a.ledger = f.Tasks
 		a.mu.Unlock()
+		if redacted {
+			a.saveLedger()
+		}
 	}
 }
 
@@ -100,10 +106,12 @@ func (a *App) recover() error {
 		return err
 	}
 	now := a.now()
-	var interrupted []*domain.Execution
+	var interrupted, redacted []*domain.Execution
 	a.mu.Lock()
 	for _, x := range all {
 		x.Upgrade()
+		// A record saved before the agent's text was redacted on arrival may keep a credential, with no time limit.
+		changed := eventlog.RedactFields(x)
 		if x.Attempts == nil {
 			x.Attempts = []domain.Attempt{}
 		}
@@ -130,9 +138,14 @@ func (a *App) recover() error {
 				at.Outcome = domain.AttemptInterrupted
 			}
 			interrupted = append(interrupted, x)
+		} else if changed {
+			redacted = append(redacted, x)
 		}
 	}
 	a.mu.Unlock()
+	for _, x := range redacted {
+		a.persistExecution(x)
+	}
 	for _, x := range interrupted {
 		a.endLeftovers(x)
 		a.persistExecution(x)

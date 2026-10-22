@@ -446,6 +446,20 @@ func TestRawOutputRedacted(t *testing.T) {
 	if strings.Contains(text, "ghp_") {
 		t.Errorf("the token survived:\n%s", text)
 	}
+	// FS-009 FR-005: the record the API serves keeps the command and the final text, redacted, in its detail and list.
+	detail, _ := json.Marshal(d.call("GET", "/executions/"+id, nil, 200))
+	status, list := d.request("GET", "/executions?taskId=leaky", nil, nil)
+	if status != 200 {
+		t.Fatalf("list: status %d: %s", status, list)
+	}
+	for name, body := range map[string]string{"detail": string(detail), "list": string(list)} {
+		if strings.Contains(body, "ghp_") || !strings.Contains(body, "Pushed with [REDACTED]") {
+			t.Errorf("the execution %s keeps the token or lost the summary:\n%s", name, body)
+		}
+	}
+	if !strings.Contains(string(detail), "git push https://x-access-token:[REDACTED]@github.com/o/r") {
+		t.Errorf("the detail lacks the redacted command:\n%s", detail)
+	}
 	if status, _ := d.request("GET", "/executions/no-such-execution/output", nil, nil); status != 404 {
 		t.Errorf("an unknown execution answered %d", status)
 	}

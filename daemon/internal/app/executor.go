@@ -614,6 +614,8 @@ func (r *run) runAttempt(ad ports.HarnessAdapter, info ports.HarnessInfo, p doma
 	}
 	timedOut := errors.Is(r.ctx.Err(), context.DeadlineExceeded) && !r.cancelRequested()
 	end := parser.Finish(proc.ExitCode(), proc.StderrTail(), timedOut, r.cancelRequested())
+	// Its final text and error quote the harness, and the next attempt's context and the summary quote them in turn.
+	eventlog.RedactFields(&end)
 	r.endAttempt(end, proc.ExitCode())
 	return end
 }
@@ -772,8 +774,10 @@ func (r *run) env() []string {
 	)
 }
 
-// onHarnessEvent turns the adapter's observations into events, commands, and changed files.
+// onHarnessEvent turns the adapter's observations into events, commands, and changed files. They are the harness's
+// text, redacted before any of it is kept or trimmed (FS-009 FR-005, FR-007).
 func (r *run) onHarnessEvent(he ports.HarnessEvent) {
+	eventlog.RedactFields(&he)
 	a := r.a
 	now := a.now()
 	switch he.Kind {
@@ -902,7 +906,9 @@ func (r *run) readProgress() {
 	}
 }
 
+// onProgress applies a line the agent wrote, redacted before any of it is kept or trimmed.
 func (r *run) onProgress(p domain.ProgressLine) {
+	eventlog.RedactFields(&p)
 	a := r.a
 	msg := trimTo(p.Message, 1000)
 	payload := map[string]any{}
@@ -1000,6 +1006,7 @@ func (r *run) outcomeFromReport() (domain.ExecutionStatus, domain.Text) {
 	if err := json.Unmarshal(data, &rep); err != nil {
 		return domain.StatusCompleted, domain.Text{}
 	}
+	eventlog.RedactFields(&rep) // the agent's words, before the record, the ledger, or the reason take any of them
 	r.applyReport(&rep)
 	status := domain.StatusForReport(&rep)
 	var reason domain.Text // the agent's own summary, as it wrote it
