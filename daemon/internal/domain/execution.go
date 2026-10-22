@@ -214,6 +214,33 @@ type Execution struct {
 	ChangedFiles       []string          `json:"changedFiles"`
 	Commands           []CommandRecord   `json:"commands"`
 	LogExpired         bool              `json:"logExpired,omitempty"`
+	// Script is the program a script task's execution ran, as it ran; absent for every other type (FS-013 FR-011).
+	Script *ScriptRun `json:"script,omitempty"`
+}
+
+// ScriptRun is the program of a script execution as it ran, redacted like the raw output, so a later edit of the task
+// never changes what an older execution shows (FS-013 FR-011).
+type ScriptRun struct {
+	Command          []string          `json:"command,omitempty"`
+	Interpreter      []string          `json:"interpreter,omitempty"`
+	Source           string            `json:"source,omitempty"`
+	ScriptPath       string            `json:"scriptPath,omitempty"`
+	Program          string            `json:"program"`
+	WorkingDirectory string            `json:"workingDirectory"`
+	Environment      map[string]string `json:"environment,omitempty"`
+	ExitCode         *int              `json:"exitCode,omitempty"`
+	Signal           string            `json:"signal,omitempty"`
+	// Process identifies the program's process group, so a daemon that restarts after a crash can end what it left
+	// running, and nothing else (FS-013 FR-010).
+	Process *ProcessIdentity `json:"process,omitempty"`
+}
+
+// ProcessIdentity is a process group as the operating system reported it when the program started: its id, its
+// leader's start time, and the system's boot time, so a reused id is never mistaken for it.
+type ProcessIdentity struct {
+	Group       int    `json:"group"`
+	LeaderStart string `json:"leaderStart"`
+	Boot        string `json:"boot"`
 }
 
 const ExecutionSchemaVersion = "2"

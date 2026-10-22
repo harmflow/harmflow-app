@@ -88,8 +88,10 @@ type Deps struct {
 	Service    ports.HostServiceManager
 	System     ports.SystemInfo
 	Tools      ports.ToolProber
-	// HarnessEnv is the environment harness processes start with.
+	// HarnessEnv is the environment harness processes, and script tasks' programs, start with.
 	HarnessEnv []string
+	// OS is this machine's operating system, as a script task names it (FS-013 FR-014); the running one when empty.
+	OS string
 	// TickInterval is how often the scheduler looks for due firings.
 	TickInterval time.Duration
 	// MisfireAfter is how late a firing may be before it counts as missed.
@@ -158,6 +160,9 @@ func New(d Deps) (*App, error) {
 	}
 	if d.MisfireAfter == 0 {
 		d.MisfireAfter = 2 * time.Minute
+	}
+	if d.OS == "" {
+		d.OS = currentOS()
 	}
 	if d.Logger == nil {
 		d.Logger = log.New(os.Stderr, "harmflowd ", log.LstdFlags)

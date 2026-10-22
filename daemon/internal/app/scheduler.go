@@ -252,6 +252,18 @@ func (a *App) fire(taskID string, trigger domain.Trigger, scheduledFor *time.Tim
 		return FiringResult{}, newError(CodeNotFound, domain.T("task_not_found", "no task {{task}}", "task", taskID))
 	}
 	doc := e.doc
+	if !doc.RunsOn(a.d.OS) {
+		// Every firing — scheduled, catch-up, or by hand — passes here, so a script task never runs on a system it does
+		// not declare (FS-013 FR-014).
+		a.mu.Unlock()
+		text := a.systemsText(doc)
+		if trigger == domain.TriggerManual {
+			return FiringResult{}, newError(CodeConflict, text)
+		}
+		a.emit(domain.Event{Type: domain.EventFiringSkipped, TaskID: taskID, Severity: domain.SeverityWarning,
+			Payload: map[string]any{"trigger": string(trigger)}}.Says(text))
+		return FiringResult{Outcome: "skipped"}, nil
+	}
 	_, running := a.running[taskID]
 	var waiting, active *domain.Execution
 	for _, x := range a.executions {

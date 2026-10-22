@@ -713,6 +713,7 @@ components:
         - schema_min_items
         - schema_unique_items
         - schema_not
+        - schema_false
         # Task rules the schema cannot express
         - id_immutable
         - id_file_mismatch
@@ -746,10 +747,16 @@ components:
         - path_variable_unterminated
         - path_variable_undefined
         - local_path_missing
+        - script_system_not_declared
+        - script_program_not_found
+        - script_working_directory_missing
+        - script_imported_disabled
         # Execution warnings
         - restriction_claude_shell_workspace
         - restriction_claude_shell_network
         - restriction_codex_tool_lists
+        - restriction_script_unenforced
+        - script_leftovers_ended
         - harness_version_untested
         - repository_unprotected
         - report_not_json
@@ -760,6 +767,8 @@ components:
         - step_starting_harness
         - step_switching_harness
         - step_waiting_rate_limit
+        - step_preparing_program
+        - step_running_program
         - attempt_first
         - attempt_rate_limit_retry
         - attempt_failover
@@ -809,6 +818,11 @@ components:
         - tool_succeeded
         - tool_failed
         - tests_failed
+        - script_started
+        - script_exit_code
+        - script_signaled
+        - script_start_failed
+        - script_write_failed
         # Harness and tool diagnostics
         - detection_running
         - harness_manual_path_invalid
@@ -1125,7 +1139,7 @@ components:
       required: [number, harness, configuredModel, configuredEffort, startedAt]
       properties:
         number: { type: integer }
-        harness: { type: string }
+        harness: { type: string, description: "Empty for a script task's attempt, which runs a program instead of a harness." }
         harnessVersion: { type: string }
         model: { type: string, description: "The model the harness reported using; absent when it reported none (D-105)." }
         effort: { type: string, description: "The effort the harness reported using; absent when it reported none (D-105)." }
@@ -1255,7 +1269,7 @@ components:
         createdAt: { type: string, format: date-time }
         startedAt: { type: string, format: date-time }
         endedAt: { type: string, format: date-time }
-        harness: { type: string, description: The harness of the current or last attempt. }
+        harness: { type: string, description: "The harness of the current or last attempt; empty for a script task." }
         model: { type: string, description: "The model the current or last attempt's harness reported using; absent when it reported none (D-105)." }
         attemptCount: { type: integer }
         currentStep:
@@ -1306,6 +1320,32 @@ components:
                   attempt: { type: integer }
             lastOperation: { type: string }
             logExpired: { type: boolean }
+            script: { $ref: "#/components/schemas/ScriptRun" }
+
+    ScriptRun:
+      description: >-
+        The program a script task's execution ran, as it ran, redacted like the raw output; absent for every other type
+        (FS-013 FR-011). A script execution has one attempt, with no harness.
+      type: object
+      required: [program, workingDirectory]
+      properties:
+        command: { type: array, items: { type: string }, description: "The argument list, started with no shell." }
+        interpreter: { type: array, items: { type: string }, description: "The interpreter of an inline script, with its arguments." }
+        source: { type: string, description: "The inline script, as it ran." }
+        scriptPath: { type: string, description: "The file in the execution's directory the inline script was written to." }
+        program: { type: string, description: "The path of the program started." }
+        workingDirectory: { type: string }
+        environment: { type: object, additionalProperties: { type: string }, description: "The task's own variables." }
+        exitCode: { type: integer, description: "128 plus the signal's number when a signal ended the program." }
+        signal: { type: string, description: "The signal that ended the program, such as SIGKILL; absent when it exited by itself." }
+        process:
+          type: object
+          description: The program's process group while it runs, so a restarted daemon ends what it left (FS-013 FR-010).
+          required: [group, leaderStart, boot]
+          properties:
+            group: { type: integer }
+            leaderStart: { type: string }
+            boot: { type: string }
 
     ExecutionOutput:
       type: object

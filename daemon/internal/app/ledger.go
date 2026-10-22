@@ -134,6 +134,7 @@ func (a *App) recover() error {
 	}
 	a.mu.Unlock()
 	for _, x := range interrupted {
+		a.endLeftovers(x)
 		a.persistExecution(x)
 		if x.WorkItem != "" {
 			limits := a.taskLimits(x.TaskID)

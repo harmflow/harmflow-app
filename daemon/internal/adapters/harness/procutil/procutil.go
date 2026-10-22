@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -22,6 +23,7 @@ type Process struct {
 	cmd      *exec.Cmd
 	done     chan struct{}
 	exitCode int
+	signal   string
 	stderr   *tail
 	mu       sync.Mutex
 	stopping bool
@@ -29,6 +31,12 @@ type Process struct {
 
 // Start launches the invocation; onLine receives each stdout line, raw receives stdout and stderr verbatim.
 func Start(inv ports.Invocation, raw io.Writer, onLine func([]byte)) (*Process, error) {
+	return StartLines(inv, raw, onLine, nil)
+}
+
+// StartLines is Start with stderr read line by line too: onStderr, when given, receives each stderr line, and the
+// tail is still kept. The process counts as done once both streams are drained.
+func StartLines(inv ports.Invocation, raw io.Writer, onStdout, onStderr func([]byte)) (*Process, error) {
 	cmd := exec.Command(inv.Path, inv.Args...)
 	cmd.Dir = inv.Dir
 	cmd.Env = inv.Env
@@ -47,55 +55,102 @@ func Start(inv ports.Invocation, raw io.Writer, onLine func([]byte)) (*Process, 
 		return nil, err
 	}
 	p := &Process{cmd: cmd, done: make(chan struct{}), stderr: &tail{max: 64 * 1024}}
-	var errw io.Writer = p.stderr
 	if raw != nil {
-		// The stdout reader below and os/exec's stderr copy write from their own goroutines.
+		// The stream readers below and os/exec's stderr copy write from their own goroutines.
 		raw = &lockedWriter{w: raw}
-		errw = io.MultiWriter(p.stderr, raw)
 	}
-	cmd.Stderr = errw
+	var stderr io.ReadCloser
+	if onStderr != nil {
+		if stderr, err = cmd.StderrPipe(); err != nil {
+			return nil, err
+		}
+	} else if raw != nil {
+		cmd.Stderr = io.MultiWriter(p.stderr, raw)
+	} else {
+		cmd.Stderr = p.stderr
+	}
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
+	var readers sync.WaitGroup
+	readers.Add(1)
 	go func() {
-		r := bufio.NewReaderSize(stdout, 256*1024)
-		for {
-			line, err := r.ReadBytes('\n')
-			if len(line) > 0 {
-				if raw != nil {
-					_, _ = raw.Write(line)
-				}
-				onLine(bytes.TrimRight(line, "\r\n"))
-			}
-			if err != nil {
-				break
-			}
-		}
+		defer readers.Done()
+		readLines(stdout, raw, nil, onStdout)
+	}()
+	if stderr != nil {
+		readers.Add(1)
+		go func() {
+			defer readers.Done()
+			readLines(stderr, raw, p.stderr, onStderr)
+		}()
+	}
+	go func() {
+		// os/exec closes the pipes in Wait, so it is called only once every read is done.
+		readers.Wait()
 		werr := cmd.Wait()
-		p.exitCode = exitCode(werr)
+		p.exitCode, p.signal = exitStatus(werr)
 		close(p.done)
 	}()
 	return p, nil
 }
 
-func exitCode(err error) int {
+func readLines(r io.Reader, raw, tail io.Writer, onLine func([]byte)) {
+	br := bufio.NewReaderSize(r, 256*1024)
+	for {
+		line, err := br.ReadBytes('\n')
+		if len(line) > 0 {
+			if raw != nil {
+				_, _ = raw.Write(line)
+			}
+			if tail != nil {
+				_, _ = tail.Write(line)
+			}
+			onLine(bytes.TrimRight(line, "\r\n"))
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+// exitStatus is the exit code — 128 plus the signal's number for a process a signal ended, as a shell reports it —
+// and the signal's name, empty when the process exited by itself.
+func exitStatus(err error) (int, string) {
 	if err == nil {
-		return 0
+		return 0, ""
 	}
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {
 		if ws, ok := ee.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
-			return 128 + int(ws.Signal())
+			return 128 + int(ws.Signal()), signalName(ws.Signal())
 		}
-		return ee.ExitCode()
+		return ee.ExitCode(), ""
 	}
-	return -1
+	return -1, ""
+}
+
+var signalNames = map[syscall.Signal]string{
+	syscall.SIGHUP: "SIGHUP", syscall.SIGINT: "SIGINT", syscall.SIGQUIT: "SIGQUIT", syscall.SIGILL: "SIGILL",
+	syscall.SIGTRAP: "SIGTRAP", syscall.SIGABRT: "SIGABRT", syscall.SIGBUS: "SIGBUS", syscall.SIGFPE: "SIGFPE",
+	syscall.SIGKILL: "SIGKILL", syscall.SIGUSR1: "SIGUSR1", syscall.SIGSEGV: "SIGSEGV", syscall.SIGUSR2: "SIGUSR2",
+	syscall.SIGPIPE: "SIGPIPE", syscall.SIGALRM: "SIGALRM", syscall.SIGTERM: "SIGTERM", syscall.SIGXCPU: "SIGXCPU",
+}
+
+func signalName(s syscall.Signal) string {
+	if name, ok := signalNames[s]; ok {
+		return name
+	}
+	return "signal " + strconv.Itoa(int(s))
 }
 
 // Done is closed when the process has exited and its output is drained.
 func (p *Process) Done() <-chan struct{} { return p.done }
 
 func (p *Process) ExitCode() int { return p.exitCode }
+
+// Signal names the signal that ended the process, empty when it exited by itself; ExitCode is then 128 plus its number.
+func (p *Process) Signal() string { return p.signal }
 
 func (p *Process) StderrTail() string { return p.stderr.String() }
 

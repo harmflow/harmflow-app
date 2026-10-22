@@ -243,6 +243,8 @@ func kindText(k jsonschema.ErrorKind) domain.Text {
 			"first", strconv.Itoa(k.Duplicates[0]), "second", strconv.Itoa(k.Duplicates[1]))
 	case *kind.Not:
 		return domain.T("schema_not", "this combination of properties is not allowed")
+	case *kind.FalseSchema:
+		return domain.T("schema_false", "this property is not allowed here")
 	}
 	return domain.Text{Message: k.LocalizedString(printer)}
 }

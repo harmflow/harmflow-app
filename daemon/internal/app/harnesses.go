@@ -201,11 +201,12 @@ func (a *App) Catalog() Catalog {
 			}
 		}
 	}
-	key := "githubIssueImplementation"
+	key, scriptKey := "githubIssueImplementation", "script"
 	c.TaskTypes = []TaskTypeInfo{
 		{ID: domain.TypeGitHubIssueImplementation, ParametersKey: &key, DefaultAgents: []string{BuiltinIssueAgent},
 			DefaultSkills: append([]string{}, BuiltinIssueSkills...), DefaultPrompt: defaultIssuePrompt},
 		{ID: domain.TypeGeneral, ParametersKey: nil, DefaultAgents: []string{}, DefaultSkills: []string{}},
+		{ID: domain.TypeScriptTask, ParametersKey: &scriptKey, DefaultAgents: []string{}, DefaultSkills: []string{}},
 	}
 	return c
 }

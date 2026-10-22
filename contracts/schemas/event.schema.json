@@ -22,7 +22,7 @@
     "type": { "$ref": "#/$defs/eventType" },
     "severity": { "type": "string", "enum": ["debug", "info", "warning", "error"] },
     "message": {
-      "description": "Short text: the daemon's own in en-US, beside its messageKey, or the agent's text and tool output in their original language, which are never translated (FS-012 FR-005). The dashboard translates the label of the type.",
+      "description": "Short text: the daemon's own in en-US, beside its messageKey, or the agent's text, tool output, and a script's output in their original language, which are never translated (FS-012 FR-005). The dashboard translates the label of the type. A script.output event carries one line of the program's output, with its stream in payload.stream: stdout or stderr (FS-013 FR-008).",
       "type": "string"
     },
     "messageKey": {
@@ -75,6 +75,9 @@
         "harness.switched",
         "harness.no_alternative",
         "harness.version_untested",
+        "script.started",
+        "script.output",
+        "script.exited",
         "tool.started",
         "tool.completed",
         "step.started",

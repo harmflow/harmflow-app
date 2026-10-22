@@ -580,7 +580,7 @@ export interface components {
          * @description Names a text the daemon writes for the user. The desktop shows it in the interface's language, filling it with its params; the message beside it is the same text in en-US, shown for a key the desktop does not know (FS-012 FR-005). The agent's text, tool output, and a tool's own error get no key and stay as they are. A text is a message with messageKey and params, or a field such as errorMessage with errorKey and errorParams.
          * @enum {string}
          */
-        MessageKey: "host_forbidden" | "origin_forbidden" | "token_required" | "route_not_found" | "body_not_json" | "task_not_found" | "execution_not_found" | "harness_not_found" | "task_exists" | "task_file_exists" | "base_revision_required" | "task_changed_on_disk" | "task_invalid" | "task_disabled" | "task_being_deleted" | "daemon_stopping" | "execution_ended" | "executions_running" | "harness_path_not_absolute" | "harness_path_not_executable" | "settings_language_invalid" | "settings_notification_level_invalid" | "settings_log_retention_invalid" | "settings_path_variable_invalid" | "yaml_syntax" | "document_empty" | "document_not_json" | "document_not_representable" | "task_input_missing" | "schema_type" | "schema_const" | "schema_enum" | "schema_required" | "schema_additional_properties" | "schema_pattern" | "schema_min_length" | "schema_max_length" | "schema_minimum" | "schema_maximum" | "schema_min_items" | "schema_unique_items" | "schema_not" | "id_immutable" | "id_file_mismatch" | "task_file_invalid" | "schedule_missing" | "schedule_empty" | "schedule_cron_and_interval" | "timezone_unknown" | "interval_invalid" | "interval_unit_invalid" | "cron_seconds" | "cron_field_count" | "cron_step_invalid" | "cron_value_invalid" | "cron_value_out_of_range" | "harness_unknown" | "claude_model_unknown" | "claude_effort_unsupported" | "claude_effort_invalid" | "codex_model_unknown" | "codex_effort_invalid" | "harness_not_detected" | "harness_not_ready" | "agent_not_found" | "skill_not_found" | "agent_missing" | "skill_missing" | "fallback_agent_missing" | "fallback_skill_missing" | "fallback_repeats_preferred" | "path_variable_unterminated" | "path_variable_undefined" | "local_path_missing" | "restriction_claude_shell_workspace" | "restriction_claude_shell_network" | "restriction_codex_tool_lists" | "harness_version_untested" | "repository_unprotected" | "report_not_json" | "report_schema_invalid" | "step_checking_harness" | "step_preparing_workspace" | "step_starting_harness" | "step_switching_harness" | "step_waiting_rate_limit" | "attempt_first" | "attempt_rate_limit_retry" | "attempt_failover" | "daemon_started" | "daemon_signal" | "daemon_stop_requested" | "local_api_stopped" | "task_delete_pending" | "task_changed_externally" | "task_changed_externally_invalid" | "task_removed_externally" | "task_was_disabled" | "task_was_deleted" | "task_file_removed" | "task_gone" | "firing_queued" | "firing_coalesced" | "firing_skipped" | "firings_missed_catch_up" | "firings_missed_skipped" | "cancel_requested" | "cancelled_before_start" | "execution_cancelled" | "execution_timed_out" | "execution_status" | "daemon_stopped_execution" | "execution_dir_failed" | "workspace_create_failed" | "repository_path_missing" | "context_write_failed" | "harness_started" | "harness_session" | "harness_exited" | "harness_exit_code" | "harness_start_failed" | "harness_ended_with_error" | "harness_unavailable" | "harness_unavailable_readiness" | "harness_rate_limited" | "harness_quota_exhausted" | "harness_switched" | "no_alternative_harness" | "no_alternative_harness_detail" | "skill_delivery_failed" | "agent_delivery_failed" | "tool_succeeded" | "tool_failed" | "tests_failed" | "detection_running" | "harness_manual_path_invalid" | "claude_not_found" | "codex_not_found" | "git_not_found" | "gh_not_found" | "command_failed" | "harness_feature_missing" | "claude_not_signed_in" | "not_signed_in" | "authentication_unverified" | "gh_auth_problem";
+        MessageKey: "host_forbidden" | "origin_forbidden" | "token_required" | "route_not_found" | "body_not_json" | "task_not_found" | "execution_not_found" | "harness_not_found" | "task_exists" | "task_file_exists" | "base_revision_required" | "task_changed_on_disk" | "task_invalid" | "task_disabled" | "task_being_deleted" | "daemon_stopping" | "execution_ended" | "executions_running" | "harness_path_not_absolute" | "harness_path_not_executable" | "settings_language_invalid" | "settings_notification_level_invalid" | "settings_log_retention_invalid" | "settings_path_variable_invalid" | "yaml_syntax" | "document_empty" | "document_not_json" | "document_not_representable" | "task_input_missing" | "schema_type" | "schema_const" | "schema_enum" | "schema_required" | "schema_additional_properties" | "schema_pattern" | "schema_min_length" | "schema_max_length" | "schema_minimum" | "schema_maximum" | "schema_min_items" | "schema_unique_items" | "schema_not" | "schema_false" | "id_immutable" | "id_file_mismatch" | "task_file_invalid" | "schedule_missing" | "schedule_empty" | "schedule_cron_and_interval" | "timezone_unknown" | "interval_invalid" | "interval_unit_invalid" | "cron_seconds" | "cron_field_count" | "cron_step_invalid" | "cron_value_invalid" | "cron_value_out_of_range" | "harness_unknown" | "claude_model_unknown" | "claude_effort_unsupported" | "claude_effort_invalid" | "codex_model_unknown" | "codex_effort_invalid" | "harness_not_detected" | "harness_not_ready" | "agent_not_found" | "skill_not_found" | "agent_missing" | "skill_missing" | "fallback_agent_missing" | "fallback_skill_missing" | "fallback_repeats_preferred" | "path_variable_unterminated" | "path_variable_undefined" | "local_path_missing" | "script_system_not_declared" | "script_program_not_found" | "script_working_directory_missing" | "script_imported_disabled" | "restriction_claude_shell_workspace" | "restriction_claude_shell_network" | "restriction_codex_tool_lists" | "restriction_script_unenforced" | "script_leftovers_ended" | "harness_version_untested" | "repository_unprotected" | "report_not_json" | "report_schema_invalid" | "step_checking_harness" | "step_preparing_workspace" | "step_starting_harness" | "step_switching_harness" | "step_waiting_rate_limit" | "step_preparing_program" | "step_running_program" | "attempt_first" | "attempt_rate_limit_retry" | "attempt_failover" | "daemon_started" | "daemon_signal" | "daemon_stop_requested" | "local_api_stopped" | "task_delete_pending" | "task_changed_externally" | "task_changed_externally_invalid" | "task_removed_externally" | "task_was_disabled" | "task_was_deleted" | "task_file_removed" | "task_gone" | "firing_queued" | "firing_coalesced" | "firing_skipped" | "firings_missed_catch_up" | "firings_missed_skipped" | "cancel_requested" | "cancelled_before_start" | "execution_cancelled" | "execution_timed_out" | "execution_status" | "daemon_stopped_execution" | "execution_dir_failed" | "workspace_create_failed" | "repository_path_missing" | "context_write_failed" | "harness_started" | "harness_session" | "harness_exited" | "harness_exit_code" | "harness_start_failed" | "harness_ended_with_error" | "harness_unavailable" | "harness_unavailable_readiness" | "harness_rate_limited" | "harness_quota_exhausted" | "harness_switched" | "no_alternative_harness" | "no_alternative_harness_detail" | "skill_delivery_failed" | "agent_delivery_failed" | "tool_succeeded" | "tool_failed" | "tests_failed" | "script_started" | "script_exit_code" | "script_signaled" | "script_start_failed" | "script_write_failed" | "detection_running" | "harness_manual_path_invalid" | "claude_not_found" | "codex_not_found" | "git_not_found" | "gh_not_found" | "command_failed" | "harness_feature_missing" | "claude_not_signed_in" | "not_signed_in" | "authentication_unverified" | "gh_auth_problem";
         /** @description Values the desktop interpolates into the translated text of a messageKey; a count param picks its plural form. A param that quotes another text the daemon wrote has a param named after it with Key appended, its key, and params prefixed with its name and a dot, its params, so it is translated in place too. */
         MessageParams: {
             [key: string]: string;
@@ -824,6 +824,7 @@ export interface components {
         Trigger: "manual" | "schedule" | "catch_up";
         Attempt: {
             number: number;
+            /** @description Empty for a script task's attempt, which runs a program instead of a harness. */
             harness: string;
             harnessVersion?: string;
             /** @description The model the harness reported using; absent when it reported none (D-105). */
@@ -947,7 +948,7 @@ export interface components {
             startedAt?: string;
             /** Format: date-time */
             endedAt?: string;
-            /** @description The harness of the current or last attempt. */
+            /** @description The harness of the current or last attempt; empty for a script task. */
             harness: string;
             /** @description The model the current or last attempt's harness reported using; absent when it reported none (D-105). */
             model?: string;
@@ -996,6 +997,35 @@ export interface components {
             }[];
             lastOperation?: string;
             logExpired?: boolean;
+            script?: components["schemas"]["ScriptRun"];
+        };
+        /** @description The program a script task's execution ran, as it ran, redacted like the raw output; absent for every other type (FS-013 FR-011). A script execution has one attempt, with no harness. */
+        ScriptRun: {
+            /** @description The argument list, started with no shell. */
+            command?: string[];
+            /** @description The interpreter of an inline script, with its arguments. */
+            interpreter?: string[];
+            /** @description The inline script, as it ran. */
+            source?: string;
+            /** @description The file in the execution's directory the inline script was written to. */
+            scriptPath?: string;
+            /** @description The path of the program started. */
+            program: string;
+            workingDirectory: string;
+            /** @description The task's own variables. */
+            environment?: {
+                [key: string]: string;
+            };
+            /** @description 128 plus the signal's number when a signal ended the program. */
+            exitCode?: number;
+            /** @description The signal that ended the program, such as SIGKILL; absent when it exited by itself. */
+            signal?: string;
+            /** @description The program's process group while it runs, so a restarted daemon ends what it left (FS-013 FR-010). */
+            process?: {
+                group: number;
+                leaderStart: string;
+                boot: string;
+            };
         };
         ExecutionOutput: {
             attempts: components["schemas"]["AttemptOutput"][];

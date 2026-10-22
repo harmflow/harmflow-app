@@ -9,10 +9,19 @@ const (
 	KindTask   = "Task"
 )
 
-// Task types (D-060). The behavior of each lives in its prompt, agents, and skills (D-064).
+// Task types (D-060). The behavior of each lives in its prompt, agents, and skills (D-064), except a script task's,
+// which is its program: it runs instead of a harness session (FS-013).
 const (
 	TypeGitHubIssueImplementation = "github-issue-implementation"
 	TypeGeneral                   = "general"
+	TypeScriptTask                = "script"
+)
+
+// Operating systems a script task may declare (FS-013 FR-014).
+const (
+	SystemMacOS   = "macos"
+	SystemLinux   = "linux"
+	SystemWindows = "windows"
 )
 
 // Harness providers of the MVP (D-017).
@@ -67,20 +76,39 @@ type TaskMetadata struct {
 	Description string `yaml:"description,omitempty" json:"description,omitempty"`
 }
 
+// TaskSpec is a task's spec block. A script task has no prompt and no harness, so both are left out of its file.
 type TaskSpec struct {
 	Enabled                   *bool                      `yaml:"enabled,omitempty" json:"enabled,omitempty"`
 	Type                      string                     `yaml:"type" json:"type"`
-	Prompt                    string                     `yaml:"prompt" json:"prompt"`
+	Prompt                    string                     `yaml:"prompt,omitempty" json:"prompt,omitempty"`
 	Agents                    []string                   `yaml:"agents,omitempty" json:"agents,omitempty"`
 	Skills                    []string                   `yaml:"skills,omitempty" json:"skills,omitempty"`
 	Workspace                 *Workspace                 `yaml:"workspace,omitempty" json:"workspace,omitempty"`
 	Schedule                  *Schedule                  `yaml:"schedule,omitempty" json:"schedule,omitempty"`
 	Concurrency               *Concurrency               `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
-	Harness                   HarnessSelection           `yaml:"harness" json:"harness"`
+	Harness                   HarnessSelection           `yaml:"harness,omitempty" json:"harness,omitzero"`
 	Permissions               *Permissions               `yaml:"permissions,omitempty" json:"permissions,omitempty"`
 	Execution                 *ExecutionLimits           `yaml:"execution,omitempty" json:"execution,omitempty"`
 	Notifications             *Notifications             `yaml:"notifications,omitempty" json:"notifications,omitempty"`
 	GitHubIssueImplementation *GitHubIssueImplementation `yaml:"githubIssueImplementation,omitempty" json:"githubIssueImplementation,omitempty"`
+	Script                    *ScriptSpec                `yaml:"script,omitempty" json:"script,omitempty"`
+}
+
+// ScriptSpec is the program a script task runs: Command, an argument list started with no shell, or Inline, a script
+// run through its interpreter (FS-013 FR-003, FR-004, FR-014).
+type ScriptSpec struct {
+	Command          []string          `yaml:"command,omitempty" json:"command,omitempty"`
+	Inline           *InlineScript     `yaml:"inline,omitempty" json:"inline,omitempty"`
+	WorkingDirectory string            `yaml:"workingDirectory,omitempty" json:"workingDirectory,omitempty"`
+	Environment      map[string]string `yaml:"environment,omitempty" json:"environment,omitempty"`
+	Systems          []string          `yaml:"systems,omitempty" json:"systems,omitempty"`
+}
+
+// InlineScript is a script's source and the argument list of its interpreter; the daemon appends the path of the file
+// it writes the source to.
+type InlineScript struct {
+	Interpreter []string `yaml:"interpreter" json:"interpreter"`
+	Source      string   `yaml:"source" json:"source"`
 }
 
 type Workspace struct {
@@ -230,21 +258,34 @@ func (d TaskDocument) Effective() TaskDocument {
 	if s.Concurrency.OverlappingRuns == "" {
 		s.Concurrency.OverlappingRuns = OverlapQueue
 	}
-	s.Harness.Preferred = s.Harness.Preferred.withDefaults()
-	if s.Harness.Fallback == nil {
-		s.Harness.Fallback = &FallbackPolicy{}
-	}
-	if s.Harness.Fallback.On == nil {
-		s.Harness.Fallback.On = []string{FallbackOnQuota, FallbackOnUnavailable}
-	}
-	if s.Harness.Fallback.Candidates == nil {
-		s.Harness.Fallback.Candidates = []HarnessProfile{}
-	}
-	for i := range s.Harness.Fallback.Candidates {
-		s.Harness.Fallback.Candidates[i] = s.Harness.Fallback.Candidates[i].withDefaults()
-	}
-	if s.Harness.Fallback.MaxSwitches == nil {
-		s.Harness.Fallback.MaxSwitches = ptr(DefaultMaxSwitches)
+	if s.Type == TypeScriptTask {
+		// No harness: the block stays empty, with no harness default filled in, and HarnessFallback reads nil.
+		if s.Script == nil {
+			s.Script = &ScriptSpec{}
+		}
+		if s.Script.Environment == nil {
+			s.Script.Environment = map[string]string{}
+		}
+		if s.Script.Systems == nil {
+			s.Script.Systems = []string{}
+		}
+	} else {
+		s.Harness.Preferred = s.Harness.Preferred.withDefaults()
+		if s.Harness.Fallback == nil {
+			s.Harness.Fallback = &FallbackPolicy{}
+		}
+		if s.Harness.Fallback.On == nil {
+			s.Harness.Fallback.On = []string{FallbackOnQuota, FallbackOnUnavailable}
+		}
+		if s.Harness.Fallback.Candidates == nil {
+			s.Harness.Fallback.Candidates = []HarnessProfile{}
+		}
+		for i := range s.Harness.Fallback.Candidates {
+			s.Harness.Fallback.Candidates[i] = s.Harness.Fallback.Candidates[i].withDefaults()
+		}
+		if s.Harness.Fallback.MaxSwitches == nil {
+			s.Harness.Fallback.MaxSwitches = ptr(DefaultMaxSwitches)
+		}
 	}
 	if s.Permissions == nil {
 		s.Permissions = &Permissions{}
@@ -321,10 +362,46 @@ func (p HarnessProfile) withDefaults() HarnessProfile {
 	return p
 }
 
-// Profiles returns the preferred profile followed by the fallback candidates, defaults applied.
+// Profiles returns the preferred profile followed by the fallback candidates, defaults applied; a script task has none.
 func (d TaskDocument) Profiles() []HarnessProfile {
+	if d.IsScript() {
+		return nil
+	}
 	e := d.Effective()
 	return append([]HarnessProfile{e.Spec.Harness.Preferred}, e.Spec.Harness.Fallback.Candidates...)
+}
+
+// IsScript reports whether the task runs a program instead of a harness session (FS-013).
+func (d TaskDocument) IsScript() bool {
+	return d.Spec.Type == TypeScriptTask
+}
+
+// RunsOn reports whether the task may run on a system: a script task only on those it declares, when it declares any
+// (FS-013 FR-014); every other task everywhere.
+func (d TaskDocument) RunsOn(system string) bool {
+	if !d.IsScript() || d.Spec.Script == nil || len(d.Spec.Script.Systems) == 0 {
+		return true
+	}
+	for _, s := range d.Spec.Script.Systems {
+		if s == system {
+			return true
+		}
+	}
+	return false
+}
+
+// ProgramName is the program a script task starts, for display: the first element of its command, or its interpreter.
+func (d TaskDocument) ProgramName() string {
+	s := d.Spec.Script
+	switch {
+	case s == nil:
+		return ""
+	case len(s.Command) > 0:
+		return s.Command[0]
+	case s.Inline != nil && len(s.Inline.Interpreter) > 0:
+		return s.Inline.Interpreter[0]
+	}
+	return ""
 }
 
 // IsEnabled reads the enabled state with its default.
@@ -356,6 +433,8 @@ func (d TaskDocument) TypeParameters() any {
 	switch d.Spec.Type {
 	case TypeGitHubIssueImplementation:
 		return d.Effective().Spec.GitHubIssueImplementation
+	case TypeScriptTask:
+		return d.Effective().Spec.Script
 	default:
 		return nil
 	}
@@ -474,6 +553,19 @@ func (d TaskDocument) clone() TaskDocument {
 			gc.Delivery = &Delivery{TestRepairAttempts: clonePtr(g.Delivery.TestRepairAttempts)}
 		}
 		s.GitHubIssueImplementation = &gc
+	}
+	if sc := s.Script; sc != nil {
+		cc := ScriptSpec{Command: cloneSlice(sc.Command), WorkingDirectory: sc.WorkingDirectory, Systems: cloneSlice(sc.Systems)}
+		if sc.Inline != nil {
+			cc.Inline = &InlineScript{Interpreter: cloneSlice(sc.Inline.Interpreter), Source: sc.Inline.Source}
+		}
+		if sc.Environment != nil {
+			cc.Environment = make(map[string]string, len(sc.Environment))
+			for k, v := range sc.Environment {
+				cc.Environment[k] = v
+			}
+		}
+		s.Script = &cc
 	}
 	return c
 }

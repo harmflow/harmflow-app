@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/eventlog"
+	"github.com/harmflow/harmflow-app/daemon/internal/adapters/schema"
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
@@ -154,8 +155,10 @@ func (a *App) viewLocked(id string, full bool) TaskView {
 	if e.invalid != nil && e.doc.Spec.Type == "" {
 		v.Enabled = false
 	}
-	for _, c := range eff.Spec.Harness.Fallback.Candidates {
-		v.FallbackHarnesses = append(v.FallbackHarnesses, c.Provider)
+	if f := eff.Spec.Harness.Fallback; f != nil { // a script task has no harness
+		for _, c := range f.Candidates {
+			v.FallbackHarnesses = append(v.FallbackHarnesses, c.Provider)
+		}
 	}
 	if doc.Spec.Schedule != nil {
 		v.Timezone = doc.Spec.Schedule.Timezone
@@ -214,18 +217,25 @@ func (a *App) invalidError(r *ValidationResult) *Error {
 
 // CreateTask validates and writes a new task file; the daemon is its only writer (FS-001 FR-004).
 func (a *App) CreateTask(in TaskInput) (TaskView, error) {
-	return a.createTask(in, catalogStrict, false)
+	return a.createTask(in, catalogStrict, false, false)
 }
 
-// ImportTask accepts a portable task, warning about agents and skills this machine lacks (FS-001 FR-018).
+// ImportTask accepts a portable task, warning about agents and skills this machine lacks (FS-001 FR-018). An imported
+// script task is saved disabled, whatever its file says: it runs a program with the user's rights, and runs only once
+// the user has seen it and enabled it (FS-013 SEC-001).
 func (a *App) ImportTask(yamlText string, overwrite bool) (TaskView, error) {
-	return a.createTask(TaskInput{YAML: yamlText}, catalogLenient, overwrite)
+	return a.createTask(TaskInput{YAML: yamlText}, catalogLenient, overwrite, true)
 }
 
-func (a *App) createTask(in TaskInput, mode catalogMode, overwrite bool) (TaskView, error) {
+func (a *App) createTask(in TaskInput, mode catalogMode, overwrite, imported bool) (TaskView, error) {
 	r := a.validate(in, mode)
 	if !r.Valid {
 		return TaskView{}, a.invalidError(r)
+	}
+	if imported && r.doc.IsScript() {
+		if err := disableImported(r); err != nil {
+			return TaskView{}, err
+		}
 	}
 	id := r.doc.Metadata.ID
 	a.mu.Lock()
@@ -370,7 +380,22 @@ func (a *App) DuplicateTask(id string) (TaskView, error) {
 	if err != nil {
 		return TaskView{}, err
 	}
-	return a.createTask(TaskInput{YAML: string(out)}, catalogLenient, false)
+	return a.createTask(TaskInput{YAML: string(out)}, catalogLenient, false, false)
+}
+
+// disableImported sets spec.enabled to false in an imported script task's YAML, keeping the rest of the file, and says
+// so in the warnings the import returns (FS-013 SEC-001).
+func disableImported(r *ValidationResult) error {
+	out, err := setYAMLField(r.content, "spec", "enabled", false)
+	if err != nil {
+		return err
+	}
+	r.content, r.YAML = out, string(out)
+	_, r.node, _ = schema.ParseYAML(out)
+	r.doc.Spec.Enabled = boolPtr(false)
+	r.addWarning("/spec/enabled", domain.WarningOther, domain.T("script_imported_disabled",
+		"an imported script task is saved disabled; check its program, then enable it"))
+	return nil
 }
 
 // SetEnabled toggles spec.enabled in place, keeping the file's comments. Disabling lets a running execution finish
