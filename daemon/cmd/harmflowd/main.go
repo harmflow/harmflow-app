@@ -39,6 +39,9 @@ var Version = "0.1.0"
 // Commit is set at build time by make, which reads it from git also in a git worktree, where go build stamps none.
 var Commit = ""
 
+// BuiltAt is the time make built the daemon, in RFC 3339; see buildTime.
+var BuiltAt = ""
+
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "version" {
 		fmt.Println(Version)
@@ -125,7 +128,7 @@ func run(homeFlag, builtinsFlag string, port int) error {
 		daemonEnv["HARMFLOW_TOKEN_STORE"] = os.Getenv("HARMFLOW_TOKEN_STORE")
 	}
 	a, err := app.New(app.Deps{
-		Paths: paths, Version: Version, Commit: buildCommit(),
+		Paths: paths, Version: Version, Commit: buildCommit(), BuiltAt: buildTime(BuiltAt),
 		Tasks: tasks, State: state, Executions: execs, Events: events, Validator: validator,
 		Harnesses: []ports.HarnessAdapter{
 			&claudecode.Adapter{Home: userHome, PathEnv: pathEnv, Env: harnessEnv},
@@ -218,6 +221,16 @@ func commitOf(settings []debug.BuildSetting) string {
 		revision += "-dirty"
 	}
 	return revision
+}
+
+// buildTime is the time make stamped, and zero when it stamped none or not in RFC 3339. It has no fallback: go build
+// stamps only vcs.time, the time of the commit, which is not when the binary was built.
+func buildTime(stamp string) time.Time {
+	t, err := time.Parse(time.RFC3339, stamp)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
 }
 
 // acquireLock keeps a second daemon from running on the same data directory.

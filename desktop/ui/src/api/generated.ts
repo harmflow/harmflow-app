@@ -607,6 +607,11 @@ export interface components {
             version: string;
             /** @description The commit it was built from, 7 characters, -dirty with uncommitted changes. */
             commit?: string;
+            /**
+             * Format: date-time
+             * @description When it was built; left out when the build stamped no time.
+             */
+            builtAt?: string;
             /** @enum {string} */
             apiVersion: "v1";
             pid: number;

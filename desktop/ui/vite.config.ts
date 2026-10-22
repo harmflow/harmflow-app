@@ -99,7 +99,12 @@ function daemonProxy(): Plugin {
 
 export default defineConfig({
   plugins: [react(), daemonProxy()],
-  define: { __APP_VERSION__: JSON.stringify(pkg.version), __APP_COMMIT__: JSON.stringify(buildCommit()) },
+  // The build time is when Vite loads this config: under `vite dev` and `tauri dev`, when the dev server started.
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+    __APP_COMMIT__: JSON.stringify(buildCommit()),
+    __APP_BUILT_AT__: JSON.stringify(new Date().toISOString()),
+  },
   clearScreen: false,
   server: {
     port: 1420,

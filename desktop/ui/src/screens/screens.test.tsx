@@ -7,7 +7,7 @@ import { HarnessInventory } from "../components/Harnesses";
 import { ValidationPanel } from "../components/TaskEditor";
 import { TaskForm } from "../components/TaskForm";
 import i18n from "../i18n";
-import { formatBytes } from "../lib/format";
+import { formatBytes, formatDateTime } from "../lib/format";
 import { newTaskDocument } from "../lib/taskForm";
 import { getState, patchStateForTests } from "../state/store";
 import { ExecutionsScreen } from "./ExecutionsScreen";
@@ -189,8 +189,8 @@ describe("screens", () => {
 
   it("names in About the commit each build comes from, and shows the version alone without one", () => {
     const health: Health = { status: "ok", version: "0.1.0", apiVersion: "v1", pid: 7, startedAt: "2026-10-20T19:00:00-03:00", acceptingFirings: true };
-    const { appVersion, appCommit } = getState();
-    patchStateForTests({ appVersion: "0.1.0", appCommit: "45a57bb", health: { ...health, commit: "ca16cd7-dirty" } });
+    const { appVersion, appCommit, appBuiltAt } = getState();
+    patchStateForTests({ appVersion: "0.1.0", appCommit: "45a57bb", appBuiltAt: "", health: { ...health, commit: "ca16cd7-dirty" } });
     try {
       const html = renderToString(<SettingsScreen />);
       expect(html).toContain('<span class="mono">0.1.0 (45a57bb)</span>');
@@ -200,7 +200,35 @@ describe("screens", () => {
       expect(bare.match(/<span class="mono">0\.1\.0<\/span>/g)).toHaveLength(2);
       expect(bare).not.toContain("0.1.0 (");
     } finally {
-      patchStateForTests({ appVersion, appCommit, health: undefined });
+      patchStateForTests({ appVersion, appCommit, appBuiltAt, health: undefined });
+    }
+  });
+
+  it("shows in About, on each build's line, the date and time it was built, and no time without one", () => {
+    const health: Health = { status: "ok", version: "0.1.0", apiVersion: "v1", pid: 7, startedAt: "2026-10-20T19:00:00-03:00", acceptingFirings: true };
+    const { appVersion, appCommit, appBuiltAt } = getState();
+    const desktopBuilt = "2026-10-22T20:30:05.123Z";
+    const daemonBuilt = "2026-10-22T20:29:58Z";
+    const at = (iso: string) => formatDateTime(iso, i18n.language);
+    patchStateForTests({
+      appVersion: "0.1.0",
+      appCommit: "45a57bb",
+      appBuiltAt: desktopBuilt,
+      health: { ...health, commit: "ca16cd7-dirty", builtAt: daemonBuilt },
+    });
+    try {
+      const html = renderToString(<SettingsScreen />);
+      expect(html).toContain(`<span class="mono">0.1.0 (45a57bb) · ${at(desktopBuilt)}</span>`);
+      expect(html).toContain(`<span class="mono">0.1.0 (ca16cd7-dirty) · ${at(daemonBuilt)}</span>`);
+      // A time without a commit has no empty parentheses; a daemon built without make has no time.
+      patchStateForTests({ appCommit: "", health: { ...health, commit: "ca16cd7" } });
+      const partial = renderToString(<SettingsScreen />);
+      expect(partial).toContain(`<span class="mono">0.1.0 · ${at(desktopBuilt)}</span>`);
+      expect(partial).toContain('<span class="mono">0.1.0 (ca16cd7)</span>');
+      patchStateForTests({ appBuiltAt: "not a time", health });
+      expect(renderToString(<SettingsScreen />).match(/<span class="mono">0\.1\.0<\/span>/g)).toHaveLength(2);
+    } finally {
+      patchStateForTests({ appVersion, appCommit, appBuiltAt, health: undefined });
     }
   });
 
