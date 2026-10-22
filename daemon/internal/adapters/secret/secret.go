@@ -41,13 +41,26 @@ var ErrNoToken = errors.New("no token stored")
 func (k Keychain) Get() (string, error) {
 	out, err := exec.Command("/usr/bin/security", "find-generic-password", "-s", k.Service, "-a", k.Account, "-w").Output()
 	if err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) && ee.ExitCode() == 44 {
-			return "", ErrNoToken
-		}
-		return "", fmt.Errorf("keychain: %w", err)
+		return "", keychainError(err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// keychainError maps a failed security command. Only exit 44, errSecItemNotFound, means no token is stored: a locked
+// keychain or a refused prompt exits with another code, which must not read as a first start that makes a new token
+// (FS-009 FR-013). The command's message says why it failed.
+func keychainError(err error) error {
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) {
+		return fmt.Errorf("keychain: %w", err)
+	}
+	if ee.ExitCode() == 44 {
+		return ErrNoToken
+	}
+	if msg := strings.TrimSpace(string(ee.Stderr)); msg != "" {
+		return fmt.Errorf("keychain: %w: %s", err, msg)
+	}
+	return fmt.Errorf("keychain: %w", err)
 }
 
 // Set writes through security's interactive mode so the token never appears in a process's arguments.
