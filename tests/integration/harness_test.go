@@ -1,28 +1,12 @@
 package integration
 
-import (
-	"bytes"
-	"os"
-	"path/filepath"
-	"testing"
-)
+import "testing"
 
 // standInClaude copies the fake-claude stand-in into a temporary directory with one line replaced, so a test changes
 // how one probe answers and keeps the rest.
 func standInClaude(t *testing.T, line, replacement string) string {
 	t.Helper()
-	src, err := os.ReadFile(filepath.Join(repoRoot(), "tests", "integration", "testdata", "fake-claude"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Contains(src, []byte(line)) {
-		t.Fatalf("fake-claude has no line %q", line)
-	}
-	path := filepath.Join(t.TempDir(), "claude")
-	if err := os.WriteFile(path, bytes.Replace(src, []byte(line), []byte(replacement), 1), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return path
+	return standIn(t, "fake-claude", "claude", line, replacement).path
 }
 
 // harness is the harness's entry in GET /harnesses.
