@@ -1864,6 +1864,48 @@ li:last-child .tl-item__rail::before {
   margin-bottom: var(--hf-space-2);
 }
 
+/* The prompt and session context an attempt sent, collapsed until asked for (FS-008 FR-008). */
+.attempt__input {
+  display: grid;
+  margin-top: var(--hf-space-2);
+}
+
+.attempt-input > summary,
+.attempt-input--empty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  border-top: 1px solid var(--hf-color-border);
+  color: var(--hf-color-text-muted);
+  font-size: var(--hf-font-size-sm);
+}
+
+.attempt-input > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.attempt-input > summary::-webkit-details-marker {
+  display: none;
+}
+
+.attempt-input > summary svg {
+  transition: transform var(--hf-duration-fast) ease;
+}
+
+.attempt-input[open] > summary svg {
+  transform: rotate(90deg);
+}
+
+.attempt-input > .codebox {
+  margin-bottom: var(--hf-space-2);
+}
+
+.attempt-input--empty {
+  justify-content: space-between;
+}
+
 /* Costs tab: the summary and the receipt (harmflow-app#39). */
 
 .costs {

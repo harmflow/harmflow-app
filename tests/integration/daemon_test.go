@@ -503,6 +503,16 @@ func TestFailoverAcrossHarnesses(t *testing.T) {
 	if m := u2["models"].([]any)[0].(map[string]any); m["model"] != "gpt-from-config" {
 		t.Errorf("attempt 2 model: %v", m)
 	}
+	// FS-008 FR-010: each attempt keeps the prompt it sent and its own session context, under the contract's names.
+	c1, _ := a1["sessionContext"].(string)
+	c2, _ := a2["sessionContext"].(string)
+	if a1["prompt"] != "SCENARIO=quota" || a2["prompt"] != "SCENARIO=quota" {
+		t.Errorf("prompts %q and %q", a1["prompt"], a2["prompt"])
+	}
+	if !strings.HasPrefix(c1, "This session is run by HarmFlow") || strings.Contains(c1, "continuing the same execution") ||
+		!strings.Contains(c2, "continuing the same execution") {
+		t.Errorf("session contexts:\n%s\n---\n%s", c1, c2)
+	}
 }
 
 // FS-008 AC-012: a failover whose attempts both reported their usage. Claude Code's cost is the one its CLI printed;

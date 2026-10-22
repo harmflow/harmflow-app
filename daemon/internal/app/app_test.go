@@ -563,6 +563,106 @@ func TestUsagePerAttempt(t *testing.T) {
 	}
 }
 
+// FS-008 FR-010, AC-013: each attempt keeps the prompt and the session context the harness received, redacted like the
+// raw output, in the record on disk too; a later edit of the task's prompt does not change what the execution shows.
+func TestAttemptKeepsItsInput(t *testing.T) {
+	e := newEnv(t)
+	token := "ghp_" + strings.Repeat("a", 36)
+	prompt := "Push with " + token + ", then report."
+	e.create("input", "    fallback:\n      candidates:\n        - provider: codex\n")
+	view, _ := e.app.GetTask("input")
+	if _, err := e.app.UpdateTask("input", TaskInput{YAML: strings.Replace(view.YAML, "Do the work of input.", prompt, 1),
+		BaseRevision: view.Revision}); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var sent []ports.RunRequest
+	capture := func(req ports.RunRequest) {
+		if req.Prompt == "" { // validation's policy check prepares with no prompt
+			return
+		}
+		mu.Lock()
+		sent = append(sent, req)
+		mu.Unlock()
+	}
+	e.claude.setScript(func(req ports.RunRequest) string { capture(req); return "echo 'END quota'" })
+	e.codex.setScript(func(req ports.RunRequest) string { capture(req); return "echo 'END ok'" })
+	r, _ := e.app.RunTask("input")
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	e.idle("input")
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sent) != 2 || len(x.Attempts) != 2 {
+		t.Fatalf("%d requests and %d attempts, want 2 of each", len(sent), len(x.Attempts))
+	}
+	redacted := "Push with [REDACTED], then report."
+	for i, at := range x.Attempts {
+		if sent[i].Prompt != prompt {
+			t.Errorf("attempt %d: the harness received %q, want the prompt unredacted", at.Number, sent[i].Prompt)
+		}
+		if at.Prompt != redacted {
+			t.Errorf("attempt %d: the record keeps the prompt %q, want %q", at.Number, at.Prompt, redacted)
+		}
+		if at.SessionContext == "" || at.SessionContext != sent[i].Context {
+			t.Errorf("attempt %d: the record keeps the context\n%s\nwant the one the harness received\n%s", at.Number,
+				at.SessionContext, sent[i].Context)
+		}
+	}
+	// The context is composed per attempt: the failover's tells the session it continues the previous one.
+	if !strings.Contains(x.Attempts[1].SessionContext, "continuing the same execution") ||
+		strings.Contains(x.Attempts[0].SessionContext, "continuing the same execution") {
+		t.Errorf("the attempts do not keep their own contexts:\n%s\n---\n%s", x.Attempts[0].SessionContext,
+			x.Attempts[1].SessionContext)
+	}
+	data, err := os.ReadFile(filepath.Join(e.home, "state", "executions", r.ExecutionID+".json"))
+	var saved domain.Execution
+	if err == nil {
+		err = json.Unmarshal(data, &saved)
+	}
+	if err != nil || len(saved.Attempts) != 2 || saved.Attempts[0].Prompt != redacted ||
+		saved.Attempts[1].SessionContext != x.Attempts[1].SessionContext {
+		t.Errorf("the record on disk lacks the input (%v):\n%s", err, data)
+	}
+	if strings.Contains(string(data), "ghp_") {
+		t.Errorf("the token survived in the record:\n%s", data)
+	}
+
+	view, _ = e.app.GetTask("input")
+	if _, err := e.app.UpdateTask("input", TaskInput{YAML: strings.Replace(view.YAML, "then report.", "then stop.", 1),
+		BaseRevision: view.Revision}); err != nil {
+		t.Fatal(err)
+	}
+	if view, _ = e.app.GetTask("input"); !strings.Contains(view.YAML, "then stop.") {
+		t.Fatalf("the edit did not apply:\n%s", view.YAML)
+	}
+	if x, _ = e.app.GetExecution(r.ExecutionID); x.Attempts[0].Prompt != redacted || x.Attempts[1].Prompt != redacted {
+		t.Errorf("after the edit the execution shows %q and %q, want the prompt it sent", x.Attempts[0].Prompt,
+			x.Attempts[1].Prompt)
+	}
+}
+
+// The input is recorded before the harness starts, so a running attempt shows it.
+func TestRunningAttemptShowsItsInput(t *testing.T) {
+	e := newEnv(t)
+	e.create("live-input", "")
+	e.claude.setScript(func(ports.RunRequest) string { return slow })
+	r, _ := e.app.RunTask("live-input")
+	var at domain.Attempt
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if x, _ := e.app.GetExecution(r.ExecutionID); len(x.Attempts) == 1 && x.Attempts[0].Prompt != "" {
+			at = x.Attempts[0]
+			break
+		}
+	}
+	if at.Outcome != domain.AttemptRunning || at.Prompt != "Do the work of live-input." || at.SessionContext == "" {
+		t.Errorf("the running attempt: outcome %q, prompt %q, context %q", at.Outcome, at.Prompt, at.SessionContext)
+	}
+	if err := e.app.CancelExecution(r.ExecutionID); err != nil {
+		t.Fatal(err)
+	}
+	e.wait(r.ExecutionID, domain.StatusCancelled)
+}
+
 // HarmFlow's context never names the task, since a prompt may name the same thing as the task's id or name, and it
 // points at context.json only once the file holds a previous attempt, work items, or parameters.
 func TestContextNeverNamesTheTask(t *testing.T) {

@@ -295,6 +295,41 @@ describe("execution detail", () => {
     expect(body()).toContain("By attempt");
   });
 
+  // The daemon redacts the input before recording it; app › TestAttemptKeepsItsInput checks that side.
+  it("shows the prompt and the session context each attempt sent, collapsed, and says when a record has none (FS-008 AC-013)", async () => {
+    const prompt = "Fix the issue, then push with [REDACTED].";
+    const context = "This session is run by HarmFlow, a local scheduler.\nWorkspace: /workspaces/core-banking\n";
+    const sent: Execution = {
+      ...completed,
+      id: "exec-input",
+      // The first attempt comes from a record older than the input.
+      attempts: [base.attempts[0], { ...base.attempts[1], prompt, sessionContext: context }],
+    };
+    await open(sent, [], capture());
+    await choose("Attempts");
+    const [older, newer] = [...host!.querySelectorAll(".attempt")];
+
+    expect(older.querySelectorAll("details")).toHaveLength(0);
+    expect([...older.querySelectorAll(".attempt-input--empty")].map((e) => e.textContent)).toEqual([
+      "PromptNot recorded",
+      "Session contextNot recorded",
+    ]);
+
+    const blocks = [...newer.querySelectorAll<HTMLDetailsElement>("details.attempt-input")];
+    expect(blocks.map((d) => d.querySelector("summary")!.textContent)).toEqual(["Prompt", "Session context"]);
+    expect(blocks.map((d) => d.open)).toEqual([false, false]);
+    expect(blocks.map((d) => d.querySelector("pre")!.textContent)).toEqual([prompt, context]);
+
+    const writeText = vi.fn(async (_text: string) => {});
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    try {
+      for (const d of blocks) await act(async () => d.querySelector<HTMLButtonElement>('button[aria-label="Copy"]')!.click());
+      expect(writeText.mock.calls.map(([text]) => text)).toEqual([prompt, context]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("says when an execution's harness reported no usage, instead of showing zero", async () => {
     await open({ ...completed, id: "exec-unreported" }, [], capture());
     expect(await choose("Costs")).toContain("No token usage for this execution");
