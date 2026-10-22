@@ -134,6 +134,7 @@ type App struct {
 	manualPaths   map[string]string
 	settings      Settings
 	sched         map[string]*scheduleState
+	firings       map[string][]firingRecord // by task id
 	ledger        map[string]map[string]*domain.WorkItem
 	notifications []Notification
 	accepting     bool
@@ -188,8 +189,8 @@ func New(d Deps) (*App, error) {
 		d: d, log: d.Logger, startedAt: d.Clock.Now(),
 		tasks: map[string]*taskEntry{}, executions: map[string]*domain.Execution{}, running: map[string]*runHandle{},
 		inventory: map[string]ports.HarnessInfo{}, manualPaths: map[string]string{}, sched: map[string]*scheduleState{},
-		ledger: map[string]map[string]*domain.WorkItem{}, accepting: true, adapters: map[string]ports.HarnessAdapter{},
-		stopCh: make(chan struct{}), ShutdownRequested: make(chan struct{}),
+		firings: map[string][]firingRecord{}, ledger: map[string]map[string]*domain.WorkItem{}, accepting: true,
+		adapters: map[string]ports.HarnessAdapter{}, stopCh: make(chan struct{}), ShutdownRequested: make(chan struct{}),
 	}
 	for _, h := range d.Harnesses {
 		a.adapters[h.ID()] = h

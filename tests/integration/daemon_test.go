@@ -2127,3 +2127,53 @@ func TestMisfireAcrossShortRestart(t *testing.T) {
 		t.Errorf("the skip policy ran %v", runs)
 	}
 }
+
+// firings reads a task's firing history from state/scheduler.json.
+func firings(t *testing.T, home, taskID string) []map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(home, "state", "scheduler.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state struct {
+		Firings map[string][]map[string]any `json:"firings"`
+	}
+	if err := json.Unmarshal(data, &state); err != nil {
+		t.Fatal(err)
+	}
+	return state.Firings[taskID]
+}
+
+// FS-002 FR-006, AC-008: the record of misfires skipped per the policy survives the daemon being killed.
+func TestSkippedMisfireSurvivesAKill(t *testing.T) {
+	home := t.TempDir()
+	d := startDaemon(t, home)
+	d.call("POST", "/tasks", map[string]any{"yaml": task("daily-skip", "Say hi.", daily+"    missedRun:\n      policy: skip\n")}, 201)
+	next, err := time.Parse(time.RFC3339, d.call("GET", "/tasks/daily-skip", nil, 200)["nextFireAt"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.stop()
+	setNextFire(t, home, next.Add(-3*24*time.Hour), "daily-skip") // down for three days
+	d = startDaemon(t, home)
+	deadline := time.Now().Add(20 * time.Second)
+	for len(firings(t, home, "daily-skip")) == 0 && time.Now().Before(deadline) {
+		time.Sleep(100 * time.Millisecond)
+	}
+	d.kill()
+	d = startDaemon(t, home)
+	h := firings(t, home, "daily-skip")
+	if len(h) != 1 {
+		t.Fatalf("firing history %v", h)
+	}
+	r := h[0]
+	// Three misfires, or four if 09:00 UTC passed while the test ran.
+	missed, _ := r["missed"].(float64)
+	if r["outcome"] != "skipped" || r["policy"] != "skip" || r["trigger"] != "catch_up" || missed < 3 ||
+		r["reasonKey"] != "firings_missed_skipped" {
+		t.Errorf("record %v", r)
+	}
+	if runs := d.list("/executions?taskId=daily-skip"); len(runs) != 0 {
+		t.Errorf("the skip policy ran %v", runs)
+	}
+}
