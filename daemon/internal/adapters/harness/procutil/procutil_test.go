@@ -95,7 +95,7 @@ func TestStopKillsTheProcessTree(t *testing.T) {
 	}
 }
 
-// The stdout reader and os/exec's stderr copy both write to raw, which gets one write at a time.
+// Both streams reach raw whole, one write at a time, Start's stderr too, though it has no callback.
 func TestRawGetsOneWriteAtATime(t *testing.T) {
 	script := `i=0; while [ $i -lt 500 ]; do echo out $i; echo err $i >&2; i=$((i+1)); done`
 	var raw bytes.Buffer
@@ -418,5 +418,41 @@ func TestStopLeavesAnotherExecutionsProcess(t *testing.T) {
 		if _, ok := endedOne(p.Ended(), o.pid); ok {
 			t.Errorf("ended %+v names process %d, which carries another execution's id", p.Ended(), o.pid)
 		}
+	}
+}
+
+// FS-003 FR-005, AC-007: a process that keeps the harness's stdout, and that the search for the execution's processes
+// cannot find, holds up Wait only up to outputDelay after a cancel. It daemonizes with a double fork, so launchd adopts
+// it, and clears the execution's id before it becomes an Apple platform binary: macOS hides such a binary's
+// environment only while System Integrity Protection is on, which a CI host may turn off.
+func TestWaitIsBoundedWhileAStrayKeepsTheOutput(t *testing.T) {
+	needProcessTable(t)
+	pidFile := t.TempDir() + "/stray.pid"
+	script := `perl -e 'use POSIX; exit 0 if fork; POSIX::setsid(); exit 0 if fork; ` +
+		`open F, ">", "$ARGV[0].tmp"; print F $$; close F; rename "$ARGV[0].tmp", $ARGV[0]; ` +
+		`delete $ENV{HARMFLOW_EXECUTION_ID}; exec "sleep", "300"' "$1"; echo started; sleep 300`
+	var lines []string
+	id := executionID(t)
+	p := startShell(t, script, testEnv(executionIDVariable+"="+id), id, func(b []byte) { lines = append(lines, string(b)) },
+		pidFile)
+	stray := waitForPid(t, p, pidFile)
+	waitFor(t, "launchd to adopt the stray, running sleep", func() bool {
+		info, ok := processInfo(stray.pid)
+		return ok && info.ppid == 1 && info.name == "sleep"
+	})
+	grace := 300 * time.Millisecond
+	took := cancelAndWait(p, grace)
+	if !running(stray) {
+		t.Fatalf("the stray %d was ended, so the bound went untested", stray.pid)
+	}
+	if took < outputDelay {
+		t.Errorf("Wait took %v, less than the bound: the stray did not keep the output", took)
+	}
+	// The slack is for a loaded host; without the bound, Wait returns only when the stray exits.
+	if limit := grace + outputDelay + 5*time.Second; took > limit {
+		t.Errorf("Wait took %v, more than %v", took, limit)
+	}
+	if len(lines) == 0 || lines[0] != "started" {
+		t.Errorf("stdout lines: %v", lines)
 	}
 }

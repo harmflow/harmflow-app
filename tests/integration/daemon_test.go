@@ -1941,6 +1941,50 @@ func (d *daemon) waitEvent(id, eventType string) map[string]any {
 	return nil
 }
 
+// FS-003 FR-005, AC-007: a process that keeps the harness's output, and that no search for the execution's processes
+// finds, holds up neither the cancellation nor the task's next run nor the daemon's stop.
+func TestAStrayKeepingTheOutputHoldsNothingUp(t *testing.T) {
+	d := startDaemon(t, t.TempDir())
+	d.call("POST", "/tasks", map[string]any{"yaml": task("stray", "SCENARIO=stray", "  execution:\n    cancelGraceSeconds: 1\n")}, 201)
+	stray := func(id string) int {
+		x := d.waitStatus(id, "running")
+		pid := readPid(t, filepath.Join(x["executionDir"].(string), "stray.pid"))
+		t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+		// launchd adopted it, and it runs sleep without the execution's id: nothing can find it.
+		waitPs(t, pid, "ppid", "1")
+		waitPs(t, pid, "ucomm", "sleep")
+		return pid
+	}
+	a := d.call("POST", "/tasks/stray/run", nil, 202)["executionId"].(string)
+	first := stray(a)
+	d.call("POST", "/executions/"+a+"/cancel", nil, 202)
+	d.waitStatus(a, "cancelled")
+	if syscall.Kill(first, 0) != nil {
+		t.Fatalf("the stray %d was ended, so the bound went untested", first)
+	}
+	// The task is free: it runs again. The record reads cancelled a moment before the task is released, so the run
+	// may wait for that, and then it starts.
+	run := d.call("POST", "/tasks/stray/run", nil, 202)
+	if run["outcome"] != "started" && run["outcome"] != "queued" {
+		t.Fatalf("rerun %v", run)
+	}
+	second := stray(run["executionId"].(string))
+	// SIGTERM stops the daemon while the stray keeps the running execution's output.
+	_ = d.cmd.Process.Signal(syscall.SIGTERM)
+	exited := make(chan struct{})
+	go func() { _ = d.cmd.Wait(); close(exited) }()
+	select {
+	case <-exited:
+	case <-time.After(30 * time.Second):
+		_ = d.cmd.Process.Kill()
+		<-exited
+		t.Fatal("the daemon did not stop while the stray kept the output")
+	}
+	if syscall.Kill(second, 0) != nil {
+		t.Errorf("the stray %d was ended, so the bound went untested", second)
+	}
+}
+
 // waitPs waits until ps shows the value for the process's field.
 func waitPs(t *testing.T, pid int, field, want string) {
 	t.Helper()
