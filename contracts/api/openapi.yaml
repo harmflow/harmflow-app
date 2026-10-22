@@ -3,8 +3,8 @@ info:
   title: HarmFlow local API
   version: v1
   description: |
-    The only control surface of the HarmFlow daemon (ADR-0003), on HTTP bound to 127.0.0.1 with Server-Sent Events
-    for the live stream (ADR-0004). The daemon picks a free port at start and writes it, with its pid and version, to
+    The only control surface of the HarmFlow daemon (ADR-003), on HTTP bound to 127.0.0.1 with Server-Sent Events
+    for the live stream (ADR-004). The daemon picks a free port at start and writes it, with its pid and version, to
     a runtime file only the user can read (D-090).
 
     Every request, the SSE stream included, carries the per-installation token in `Authorization: Bearer <token>`.

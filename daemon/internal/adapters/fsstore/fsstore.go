@@ -1,5 +1,5 @@
 // Package fsstore keeps task YAML, operational JSON state, and execution records on the file system, with atomic
-// writes: a temporary file in the same directory, synced, then renamed over the target (ADR-0007, FS-001 FR-007).
+// writes: a temporary file in the same directory, synced, then renamed over the target (ADR-007, FS-001 FR-007).
 package fsstore
 
 import (

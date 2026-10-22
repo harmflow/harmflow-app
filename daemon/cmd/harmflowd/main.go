@@ -1,5 +1,5 @@
 // Command harmflowd is the HarmFlow daemon: the scheduler, the executions, and the local API. It runs without the
-// dashboard (ADR-0001) and stops nothing when the dashboard closes.
+// dashboard (ADR-001) and stops nothing when the dashboard closes.
 package main
 
 import (
@@ -289,7 +289,7 @@ func findBuiltins(flagValue string) string {
 }
 
 // userPath is the PATH harnesses and tools need: the user's login-shell PATH when it can be read, the daemon's own,
-// and the usual install locations. A user service starts with a minimal PATH (ADR-0009).
+// and the usual install locations. A user service starts with a minimal PATH (ADR-009).
 func userPath(home string) string {
 	var parts []string
 	shell := os.Getenv("SHELL")

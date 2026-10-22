@@ -1,5 +1,5 @@
 // Package domain holds HarmFlow's entities, invariants, and transitions. It imports nothing specific to a harness,
-// GitHub, Tauri, or an operating system (ADR-0001).
+// GitHub, Tauri, or an operating system (ADR-001).
 package domain
 
 import "strings"

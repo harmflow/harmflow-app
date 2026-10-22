@@ -1,5 +1,5 @@
 //! The HarmFlow desktop: the dashboard window, the tray, and native notifications, as a client of the daemon's
-//! local API (ADR-0001, ADR-0002, ADR-0003). It never drives a harness and never decides an execution's state.
+//! local API (ADR-001, ADR-002, ADR-003). It never drives a harness and never decides an execution's state.
 
 mod daemon;
 mod notice;

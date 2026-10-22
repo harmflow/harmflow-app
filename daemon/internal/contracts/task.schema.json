@@ -289,7 +289,7 @@
           "default": "default"
         },
         "effort": {
-          "description": "A reasoning effort the installed harness accepts; default leaves the harness's own default. Translated per adapter (ADR-0009).",
+          "description": "A reasoning effort the installed harness accepts; default leaves the harness's own default. Translated per adapter (ADR-009).",
           "type": "string",
           "minLength": 1,
           "default": "default"

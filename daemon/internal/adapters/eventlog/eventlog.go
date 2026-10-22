@@ -1,5 +1,5 @@
 // Package eventlog writes one JSONL file per execution, keeps a buffer of recent events for SSE replay, and
-// publishes every event to live subscribers (ADR-0004, ADR-0007). Secrets are redacted before anything is written.
+// publishes every event to live subscribers (ADR-004, ADR-007). Secrets are redacted before anything is written.
 package eventlog
 
 import (
