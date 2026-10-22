@@ -1042,7 +1042,9 @@ func TestNotificationLevels(t *testing.T) {
 	e.create("noisy", "")
 	r, _ := e.app.RunTask("noisy")
 	e.wait(r.ExecutionID, domain.StatusCompleted)
-	time.Sleep(50 * time.Millisecond)
+	// The status is completed before the record is saved and its event emitted, and the notice follows the event: only
+	// once the execution has returned has its notice been created, or skipped by the level.
+	e.idle("noisy")
 	if n := e.app.Notifications(true); len(n) != 1 || n[0].EventType != domain.EventExecutionCompleted {
 		t.Fatalf("notices %+v", n)
 	}
@@ -1052,7 +1054,7 @@ func TestNotificationLevels(t *testing.T) {
 	}
 	r, _ = e.app.RunTask("noisy")
 	e.wait(r.ExecutionID, domain.StatusCompleted)
-	time.Sleep(50 * time.Millisecond)
+	e.idle("noisy")
 	if n := e.app.Notifications(true); len(n) != 1 {
 		t.Errorf("a success notified at the failures level: %d notices", len(n))
 	}
