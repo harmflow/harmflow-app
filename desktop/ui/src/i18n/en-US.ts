@@ -196,6 +196,7 @@ export const enUS = {
       switched: "Switching harness",
       no_alternative: "No alternative harness available",
       version_untested: "Harness version not tested",
+      checked: "Harness checked",
     },
     script: { started: "Program started", output: "Program output", exited: "Program exited" },
     tool: { started: "Tool started", completed: "Tool finished" },
@@ -681,6 +682,7 @@ export const enUS = {
     names: { "claude-code": "Claude Code", codex: "Codex" },
     scriptLabel: "Program",
     readiness: {
+      checking: "Checking…",
       not_installed: "Not installed",
       installed: "Installed",
       version_identified: "Version identified",

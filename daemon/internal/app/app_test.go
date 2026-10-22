@@ -49,13 +49,22 @@ type fakeHarness struct {
 	unavailable bool
 	script      func(req ports.RunRequest) string
 	prompts     []string
-	live        int // attempts prepared to run whose parser has not finished
+	live        int           // attempts prepared to run whose parser has not finished
+	gate        chan struct{} // Detect waits for it to close, when set
+	held        int           // Detect calls waiting for the gate
 }
 
 func (f *fakeHarness) ID() string   { return f.id }
 func (f *fakeHarness) Name() string { return f.id }
 func (f *fakeHarness) Detect(context.Context, string) ports.HarnessInfo {
 	f.mu.Lock()
+	if gate := f.gate; gate != nil {
+		f.held++
+		f.mu.Unlock()
+		<-gate
+		f.mu.Lock()
+		f.held--
+	}
 	defer f.mu.Unlock()
 	info := ports.HarnessInfo{ID: f.id, Name: f.id, Detected: true, Path: "/bin/sh", Version: "1.0.0",
 		Authentication: "valid", Readiness: "ready", Models: []ports.ModelInfo{{ID: "default"}}, Efforts: []string{"default"}}
@@ -104,6 +113,24 @@ func (f *fakeHarness) running() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.live > 0
+}
+
+// hold makes Detect wait until the returned release is called; the test's end releases it too.
+func (f *fakeHarness) hold(t *testing.T) (release func()) {
+	gate := make(chan struct{})
+	f.mu.Lock()
+	f.gate = gate
+	f.mu.Unlock()
+	release = sync.OnceFunc(func() { close(gate) })
+	t.Cleanup(release)
+	return release
+}
+
+// holding reports whether a Detect call is waiting for the gate.
+func (f *fakeHarness) holding() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.held > 0
 }
 
 // fakeParser also reads "USAGE <input tokens>", the usage so far, which is final once the attempt ends well. Any other
@@ -196,7 +223,8 @@ type env struct {
 	home   string
 }
 
-func newEnv(t *testing.T) *env {
+// newEnv starts an App on fake harnesses; configure sets up the env, its fakes included, before the App starts.
+func newEnv(t *testing.T, configure ...func(*env)) *env {
 	t.Helper()
 	home := t.TempDir()
 	builtins := t.TempDir()
@@ -215,6 +243,9 @@ func newEnv(t *testing.T) *env {
 	}
 	e := &env{t: t, clock: clock, home: home, events: &hookedEvents{Log: events},
 		claude: &fakeHarness{id: domain.HarnessClaudeCode}, codex: &fakeHarness{id: domain.HarnessCodex}}
+	for _, c := range configure {
+		c(e)
+	}
 	a, err := New(Deps{Paths: paths, Version: "test", Clock: clock, Location: time.UTC, Tasks: tasks, State: state,
 		Executions: execs, Events: e.events, Validator: v, Harnesses: []ports.HarnessAdapter{e.claude, e.codex},
 		TickInterval: time.Hour, Logger: log.New(io.Discard, "", 0)})
@@ -1002,6 +1033,67 @@ func TestUnavailableWithoutFallbackNeverStarts(t *testing.T) {
 	}
 	if types[domain.EventExecutionStarted] {
 		t.Error("execution.started was emitted for an execution that never started")
+	}
+}
+
+// FS-004 AC-011, FR-006: a harness whose first check still runs is checking, never not installed; its result arrives
+// with harness.checked, and a later check keeps the previous result until the new one lands (D-102).
+func TestHarnessIsCheckingUntilItsCheckEnds(t *testing.T) {
+	var release func()
+	e := newEnv(t, func(e *env) { release = e.codex.hold(t) })
+	sub, _, cancel := e.app.Subscribe(0)
+	defer cancel()
+	codex := func() ports.HarnessInfo {
+		t.Helper()
+		for _, h := range e.app.Harnesses() {
+			if h.ID == domain.HarnessCodex {
+				return h
+			}
+		}
+		t.Fatal("codex is not listed")
+		return ports.HarnessInfo{}
+	}
+	checked := func() domain.Event {
+		t.Helper()
+		timeout := time.After(10 * time.Second)
+		for {
+			select {
+			case ev := <-sub:
+				if ev.Type == domain.EventHarnessChecked && ev.Harness == domain.HarnessCodex {
+					return ev
+				}
+			case <-timeout:
+				t.Fatal("no harness.checked for codex")
+			}
+		}
+	}
+
+	if h := codex(); h.Readiness != "checking" || h.Detected || !h.LastCheckedAt.IsZero() || h.DiagnosticKey != "detection_running" {
+		t.Errorf("while its first check runs: %+v", h)
+	}
+	release()
+	ev := checked()
+	if ev.Payload["readiness"] != "ready" || ev.Message != "" || ev.MessageKey != "" || ev.TaskID != "" {
+		t.Errorf("harness.checked %+v", ev)
+	}
+	first := codex()
+	if first.Readiness != "ready" || !first.Detected || first.LastCheckedAt.IsZero() {
+		t.Errorf("once its check ended: %+v", first)
+	}
+
+	release = e.codex.hold(t)
+	go e.app.RefreshHarnesses(context.Background())
+	if !e.poll(10*time.Second, e.codex.holding) {
+		t.Fatal("the second check did not start")
+	}
+	if h := codex(); h.Readiness != "ready" || !h.LastCheckedAt.Equal(first.LastCheckedAt) {
+		t.Errorf("while a later check runs: %+v", h)
+	}
+	e.clock.Advance(time.Minute)
+	release()
+	checked()
+	if h := codex(); h.Readiness != "ready" || !h.LastCheckedAt.After(first.LastCheckedAt) {
+		t.Errorf("once the later check ended: %+v", h)
 	}
 }
 

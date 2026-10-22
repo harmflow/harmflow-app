@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import type { Execution, ExecutionSummary, HarmflowEvent, Harness, Health, Notification, Settings, TaskSummary, WorkItem } from "../api/types";
 import { RawCaptures } from "../components/ExecutionDetail";
 import { HarnessInventory } from "../components/Harnesses";
+import { Icon } from "../components/Icon";
 import { ValidationPanel } from "../components/TaskEditor";
 import { TaskForm } from "../components/TaskForm";
 import i18n from "../i18n";
@@ -269,6 +270,34 @@ describe("screens", () => {
     );
     expect(html).toContain("a propriedade colour não é permitida");
     expect(html).toContain("agent output, untouched");
+  });
+
+  it("shows a harness whose first check runs as checking, in its card, its details, and the task editor (FS-004 AC-011)", () => {
+    const checking: Harness = {
+      id: "codex",
+      name: "Codex",
+      detected: false,
+      installations: [],
+      authentication: "unknown",
+      readiness: "checking",
+      models: [],
+      efforts: [],
+      lastCheckedAt: "0001-01-01T00:00:00Z",
+      diagnostic: "detection is running",
+      diagnosticKey: "detection_running",
+    };
+    const html = renderToString(<HarnessInventory harness={checking} locale="pt-BR" />).replace(/<!-- -->/g, "");
+    // The row, its neutral chip with the diagnostic as its tooltip, and the Detected row; with no check time yet.
+    expect(html.match(/Verificando…/g)).toHaveLength(3);
+    expect(html).toContain(
+      `<span class="chip chip--neutral" title="a detecção está em andamento">${renderToString(<Icon name="clock" size={12} />)}Verificando…</span>`,
+    );
+    expect(html).toContain("<dt>Última verificação</dt><dd>—</dd>");
+    for (const hidden of ["Não detectado", "Não instalado", "<dd>Não</dd>"]) expect(html).not.toContain(hidden);
+    const form = renderToString(
+      <TaskForm doc={newTaskDocument("general", undefined, "A")} onChange={() => {}} mode="create" harnesses={[harness, checking]} errorPaths={new Set()} />,
+    ).replace(/<!-- -->/g, "");
+    expect(form).toContain("Codex — Verificando…");
   });
 
   it("shows a harness's diagnostic and an execution's error in the interface's language (FS-012 FR-005)", () => {

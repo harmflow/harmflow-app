@@ -278,6 +278,10 @@ function handleEvent(e: HarmflowEvent) {
   if (family === "task" || (family === "execution" && e.type !== "execution.status_changed")) {
     debounce("tasks", () => void actions.refreshTasks(), 400);
   }
+  // A check ended: read the inventory again, without detecting again, which would announce another check (FS-004 FR-007).
+  if (e.type === "harness.checked") {
+    debounce("harnesses", () => void actions.refreshHarnesses());
+  }
   // Output lines change nothing in the record, and a program can print many of them.
   if (e.executionId && state.details[e.executionId] && e.type !== "harness.output" && e.type !== "script.output") {
     const id = e.executionId;
