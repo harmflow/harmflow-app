@@ -109,6 +109,12 @@ ol {
   grid-template-columns: var(--hf-sidebar-width) minmax(0, 1fr);
   height: 100vh;
   overflow: hidden;
+  transition: grid-template-columns var(--hf-duration) ease;
+}
+
+/* Collapsed (⌘B), the sidebar keeps only its icons: the grid column and the sidebar's children change together. */
+.app[data-sidebar="collapsed"] {
+  --hf-sidebar-width: var(--hf-sidebar-width-collapsed);
 }
 
 .app__backdrop {
@@ -146,6 +152,7 @@ ol {
     linear-gradient(0deg, rgba(var(--hf-rgb-purple), 0.08), transparent 45%),
     var(--hf-color-sidebar);
   border-right: 1px solid var(--hf-color-border);
+  overflow-x: hidden;
   overflow-y: auto;
 }
 
@@ -173,11 +180,13 @@ ol {
   min-width: 0;
 }
 
+/* No taller than the logo, so the navigation stays put when the text goes */
 .brand__name {
   font-family: var(--hf-font-display);
   font-size: var(--hf-font-size-xl);
   font-weight: var(--hf-font-weight-bold);
   letter-spacing: 0.01em;
+  line-height: var(--hf-line-height-tight);
 }
 
 .brand__tagline {
@@ -208,6 +217,7 @@ ol {
   font-size: var(--hf-font-size-md);
   font-weight: var(--hf-font-weight-medium);
   text-align: left;
+  white-space: nowrap;
   transition: background var(--hf-duration-fast), color var(--hf-duration-fast);
 }
 
@@ -251,6 +261,29 @@ ol {
   text-align: center;
 }
 
+.app[data-sidebar="collapsed"] .brand {
+  justify-content: center;
+  padding: 0;
+}
+
+.app[data-sidebar="collapsed"] .nav__item {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+/* The running count stays, as a badge on the Executions icon */
+.app[data-sidebar="collapsed"] .nav__badge {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  min-width: 16px;
+  padding: 0 4px;
+  background: var(--hf-color-cyan);
+  color: var(--hf-color-text-inverse);
+  font-weight: var(--hf-font-weight-bold);
+  line-height: 16px;
+}
+
 .sidebar__spacer {
   flex: 1;
 }
@@ -261,6 +294,17 @@ ol {
   gap: var(--hf-space-2);
 }
 
+.sidebar__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--hf-space-2);
+}
+
+.app[data-sidebar="collapsed"] .sidebar__bar {
+  justify-content: center;
+}
+
 .sidebar__version {
   padding: 0 var(--hf-space-2);
   color: var(--hf-color-text-faint);
@@ -268,35 +312,32 @@ ol {
   font-size: var(--hf-font-size-2xs);
 }
 
-.daemon-card {
-  padding: var(--hf-space-3);
-  border: 1px solid var(--hf-color-border);
-  border-radius: var(--hf-radius-md);
-  background: rgba(var(--hf-rgb-panel-bottom), 0.75);
-}
-
-.daemon-card__state {
-  display: flex;
+/* A tooltip beside the sidebar, above every layer; it never takes the pointer */
+.tooltip {
+  position: fixed;
+  z-index: 70;
+  display: inline-flex;
   align-items: center;
   gap: var(--hf-space-2);
-  font-weight: var(--hf-font-weight-semibold);
-  color: var(--hf-color-success);
-}
-
-.daemon-card__hint {
-  margin-top: var(--hf-space-1);
-  color: var(--hf-color-text-muted);
+  padding: 5px var(--hf-space-2);
+  border: 1px solid var(--hf-color-border-strong);
+  border-radius: var(--hf-radius-sm);
+  background: var(--hf-color-surface-raised);
+  box-shadow: var(--hf-shadow-panel);
+  color: var(--hf-color-text);
   font-size: var(--hf-font-size-xs);
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translateY(-50%);
 }
 
-.daemon-card--reconnecting .daemon-card__state,
-.daemon-card--connecting .daemon-card__state {
-  color: var(--hf-color-warning);
-}
-
-.daemon-card--disconnected .daemon-card__state,
-.daemon-card--daemon_stopped .daemon-card__state {
-  color: var(--hf-color-danger);
+.tooltip__keys {
+  padding: 0 5px;
+  border: 1px solid var(--hf-color-border);
+  border-radius: var(--hf-radius-sm);
+  color: var(--hf-color-text-muted);
+  font-family: var(--hf-font-mono);
+  font-size: var(--hf-font-size-2xs);
 }
 
 .dot {
@@ -312,7 +353,10 @@ ol {
   display: flex;
   flex-direction: column;
   gap: 7px;
-  margin-top: var(--hf-space-3);
+  padding: var(--hf-space-3);
+  border: 1px solid var(--hf-color-border);
+  border-radius: var(--hf-radius-md);
+  background: rgba(var(--hf-rgb-panel-bottom), 0.75);
 }
 
 .gauge {
@@ -349,6 +393,7 @@ ol {
   grid-column: 2;
   color: var(--hf-color-text-muted);
   text-align: right;
+  white-space: nowrap;
 }
 
 /* ---------- Top bar ---------- */

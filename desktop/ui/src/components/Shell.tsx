@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
 import { native } from "../api/native";
@@ -20,22 +21,66 @@ const NAV: Array<{ key: Screen; icon: IconName }> = [
   { key: "settings", icon: "settings" },
 ];
 
-export function Sidebar({ screen, onNavigate }: { screen: Screen; onNavigate: (s: Screen) => void }) {
+const TOGGLE_SHORTCUT = "⌘B";
+
+interface Tip {
+  text: string;
+  keys?: string;
+  top: number;
+  left: number;
+}
+
+/** A tooltip just past the sidebar's edge, level with its target. */
+function tipBeside(target: HTMLElement, text: string, keys?: string): Tip {
+  const box = target.getBoundingClientRect();
+  const edge = target.closest(".sidebar")?.getBoundingClientRect().right ?? box.right;
+  return { text, keys, top: box.top + box.height / 2, left: edge + 8 };
+}
+
+/**
+ * The sidebar, expanded or collapsed to its icons (⌘B). The daemon's connection state is the topbar's alone; the
+ * gauges and the version show only while expanded.
+ */
+export function Sidebar({
+  screen,
+  onNavigate,
+  collapsed,
+  onToggle,
+}: {
+  screen: Screen;
+  onNavigate: (s: Screen) => void;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
   const { t, i18n } = useTranslation();
-  const connection = useStore((s) => s.connection);
   const system = useStore((s) => s.stats?.system);
   const version = useStore((s) => s.appVersion);
   const running = useStore((s) => s.stats?.running ?? 0);
   const locale = i18n.language;
+  const [tip, setTip] = useState<Tip | null>(null);
+
+  // The layout moves under a shown tooltip; the next hover or focus places it again.
+  useEffect(() => setTip(null), [collapsed]);
+
+  // Shown at once on hover and on keyboard focus: `title` appears late and never on focus.
+  const tipped = (text: string, keys?: string) => ({
+    onMouseEnter: (e: { currentTarget: HTMLElement }) => setTip(tipBeside(e.currentTarget, text, keys)),
+    onFocus: (e: { currentTarget: HTMLElement }) => setTip(tipBeside(e.currentTarget, text, keys)),
+    onMouseLeave: () => setTip(null),
+    onBlur: () => setTip(null),
+  });
+  const toggleLabel = collapsed ? t("sidebar.expand") : t("sidebar.collapse");
 
   return (
     <aside className="sidebar">
       <div className="brand">
         <Logo size={38} />
-        <div className="brand__text">
-          <span className="brand__name">{t("app.name")}</span>
-          <span className="brand__tagline">{t("app.tagline")}</span>
-        </div>
+        {collapsed ? null : (
+          <div className="brand__text">
+            <span className="brand__name">{t("app.name")}</span>
+            <span className="brand__tagline">{t("app.tagline")}</span>
+          </div>
+        )}
       </div>
 
       <nav className="nav" aria-label="HarmFlow">
@@ -46,9 +91,10 @@ export function Sidebar({ screen, onNavigate }: { screen: Screen; onNavigate: (s
             className={cx("nav__item", screen === item.key && "nav__item--active")}
             aria-current={screen === item.key ? "page" : undefined}
             onClick={() => onNavigate(item.key)}
+            {...(collapsed ? tipped(t(`nav.${item.key}`)) : {})}
           >
             <Icon name={item.icon} size={19} />
-            <span>{t(`nav.${item.key}`)}</span>
+            <span className={cx("nav__label", collapsed && "sr-only")}>{t(`nav.${item.key}`)}</span>
             {item.key === "executions" && running > 0 ? <span className="nav__badge">{running}</span> : null}
           </button>
         ))}
@@ -57,12 +103,7 @@ export function Sidebar({ screen, onNavigate }: { screen: Screen; onNavigate: (s
       <div className="sidebar__spacer" />
 
       <div className="sidebar__foot">
-        <div className={cx("daemon-card", `daemon-card--${connection}`)}>
-          <div className="daemon-card__state">
-            <span className="dot" aria-hidden="true" />
-            <span>{t(`connection.${connection}`)}</span>
-          </div>
-          <p className="daemon-card__hint">{connection === "connected" ? t("connection.readyHint") : t("connection.lostHint")}</p>
+        {collapsed ? null : (
           <div className="gauges">
             <Gauge
               label={t("gauges.cpu")}
@@ -91,9 +132,31 @@ export function Sidebar({ screen, onNavigate }: { screen: Screen; onNavigate: (s
               }
             />
           </div>
+        )}
+        <div className="sidebar__bar">
+          {collapsed ? null : <span className="sidebar__version">{t("common.version", { version })}</span>}
+          <button
+            type="button"
+            className="icon-btn sidebar__toggle"
+            aria-label={toggleLabel}
+            aria-keyshortcuts="Meta+B"
+            onClick={onToggle}
+            {...tipped(toggleLabel, TOGGLE_SHORTCUT)}
+          >
+            <Icon name={collapsed ? "sidebarExpand" : "sidebarCollapse"} size={18} />
+          </button>
         </div>
-        <span className="sidebar__version">{t("common.version", { version })}</span>
       </div>
+
+      {tip
+        ? createPortal(
+            <span className="tooltip" aria-hidden="true" style={{ top: tip.top, left: tip.left }}>
+              {tip.text}
+              {tip.keys ? <kbd className="tooltip__keys">{tip.keys}</kbd> : null}
+            </span>,
+            document.body,
+          )
+        : null}
     </aside>
   );
 }

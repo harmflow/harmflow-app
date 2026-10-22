@@ -14,6 +14,10 @@ export const esES: Resources = {
     history: "Historial",
     settings: "Ajustes",
   },
+  sidebar: {
+    collapse: "Contraer barra lateral",
+    expand: "Expandir barra lateral",
+  },
   common: {
     cancel: "Cancelar",
     save: "Guardar",
@@ -71,7 +75,6 @@ export const esES: Resources = {
     lastUpdate: "Última actualización: {{time}}",
     lostHint:
       "Se perdió la conexión con el daemon. Las ejecuciones siguen en el daemon; el panel se reconecta y reproduce los eventos que perdió.",
-    readyHint: "Agentes listos para ejecutar tareas programadas.",
     versionMismatch:
       "El daemon ejecuta la versión {{daemon}} y este panel la versión {{desktop}}. Reinstala HarmFlow para que coincidan.",
   },

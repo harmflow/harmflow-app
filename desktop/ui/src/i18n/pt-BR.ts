@@ -14,6 +14,10 @@ export const ptBR: Resources = {
     history: "Histórico",
     settings: "Configurações",
   },
+  sidebar: {
+    collapse: "Recolher barra lateral",
+    expand: "Expandir barra lateral",
+  },
   common: {
     cancel: "Cancelar",
     save: "Salvar",
@@ -71,7 +75,6 @@ export const ptBR: Resources = {
     lastUpdate: "Última atualização: {{time}}",
     lostHint:
       "A conexão com o daemon caiu. As execuções continuam no daemon; o painel reconecta e reproduz os eventos que perdeu.",
-    readyHint: "Agentes prontos para executar tarefas agendadas.",
     versionMismatch:
       "O daemon está na versão {{daemon}} e este painel na versão {{desktop}}. Reinstale o HarmFlow para que as duas coincidam.",
   },

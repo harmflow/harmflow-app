@@ -173,6 +173,18 @@ const paths: Record<string, ReactNode> = {
     </>
   ),
   sparkle: <path d="M12 3.5 13.8 10l6.7 2-6.7 2L12 20.5 10.2 14l-6.7-2 6.7-2L12 3.5Z" />,
+  sidebarCollapse: (
+    <>
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+      <path d="M9 4.5v15M15.5 9.5 13 12l2.5 2.5" />
+    </>
+  ),
+  sidebarExpand: (
+    <>
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+      <path d="M9 4.5v15M13 9.5l2.5 2.5-2.5 2.5" />
+    </>
+  ),
 };
 
 export type IconName = keyof typeof paths;

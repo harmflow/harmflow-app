@@ -13,10 +13,19 @@ import { ImportDialog, TasksScreen, TemplatePicker, type TaskView } from "./scre
 import { setNotificationHandler, startSync, useStore } from "./state/store";
 
 const ONBOARDED_KEY = "harmflow.onboarded";
+const SIDEBAR_KEY = "harmflow.sidebarCollapsed";
 
 function wasOnboarded(): boolean {
   try {
     return localStorage.getItem(ONBOARDED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function wasSidebarCollapsed(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_KEY) === "1";
   } catch {
     return false;
   }
@@ -31,6 +40,7 @@ export function App() {
   const [picker, setPicker] = useState(false);
   const [importing, setImporting] = useState(false);
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(wasSidebarCollapsed);
 
   const settings = useStore((s) => s.settings);
   const daemonRunning = useStore((s) => s.daemonRunning);
@@ -52,6 +62,14 @@ export function App() {
       }
     }
   }, [settings?.language, settings?.onboardingCompleted]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SIDEBAR_KEY, sidebarCollapsed ? "1" : "0");
+    } catch {
+      // Without storage the choice lasts until the app quits.
+    }
+  }, [sidebarCollapsed]);
 
   // The tray speaks the interface's language too.
   useEffect(() => {
@@ -100,6 +118,21 @@ export function App() {
   const onboarding =
     !onboardingDismissed && ((settings && !settings.onboardingCompleted) || (daemonRunning === false && !wasOnboarded()));
   const daemonDown = !onboarding && native.available && daemonRunning === false;
+  const shell = !onboarding && !daemonDown;
+
+  // ⌘B collapses and expands the sidebar from any focus, a text field or the YAML editor included. The onboarding and
+  // daemon-down screens have no sidebar, and a modal dialog keeps the keyboard. Linux and Windows would check ctrlKey.
+  useEffect(() => {
+    if (!shell) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat || e.key.toLowerCase() !== "b") return;
+      if (document.querySelector('[aria-modal="true"]')) return;
+      e.preventDefault();
+      setSidebarCollapsed((collapsed) => !collapsed);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [shell]);
 
   if (onboarding) {
     return (
@@ -135,9 +168,9 @@ export function App() {
   }
 
   return (
-    <div className={native.available ? "app app--tauri" : "app"}>
+    <div className={native.available ? "app app--tauri" : "app"} data-sidebar={sidebarCollapsed ? "collapsed" : "expanded"}>
       <div className="app__backdrop" aria-hidden="true" />
-      <Sidebar screen={screen} onNavigate={navigate} />
+      <Sidebar screen={screen} onNavigate={navigate} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
       <main className="app__content">
         <Header screen={screen} onNewTask={() => setPicker(true)} onNavigate={navigate} onOpenExecution={openExecution} />
         {screen === "executions" ? (
