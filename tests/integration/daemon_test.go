@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -119,7 +120,9 @@ func (d *daemon) request(method, path string, body any, headers map[string]strin
 		r = bytes.NewReader(data)
 	}
 	req, _ := http.NewRequest(method, d.base+path, r)
-	req.Header.Set("Authorization", "Bearer "+d.token)
+	if d.token != "" {
+		req.Header.Set("Authorization", "Bearer "+d.token)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	for k, v := range headers {
 		if k == "Host" {
@@ -192,9 +195,14 @@ spec:
 }
 
 // FS-009 FR-004, FR-005: the token is required everywhere; a web page's Origin and a non-loopback Host are refused.
+// FS-009 FR-003, AC-003: each refusal is recorded in daemon.log with its reason, never with the token it presented.
 func TestAPIProtection(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	saved := d.token
+	d.token = ""
+	if s, _ := d.request("GET", "/tasks", nil, nil); s != 401 {
+		t.Errorf("no token: %d", s)
+	}
 	d.token = "wrong"
 	if s, _ := d.request("GET", "/tasks", nil, nil); s != 401 {
 		t.Errorf("wrong token: %d", s)
@@ -213,7 +221,45 @@ func TestAPIProtection(t *testing.T) {
 	if err != nil || info.Mode().Perm() != 0o600 {
 		t.Errorf("runtime file %v %v", err, info)
 	}
+
+	// The second wrong token comes within a minute of the first, so it waits to be counted in a later entry.
+	data, err := os.ReadFile(filepath.Join(d.home, "logs", "daemon.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"missing token": "GET /api/v1/tasks", "invalid token": "GET /api/v1/tasks",
+		"forbidden Origin": "POST /api/v1/tasks/x/run", "forbidden Host": "GET /api/v1/health"}
+	got := map[string]string{}
+	for _, line := range strings.Split(string(data), "\n") {
+		m := rejectionEntry.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		if strings.Contains(line, "wrong") {
+			t.Errorf("an entry holds the presented token: %s", line)
+		}
+		path, _ := strconv.Unquote(m[2])
+		if _, seen := got[m[3]]; seen {
+			t.Errorf("a second entry for %s: %s", m[3], line)
+		}
+		got[m[3]] = m[1] + " " + path
+		if m[4] != "1" {
+			t.Errorf("%s: count %s, want 1", m[3], m[4])
+		}
+	}
+	for reason, request := range want {
+		if got[reason] != request {
+			t.Errorf("%s: entry for %q, want %q\n%s", reason, got[reason], request, data)
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("entries %v, want one for each of %v", got, want)
+	}
 }
+
+// rejectionEntry is a line of daemon.log recording rejected requests: the last one's method and path, the reason, and
+// how many requests the entry stands for since when.
+var rejectionEntry = regexp.MustCompile(`local API rejected (\S+) ("(?:[^"\\]|\\.)*"): ([^(]+) \((\d+) requests? since (\S+)\)$`)
 
 // GET /health names the commit go build stamped in the binary, and leaves it out when go build stamped none: outside
 // a checkout, or in a git worktree.

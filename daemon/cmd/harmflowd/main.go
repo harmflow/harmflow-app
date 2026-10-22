@@ -154,7 +154,7 @@ func run(homeFlag, builtinsFlag string, port int) error {
 	if err != nil {
 		return err
 	}
-	srv := &httpapi.Server{App: a, Secrets: secrets, NewToken: secret.NewToken}
+	srv := &httpapi.Server{App: a, Secrets: secrets, NewToken: secret.NewToken, Logger: logger}
 	srv.SetToken(token)
 	if err := srv.Listen(port); err != nil {
 		return err

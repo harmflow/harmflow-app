@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -26,12 +27,17 @@ type Server struct {
 	App      *app.App
 	Secrets  ports.SecretStore
 	NewToken func() (string, error)
+	// Logger is daemon.log, where rejected requests are recorded; nil records none.
+	Logger *log.Logger
+	// Clock defaults to the system clock.
+	Clock ports.Clock
 
 	mu       sync.RWMutex
 	token    string
 	listener net.Listener
 	port     int
 	srv      *http.Server
+	rejected rejections
 }
 
 // allowedOrigins are the desktop's own webview origins; any other Origin is a web page.
@@ -66,10 +72,12 @@ func (s *Server) Serve() error {
 	return err
 }
 
+// Shutdown stops serving, then records the rejected requests no entry has counted yet.
 func (s *Server) Shutdown(ctx context.Context) {
 	if s.srv != nil {
 		_ = s.srv.Shutdown(ctx)
 	}
+	s.flushRejections()
 }
 
 func (s *Server) Handler() http.Handler {
@@ -123,7 +131,8 @@ func (s *Server) Handler() http.Handler {
 	return s.guard(mux)
 }
 
-// guard enforces the Host and Origin checks and the bearer token on every route, the SSE stream included.
+// guard enforces the Host and Origin checks and the bearer token on every route, the SSE stream included, and records
+// each request it rejects (FS-009 FR-003).
 func (s *Server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host, _, err := net.SplitHostPort(r.Host)
@@ -131,11 +140,13 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			host = r.Host
 		}
 		if host != "127.0.0.1" && host != "localhost" && host != "::1" && host != "[::1]" {
-			writeError(w, 403, "forbidden", domain.T("host_forbidden", "the Host header must be the loopback address"))
+			s.reject(w, r, reasonForbiddenHost, 403, "forbidden",
+				domain.T("host_forbidden", "the Host header must be the loopback address"))
 			return
 		}
 		if origin := r.Header.Get("Origin"); origin != "" && !allowedOrigins[origin] {
-			writeError(w, 403, "forbidden", domain.T("origin_forbidden", "requests from web pages are not accepted"))
+			s.reject(w, r, reasonForbiddenOrigin, 403, "forbidden",
+				domain.T("origin_forbidden", "requests from web pages are not accepted"))
 			return
 		}
 		if !strings.HasPrefix(r.URL.Path, "/api/v1/") {
@@ -147,7 +158,11 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		want := s.token
 		s.mu.RUnlock()
 		if want == "" || got == "" || subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
-			writeError(w, 401, "unauthorized", domain.T("token_required", "a valid token is required"))
+			reason := reasonInvalidToken
+			if got == "" {
+				reason = reasonMissingToken
+			}
+			s.reject(w, r, reason, 401, "unauthorized", domain.T("token_required", "a valid token is required"))
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
