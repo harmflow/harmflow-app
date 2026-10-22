@@ -201,7 +201,7 @@ export const esES: Resources = {
     script: { started: "Programa iniciado", output: "Salida del programa", exited: "Programa terminado" },
     tool: { started: "Herramienta iniciada", completed: "Herramienta finalizada" },
     step: { started: "Paso" },
-    work_item: { selected: "Elemento de trabajo seleccionado" },
+    work_item: { selected: "Elemento de trabajo seleccionado", conflicting_activity: "Actividad en conflicto" },
     workspace: { changed: "Espacio de trabajo cambiado" },
     test: { started: "Ejecutando pruebas", completed: "Pruebas finalizadas", failed: "Pruebas fallidas" },
     pull_request: { created: "Pull request en borrador creado", updated: "Pull request en borrador actualizado" },
@@ -218,6 +218,7 @@ export const esES: Resources = {
   warnings: {
     policy_unenforced: "Restricción no aplicada",
     repository_unprotected: "Rama base sin protección",
+    conflicting_activity: "Actividad en conflicto",
     missing_agent: "Agente no encontrado",
     missing_skill: "Skill no encontrada",
     invalid_fallback: "Fallback no válido",

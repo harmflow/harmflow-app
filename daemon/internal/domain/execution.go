@@ -156,6 +156,7 @@ type Warning struct {
 const (
 	WarningPolicyUnenforced      = "policy_unenforced"
 	WarningRepositoryUnprotected = "repository_unprotected"
+	WarningConflictingActivity   = "conflicting_activity"
 	WarningMissingAgent          = "missing_agent"
 	WarningMissingSkill          = "missing_skill"
 	WarningInvalidFallback       = "invalid_fallback"

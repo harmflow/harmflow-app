@@ -140,6 +140,8 @@ function styleOf(e: HarmflowEvent): Style {
       return { tone: "cyan", icon: "dot" };
     case "work_item.selected":
       return { tone: "cyan", icon: "file" };
+    case "work_item.conflicting_activity":
+      return { tone: "warning", icon: "alert" };
     case "workspace.changed":
       return { tone: "cyan", icon: "branch" };
     case "test.started":

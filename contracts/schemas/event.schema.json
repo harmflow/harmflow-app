@@ -83,6 +83,7 @@
         "tool.completed",
         "step.started",
         "work_item.selected",
+        "work_item.conflicting_activity",
         "workspace.changed",
         "test.started",
         "test.completed",

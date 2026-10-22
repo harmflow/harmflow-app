@@ -1055,7 +1055,7 @@ components:
       type: object
       required: [code, message]
       properties:
-        code: { type: string, enum: [policy_unenforced, repository_unprotected, missing_agent, missing_skill, invalid_fallback, harness_not_ready, version_untested, external_edit_invalid, other] }
+        code: { type: string, enum: [policy_unenforced, repository_unprotected, conflicting_activity, missing_agent, missing_skill, invalid_fallback, harness_not_ready, version_untested, external_edit_invalid, other] }
         message: { type: string, description: "The en-US text, or the agent's own words, which have no messageKey." }
         messageKey: { $ref: "#/components/schemas/MessageKey" }
         params: { $ref: "#/components/schemas/MessageParams" }

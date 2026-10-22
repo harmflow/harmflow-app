@@ -20,6 +20,7 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/eventlog"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/fsstore"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/schema"
+	"github.com/harmflow/harmflow-app/daemon/internal/contracts"
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
@@ -409,6 +410,59 @@ sleep 1.2; printf '%%s' '%[2]s' > %[1]s/report.json; echo 'END ok'`, req.Executi
 	})
 	res, _ = e.app.RunTask("reporter")
 	e.wait(res.ExecutionID, domain.StatusNoWork)
+}
+
+// FS-006 AC-015: a conflict the agent met keeps its code in the record, and its log holds it as a warning that a
+// replay returns; the execution continues.
+func TestConflictingActivityIsLogged(t *testing.T) {
+	e := newEnv(t)
+	e.create("conflict", "")
+	const said = "someone pushed to the work branch; rebased and continued"
+	e.claude.setScript(func(req ports.RunRequest) string {
+		report := `{"outcome":"completed","summary":"opened a draft","workItems":[{"key":"o/r#7","outcome":"completed"}],` +
+			`"warnings":[{"code":"conflicting_activity","message":"` + said + `","repository":"o/r"}]}`
+		return fmt.Sprintf(`printf '%%s' '%s' > %s/report.json; echo 'END ok'`, report, req.ExecutionDir)
+	})
+	r, _ := e.app.RunTask("conflict")
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	if len(x.Warnings) != 1 || x.Warnings[0].Code != domain.WarningConflictingActivity ||
+		x.Warnings[0].Subject != "o/r" || x.Warnings[0].Message != said {
+		t.Errorf("warnings %+v", x.Warnings)
+	}
+	e.eventKeys(r.ExecutionID, domain.EventExecutionCompleted)
+	conflict := func(ev domain.Event) bool {
+		return ev.Type == domain.EventWorkItemConflicting && ev.Severity == domain.SeverityWarning && ev.Message == said &&
+			ev.Payload["code"] == domain.WarningConflictingActivity && ev.Payload["subject"] == "o/r"
+	}
+	data, err := os.ReadFile(filepath.Join(e.home, "logs", r.ExecutionID+".jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logged []domain.Event
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		var ev domain.Event
+		if json.Unmarshal([]byte(line), &ev) == nil && conflict(ev) {
+			logged = append(logged, ev)
+		}
+	}
+	if len(logged) != 1 {
+		t.Fatalf("%d conflict events in the log, want 1:\n%s", len(logged), data)
+	}
+	// A log opened afresh, as after the daemon restarts, replays it from the file.
+	fresh, _ := eventlog.New(filepath.Join(e.home, "logs"), time.Now)
+	replayed, _, err := fresh.Replay(r.ExecutionID, 0, 0)
+	if err != nil || !slices.ContainsFunc(replayed, func(ev domain.Event) bool { return ev.ID == logged[0].ID && conflict(ev) }) {
+		t.Errorf("the replay lacks the conflict (%v): %+v", err, replayed)
+	}
+	var contract struct {
+		Defs struct {
+			EventType struct{ Enum []string } `json:"eventType"`
+		} `json:"$defs"`
+	}
+	if err := json.Unmarshal(contracts.EventSchema, &contract); err != nil ||
+		!slices.Contains(contract.Defs.EventType.Enum, domain.EventWorkItemConflicting) {
+		t.Errorf("%s is not an event type of the contract (%v)", domain.EventWorkItemConflicting, err)
+	}
 }
 
 // FS-003 AC-010, AC-002: a task never runs twice at once; one firing waits and the next coalesce into it.

@@ -1060,8 +1060,12 @@ func (r *run) applyReport(rep *domain.ExecutionReport) {
 	for _, w := range rep.Warnings {
 		code := domain.WarningOther
 		eventType := ""
-		if w.Code == "repository_unprotected" {
+		switch w.Code {
+		case domain.WarningRepositoryUnprotected:
 			code, eventType = domain.WarningRepositoryUnprotected, domain.EventRepositoryUnprotected
+		case domain.WarningConflictingActivity:
+			// The conflict is only logged; the work goes on (FS-006 FR-015).
+			code, eventType = domain.WarningConflictingActivity, domain.EventWorkItemConflicting
 		}
 		r.warn(domain.Warning{Code: code, Subject: w.Repository, Text: domain.Text{Message: w.Message}},
 			eventType, eventType != "")

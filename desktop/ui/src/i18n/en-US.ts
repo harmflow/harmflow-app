@@ -201,7 +201,7 @@ export const enUS = {
     script: { started: "Program started", output: "Program output", exited: "Program exited" },
     tool: { started: "Tool started", completed: "Tool finished" },
     step: { started: "Step" },
-    work_item: { selected: "Work item selected" },
+    work_item: { selected: "Work item selected", conflicting_activity: "Conflicting activity" },
     workspace: { changed: "Workspace changed" },
     test: { started: "Running tests", completed: "Tests finished", failed: "Tests failed" },
     pull_request: { created: "Draft pull request created", updated: "Draft pull request updated" },
@@ -218,6 +218,7 @@ export const enUS = {
   warnings: {
     policy_unenforced: "Restriction not enforced",
     repository_unprotected: "Base branch not protected",
+    conflicting_activity: "Conflicting activity",
     missing_agent: "Agent not found",
     missing_skill: "Skill not found",
     invalid_fallback: "Invalid fallback",
