@@ -1228,6 +1228,111 @@ func TestEditWhileRunning(t *testing.T) {
 	}
 }
 
+// FS-001 FR-013, AC-015 (D-083): what a running execution reads after an edit still comes from the definition it
+// started with. The edit changes the prompt and removes the fallback while the first attempt runs; the quota that ends
+// that attempt still switches to codex, and codex reads the prompt as it was. The next execution runs the edit.
+func TestEditWhileRunningKeepsTheStartingDefinition(t *testing.T) {
+	e := newEnv(t)
+	gates := t.TempDir()
+	e.claude.setScript(func(req ports.RunRequest) string {
+		return fmt.Sprintf("while [ ! -e %s ]; do sleep 0.05; done; echo 'END quota'", filepath.Join(gates, req.TaskID))
+	})
+	e.codex.setScript(func(ports.RunRequest) string { return "echo 'END ok'" })
+	e.create("late", "    fallback:\n      candidates:\n        - provider: codex\n")
+	first, _ := e.app.RunTask("late")
+	e.wait(first.ExecutionID, domain.StatusRunning)
+	view, _ := e.app.GetTask("late")
+	edited := strings.Replace(taskYAML("late", ""), "Do the work of late.", "Do the edited work of late.", 1)
+	after, err := e.app.UpdateTask("late", TaskInput{YAML: edited, BaseRevision: view.Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Revision == view.Revision || strings.Contains(after.YAML, "fallback") ||
+		!strings.Contains(after.YAML, "Do the edited work of late.") {
+		t.Fatalf("the edit was not saved: revision %s, YAML %q", after.Revision, after.YAML)
+	}
+	if err := os.WriteFile(filepath.Join(gates, "late"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	x := e.wait(first.ExecutionID, domain.StatusCompleted)
+	if len(x.Attempts) != 2 || x.Attempts[0].Outcome != domain.AttemptQuotaExhausted ||
+		x.Attempts[1].Harness != domain.HarnessCodex || x.HarnessSwitches != 1 {
+		t.Fatalf("the running execution did not fail over as it started: %+v", x.Attempts)
+	}
+	if x.Attempts[1].Prompt != "Do the work of late." {
+		t.Errorf("the second attempt read the edited prompt: %q", x.Attempts[1].Prompt)
+	}
+	if x.DefinitionRevision != view.Revision {
+		t.Errorf("the execution's revision is %s, want %s, the one it started with", x.DefinitionRevision, view.Revision)
+	}
+	e.codex.mu.Lock()
+	codex := append([]string(nil), e.codex.prompts...)
+	e.codex.mu.Unlock()
+	if len(codex) != 1 || codex[0] != "Do the work of late." {
+		t.Errorf("codex received %q, want the prompt the execution started with", codex)
+	}
+
+	e.idle("late")
+	next, _ := e.app.RunTask("late")
+	y := e.wait(next.ExecutionID, domain.StatusFailed)
+	if y.ErrorKey != "no_alternative_harness_detail" || len(y.Attempts) != 1 ||
+		y.Attempts[0].Prompt != "Do the edited work of late." || y.DefinitionRevision != after.Revision {
+		t.Errorf("the next execution did not run the edit: %s (%s), revision %s, attempts %+v", y.Status, y.ErrorKey,
+			y.DefinitionRevision, y.Attempts)
+	}
+	e.codex.mu.Lock()
+	switched := len(e.codex.prompts)
+	e.codex.mu.Unlock()
+	if switched != 1 {
+		t.Errorf("codex was prepared %d times, want 1: the next execution kept the removed fallback", switched)
+	}
+}
+
+// FS-001 FR-013, AC-019: an edit that fails validation while an execution runs changes nothing. The task keeps its file
+// and revision, the execution ends with the definition it started with, and so does the next one.
+func TestInvalidEditWhileRunning(t *testing.T) {
+	e := newEnv(t)
+	gates := t.TempDir()
+	e.claude.setScript(func(req ports.RunRequest) string {
+		return fmt.Sprintf("while [ ! -e %s ]; do sleep 0.05; done; echo 'END ok'", filepath.Join(gates, req.TaskID))
+	})
+	e.create("kept", "")
+	first, _ := e.app.RunTask("kept")
+	e.wait(first.ExecutionID, domain.StatusRunning)
+	view, _ := e.app.GetTask("kept")
+	// The edit would change the prompt too, so a partial save would show in what the executions read.
+	invalid := strings.NewReplacer("Do the work of kept.", "Do the edited work of kept.", "type: general", "type: nope").
+		Replace(view.YAML)
+	_, err := e.app.UpdateTask("kept", TaskInput{YAML: invalid, BaseRevision: view.Revision})
+	if appErr, ok := err.(*Error); !ok || appErr.Code != CodeValidationFailed {
+		t.Fatalf("invalid edit: %v, want %s", err, CodeValidationFailed)
+	}
+	after, _ := e.app.GetTask("kept")
+	onDisk, err := os.ReadFile(view.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.YAML != view.YAML || after.Revision != view.Revision || string(onDisk) != view.YAML {
+		t.Errorf("the invalid edit changed the task: revision %s, want %s; YAML %q; on disk %q", after.Revision,
+			view.Revision, after.YAML, onDisk)
+	}
+	if err := os.WriteFile(filepath.Join(gates, "kept"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	x := e.wait(first.ExecutionID, domain.StatusCompleted)
+	e.idle("kept")
+	next, _ := e.app.RunTask("kept")
+	y := e.wait(next.ExecutionID, domain.StatusCompleted)
+	for _, run := range []ExecutionView{x, y} {
+		if len(run.Attempts) != 1 || run.Attempts[0].Prompt != "Do the work of kept." ||
+			run.DefinitionRevision != view.Revision {
+			t.Errorf("execution %s did not run the valid definition: revision %s, want %s; attempts %+v", run.ID,
+				run.DefinitionRevision, view.Revision, run.Attempts)
+		}
+	}
+}
+
 // FS-001 AC-017, AC-018: disabling lets the execution finish; deleting waits for it; records stay.
 func TestDisableAndDeleteWhileRunning(t *testing.T) {
 	e := newEnv(t)
@@ -1261,6 +1366,86 @@ func TestDisableAndDeleteWhileRunning(t *testing.T) {
 	}
 	if len(e.executions("going")) != 1 {
 		t.Error("the execution record was lost")
+	}
+}
+
+// FS-001 FR-015, AC-017 (D-083): disabling a running task lets its execution finish and stops every new firing until
+// the task is enabled: the firing waiting behind it is cancelled and never starts, and a firing that comes due while
+// it is disabled creates no execution. Once enabled, the next firing is on time, not a catch-up.
+func TestDisableStopsNewFiringsUntilEnabled(t *testing.T) {
+	e := newEnv(t)
+	gates := t.TempDir()
+	e.claude.setScript(func(req ports.RunRequest) string {
+		return fmt.Sprintf("while [ ! -e %s ]; do sleep 0.05; done; echo 'END ok'", filepath.Join(gates, req.TaskID))
+	})
+	e.create("paused", "  schedule:\n    interval: 30m\n")
+	// tickAtNext moves the clock just past the task's next firing, within the misfire window, and ticks.
+	tickAtNext := func(next time.Time) {
+		e.clock.Advance(next.Sub(e.clock.Now()) + 10*time.Second)
+		e.app.Tick()
+	}
+	view, _ := e.app.GetTask("paused")
+	tickAtNext(*view.NextFireAt)
+	runs := e.executions("paused")
+	if len(runs) != 1 || runs[0].Trigger != domain.TriggerSchedule {
+		t.Fatalf("first firing: %+v", runs)
+	}
+	running := runs[0].ID
+	e.wait(running, domain.StatusRunning)
+	view, _ = e.app.GetTask("paused")
+	tickAtNext(*view.NextFireAt)
+	runs = e.executions("paused")
+	if len(runs) != 2 || runs[0].Status != domain.StatusQueued {
+		t.Fatalf("the second firing does not wait: %+v", runs)
+	}
+	waiting := runs[0].ID
+	view, _ = e.app.GetTask("paused")
+	due := *view.NextFireAt // the view shows no next firing once the task is disabled
+
+	if _, err := e.app.SetEnabled("paused", false); err != nil {
+		t.Fatal(err)
+	}
+	if x, _ := e.app.GetExecution(waiting); x.Status != domain.StatusCancelled || x.ErrorKey != "task_was_disabled" {
+		t.Errorf("the waiting execution is %s (%q), want cancelled (task_was_disabled)", x.Status, x.ErrorKey)
+	}
+	if err := os.WriteFile(filepath.Join(gates, "paused"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.wait(running, domain.StatusCompleted)
+	e.idle("paused")
+	if x, _ := e.app.GetExecution(waiting); x.Status != domain.StatusCancelled || x.StartedAt != nil ||
+		len(x.Attempts) != 0 {
+		t.Errorf("the dropped firing started: %s, started at %v, %d attempts", x.Status, x.StartedAt, len(x.Attempts))
+	}
+	e.claude.mu.Lock()
+	prompts := len(e.claude.prompts)
+	e.claude.mu.Unlock()
+	if prompts != 1 {
+		t.Errorf("the harness was prepared %d times, want 1: the dropped firing started", prompts)
+	}
+
+	tickAtNext(due)
+	if runs := e.executions("paused"); len(runs) != 2 {
+		t.Fatalf("a disabled task fired: %+v", runs)
+	}
+
+	if _, err := e.app.SetEnabled("paused", true); err != nil {
+		t.Fatal(err)
+	}
+	view, _ = e.app.GetTask("paused")
+	if view.NextFireAt == nil || !view.NextFireAt.After(e.clock.Now()) {
+		t.Fatalf("next firing once enabled: %v, now %v", view.NextFireAt, e.clock.Now())
+	}
+	next := *view.NextFireAt
+	tickAtNext(next)
+	runs = e.executions("paused")
+	if len(runs) != 3 || runs[0].ID == running || runs[0].ID == waiting {
+		t.Fatalf("the enabled task did not fire: %+v", runs)
+	}
+	x := e.wait(runs[0].ID, domain.StatusCompleted)
+	if x.Trigger != domain.TriggerSchedule || x.ScheduledFor == nil || !x.ScheduledFor.Equal(next) {
+		t.Errorf("the firing once enabled is %s for %v, want %s for %v", x.Trigger, x.ScheduledFor,
+			domain.TriggerSchedule, next)
 	}
 }
 
