@@ -10,7 +10,7 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 )
 
-// Clock is injectable so the scheduler can be tested without waiting (ADR-0001).
+// Clock is injectable so the scheduler can be tested without waiting (ADR-001).
 type Clock interface {
 	Now() time.Time
 }
@@ -34,7 +34,7 @@ type TaskRepository interface {
 	Dir() string
 }
 
-// StateStore persists operational state as versioned JSON, written atomically (ADR-0007).
+// StateStore persists operational state as versioned JSON, written atomically (ADR-007).
 type StateStore interface {
 	Load(name string, v any) (bool, error)
 	Save(name string, v any) error
@@ -46,7 +46,7 @@ type ExecutionRepository interface {
 	LoadAll() ([]*domain.Execution, error)
 }
 
-// EventLog writes one JSONL file per execution and publishes every event live (ADR-0004, ADR-0007).
+// EventLog writes one JSONL file per execution and publishes every event live (ADR-004, ADR-007).
 type EventLog interface {
 	Append(e domain.Event) domain.Event
 	Replay(executionID string, after int64, limit int) ([]domain.Event, bool, error)
@@ -205,7 +205,7 @@ type OutputParser interface {
 	Finish(exitCode int, stderrTail string, timedOut, cancelled bool) domain.AttemptEnd
 }
 
-// HarnessAdapter is the HarnessRunner port of one harness (ADR-0009): detect, declare capabilities, run
+// HarnessAdapter is the HarnessRunner port of one harness (ADR-009): detect, declare capabilities, run
 // non-interactively, capture events, and recognize quota failure. Cancellation is the executor's, by process group.
 type HarnessAdapter interface {
 	ID() string

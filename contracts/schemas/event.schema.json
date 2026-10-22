@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harmflow.com/schemas/v1alpha1/event.schema.json",
   "title": "HarmFlow event",
-  "description": "A normalized event, as written to one JSONL file per execution and delivered on the SSE stream (ADR-0004, ADR-0007). Event types are object.action in snake_case (D-094).",
+  "description": "A normalized event, as written to one JSONL file per execution and delivered on the SSE stream (ADR-004, ADR-007). Event types are object.action in snake_case (D-094).",
   "type": "object",
   "additionalProperties": false,
   "required": ["id", "schemaVersion", "timestamp", "type", "severity"],

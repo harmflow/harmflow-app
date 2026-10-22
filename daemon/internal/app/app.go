@@ -1,5 +1,5 @@
 // Package app holds the daemon's use cases: tasks, scheduling, executions, failover, recovery, notifications, and
-// settings. It orchestrates only; what a task does lives in its prompt, agents, and skills (ADR-0013).
+// settings. It orchestrates only; what a task does lives in its prompt, agents, and skills (ADR-013).
 package app
 
 import (
