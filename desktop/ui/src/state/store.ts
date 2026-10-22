@@ -45,6 +45,8 @@ export interface State {
   /** Per task, the id of the latest event saying its file changed outside the dashboard. */
   externalChanges: Record<string, number>;
   appVersion: string;
+  /** The commit the interface was built from; empty without git information. */
+  appCommit: string;
   /** The latest event that asked the interface to show something: a navigation target. */
   navigation?: { executionId?: string; screen?: string; nonce: number };
 }
@@ -67,6 +69,7 @@ let state: State = {
   lastEventId: 0,
   externalChanges: {},
   appVersion: __APP_VERSION__,
+  appCommit: __APP_COMMIT__,
 };
 
 const listeners = new Set<() => void>();

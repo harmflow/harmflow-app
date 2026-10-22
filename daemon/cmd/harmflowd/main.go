@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -35,6 +36,9 @@ import (
 
 // Version is set at build time; desktop and daemon always ship at the same version (D-080).
 var Version = "0.1.0"
+
+// Commit is set at build time by make, which reads it from git also in a git worktree, where go build stamps none.
+var Commit = ""
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "version" {
@@ -136,7 +140,8 @@ func run(homeFlag, builtinsFlag string, port int) error {
 		daemonEnv["HARMFLOW_TOKEN_STORE"] = os.Getenv("HARMFLOW_TOKEN_STORE")
 	}
 	a, err := app.New(app.Deps{
-		Paths: paths, Version: Version, Tasks: tasks, State: state, Executions: execs, Events: events, Validator: validator,
+		Paths: paths, Version: Version, Commit: buildCommit(),
+		Tasks: tasks, State: state, Executions: execs, Events: events, Validator: validator,
 		Harnesses: []ports.HarnessAdapter{
 			&claudecode.Adapter{Home: userHome, PathEnv: pathEnv, Env: harnessEnv},
 			&codex.Adapter{Home: userHome, PathEnv: pathEnv, Env: harnessEnv},
@@ -200,6 +205,41 @@ func writeRuntime(path string, srv *httpapi.Server, store string) error {
 		"startedAt": time.Now().Format(time.RFC3339), "tokenStore": store,
 	}, "", "  ")
 	return fsstore.WriteAtomic(path, append(data, '\n'), 0o600)
+}
+
+// buildCommit is the Commit make set, or else the one go build stamped in the binary; see commitOf.
+func buildCommit() string {
+	if Commit != "" {
+		return Commit
+	}
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	return commitOf(info.Settings)
+}
+
+// commitOf is the first 7 characters of vcs.revision, with "-dirty" when vcs.modified says the tree had uncommitted
+// changes, and empty without a revision: outside a checkout, or with -buildvcs=false.
+func commitOf(settings []debug.BuildSetting) string {
+	var revision string
+	var modified bool
+	for _, s := range settings {
+		switch s.Key {
+		case "vcs.revision":
+			revision = s.Value
+		case "vcs.modified":
+			modified = s.Value == "true"
+		}
+	}
+	if revision == "" {
+		return ""
+	}
+	revision = revision[:min(len(revision), 7)]
+	if modified {
+		revision += "-dirty"
+	}
+	return revision
 }
 
 // acquireLock keeps a second daemon from running on the same data directory.

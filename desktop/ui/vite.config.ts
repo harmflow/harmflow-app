@@ -17,6 +17,18 @@ interface Runtime {
   tokenStore?: "keychain" | "file";
 }
 
+// The commit the interface is built from, as the Makefile reads it for the daemon: its first 7 characters, "-dirty"
+// with uncommitted changes, and empty outside a checkout. `tauri build` builds the interface first, from the same tree.
+function buildCommit(): string {
+  const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  try {
+    const commit = git("rev-parse", "--verify", "--quiet", "HEAD").slice(0, 7);
+    return git("status", "--porcelain") ? `${commit}-dirty` : commit;
+  } catch {
+    return "";
+  }
+}
+
 function harmflowHome(): string {
   return process.env.HARMFLOW_HOME || join(homedir(), "Library", "Application Support", "HarmFlow");
 }
@@ -87,7 +99,7 @@ function daemonProxy(): Plugin {
 
 export default defineConfig({
   plugins: [react(), daemonProxy()],
-  define: { __APP_VERSION__: JSON.stringify(pkg.version) },
+  define: { __APP_VERSION__: JSON.stringify(pkg.version), __APP_COMMIT__: JSON.stringify(buildCommit()) },
   clearScreen: false,
   server: {
     port: 1420,

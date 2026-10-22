@@ -605,6 +605,8 @@ export interface components {
             /** @enum {string} */
             status: "ok";
             version: string;
+            /** @description The commit it was built from, 7 characters, -dirty with uncommitted changes. */
+            commit?: string;
             /** @enum {string} */
             apiVersion: "v1";
             pid: number;
