@@ -9,6 +9,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -1572,6 +1573,100 @@ func TestMisfireAcrossShortRestart(t *testing.T) {
 	}
 	if runs = e.executions("daily-skip"); len(runs) != 1 || runs[0].Trigger != domain.TriggerSchedule {
 		t.Fatalf("on-time firing of daily-skip: %+v", runs)
+	}
+}
+
+// lastFiring is the latest record of the task's firing history.
+func (e *env) lastFiring(id string) firingRecord {
+	e.t.Helper()
+	e.app.mu.Lock()
+	defer e.app.mu.Unlock()
+	h := e.app.firings[id]
+	if len(h) == 0 {
+		e.t.Fatalf("%s has no firing record", id)
+	}
+	return h[len(h)-1]
+}
+
+// FS-002 FR-006, AC-008: the firings of a three-day outage are recorded, the catch-up with its execution and the
+// skipped misfires with the policy, and the records survive a restart.
+func TestFiringsRecordedAcrossRestart(t *testing.T) {
+	e := newEnv(t)
+	e.create("daily", "  schedule:\n    cron: \"0 9 * * *\"\n    timezone: UTC\n")
+	e.create("daily-skip", "  schedule:\n    cron: \"0 9 * * *\"\n    timezone: UTC\n    missedRun:\n      policy: skip\n")
+	e.clock.Advance(3 * 24 * time.Hour) // the daemon was down for three days
+	e = e.restart(t)
+	e.app.Tick()
+	runs := e.executions("daily")
+	if len(runs) != 1 {
+		t.Fatalf("daily: %+v", runs)
+	}
+	e.wait(runs[0].ID, domain.StatusCompleted)
+	e = e.restart(t)
+	e.app.Tick()
+	if n := len(e.executions("daily")); n != 1 {
+		t.Errorf("the restart ran daily again: %d executions", n)
+	}
+	first := time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)
+	got := e.lastFiring("daily")
+	want := firingRecord{ScheduledFor: first, ProcessedAt: e.clock.Now(), Trigger: domain.TriggerCatchUp, Missed: 3,
+		Policy: domain.MissedRunOnResume, Outcome: "started", ExecutionID: runs[0].ID}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("daily's record:\n got %+v\nwant %+v", got, want)
+	}
+	got = e.lastFiring("daily-skip")
+	if !got.ScheduledFor.Equal(first) || got.Trigger != domain.TriggerCatchUp || got.Missed != 3 ||
+		got.Policy != domain.MissedRunSkip || got.Outcome != "skipped" || got.ExecutionID != "" ||
+		got.ReasonKey != "firings_missed_skipped" {
+		t.Errorf("daily-skip's record: %+v", got)
+	}
+}
+
+// FS-002 FR-006: a firing due while its task is disabled, pending deletion, or invalid on disk is recorded as
+// skipped, with the reason.
+func TestHeldBackFiringsRecorded(t *testing.T) {
+	e := newEnv(t)
+	schedule := "  schedule:\n    cron: \"0 9 * * *\"\n    timezone: UTC\n"
+	for _, id := range []string{"off", "going", "broken", "on"} {
+		e.create(id, schedule)
+	}
+	if _, err := e.app.SetEnabled("off", false); err != nil {
+		t.Fatal(err)
+	}
+	e.claude.setScript(func(ports.RunRequest) string { return slow })
+	r, _ := e.app.RunTask("going")
+	e.wait(r.ExecutionID, domain.StatusRunning)
+	if pending, err := e.app.DeleteTask("going"); err != nil || !pending {
+		t.Fatalf("delete: %v %v", pending, err)
+	}
+	view, _ := e.app.GetTask("broken")
+	invalid := strings.Replace(view.YAML, "type: general", "type: nope", 1)
+	if err := os.WriteFile(filepath.Join(e.paths.Tasks, "broken.yaml"), []byte(invalid), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.app.scanTaskFiles()
+	e.claude.setScript(nil)
+	e.clock.Advance(61 * time.Minute)
+	e.app.Tick()
+	for id, key := range map[string]string{"off": "task_was_disabled", "going": "task_being_deleted",
+		"broken": "task_file_invalid"} {
+		got := e.lastFiring(id)
+		if got.Outcome != "skipped" || got.ReasonKey != key || got.Trigger != domain.TriggerSchedule ||
+			got.ExecutionID != "" || got.Reason == "" {
+			t.Errorf("%s's record: %+v", id, got)
+		}
+	}
+	if got := e.lastFiring("broken"); got.ReasonParams["file"] != "broken.yaml" {
+		t.Errorf("the invalid file's record names %q", got.ReasonParams["file"])
+	}
+	// The task that could run fired on time, and its record names the execution.
+	runs := e.executions("on")
+	if got := e.lastFiring("on"); len(runs) != 1 || got.Outcome != "started" || got.ExecutionID != runs[0].ID ||
+		got.Trigger != domain.TriggerSchedule || got.Policy != "" {
+		t.Errorf("on's record: %+v, executions %+v", got, runs)
+	}
+	if err := e.app.CancelExecution(r.ExecutionID); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -16,21 +16,49 @@ type scheduleState struct {
 	LastFiredAt *time.Time `json:"lastFiredAt,omitempty"`
 }
 
+// firingRecord is what became of one firing the scheduler processed, kept so no firing is lost silently (FS-002
+// FR-006). For a catch-up, ScheduledFor is the first missed time and Missed how many misfires it covers; Policy is the
+// missed-run policy a misfire followed. A skipped firing says why, as a text the desktop translates.
+type firingRecord struct {
+	ScheduledFor time.Time         `json:"scheduledFor"`
+	ProcessedAt  time.Time         `json:"processedAt"`
+	Trigger      domain.Trigger    `json:"trigger"`
+	Missed       int               `json:"missed,omitempty"`
+	Policy       string            `json:"policy,omitempty"`
+	Outcome      string            `json:"outcome"` // started, queued, coalesced, or skipped
+	ExecutionID  string            `json:"executionId,omitempty"`
+	Reason       string            `json:"reason,omitempty"`
+	ReasonKey    string            `json:"reasonKey,omitempty"`
+	ReasonParams map[string]string `json:"reasonParams,omitempty"`
+}
+
+func (r *firingRecord) because(t domain.Text) {
+	r.Reason, r.ReasonKey, r.ReasonParams = t.Message, t.Key, t.Params
+}
+
+// firingHistoryLimit is how many firings each task's history keeps, the latest ones.
+const firingHistoryLimit = 20
+
 type scheduleFile struct {
 	SchemaVersion string                    `json:"schemaVersion"`
 	Tasks         map[string]*scheduleState `json:"tasks"`
+	// Firings is each task's history, oldest first. It stays when the task goes, as its executions do.
+	Firings map[string][]firingRecord `json:"firings,omitempty"`
 }
 
 func (a *App) loadSchedule() {
 	var f scheduleFile
 	if ok, err := a.d.State.Load("scheduler", &f); err != nil {
 		a.log.Printf("scheduler state: %v", err)
-	} else if ok && f.Tasks != nil {
+	} else if ok {
 		a.mu.Lock()
 		for id, s := range f.Tasks {
 			if _, exists := a.tasks[id]; exists {
 				a.sched[id] = s
 			}
+		}
+		for id, h := range f.Firings {
+			a.firings[id] = h
 		}
 		a.mu.Unlock()
 	}
@@ -44,10 +72,13 @@ func (a *App) loadSchedule() {
 
 func (a *App) saveSchedule() {
 	a.mu.Lock()
-	f := scheduleFile{SchemaVersion: "1", Tasks: map[string]*scheduleState{}}
+	f := scheduleFile{SchemaVersion: "1", Tasks: map[string]*scheduleState{}, Firings: map[string][]firingRecord{}}
 	for id, s := range a.sched {
 		c := *s
 		f.Tasks[id] = &c
+	}
+	for id, h := range a.firings {
+		f.Firings[id] = append([]firingRecord(nil), h...)
 	}
 	a.mu.Unlock()
 	if err := a.d.State.Save("scheduler", f); err != nil {
@@ -56,7 +87,8 @@ func (a *App) saveSchedule() {
 }
 
 // rescheduleTask recomputes the next firing when the schedule changed, at once (D-083, FS-002 FR-010). An unchanged
-// schedule keeps its pending firing, so a restart still sees the misfire.
+// schedule keeps its pending firing, so a restart still sees the misfire. A file that fails validation keeps the
+// schedule of its last valid definition, so its firings come due and are recorded as skipped (FS-002 FR-006).
 func (a *App) rescheduleTask(id string) {
 	a.mu.Lock()
 	e := a.tasks[id]
@@ -67,7 +99,7 @@ func (a *App) rescheduleTask(id string) {
 	doc := e.doc
 	s := a.sched[id]
 	now := a.now()
-	if doc.Spec.Schedule == nil || e.invalid != nil {
+	if doc.Spec.Schedule == nil {
 		delete(a.sched, id)
 		a.mu.Unlock()
 		a.saveSchedule()
@@ -112,17 +144,15 @@ func (a *App) schedulerLoop() {
 	}
 }
 
+// dueFiring is a firing Tick decided, with its record so far.
 type dueFiring struct {
-	taskID       string
-	trigger      domain.Trigger
-	scheduledFor time.Time
-	missed       int
-	skip         bool
+	taskID string
+	firingRecord
 }
 
 // Tick fires every due task. A firing scheduled while the daemon or the machine was unavailable is a misfire, however
 // late it is; so is one later than MisfireAfter. All misfires coalesce into one catch-up or are skipped, per the
-// task's policy (D-071).
+// task's policy (D-071). Every firing it processes is recorded with what became of it (FS-002 FR-006).
 func (a *App) Tick() {
 	a.tickMu.Lock()
 	defer a.tickMu.Unlock()
@@ -139,6 +169,7 @@ func (a *App) Tick() {
 		a.mu.Unlock()
 		return
 	}
+	processed := false
 	for _, id := range sortedKeys(a.sched) {
 		s := a.sched[id]
 		e := a.tasks[id]
@@ -152,43 +183,99 @@ func (a *App) Tick() {
 		scheduled := *s.NextFireAt
 		next := rule.Next(now)
 		s.NextFireAt = &next
-		if !e.doc.IsEnabled() || e.invalid != nil || e.deletePending {
+		processed = true
+		r := firingRecord{ScheduledFor: scheduled, ProcessedAt: now, Trigger: domain.TriggerSchedule}
+		if scheduled.Before(a.unavailableUntil) || now.Sub(scheduled) > a.d.MisfireAfter {
+			r.Trigger, r.Missed = domain.TriggerCatchUp, countMissed(rule, scheduled, now)
+		}
+		if reason, held := heldBack(e); held {
+			r.Outcome = "skipped"
+			r.because(reason)
+			a.recordFiringLocked(id, r)
 			continue
 		}
 		fired := now
 		s.LastFiredAt = &fired
-		f := dueFiring{taskID: id, trigger: domain.TriggerSchedule, scheduledFor: scheduled}
-		if scheduled.Before(a.unavailableUntil) || now.Sub(scheduled) > a.d.MisfireAfter {
-			f.missed = countMissed(rule, scheduled, now)
-			f.trigger = domain.TriggerCatchUp
-			f.skip = e.doc.Effective().Spec.Schedule.MissedRun.Policy == domain.MissedRunSkip
+		if r.Trigger == domain.TriggerCatchUp {
+			r.Policy = domain.MissedRunOnResume
+			if e.doc.Effective().Spec.Schedule.MissedRun.Policy == domain.MissedRunSkip {
+				r.Policy, r.Outcome = domain.MissedRunSkip, "skipped"
+				r.because(missedText(r.Missed, true))
+				a.recordFiringLocked(id, r)
+			}
 		}
-		due = append(due, f)
+		due = append(due, dueFiring{taskID: id, firingRecord: r})
 	}
 	a.mu.Unlock()
 	if woke {
 		a.log.Printf("the machine woke from sleep; firings scheduled before %s are misfires", wake.Format(time.RFC3339))
 	}
-	if len(due) == 0 {
+	if !processed {
 		return
 	}
+	// The next firings and the skips are saved before anything runs, so a crash never fires them twice.
 	a.saveSchedule()
+	ran := false
 	for _, f := range due {
-		if f.trigger == domain.TriggerCatchUp {
-			policy := domain.MissedRunOnResume
-			if f.skip {
-				policy = domain.MissedRunSkip
-			}
+		if f.Trigger == domain.TriggerCatchUp {
+			skip := f.Policy == domain.MissedRunSkip
 			a.emit(domain.Event{Type: domain.EventFiringMissed, TaskID: f.taskID, Severity: domain.SeverityWarning,
-				Payload: map[string]any{"missed": f.missed, "policy": policy, "firstMissedAt": f.scheduledFor}}.Says(
-				missedText(f.missed, f.skip)))
-			if f.skip {
+				Payload: map[string]any{"missed": f.Missed, "policy": f.Policy, "firstMissedAt": f.ScheduledFor}}.Says(
+				missedText(f.Missed, skip)))
+			if skip {
 				continue
 			}
 		}
-		sf := f.scheduledFor
-		_, _ = a.fire(f.taskID, f.trigger, &sf)
+		sf := f.ScheduledFor
+		res, err := a.fire(f.taskID, f.Trigger, &sf)
+		r := f.firingRecord
+		r.Outcome, r.ExecutionID = res.Outcome, res.ExecutionID
+		switch {
+		case err != nil:
+			r.Outcome = "skipped"
+			r.because(errorText(err))
+		case res.Outcome == "skipped":
+			r.ExecutionID = res.cause
+			r.because(res.reason)
+		}
+		a.mu.Lock()
+		a.recordFiringLocked(f.taskID, r)
+		a.mu.Unlock()
+		ran = true
 	}
+	if ran {
+		a.saveSchedule() // what became of the firings that ran
+	}
+}
+
+// heldBack says why a due firing of a task that cannot fire now is skipped: it is being deleted, its file fails
+// validation, or it is disabled (D-083).
+func heldBack(e *taskEntry) (domain.Text, bool) {
+	switch {
+	case e.deletePending:
+		return domain.T("task_being_deleted", "the task is being deleted"), true
+	case e.invalid != nil:
+		return domain.T("task_file_invalid", "the task file {{file}} fails validation", "file", taskFileName(e.file)), true
+	case !e.doc.IsEnabled():
+		return domain.T("task_was_disabled", "the task was disabled"), true
+	}
+	return domain.Text{}, false
+}
+
+// recordFiringLocked adds a firing to its task's history, which keeps the latest firingHistoryLimit.
+func (a *App) recordFiringLocked(taskID string, r firingRecord) {
+	h := append(a.firings[taskID], r)
+	if len(h) > firingHistoryLimit {
+		h = h[len(h)-firingHistoryLimit:]
+	}
+	a.firings[taskID] = h
+}
+
+func errorText(err error) domain.Text {
+	if e, ok := err.(*Error); ok {
+		return e.Text
+	}
+	return domain.TextOf(err)
 }
 
 // missedText counts the missed firings; the desktop picks the plural form from the count, and so does the en-US text.
@@ -228,6 +315,9 @@ func countMissed(rule domain.Rule, first, now time.Time) int {
 type FiringResult struct {
 	Outcome     string `json:"outcome"`
 	ExecutionID string `json:"executionId,omitempty"`
+	// reason says why a firing was skipped, and cause is the execution it was skipped for, as the firing record keeps.
+	reason domain.Text
+	cause  string
 }
 
 // RunTask is the manual trigger (FS-002 FR-001).
@@ -274,7 +364,7 @@ func (a *App) fire(taskID string, trigger domain.Trigger, scheduledFor *time.Tim
 		}
 		a.emit(domain.Event{Type: domain.EventFiringSkipped, TaskID: taskID, Severity: domain.SeverityWarning,
 			Payload: map[string]any{"trigger": string(trigger)}}.Says(text))
-		return FiringResult{Outcome: "skipped"}, nil
+		return FiringResult{Outcome: "skipped", reason: text}, nil
 	}
 	_, running := a.running[taskID]
 	var waiting, active *domain.Execution
@@ -302,10 +392,10 @@ func (a *App) fire(taskID string, trigger domain.Trigger, scheduledFor *time.Tim
 				causeID = cause.ID
 			}
 			a.mu.Unlock()
+			reason := domain.T("firing_skipped", "the task was running; this firing was skipped, per its overlap policy")
 			a.emit(domain.Event{Type: domain.EventFiringSkipped, TaskID: taskID, ExecutionID: causeID,
-				Severity: domain.SeverityWarning, Payload: map[string]any{"trigger": string(trigger)}}.Says(
-				domain.T("firing_skipped", "the task was running; this firing was skipped, per its overlap policy")))
-			return FiringResult{Outcome: "skipped"}, nil
+				Severity: domain.SeverityWarning, Payload: map[string]any{"trigger": string(trigger)}}.Says(reason))
+			return FiringResult{Outcome: "skipped", reason: reason, cause: causeID}, nil
 		}
 		if waiting != nil {
 			a.mu.Unlock()
