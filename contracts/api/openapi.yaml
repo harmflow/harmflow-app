@@ -718,6 +718,7 @@ components:
         - id_immutable
         - id_file_mismatch
         - task_file_invalid
+        - task_file_error
         - schedule_missing
         - schedule_empty
         - schedule_cron_and_interval

@@ -281,7 +281,8 @@ export const ptBR: Resources = {
     schema_false: "esta propriedade não é permitida aqui",
     id_immutable: "o identificador não pode mudar; duplique a tarefa em vez disso",
     id_file_mismatch: 'metadata.id "{{id}}" deve corresponder ao nome do arquivo {{file}}.yaml',
-    task_file_invalid: "o arquivo da tarefa não passa na validação",
+    task_file_invalid: "o arquivo da tarefa {{file}} não passa na validação",
+    task_file_error: "{{file}}: {{detail}}",
     schedule_missing:
       "um agendamento precisa de uma expressão cron ou de um intervalo; remova-o para uma tarefa só manual",
     schedule_empty: "um agendamento precisa de uma expressão cron ou de um intervalo",
@@ -357,7 +358,7 @@ export const ptBR: Resources = {
     task_delete_pending: "a exclusão aguarda a execução em andamento",
     task_changed_externally: "o arquivo da tarefa foi alterado fora do HarmFlow",
     task_changed_externally_invalid:
-      "o arquivo da tarefa foi alterado fora do HarmFlow e não passa na validação; a última definição válida continua valendo",
+      "o arquivo da tarefa {{file}} foi alterado fora do HarmFlow e não passa na validação; a última definição válida continua valendo",
     task_removed_externally: "o arquivo da tarefa foi removido fora do HarmFlow",
     task_was_disabled: "a tarefa foi desativada",
     task_was_deleted: "a tarefa foi excluída",

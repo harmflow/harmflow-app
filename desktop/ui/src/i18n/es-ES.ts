@@ -281,7 +281,8 @@ export const esES: Resources = {
     schema_false: "esta propiedad no está permitida aquí",
     id_immutable: "el identificador no puede cambiar; duplica la tarea en su lugar",
     id_file_mismatch: 'metadata.id "{{id}}" debe coincidir con el nombre del archivo {{file}}.yaml',
-    task_file_invalid: "el archivo de la tarea no supera la validación",
+    task_file_invalid: "el archivo de la tarea {{file}} no supera la validación",
+    task_file_error: "{{file}}: {{detail}}",
     schedule_missing:
       "una programación necesita una expresión cron o un intervalo; quítala para una tarea solo manual",
     schedule_empty: "una programación necesita una expresión cron o un intervalo",
@@ -358,7 +359,7 @@ export const esES: Resources = {
     task_delete_pending: "la eliminación espera a la ejecución en curso",
     task_changed_externally: "el archivo de la tarea se cambió fuera de HarmFlow",
     task_changed_externally_invalid:
-      "el archivo de la tarea se cambió fuera de HarmFlow y no supera la validación; se mantiene la última definición válida",
+      "el archivo de la tarea {{file}} se cambió fuera de HarmFlow y no supera la validación; se mantiene la última definición válida",
     task_removed_externally: "el archivo de la tarea se eliminó fuera de HarmFlow",
     task_was_disabled: "la tarea se desactivó",
     task_was_deleted: "la tarea se eliminó",

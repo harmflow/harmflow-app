@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -48,16 +49,38 @@ type ExecutionRef struct {
 	EndedAt   *time.Time             `json:"endedAt,omitempty"`
 }
 
-// loadTasks reads every task file; a file that fails validation is listed as invalid and never fires.
+// loadTasks reads every task file; a file that fails validation is listed as invalid and never fires, and is reported
+// as one the watcher finds.
 func (a *App) loadTasks() error {
 	files, err := a.d.Tasks.List()
 	if err != nil {
 		return err
 	}
 	for _, f := range files {
-		a.loadTaskFile(f)
+		e := a.loadTaskFile(f)
+		a.mu.Lock()
+		invalid := e.invalid
+		a.mu.Unlock()
+		if invalid != nil {
+			a.emit(invalidEvent(f, invalid, domain.T("task_file_invalid", "the task file {{file}} fails validation",
+				"file", taskFileName(f))))
+		}
 	}
 	return nil
+}
+
+// taskFileName is the name of the task's file in the tasks directory, which a task file's error names (FS-001 FR-007).
+func taskFileName(f ports.TaskFile) string {
+	if f.Path == "" {
+		return f.ID + ".yaml"
+	}
+	return filepath.Base(f.Path)
+}
+
+// invalidEvent announces a task file that fails validation, at start or from the watcher.
+func invalidEvent(f ports.TaskFile, r *ValidationResult, text domain.Text) domain.Event {
+	return domain.Event{Type: domain.EventTaskInvalid, TaskID: f.ID, Severity: domain.SeverityWarning,
+		Payload: map[string]any{"file": taskFileName(f), "errors": r.Errors, "revision": f.Revision}}.Says(text)
 }
 
 func (a *App) loadTaskFile(f ports.TaskFile) *taskEntry {
@@ -80,17 +103,23 @@ func (a *App) loadTaskFile(f ports.TaskFile) *taskEntry {
 		e.invalid = nil
 		e.warnings = issuesToWarnings(r.Warnings)
 	} else {
+		// Each error names its file, beside the line and column it keeps (FS-001 FR-007).
+		file := taskFileName(f)
+		for i := range r.Errors {
+			r.Errors[i].Text = domain.T("task_file_error", "{{file}}: {{detail}}", "file", file).Nest("detail", r.Errors[i].Text)
+		}
 		e.invalid = r
 		if e.doc.Metadata.ID == "" {
 			// Never valid since it was loaded: keep a skeleton so the dashboard can list it and show the errors.
 			e.doc = domain.TaskDocument{Metadata: domain.TaskMetadata{ID: f.ID, Name: f.ID}}
 			e.doc.Spec.Enabled = boolPtr(false)
 		}
-		text := domain.T("task_file_invalid", "the task file fails validation")
+		w := domain.Warning{Code: domain.WarningExternalEditInvalid,
+			Text: domain.T("task_file_invalid", "the task file {{file}} fails validation", "file", file)}
 		if len(r.Errors) > 0 {
-			text = r.Errors[0].Text
+			w.Text, w.Subject = r.Errors[0].Text, r.Errors[0].Path
 		}
-		e.warnings = []domain.Warning{{Code: domain.WarningExternalEditInvalid, Text: text}}
+		e.warnings = []domain.Warning{w}
 	}
 	return e
 }
@@ -469,9 +498,9 @@ func (a *App) scanTaskFiles() {
 		enabled := ne.doc.IsEnabled()
 		a.mu.Unlock()
 		if invalid != nil {
-			a.emit(domain.Event{Type: domain.EventTaskInvalid, TaskID: f.ID, Severity: domain.SeverityWarning,
-				Payload: map[string]any{"errors": invalid.Errors, "revision": f.Revision}}.Says(domain.T("task_changed_externally_invalid",
-				"the task file was changed outside HarmFlow and fails validation; the last valid definition stays")))
+			a.emit(invalidEvent(f, invalid, domain.T("task_changed_externally_invalid",
+				"the task file {{file}} was changed outside HarmFlow and fails validation; the last valid definition stays",
+				"file", taskFileName(f))))
 			continue
 		}
 		// Disabled in its file, a task drops its waiting firing as one disabled through the API does (D-083).

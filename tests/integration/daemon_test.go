@@ -622,6 +622,43 @@ func taskFiles(t *testing.T, home string) map[string]string {
 	return out
 }
 
+// FS-001 FR-007, AC-009: a task file broken while the daemon is down is named, beside its line, once it restarts.
+func TestRestartNamesTheBrokenFile(t *testing.T) {
+	home := t.TempDir()
+	startDaemon(t, home).stop()
+	broken := "apiVersion: harmflow/v1alpha1\nkind: Task\nmetadata:\n  id: [unclosed\n"
+	if err := os.WriteFile(filepath.Join(home, "tasks", "broken.yaml"), []byte(broken), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d := startDaemon(t, home)
+	var listed map[string]any
+	for _, task := range d.list("/tasks") {
+		if task["id"] == "broken" {
+			listed = task
+		}
+	}
+	warnings, _ := listed["warnings"].([]any)
+	if listed["invalid"] != true || len(warnings) != 1 {
+		t.Fatalf("listed %v", listed)
+	}
+	w := warnings[0].(map[string]any)
+	params, _ := w["params"].(map[string]any)
+	message, _ := w["message"].(string)
+	if w["messageKey"] != "task_file_error" || params["file"] != "broken.yaml" || params["detailKey"] != "yaml_syntax" ||
+		!strings.HasPrefix(message, "broken.yaml: ") || !strings.Contains(message, "line ") {
+		t.Errorf("the warning does not name the file and its line: %v", w)
+	}
+	view := d.call("GET", "/tasks/broken", nil, 200)
+	errs, _ := view["validation"].(map[string]any)["errors"].([]any)
+	if len(errs) != 1 {
+		t.Fatalf("validation %v", view["validation"])
+	}
+	first := errs[0].(map[string]any)
+	if p, _ := first["params"].(map[string]any); p["file"] != "broken.yaml" || first["line"] == nil {
+		t.Errorf("the validation error does not name the file and its line: %v", first)
+	}
+}
+
 type sseEvent struct {
 	ID   int64
 	Type string
