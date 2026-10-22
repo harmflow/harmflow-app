@@ -178,7 +178,9 @@ func (r *run) started() *domain.TaskDocument {
 	return &r.def
 }
 
-// save persists the record, at most every second unless forced.
+// save persists the record, at most every second unless forced. What recovery reads from the record, the work item and
+// the last operation, is saved at once, before the event that logs it, so a crash never leaves the record behind the
+// log (FS-003 FR-010, FR-011).
 func (r *run) save(force bool) {
 	r.saveMu.Lock()
 	defer r.saveMu.Unlock()
@@ -845,6 +847,7 @@ func (r *run) onHarnessEvent(he ports.HarnessEvent) {
 			status = "failed"
 		}
 		a.mu.Lock()
+		recorded := false
 		if i, ok := r.commandIndex[he.ToolID]; ok && i < len(r.x.Commands) {
 			c := &r.x.Commands[i]
 			c.Status = status
@@ -853,9 +856,13 @@ func (r *run) onHarnessEvent(he ports.HarnessEvent) {
 			if !he.IsError {
 				r.lastOperation = trimTo(c.Command, 300)
 				r.x.LastOperation = r.lastOperation
+				recorded = true
 			}
 		}
 		a.mu.Unlock()
+		if recorded {
+			r.save(true)
+		}
 		sev := domain.SeverityInfo
 		text := domain.T("tool_succeeded", "{{tool}} succeeded", "tool", he.Tool)
 		if he.IsError {
@@ -954,6 +961,8 @@ func (r *run) onProgress(p domain.ProgressLine) {
 		}
 		r.x.SetStep(domain.Text{Message: msg})
 		a.mu.Unlock()
+		// The record names the item before the ledger does: recovery counts the interruption from the record.
+		r.save(true)
 		a.trackWorkItem(r.x.TaskID, p.WorkItem, msg, p.Repository, r.x.ID)
 	case domain.EventTestStarted:
 		r.setStatus(domain.StatusTesting, domain.Text{Message: msg})
@@ -970,6 +979,7 @@ func (r *run) onProgress(p domain.ProgressLine) {
 		r.lastOperation = p.Type + " " + p.URL
 		r.x.LastOperation = r.lastOperation
 		a.mu.Unlock()
+		r.save(true) // setStatus saves only the move to publishing, not a later pull request
 		r.setStatus(domain.StatusPublishing, domain.Text{Message: msg})
 	case domain.EventRepositoryUnprotected:
 		// The agent's own words stay as they are; the daemon's text stands in when it wrote none.
@@ -985,6 +995,7 @@ func (r *run) onProgress(p domain.ProgressLine) {
 			r.lastOperation = msg
 			r.x.LastOperation = msg
 			a.mu.Unlock()
+			r.save(true)
 		}
 	default:
 		return

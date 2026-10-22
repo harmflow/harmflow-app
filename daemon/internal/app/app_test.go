@@ -134,12 +134,14 @@ func (f *fakeHarness) holding() bool {
 	return f.held > 0
 }
 
-// fakeParser also reads "USAGE <input tokens>", the usage so far, which is final once the attempt ends well. Any other
-// line is the agent's message, and the last one is what a quota end reports as its final text, as the real adapters do.
+// fakeParser also reads "USAGE <input tokens>", the usage so far, which is final once the attempt ends well, and
+// "CMD <command>", a shell command the session ran to success. Any other line is the agent's message, and the last one
+// is what a quota end reports as its final text, as the real adapters do.
 type fakeParser struct {
 	last     string
 	text     string
 	input    int64
+	tools    int
 	finished func() // the executor calls Finish once the process has exited and its output is drained
 }
 
@@ -156,6 +158,12 @@ func (p *fakeParser) Line(b []byte) []ports.HarnessEvent {
 	if n, ok := strings.CutPrefix(s, "USAGE "); ok {
 		p.input, _ = strconv.ParseInt(n, 10, 64)
 		return []ports.HarnessEvent{{Kind: ports.HarnessUsage, Usage: p.usage(domain.UsagePartial)}}
+	}
+	if cmd, ok := strings.CutPrefix(s, "CMD "); ok {
+		p.tools++
+		id := "tool-" + strconv.Itoa(p.tools)
+		return []ports.HarnessEvent{{Kind: ports.HarnessToolStarted, ToolID: id, Tool: "Bash", Command: cmd},
+			{Kind: ports.HarnessToolDone, ToolID: id, Tool: "Bash"}}
 	}
 	p.text = s
 	return []ports.HarnessEvent{{Kind: ports.HarnessMessage, Message: s}}
@@ -227,7 +235,12 @@ type env struct {
 // newEnv starts an App on fake harnesses; configure sets up the env, its fakes included, before the App starts.
 func newEnv(t *testing.T, configure ...func(*env)) *env {
 	t.Helper()
-	home := t.TempDir()
+	return openEnv(t, t.TempDir(), configure...)
+}
+
+// openEnv starts a daemon over home, which recovers what it finds there; configure is as for newEnv.
+func openEnv(t *testing.T, home string, configure ...func(*env)) *env {
+	t.Helper()
 	builtins := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(builtins, "skills", "harmflow-github-draft-pr"), 0o700)
 	_ = os.WriteFile(filepath.Join(builtins, "skills", "harmflow-github-draft-pr", "SKILL.md"), []byte("---\nname: harmflow-github-draft-pr\ndescription: d\n---\n"), 0o600)
@@ -1847,6 +1860,132 @@ func TestRecoveryMarksInterrupted(t *testing.T) {
 	if list, _ := ctx["interruptedExecutions"].([]any); len(list) != 1 {
 		t.Errorf("context interruptedExecutions: %v", ctx["interruptedExecutions"])
 	}
+}
+
+// FS-003 FR-010, FR-011, BR-002, AC-012, AC-013 (harmflow-app#63): a crash at any moment leaves a record that is not
+// behind the execution's log. The home is copied just before an event is appended, which is what a crash then leaves
+// on disk, and a new daemon recovers the copy: it names the last operation the log recorded, counts the interruption
+// against the item the session selected, and the next session's context carries both.
+func TestRecoveryAfterACrashMatchesTheLog(t *testing.T) {
+	const item = "o/r#7"
+	selected := `{"type":"work_item.selected","workItem":"o/r#7","message":"Fix the crash"}`
+	step := func(message string) string { return `{"type":"step.started","message":"` + message + `"}` }
+	pullRequest := func(n int, message string) string {
+		return fmt.Sprintf(`{"type":"pull_request.created","url":"https://github.com/o/r/pull/%d","number":%d,`+
+			`"workItem":"o/r#7","message":"%s"}`, n, n, message)
+	}
+	// The session's steps: lines appended to progress.jsonl in one write, so one pass reads them all, and a wait until
+	// the execution's log has a text, so the next steps follow what the daemon already took in.
+	progress := func(lines ...string) string { return `printf '%s\n' '` + strings.Join(lines, `' '`) + `' >> "$P"` }
+	logged := func(text string) string { return `until grep -qF '` + text + `' "$L"; do sleep 0.05; done` }
+	for _, tc := range []struct {
+		name  string
+		steps []string
+		crash string // the message of the event the daemon dies before appending
+		want  string // the last operation the log recorded
+	}{
+		{"work item selected", []string{progress(selected, step("Reading the issue"))}, "Reading the issue", ""},
+		{"completed command", []string{progress(selected), logged("Fix the crash"), "echo 'CMD git commit -m x'",
+			"echo 'CMD git push -u origin harmflow/7-x'", "echo 'Pushed the branch'"},
+			"Pushed the branch", "git push -u origin harmflow/7-x"},
+		{"branch", []string{progress(selected), logged("Fix the crash"), progress(`{"type":"workspace.changed",`+
+			`"message":"Created the branch harmflow/7-x","branch":"harmflow/7-x"}`, step("Writing the fix"))},
+			"Writing the fix", "Created the branch harmflow/7-x"},
+		{"later pull request", []string{progress(selected, pullRequest(9, "Opened a draft")), logged("Opened a draft"),
+			progress(pullRequest(10, "Opened another draft"), step("Waiting for review"))},
+			"Waiting for review", "pull_request.created https://github.com/o/r/pull/10"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.create("crashed", "")
+			logs := e.app.d.Paths.Logs
+			e.claude.setScript(func(ports.RunRequest) string {
+				return `P="$HARMFLOW_EXECUTION_DIR/progress.jsonl"; L="` + logs + `/$HARMFLOW_EXECUTION_ID.jsonl"
+` + strings.Join(tc.steps, "\n") + "\nexec sleep 30"
+			})
+			rec, id := e.crashAt("crashed", func(ev domain.Event) bool { return ev.Message == tc.crash })
+
+			x, err := rec.app.GetExecution(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if x.Status != domain.StatusInterrupted || x.WorkItem != item || x.LastOperation != tc.want {
+				t.Errorf("recovered execution: %s, work item %q, last operation %q; want interrupted, %q, %q", x.Status,
+					x.WorkItem, x.LastOperation, item, tc.want)
+			}
+			var got *domain.WorkItem
+			for _, w := range rec.app.Queue().WorkItems {
+				if w.Key == item {
+					got = &w
+				}
+			}
+			if got == nil || got.Status != domain.WorkItemFailed || got.Failures != 1 || got.LastExecutionID != id ||
+				got.LastOperation != tc.want {
+				t.Errorf("recovered work item %+v; want failed with one failure by %s, last operation %q", got, id, tc.want)
+			}
+
+			r, _ := rec.app.RunTask("crashed")
+			next := rec.wait(r.ExecutionID, domain.StatusCompleted)
+			data, err := os.ReadFile(filepath.Join(next.ExecutionDir, "context.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			type interrupted struct {
+				ExecutionID   string `json:"executionId"`
+				WorkItem      string `json:"workItem"`
+				LastOperation string `json:"lastOperation"`
+			}
+			var doc struct {
+				Interrupted []interrupted `json:"interruptedExecutions"`
+			}
+			if err := json.Unmarshal(data, &doc); err != nil {
+				t.Fatal(err)
+			}
+			if want := (interrupted{id, item, tc.want}); len(doc.Interrupted) != 1 || doc.Interrupted[0] != want {
+				t.Errorf("the next context's interruptedExecutions %+v, want [%+v]", doc.Interrupted, want)
+			}
+		})
+	}
+}
+
+// crashAt runs the task and copies the daemon's home just before the first event crash matches is appended, which is
+// what a crash at that moment leaves on disk. It returns a daemon started over the copy, which recovered it, and the
+// execution's id. The first daemon goes on; what follows never reaches the copy.
+func (e *env) crashAt(task string, crash func(domain.Event) bool) (*env, string) {
+	e.t.Helper()
+	home := filepath.Join(e.t.TempDir(), "home")
+	copied := make(chan error, 1)
+	var once sync.Once
+	e.events.setHook(func(ev domain.Event) {
+		if !crash(ev) {
+			return
+		}
+		once.Do(func() {
+			// A record is saved whole or not at all: a save in progress finishes first, and the next waits for the copy.
+			e.app.saveMu.Lock()
+			defer e.app.saveMu.Unlock()
+			copied <- os.CopyFS(home, os.DirFS(e.home))
+		})
+	})
+	r, err := e.app.RunTask(task)
+	if err != nil || r.Outcome != "started" {
+		e.t.Fatalf("run: %v %+v", err, r)
+	}
+	var copyErr error
+	if !e.poll(10*time.Second, func() bool {
+		select {
+		case copyErr = <-copied:
+			return true
+		default:
+			return false
+		}
+	}) {
+		e.t.Fatalf("execution %s never reached the event to crash at", r.ExecutionID)
+	}
+	if copyErr != nil {
+		e.t.Fatalf("copying the home: %v", copyErr)
+	}
+	return openEnv(e.t, home), r.ExecutionID
 }
 
 // D-074: notices follow the task's events and the global level.
