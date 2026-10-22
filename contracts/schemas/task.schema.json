@@ -54,20 +54,20 @@
       }
     },
     "taskType": {
-      "description": "github-issue-implementation takes repositories (FS-006, FS-007); general takes no type parameters (D-060).",
+      "description": "github-issue-implementation takes repositories (FS-006, FS-007); general takes no type parameters (D-060); script runs a program of the user's instead of a harness session (FS-013).",
       "type": "string",
       "enum": [
         "github-issue-implementation",
-        "general"
+        "general",
+        "script"
       ]
     },
     "spec": {
+      "description": "Every type but script needs a prompt and a harness; a script task takes neither, nor agents, skills, or a workspace (FS-013 FR-002).",
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "type",
-        "prompt",
-        "harness"
+        "type"
       ],
       "properties": {
         "enabled": {
@@ -120,9 +120,43 @@
         },
         "githubIssueImplementation": {
           "$ref": "#/$defs/githubIssueImplementation"
+        },
+        "script": {
+          "$ref": "#/$defs/script"
         }
       },
       "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "script"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "script"
+            ],
+            "properties": {
+              "prompt": false,
+              "agents": false,
+              "skills": false,
+              "workspace": false,
+              "harness": false,
+              "githubIssueImplementation": false
+            }
+          },
+          "else": {
+            "required": [
+              "prompt",
+              "harness"
+            ],
+            "properties": {
+              "script": false
+            }
+          }
+        },
         {
           "if": {
             "properties": {
@@ -544,6 +578,98 @@
             }
           }
         }
+      }
+    },
+    "argumentList": {
+      "description": "A program and its arguments, passed as they are: nothing is expanded or split. A program without a slash is looked up on the daemon's PATH.",
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "string",
+          "minLength": 1
+        }
+      ],
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "script": {
+      "description": "Parameters of the script type: either command, started directly with no shell, or inline, a script run through its interpreter, never both (FS-013 FR-003).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "$ref": "#/$defs/argumentList"
+        },
+        "inline": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "interpreter",
+            "source"
+          ],
+          "properties": {
+            "interpreter": {
+              "description": "The interpreter and its arguments; the daemon appends the path of a file in the execution's directory holding the source.",
+              "$ref": "#/$defs/argumentList"
+            },
+            "source": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "workingDirectory": {
+          "description": "Where the program starts; the user's home directory when absent. A path may use ${VARIABLE} references and ~.",
+          "type": "string",
+          "minLength": 1
+        },
+        "environment": {
+          "description": "Variables added to the environment the daemon gives the processes it starts, each replacing one of the same name. Names that start with HARMFLOW_ are HarmFlow's own.",
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+            "not": {
+              "pattern": "^HARMFLOW_"
+            }
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "systems": {
+          "description": "The operating systems the task runs on; every system when absent (FS-013 FR-014).",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "macos",
+              "linux",
+              "windows"
+            ]
+          },
+          "uniqueItems": true,
+          "minItems": 1
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "command"
+          ]
+        },
+        {
+          "required": [
+            "inline"
+          ]
+        }
+      ],
+      "not": {
+        "required": [
+          "command",
+          "inline"
+        ]
       }
     }
   }

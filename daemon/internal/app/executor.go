@@ -44,6 +44,9 @@ type run struct {
 	hasContext     bool   // context.json holds parameters or history the session can use, not only the task's identity
 }
 
+// timeoutUnit is what a task's timeoutMinutes counts; tests shorten it, since a timeout is at least one minute.
+var timeoutUnit = time.Minute
+
 func (a *App) launch(x *domain.Execution, h *runHandle) {
 	a.wg.Add(1)
 	go func() {
@@ -83,7 +86,7 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 
 	eff := def.Effective()
 	now := a.now()
-	timeout := time.Duration(*eff.Spec.Execution.TimeoutMinutes) * time.Minute
+	timeout := time.Duration(*eff.Spec.Execution.TimeoutMinutes) * timeoutUnit
 	deadline := now.Add(timeout)
 	// The timeout runs on real time; the record shows it on the daemon's clock.
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -104,6 +107,14 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 	a.mu.Unlock()
 	if cancelled {
 		r.finish(domain.StatusCancelled, domain.T("cancelled_before_start", "cancelled before it started"))
+		return
+	}
+	if def.IsScript() {
+		// A program of the user's, with no harness to check or fail over to (FS-013).
+		if !r.setStatus(domain.StatusPreparing, domain.T("step_preparing_program", "Preparing the program")) {
+			return
+		}
+		r.finish(r.runScript(deadline))
 		return
 	}
 	// Leave queued before the harness check: the scheduler and cancellation take a queued execution for a waiting firing.

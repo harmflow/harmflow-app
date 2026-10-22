@@ -206,6 +206,7 @@ func (a *App) semanticChecks(r *ValidationResult, doc domain.TaskDocument, mode 
 			r.addWarning("/spec/workspace/path", domain.WarningOther, domain.TextOf(err))
 		}
 	}
+	a.scriptChecks(r, doc)
 	for _, w := range a.policyWarnings(doc) {
 		r.addWarning("/spec/permissions", w.Code, w.Text)
 	}
@@ -265,9 +266,13 @@ func (a *App) missingItems(doc domain.TaskDocument, harness string) []missingIte
 	return out
 }
 
-// policyWarnings names each declared restriction the primary harness cannot enforce (D-068, FS-009 FR-010).
+// policyWarnings names each declared restriction the primary harness, or nothing at all for a script task's program,
+// can enforce (D-068, FS-009 FR-010, FS-013 SEC-002).
 func (a *App) policyWarnings(doc domain.TaskDocument) []domain.Warning {
 	eff := doc.Effective()
+	if doc.IsScript() {
+		return scriptRestrictions(*eff.Spec.Permissions)
+	}
 	ad, ok := a.adapters[eff.Spec.Harness.Preferred.Provider]
 	if !ok {
 		return nil

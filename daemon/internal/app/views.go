@@ -120,6 +120,7 @@ type ExecutionView struct {
 	LastOperation      string                  `json:"lastOperation,omitempty"`
 	LogExpired         bool                    `json:"logExpired"`
 	HarnessSwitches    int                     `json:"harnessSwitches"`
+	Script             *domain.ScriptRun       `json:"script,omitempty"`
 }
 
 func (a *App) GetExecution(id string) (ExecutionView, error) {
@@ -139,7 +140,7 @@ func (a *App) GetExecution(id string) (ExecutionView, error) {
 		TimeoutAt: c.TimeoutAt, DefinitionRevision: c.DefinitionRevision, WorkspacePath: c.WorkspacePath,
 		ExecutionDir: c.ExecutionDir, Attempts: c.Attempts, WorkItems: c.WorkItems, Warnings: c.Warnings,
 		ChangedFiles: c.ChangedFiles, Commands: c.Commands, LastOperation: c.LastOperation, LogExpired: c.LogExpired,
-		HarnessSwitches: c.HarnessSwitches,
+		HarnessSwitches: c.HarnessSwitches, Script: c.Script,
 	}, nil
 }
 
