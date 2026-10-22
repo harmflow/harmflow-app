@@ -15,6 +15,13 @@ type Clock interface {
 	Now() time.Time
 }
 
+// WakeMonitor tells the scheduler when the machine last woke from sleep or hibernation, so a firing due while it was
+// suspended follows the missed-run policy however soon it wakes (FS-002 FR-004). Tests replace it, as they do Clock.
+type WakeMonitor interface {
+	// LastWake is when the machine was last seen awake after a suspension; zero when none was seen.
+	LastWake() time.Time
+}
+
 // TaskFile is one task definition as stored: the raw YAML is kept so comments survive edits from the editor.
 type TaskFile struct {
 	ID       string

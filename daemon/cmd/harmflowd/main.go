@@ -28,6 +28,7 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/secret"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/sysinfo"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/tools"
+	"github.com/harmflow/harmflow-app/daemon/internal/adapters/wake"
 	"github.com/harmflow/harmflow-app/daemon/internal/app"
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
@@ -128,7 +129,7 @@ func run(homeFlag, builtinsFlag string, port int) error {
 		daemonEnv["HARMFLOW_TOKEN_STORE"] = os.Getenv("HARMFLOW_TOKEN_STORE")
 	}
 	a, err := app.New(app.Deps{
-		Paths: paths, Version: Version, Commit: buildCommit(), BuiltAt: buildTime(BuiltAt),
+		Paths: paths, Version: Version, Commit: buildCommit(), BuiltAt: buildTime(BuiltAt), Wake: wake.NewMonitor(),
 		Tasks: tasks, State: state, Executions: execs, Events: events, Validator: validator,
 		Harnesses: []ports.HarnessAdapter{
 			&claudecode.Adapter{Home: userHome, PathEnv: pathEnv, Env: harnessEnv},
