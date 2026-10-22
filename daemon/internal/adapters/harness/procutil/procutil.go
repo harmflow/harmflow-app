@@ -287,7 +287,12 @@ func filepathSplitList(p string) []string {
 	return out
 }
 
-// Output runs a short probe command with a timeout.
+// probeWaitDelay bounds how long a probe's output is still read once the probe has exited or its timeout has ended: a
+// child it started, such as the native binary an npm wrapper runs, can keep the output open long after.
+const probeWaitDelay = time.Second
+
+// Output runs a short probe command with a timeout. The probe's own exit status decides: a child that keeps its output
+// open is cut off after probeWaitDelay, and what was read by then is returned.
 func Output(ctx context.Context, timeout time.Duration, env []string, name string, args ...string) (string, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -299,6 +304,10 @@ func Output(ctx context.Context, timeout time.Duration, env []string, name strin
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
 	cmd.Stdin = nil
+	cmd.WaitDelay = probeWaitDelay
 	err := cmd.Run()
+	if errors.Is(err, exec.ErrWaitDelay) {
+		err = nil // the probe succeeded; only a child it left behind held the output
+	}
 	return out.String(), errb.String(), err
 }
