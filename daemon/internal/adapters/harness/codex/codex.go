@@ -111,28 +111,42 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 				"harness", Name, "feature", "exec "+f))
 		}
 	}
-	if info.VersionSupport == "supported" && compareVersions(info.Version, TestedUpTo) > 0 {
-		info.VersionSupport = "untested_newer"
+	if info.VersionSupport == "supported" {
+		switch {
+		case info.Version == "":
+			// No number to check against the tested range; the help text passed, so it runs with a warning.
+			info.VersionSupport = "unknown"
+		case compareVersions(info.Version, TestedUpTo) > 0:
+			info.VersionSupport = "untested_newer"
+		}
 	}
 	info.Models, info.Efforts, info.CapabilitySource = a.models()
 	info.EnforceableControls = []string{"sandbox_read_only", "sandbox_workspace_write", "network_access", "writable_roots"}
 
-	_, _, err = procutil.Output(ctx, 20*time.Second, a.Env, info.Path, "login", "status")
-	if err == nil {
-		info.Authentication = "valid"
-	} else if _, ok := err.(interface{ ExitCode() int }); ok {
+	// Signed out only when the CLI says so, which it does exiting 1; a probe killed at its timeout, or failing
+	// otherwise, leaves the sign-in unknown.
+	status, statusErr, err := procutil.Output(ctx, 20*time.Second, a.Env, info.Path, "login", "status")
+	switch {
+	case strings.Contains(strings.ToLower(status+statusErr), "not logged in"):
 		info.Authentication = "invalid"
+	case err == nil:
+		info.Authentication = "valid"
 	}
 	if info.Readiness == "not_ready" {
 		return info
 	}
-	if info.Authentication == "invalid" {
+	switch info.Authentication {
+	case "valid":
+		info.Readiness = "ready"
+	case "invalid":
 		info.Readiness = "not_ready"
 		info.SetDiagnostic(domain.T("not_signed_in", "{{name}} is not signed in; run `{{command}}` in a terminal",
 			"name", Name, "command", "codex login"))
-		return info
+	default:
+		// The CLI cannot tell; let the first execution prove it rather than blocking on an unknown.
+		info.Readiness = "ready"
+		info.SetDiagnostic(domain.T("authentication_unverified", "authentication could not be verified"))
 	}
-	info.Readiness = "ready"
 	return info
 }
 

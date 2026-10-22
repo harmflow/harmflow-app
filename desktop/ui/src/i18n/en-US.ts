@@ -327,6 +327,7 @@ export const enUS = {
       "Claude Code does not block network access from shell commands; only its web tools are removed",
     restriction_codex_tool_lists: "Codex has no per-tool allow or deny list; the custom tool lists are not enforced",
     harness_version_untested: "{{harness}} {{version}} is newer than the versions HarmFlow was tested with",
+    harness_version_unknown: "{{harness}} reported no version number, so HarmFlow cannot tell whether it was tested with it",
     repository_unprotected: "{{repository}}: the base branch is not protected against merging without review",
     report_not_json: "report.json is not valid JSON; it was ignored",
     report_schema_invalid: "report.json does not follow its schema ({{path}}: {{detail}}); it was ignored",

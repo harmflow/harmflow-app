@@ -117,8 +117,14 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 				"harness", Name, "feature", f))
 		}
 	}
-	if info.VersionSupport == "supported" && compareVersions(info.Version, TestedUpTo) > 0 {
-		info.VersionSupport = "untested_newer"
+	if info.VersionSupport == "supported" {
+		switch {
+		case info.Version == "":
+			// No number to check against the tested range; the help text passed, so it runs with a warning.
+			info.VersionSupport = "unknown"
+		case compareVersions(info.Version, TestedUpTo) > 0:
+			info.VersionSupport = "untested_newer"
+		}
 	}
 	if m := effortRe.FindStringSubmatch(help); m != nil {
 		info.Efforts = append([]string{domain.DefaultEffort}, splitList(m[1])...)
@@ -131,18 +137,18 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 	info.CapabilitySource = "reported"
 	info.EnforceableControls = []string{"permission_mode", "tool_allowlist", "edit_directories"}
 
-	status, _, err := procutil.Output(ctx, 20*time.Second, a.Env, info.Path, "auth", "status")
+	// Signed out only when the CLI says so, which it does exiting 1; a probe killed at its timeout, or failing
+	// otherwise, leaves the sign-in unknown.
+	status, statusErr, err := procutil.Output(ctx, 20*time.Second, a.Env, info.Path, "auth", "status")
 	var st struct {
 		LoggedIn *bool `json:"loggedIn"`
 	}
-	if err == nil && json.Unmarshal([]byte(strings.TrimSpace(status)), &st) == nil && st.LoggedIn != nil {
-		if *st.LoggedIn {
-			info.Authentication = "valid"
-		} else {
-			info.Authentication = "invalid"
-		}
-	} else if err != nil && strings.Contains(strings.ToLower(status), "not logged in") {
+	reported := json.Unmarshal([]byte(strings.TrimSpace(status)), &st) == nil && st.LoggedIn != nil
+	switch {
+	case reported && !*st.LoggedIn, strings.Contains(strings.ToLower(status+statusErr), "not logged in"):
 		info.Authentication = "invalid"
+	case err == nil && reported:
+		info.Authentication = "valid"
 	}
 	if info.Readiness == "not_ready" {
 		return info

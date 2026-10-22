@@ -333,6 +333,7 @@ export const esES: Resources = {
     restriction_codex_tool_lists:
       "Codex no tiene listas de herramientas permitidas o denegadas; las listas personalizadas no se aplican",
     harness_version_untested: "{{harness}} {{version}} es más reciente que las versiones con las que se probó HarmFlow",
+    harness_version_unknown: "{{harness}} no informó un número de versión, así que HarmFlow no sabe si se probó con ella",
     repository_unprotected: "{{repository}}: la rama base no está protegida contra merges sin revisión",
     report_not_json: "report.json no es un JSON válido; se ignoró",
     report_schema_invalid: "report.json no sigue su schema ({{path}}: {{detail}}); se ignoró",
