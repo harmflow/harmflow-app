@@ -174,6 +174,63 @@ describe("execution detail", () => {
     expect(codex).not.toMatch(/Model(default|high)/);
   });
 
+  it("shows a failover's switch events in its timeline, in order, each with its own tone (FS-005 AC-008)", async () => {
+    // A quota failover's events as the daemon emits them, in the order itest › TestFailoverAcrossHarnesses reads.
+    const failedOver: Execution = { ...completed, id: "exec-failed-over" };
+    const on = { executionId: failedOver.id };
+    await open(
+      failedOver,
+      [
+        event(1, "harness.started", {
+          ...on,
+          harness: "claude-code",
+          attempt: 1,
+          message: "Claude Code 2.1.239 started",
+          messageKey: "harness_started",
+          params: { harness: "Claude Code", version: "2.1.239" },
+        }),
+        event(2, "harness.quota_exhausted", {
+          ...on,
+          harness: "claude-code",
+          attempt: 1,
+          severity: "warning",
+          message: "Claude Code exhausted its quota",
+          messageKey: "harness_quota_exhausted",
+          params: { harness: "Claude Code" },
+        }),
+        event(3, "harness.switched", {
+          ...on,
+          attempt: 1,
+          severity: "warning",
+          message: "switching from Claude Code to Codex",
+          messageKey: "harness_switched",
+          params: { from: "Claude Code", to: "Codex" },
+        }),
+        event(4, "harness.started", {
+          ...on,
+          harness: "codex",
+          attempt: 2,
+          message: "Codex 0.163.0 started",
+          messageKey: "harness_started",
+          params: { harness: "Codex", version: "0.163.0" },
+        }),
+      ],
+      capture(),
+    );
+
+    const items = [...host!.querySelectorAll<HTMLElement>(".tl-item")].map((b) => ({
+      title: b.querySelector(".tl-item__title")?.textContent, // the event's label, and #n from the second attempt on
+      detail: b.querySelector(".tl-item__detail")?.textContent,
+      tone: /tl-item--([a-z]+)/.exec(b.className)?.[1],
+    }));
+    expect(items).toEqual([
+      { title: "Harness started", detail: "Claude Code 2.1.239 started", tone: "violet" },
+      { title: "Harness quota exhausted", detail: "Claude Code exhausted its quota", tone: "warning" },
+      { title: "Switching harness", detail: "switching from Claude Code to Codex", tone: "magenta" },
+      { title: "Harness started#2", detail: "Codex 0.163.0 started", tone: "violet" },
+    ]);
+  });
+
   it("shows the daemon's texts in the interface's language, and the agent's and harness's as they are (FS-012 AC-005)", async () => {
     await i18n.changeLanguage("pt-BR");
     try {
