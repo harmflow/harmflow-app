@@ -62,6 +62,24 @@ func TestTypeParametersAndLocation(t *testing.T) {
 	}
 }
 
+// FS-013 FR-002: the rules of a type apply only to a task that names it, so a task with no type is told its type is
+// missing, and not that its prompt and harness are not allowed.
+func TestTypeRulesNeedTheType(t *testing.T) {
+	v, _ := New()
+	doc, node, _ := ParseYAML([]byte(strings.Replace(valid, "  type: general\n", "", 1)))
+	issues := v.ValidateTask(doc, node)
+	missing := false
+	for _, is := range issues {
+		if is.Key == "schema_false" {
+			t.Errorf("a task with no type got %s at %s", is.Message, is.Path)
+		}
+		missing = missing || (is.Key == "schema_required" && strings.Contains(is.Message, `"type"`))
+	}
+	if !missing {
+		t.Errorf("issues %+v", issues)
+	}
+}
+
 // FS-001 AC-022: notifications cite the schema's event names.
 func TestNotificationEventNames(t *testing.T) {
 	v, _ := New()
