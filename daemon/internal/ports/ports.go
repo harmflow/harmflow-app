@@ -178,6 +178,8 @@ const (
 	HarnessFileChanged HarnessEventKind = "file_changed"
 	HarnessWarning     HarnessEventKind = "warning"
 	HarnessRateLimit   HarnessEventKind = "rate_limit"
+	// HarnessUsage carries the attempt's token use so far, each time the harness reports more.
+	HarnessUsage HarnessEventKind = "usage"
 )
 
 type HarnessEvent struct {
@@ -192,6 +194,7 @@ type HarnessEvent struct {
 	Output    string
 	SessionID string
 	Model     string
+	Usage     *domain.Usage
 }
 
 // OutputParser turns one attempt's stdout lines into events and classifies its end.

@@ -172,6 +172,83 @@ func TestPrepareDeliversBuiltins(t *testing.T) {
 	}
 }
 
+// The Costs tab (harmflow-app#39), on a real Codex 0.163.0 run: one turn.completed carries the attempt's usage, its
+// input_tokens include the cached ones, and the cost is estimated from the table when the attempt ends.
+func TestUsageFromTurnCompleted(t *testing.T) {
+	defer func(old domain.PriceTable) { Prices = old }(Prices)
+	price := domain.Price{Input: 1.25, CacheRead: 0.125, Output: 10}
+	Prices = domain.PriceTable{AsOf: "2026-01-02", Prices: map[string]domain.Price{"gpt-test": price}}
+
+	p, events := replay(t, "usage.jsonl")
+	p.model, p.modelSource = "gpt-test", domain.ModelFromConfig
+	var live []*domain.Usage
+	for _, e := range events {
+		if e.Kind == ports.HarnessUsage {
+			live = append(live, e.Usage)
+		}
+	}
+	want := domain.Tokens{Input: 160035 - 135680, CacheRead: 135680, Output: 1194}
+	if len(live) != 1 || live[0].Models[0].Tokens != want || live[0].CostUSD != nil {
+		t.Fatalf("live usage: %+v", live)
+	}
+	u := p.Finish(0, "", false, false).Usage
+	if u.Status != domain.UsageReported || u.ModelSource != domain.ModelFromConfig || u.Models[0].Model != "gpt-test" {
+		t.Fatalf("usage: %+v", u)
+	}
+	if u.CostSource != domain.CostEstimated || u.CostUSD == nil || *u.CostUSD != price.Cost(want) || u.PricesAsOf != "2026-01-02" {
+		t.Errorf("cost: %+v", u)
+	}
+
+	// No model named anywhere: the tokens, without a cost.
+	p.model, p.modelSource = "", ""
+	if u := p.Finish(0, "", false, false).Usage; u.CostSource != domain.CostUnpriced || u.CostUSD != nil || u.Models[0].Tokens != want {
+		t.Errorf("unpriced: %+v", u)
+	}
+	// Cache writes, which GPT-5.6 and later bill, are counted out of the input that includes them.
+	w := &parser{model: "gpt-test", modelSource: domain.ModelFromTask}
+	w.Line([]byte(`{"type":"turn.completed","usage":{"input_tokens":5000,"cached_input_tokens":3000,"cache_write_input_tokens":1500,"output_tokens":20}}`))
+	if got := w.Finish(0, "", false, false).Usage.Models[0].Tokens; got != (domain.Tokens{Input: 500, CacheWriteShort: 1500, CacheRead: 3000, Output: 20}) {
+		t.Errorf("cache writes: %+v", got)
+	}
+	// A turn that failed reported no usage.
+	q, _ := replay(t, "quota.jsonl")
+	if u := q.Finish(1, "", false, false).Usage; u.Status != domain.UsageNotReported {
+		t.Errorf("quota: %+v", u)
+	}
+}
+
+// A task left at the default model is priced as the model Codex's configuration sets, and says so.
+func TestPrepareNamesTheModel(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	a := &Adapter{Home: t.TempDir()}
+	info := ports.HarnessInfo{Path: "/bin/codex", Features: map[string]bool{}}
+	perm := *domain.TaskDocument{}.Effective().Spec.Permissions
+	model := func(m string) (string, string) {
+		t.Helper()
+		_, out, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, Model: m})
+		if err != nil {
+			t.Fatal(err)
+		}
+		p := out.(*parser)
+		return p.model, p.modelSource
+	}
+	if m, src := model("default"); m != "" || src != "" {
+		t.Errorf("no configuration: %q from %q", m, src)
+	}
+	_ = os.WriteFile(filepath.Join(home, "config.toml"), []byte("# mine\nmodel = \"gpt-conf\" # chosen\n\n[profiles.fast]\nmodel = \"gpt-fast\"\n"), 0o600)
+	if m, src := model("default"); m != "gpt-conf" || src != domain.ModelFromConfig {
+		t.Errorf("configured: %q from %q", m, src)
+	}
+	if m, src := model("gpt-task"); m != "gpt-task" || src != domain.ModelFromTask {
+		t.Errorf("the task's: %q from %q", m, src)
+	}
+	_ = os.WriteFile(filepath.Join(home, "config.toml"), []byte("[profiles.fast]\nmodel = 'gpt-fast'\n"), 0o600)
+	if m, _ := model(""); m != "" {
+		t.Errorf("a profile's model was read as the default: %q", m)
+	}
+}
+
 func TestModelsFromCache(t *testing.T) {
 	home := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(home, ".codex"), 0o700)

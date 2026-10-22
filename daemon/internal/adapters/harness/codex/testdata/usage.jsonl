@@ -1,0 +1,15 @@
+{"type":"thread.started","thread_id":"01a15b1f-0000-7000-8000-000000000000"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_3","type":"agent_message","text":"Created hello.md."}}
+{"type":"item.started","item":{"id":"item_4","type":"command_execution","command":"/bin/zsh -lc 'ls -la'","status":"in_progress","exit_code":null,"aggregated_output":""}}
+{"type":"item.completed","item":{"id":"item_4","type":"command_execution","command":"/bin/zsh -lc 'ls -la'","status":"completed","exit_code":0,"aggregated_output":"total 0\n"}}
+{"type":"item.started","item":{"id":"item_5","type":"file_change","status":"in_progress","changes":[{"path":"/work/hello.md","kind":"add"}]}}
+{"type":"item.completed","item":{"id":"item_5","type":"file_change","status":"completed","changes":[{"path":"/work/hello.md","kind":"add"}]}}
+{"type":"item.started","item":{"id":"item_6","type":"command_execution","command":"/bin/zsh -lc 'ls -la'","status":"in_progress","exit_code":null,"aggregated_output":""}}
+{"type":"item.completed","item":{"id":"item_6","type":"command_execution","command":"/bin/zsh -lc 'ls -la'","status":"completed","exit_code":0,"aggregated_output":"total 0\n"}}
+{"type":"item.started","item":{"id":"item_7","type":"command_execution","command":"/bin/zsh -lc 'ls -la'","status":"in_progress","exit_code":null,"aggregated_output":""}}
+{"type":"item.completed","item":{"id":"item_7","type":"command_execution","command":"/bin/zsh -lc 'ls -la'","status":"completed","exit_code":0,"aggregated_output":"total 0\n"}}
+{"type":"item.started","item":{"id":"item_8","type":"file_change","status":"in_progress","changes":[{"path":"/work/hello.md","kind":"update"}]}}
+{"type":"item.completed","item":{"id":"item_8","type":"file_change","status":"completed","changes":[{"path":"/work/hello.md","kind":"update"}]}}
+{"type":"item.completed","item":{"id":"item_9","type":"agent_message","text":"Created hello.md."}}
+{"type":"turn.completed","usage":{"input_tokens":160035,"cached_input_tokens":135680,"cache_write_input_tokens":0,"output_tokens":1194,"reasoning_output_tokens":244}}

@@ -1864,6 +1864,331 @@ li:last-child .tl-item__rail::before {
   margin-bottom: var(--hf-space-2);
 }
 
+/* Costs tab: the summary and the receipt (harmflow-app#39). */
+
+.costs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--hf-space-4);
+}
+
+.costs .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.costs h4 {
+  margin: 0;
+  font-size: var(--hf-font-size-sm);
+}
+
+.costs__tiles {
+  display: grid;
+  grid-template-columns: 1.4fr repeat(3, 1fr);
+  gap: var(--hf-space-3);
+}
+
+.costs-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: var(--hf-space-3) var(--hf-space-4);
+  border: 1px solid var(--hf-color-border);
+  border-radius: var(--hf-radius-md);
+  background: var(--hf-color-surface-raised);
+}
+
+.costs-tile--hero {
+  border-color: rgba(var(--hf-rgb-cyan), 0.45);
+  box-shadow: inset 0 0 24px rgba(var(--hf-rgb-cyan), 0.07);
+}
+
+.costs-tile__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--hf-color-text-muted);
+  font-size: var(--hf-font-size-xs);
+}
+
+.costs-tile__value {
+  font-family: var(--hf-font-mono);
+  font-size: var(--hf-font-size-2xl);
+  font-variant-numeric: tabular-nums;
+}
+
+.costs-tile--hero .costs-tile__value {
+  color: var(--hf-color-cyan);
+  font-size: var(--hf-font-size-3xl);
+}
+
+.costs-tile__plus,
+.costs-flag {
+  color: var(--hf-color-warning);
+}
+
+.costs-tile__plus {
+  margin-left: 6px;
+  font-size: var(--hf-font-size-md);
+}
+
+.costs-tile__sub {
+  color: var(--hf-color-text-faint);
+  font-size: var(--hf-font-size-xs);
+}
+
+.costs-live {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--hf-color-cyan);
+  box-shadow: 0 0 8px var(--hf-color-cyan-glow);
+  animation: costs-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes costs-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.costs-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--hf-space-2);
+}
+
+.costs-block__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.costs-seg {
+  display: inline-flex;
+  border: 1px solid var(--hf-color-border);
+  border-radius: var(--hf-radius-pill);
+  overflow: hidden;
+}
+
+.costs-seg button {
+  padding: 3px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--hf-color-text-muted);
+  font-size: var(--hf-font-size-xs);
+  cursor: pointer;
+}
+
+.costs-seg button.is-on {
+  background: var(--hf-color-cyan-soft);
+  color: var(--hf-color-cyan);
+}
+
+.costs-seg button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.costs-mix {
+  display: flex;
+  gap: 2px;
+  height: 14px;
+  border-radius: var(--hf-radius-sm);
+  overflow: hidden;
+}
+
+.costs-mix__seg {
+  flex-basis: 0;
+  min-width: 3px;
+}
+
+.costs-c--input {
+  background: var(--hf-color-blue);
+}
+
+.costs-c--cacheWrite {
+  background: var(--hf-color-violet);
+}
+
+.costs-c--cacheRead {
+  background: rgba(var(--hf-rgb-cyan), 0.55);
+}
+
+.costs-c--output {
+  background: var(--hf-color-magenta);
+}
+
+.costs-dot {
+  display: inline-block;
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+
+.costs-legend {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--hf-space-2) var(--hf-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--hf-font-size-xs);
+}
+
+.costs-legend li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.costs-legend__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.costs-legend__name {
+  flex: 1;
+}
+
+.costs-legend__share {
+  color: var(--hf-color-text);
+}
+
+.costs-legend li > .mono {
+  padding-left: 17px;
+}
+
+.costs-table td .chip {
+  margin-right: 4px;
+}
+
+.costs-table__total td {
+  border-top: 1px solid var(--hf-color-border-strong);
+  font-weight: 600;
+}
+
+.costs-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: var(--hf-color-text-faint);
+  font-size: var(--hf-font-size-xs);
+}
+
+.costs-note svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.costs-receipt-view {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--hf-space-2);
+}
+
+.costs-receipt-view__back {
+  width: min(640px, 100%);
+}
+
+.costs-receipt {
+  display: flex;
+  flex-direction: column;
+  gap: var(--hf-space-3);
+  width: min(640px, 100%);
+  padding: var(--hf-space-4) var(--hf-space-5);
+  border: 1px dashed var(--hf-color-border-strong);
+  border-radius: var(--hf-radius-md);
+  background: var(--hf-color-surface-sunken);
+  font-family: var(--hf-font-mono);
+  font-size: var(--hf-font-size-sm);
+}
+
+.costs-receipt__head {
+  display: flex;
+  align-items: center;
+  gap: var(--hf-space-3);
+  padding-bottom: var(--hf-space-2);
+  border-bottom: 1px dashed var(--hf-color-border);
+}
+
+.costs-receipt__brand {
+  flex: 1;
+  color: var(--hf-color-cyan);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.costs-receipt__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--hf-space-2);
+}
+
+.costs-receipt__attempt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--hf-space-3);
+  font-family: var(--hf-font-sans);
+}
+
+.costs-receipt__attempt > .mono {
+  color: var(--hf-color-text-muted);
+  font-size: var(--hf-font-size-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.costs-receipt__lines {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.costs-receipt__lines td {
+  padding: 3px 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.costs-receipt__model td {
+  padding-top: 6px;
+  font-size: var(--hf-font-size-xs);
+}
+
+.costs-receipt__op {
+  width: 22px;
+  color: var(--hf-color-text-faint);
+  text-align: center;
+}
+
+.costs-receipt__subtotal td {
+  padding-top: 6px;
+  border-top: 1px dotted var(--hf-color-border);
+}
+
+.costs-receipt__total {
+  display: flex;
+  justify-content: space-between;
+  padding-top: var(--hf-space-2);
+  border-top: 3px double var(--hf-color-border-strong);
+  font-size: var(--hf-font-size-lg);
+}
+
+.costs-receipt__total .mono {
+  color: var(--hf-color-cyan);
+}
+
+.costs-receipt .costs-note {
+  font-family: var(--hf-font-sans);
+}
+
 .kv {
   display: grid;
   gap: 4px;

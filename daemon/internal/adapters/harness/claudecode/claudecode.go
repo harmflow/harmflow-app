@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -368,28 +369,74 @@ type toolUse struct {
 type parser struct {
 	tools      map[string]toolUse
 	sessionID  string
+	model      string // the init line's model, the session's main one
 	result     *resultLine
 	rateStatus string
 	rateType   string
 	resetsAt   int64
 	lastText   string
+	messages   map[string]messageUsage // the latest usage of each assistant message, by message id
+	order      []string
 }
 
 type resultLine struct {
-	IsError bool   `json:"is_error"`
-	Subtype string `json:"subtype"`
-	Result  string `json:"result"`
+	IsError      bool
+	Subtype      string
+	Result       string
+	TotalCostUSD *float64
+	Usage        *apiUsage
+	ModelUsage   map[string]modelUsage
+}
+
+// apiUsage is the API's usage of one message, or of the session on the result line.
+type apiUsage struct {
+	InputTokens              int64 `json:"input_tokens"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+	OutputTokens             int64 `json:"output_tokens"`
+	CacheCreation            *struct {
+		Ephemeral5m int64 `json:"ephemeral_5m_input_tokens"`
+		Ephemeral1h int64 `json:"ephemeral_1h_input_tokens"`
+	} `json:"cache_creation"`
+}
+
+// tokens are the usage's input and cache counts. Cache writes the CLI does not split by lifetime are counted as
+// 5-minute writes, the API's default. The output is left out: a message's output count is provisional.
+func (u apiUsage) tokens() domain.Tokens {
+	t := domain.Tokens{Input: u.InputTokens, CacheRead: u.CacheReadInputTokens}
+	if u.CacheCreation != nil {
+		t.CacheWriteLong = u.CacheCreation.Ephemeral1h
+	}
+	t.CacheWriteShort = max(0, u.CacheCreationInputTokens-t.CacheWriteLong)
+	return t
+}
+
+// modelUsage is the result line's complete count for one model, calls the messages never show included.
+type modelUsage struct {
+	InputTokens              int64    `json:"inputTokens"`
+	OutputTokens             int64    `json:"outputTokens"`
+	CacheReadInputTokens     int64    `json:"cacheReadInputTokens"`
+	CacheCreationInputTokens int64    `json:"cacheCreationInputTokens"`
+	CostUSD                  *float64 `json:"costUSD"`
+}
+
+type messageUsage struct {
+	model  string
+	tokens domain.Tokens
 }
 
 type streamLine struct {
-	Type      string          `json:"type"`
-	Subtype   string          `json:"subtype"`
-	SessionID string          `json:"session_id"`
-	Model     string          `json:"model"`
-	Message   json.RawMessage `json:"message"`
-	IsError   bool            `json:"is_error"`
-	Result    string          `json:"result"`
-	RateLimit *struct {
+	Type         string                `json:"type"`
+	Subtype      string                `json:"subtype"`
+	SessionID    string                `json:"session_id"`
+	Model        string                `json:"model"`
+	Message      json.RawMessage       `json:"message"`
+	IsError      bool                  `json:"is_error"`
+	Result       string                `json:"result"`
+	TotalCostUSD *float64              `json:"total_cost_usd"`
+	Usage        *apiUsage             `json:"usage"`
+	ModelUsage   map[string]modelUsage `json:"modelUsage"`
+	RateLimit    *struct {
 		Status        string `json:"status"`
 		ResetsAt      int64  `json:"resetsAt"`
 		RateLimitType string `json:"rateLimitType"`
@@ -420,14 +467,21 @@ func (p *parser) Line(line []byte) []ports.HarnessEvent {
 	case "system":
 		if sl.Subtype == "init" {
 			p.sessionID = sl.SessionID
+			p.model = sl.Model
 			return []ports.HarnessEvent{{Kind: ports.HarnessStarted, SessionID: sl.SessionID, Model: sl.Model}}
 		}
 	case "assistant":
 		var msg struct {
+			ID      string         `json:"id"`
+			Model   string         `json:"model"`
+			Usage   *apiUsage      `json:"usage"`
 			Content []contentBlock `json:"content"`
 		}
 		_ = json.Unmarshal(sl.Message, &msg)
 		var out []ports.HarnessEvent
+		if p.countMessage(msg.ID, msg.Model, msg.Usage) {
+			out = append(out, ports.HarnessEvent{Kind: ports.HarnessUsage, Usage: p.liveUsage()})
+		}
 		for _, c := range msg.Content {
 			switch c.Type {
 			case "text":
@@ -489,12 +543,104 @@ func (p *parser) Line(line []byte) []ports.HarnessEvent {
 			}
 		}
 	case "result":
-		p.result = &resultLine{IsError: sl.IsError, Subtype: sl.Subtype, Result: sl.Result}
+		p.result = &resultLine{IsError: sl.IsError, Subtype: sl.Subtype, Result: sl.Result, TotalCostUSD: sl.TotalCostUSD,
+			Usage: sl.Usage, ModelUsage: sl.ModelUsage}
 		if sl.SessionID != "" {
 			p.sessionID = sl.SessionID
 		}
 	}
 	return nil
+}
+
+// countMessage keeps a message's usage once: the CLI repeats it on every content-block line of the message, so
+// summing per line would count its input and cache tokens two or three times. It reports whether the counts changed.
+func (p *parser) countMessage(id, model string, u *apiUsage) bool {
+	if id == "" || u == nil {
+		return false
+	}
+	if p.messages == nil {
+		p.messages = map[string]messageUsage{}
+	}
+	next := messageUsage{model: firstNonEmpty(model, p.model), tokens: u.tokens()}
+	prev, seen := p.messages[id]
+	if seen && prev == next {
+		return false
+	}
+	if !seen {
+		p.order = append(p.order, id)
+	}
+	p.messages[id] = next
+	return true
+}
+
+// liveUsage is the input and cache tokens of the messages so far, by model: partial until the result line settles
+// the output, or not reported when no message carried usage.
+func (p *parser) liveUsage() *domain.Usage {
+	if len(p.order) == 0 {
+		return domain.NotReported()
+	}
+	u := &domain.Usage{Status: domain.UsagePartial, ModelSource: domain.ModelFromHarness, Models: []domain.ModelUsage{}}
+	index := map[string]int{}
+	for _, id := range p.order {
+		m := p.messages[id]
+		i, ok := index[m.model]
+		if !ok {
+			i = len(u.Models)
+			index[m.model] = i
+			u.Models = append(u.Models, domain.ModelUsage{Model: m.model})
+		}
+		u.Models[i].Tokens = u.Models[i].Tokens.Add(m.tokens)
+	}
+	u.SortModels(p.model)
+	return u
+}
+
+// usage is the attempt's final count: the result line's modelUsage, keyed by the full model id, with the cost the CLI
+// reported. A result line that counts nothing, as an error before any call prints, is no final count: the messages'
+// partial counts stand, or none.
+func (p *parser) usage() *domain.Usage {
+	r := p.result
+	if r == nil || (len(r.ModelUsage) == 0 && (r.Usage == nil || r.Usage.tokens() == (domain.Tokens{}) && r.Usage.OutputTokens == 0)) {
+		return p.liveUsage()
+	}
+	u := &domain.Usage{Status: domain.UsageReported, ModelSource: domain.ModelFromHarness, Models: []domain.ModelUsage{}}
+	if len(r.ModelUsage) > 0 {
+		long := p.longCacheShare()
+		for id, m := range r.ModelUsage {
+			w1h := int64(math.Round(float64(m.CacheCreationInputTokens) * long))
+			u.Models = append(u.Models, domain.ModelUsage{Model: id, CostUSD: m.CostUSD, Tokens: domain.Tokens{
+				Input: m.InputTokens, CacheWriteShort: m.CacheCreationInputTokens - w1h, CacheWriteLong: w1h,
+				CacheRead: m.CacheReadInputTokens, Output: m.OutputTokens}})
+		}
+	} else {
+		t := r.Usage.tokens()
+		t.Output = r.Usage.OutputTokens
+		u.Models = append(u.Models, domain.ModelUsage{Model: p.model, Tokens: t})
+	}
+	u.SortModels(p.model)
+	if r.TotalCostUSD != nil {
+		u.CostSource, u.CostUSD = domain.CostReported, r.TotalCostUSD
+	}
+	u.ApplyPrices(Prices)
+	return u
+}
+
+// longCacheShare is the share of cache writes at the 1-hour lifetime. modelUsage does not split them, so each model's
+// writes are apportioned by the result line's split, or the messages' when it has none.
+func (p *parser) longCacheShare() float64 {
+	var w5, w1 int64
+	if u := p.result.Usage; u != nil && u.CacheCreation != nil {
+		w5, w1 = u.CacheCreation.Ephemeral5m, u.CacheCreation.Ephemeral1h
+	}
+	if w5+w1 == 0 {
+		for _, m := range p.messages {
+			w5, w1 = w5+m.tokens.CacheWriteShort, w1+m.tokens.CacheWriteLong
+		}
+	}
+	if w5+w1 == 0 {
+		return 0
+	}
+	return float64(w1) / float64(w5+w1)
 }
 
 func resultText(raw json.RawMessage) string {
@@ -524,7 +670,7 @@ var patterns = classify.Patterns{
 }
 
 func (p *parser) Finish(exitCode int, stderrTail string, timedOut, cancelled bool) domain.AttemptEnd {
-	end := domain.AttemptEnd{ExitCode: exitCode, SessionID: p.sessionID, FinalText: p.lastText}
+	end := domain.AttemptEnd{ExitCode: exitCode, SessionID: p.sessionID, FinalText: p.lastText, Usage: p.usage()}
 	switch {
 	case cancelled:
 		end.Class, end.Error = domain.ClassCancelled, domain.T("execution_cancelled", "cancelled")

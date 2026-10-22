@@ -1140,6 +1140,68 @@ components:
         reason: { type: string, description: "Why the attempt started — first, failover, rate-limit retry — in en-US." }
         reasonKey: { $ref: "#/components/schemas/MessageKey" }
         reasonParams: { $ref: "#/components/schemas/MessageParams" }
+        usage: { $ref: "#/components/schemas/AttemptUsage" }
+
+    AttemptUsage:
+      type: object
+      description: >-
+        What the harness reported of the attempt's token use: the count so far while it runs, the final one when it ends.
+        The cost is stamped when the attempt ends — the harness's own figure, or an estimate from the adapter's dated table
+        of API list prices — so a later table never reprices it. Numbers and enums only; the desktop words them (D-099).
+        Absent when the attempt started no harness process; older records have none.
+      required: [status, models]
+      properties:
+        status:
+          type: string
+          enum: [reported, partial, not_reported]
+          description: >-
+            reported: the harness's final count. partial: the count so far, without the harness's final line, so output
+            tokens are unknown and there is no cost. not_reported: the harness reported no usage, which is not zero.
+        modelSource:
+          type: string
+          enum: [harness, task, config]
+          description: Where the model was named — the harness's output, the task, or the harness's configuration for a task left at the default.
+        models: { type: array, items: { $ref: "#/components/schemas/ModelUsage" } }
+        costSource:
+          type: string
+          enum: [reported, estimated, unpriced]
+          description: Set on a reported usage. reported — printed by the harness; estimated — tokens at the price table; unpriced — the model is unknown or has no price.
+        costUsd: { type: number, description: "The attempt's cost in USD, when costSource is reported or estimated." }
+        pricesAsOf: { type: string, format: date, description: "The date of the price table the attempt ended with." }
+
+    ModelUsage:
+      type: object
+      required: [tokens]
+      properties:
+        model: { type: string, description: "The full model id; absent when nothing names it." }
+        tokens: { $ref: "#/components/schemas/TokenCounts" }
+        price: { $ref: "#/components/schemas/TokenPrice" }
+        costUsd: { type: number, description: "This model's cost in USD, reported by the harness or estimated from price." }
+
+    TokenCounts:
+      type: object
+      description: >-
+        Tokens by class. input excludes the tokens written to and read from the cache. cacheWriteShort is written at the
+        provider's default cache lifetime (Anthropic 5 minutes, OpenAI 30 minutes), cacheWriteLong at its extended one
+        (Anthropic 1 hour, OpenAI 12 hours).
+      required: [input, cacheWriteShort, cacheWriteLong, cacheRead, output]
+      properties:
+        input: { type: integer, format: int64 }
+        cacheWriteShort: { type: integer, format: int64 }
+        cacheWriteLong: { type: integer, format: int64 }
+        cacheRead: { type: integer, format: int64 }
+        output: { type: integer, format: int64 }
+
+    TokenPrice:
+      type: object
+      description: A model's API list price by token class, in USD per million tokens.
+      required: [input, cacheWriteShort, cacheWriteLong, cacheRead, output]
+      properties:
+        input: { type: number }
+        cacheWriteShort: { type: number }
+        cacheWriteLong: { type: number }
+        cacheRead: { type: number }
+        output: { type: number }
 
     WorkItemResult:
       type: object

@@ -27,6 +27,7 @@ type AttemptEnd struct {
 	ExitCode   int
 	SessionID  string
 	FinalText  string // the agent's last message, carried into the next attempt's summary
+	Usage      *Usage // the attempt's token use, priced at the adapter's table; nil when no process ran
 }
 
 // Action is what the executor does after an attempt.

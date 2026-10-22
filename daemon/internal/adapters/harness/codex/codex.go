@@ -299,7 +299,35 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 	}
 	inv := ports.Invocation{Path: info.Path, Args: args, Env: req.Env, Dir: req.WorkDir, Stdin: prompt,
 		Restrictions: restrictions}
-	return inv, &parser{}, nil
+	p := &parser{model: req.Model, modelSource: domain.ModelFromTask}
+	if req.Model == "" || req.Model == domain.DefaultModel {
+		// Codex's output never names its model: a task left at the default runs the one its configuration sets.
+		p.model, p.modelSource = a.configModel(), domain.ModelFromConfig
+		if p.model == "" {
+			p.modelSource = ""
+		}
+	}
+	return inv, p, nil
+}
+
+var configModelRe = regexp.MustCompile(`^\s*model\s*=\s*(?:"([^"]*)"|'([^']*)')`)
+
+// configModel is the top-level `model` of $CODEX_HOME/config.toml, the model Codex runs when none is asked for; the
+// keys of a table, such as a profile's, are not read.
+func (a *Adapter) configModel() string {
+	data, err := os.ReadFile(filepath.Join(a.codexHome(), "config.toml"))
+	if err != nil {
+		return ""
+	}
+	for _, l := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), "[") {
+			return ""
+		}
+		if m := configModelRe.FindStringSubmatch(l); m != nil {
+			return m[1] + m[2]
+		}
+	}
+	return ""
 }
 
 // deliverBuiltins copies the built-in skills, and the built-in agents other than the main one (whose body the
@@ -371,10 +399,24 @@ func (a *Adapter) instructions(req ports.RunRequest) (string, error) {
 }
 
 type parser struct {
-	sessionID string
-	completed bool
-	failure   string
-	lastText  string
+	sessionID   string
+	completed   bool
+	failure     string
+	lastText    string
+	model       string // the model that prices the attempt, empty when nothing names it
+	modelSource string
+	reported    bool // a turn reported its usage
+	tokens      domain.Tokens
+}
+
+// turnUsage is a turn's usage. As in OpenAI's API, input_tokens include the tokens read from and written to the cache,
+// so the plain input is what remains; output_tokens include the reasoning tokens, which bill as output. Codex does not
+// say how long its writes live: they are priced at the default, 30-minute lifetime.
+type turnUsage struct {
+	InputTokens           int64 `json:"input_tokens"`
+	CachedInputTokens     int64 `json:"cached_input_tokens"`
+	CacheWriteInputTokens int64 `json:"cache_write_input_tokens"`
+	OutputTokens          int64 `json:"output_tokens"`
 }
 
 type item struct {
@@ -396,10 +438,11 @@ type item struct {
 }
 
 type line struct {
-	Type     string `json:"type"`
-	ThreadID string `json:"thread_id"`
-	Item     *item  `json:"item"`
-	Message  string `json:"message"`
+	Type     string     `json:"type"`
+	ThreadID string     `json:"thread_id"`
+	Item     *item      `json:"item"`
+	Message  string     `json:"message"`
+	Usage    *turnUsage `json:"usage"`
 	Error    *struct {
 		Message string `json:"message"`
 	} `json:"error"`
@@ -419,6 +462,13 @@ func (p *parser) Line(raw []byte) []ports.HarnessEvent {
 		return []ports.HarnessEvent{{Kind: ports.HarnessStarted, SessionID: l.ThreadID}}
 	case "turn.completed":
 		p.completed = true
+		// One turn per `codex exec`: its usage arrives once, at the end of the attempt.
+		if u := l.Usage; u != nil {
+			p.reported = true
+			p.tokens = p.tokens.Add(domain.Tokens{Input: max(0, u.InputTokens-u.CachedInputTokens-u.CacheWriteInputTokens),
+				CacheWriteShort: u.CacheWriteInputTokens, CacheRead: u.CachedInputTokens, Output: u.OutputTokens})
+			return []ports.HarnessEvent{{Kind: ports.HarnessUsage, Usage: p.usage(false)}}
+		}
 	case "turn.failed":
 		if l.Error != nil {
 			p.failure = l.Error.Message
@@ -499,8 +549,21 @@ var patterns = classify.Patterns{
 	Network:     regexp.MustCompile(`(?i)(stream disconnected|error sending request|connection (refused|reset)|dns error|timed out connecting|network)`),
 }
 
+// usage is the turns' tokens, priced at the table once the attempt ends.
+func (p *parser) usage(ended bool) *domain.Usage {
+	if !p.reported {
+		return domain.NotReported()
+	}
+	u := &domain.Usage{Status: domain.UsageReported, ModelSource: p.modelSource,
+		Models: []domain.ModelUsage{{Model: p.model, Tokens: p.tokens}}}
+	if ended {
+		u.ApplyPrices(Prices)
+	}
+	return u
+}
+
 func (p *parser) Finish(exitCode int, stderrTail string, timedOut, cancelled bool) domain.AttemptEnd {
-	end := domain.AttemptEnd{ExitCode: exitCode, SessionID: p.sessionID, FinalText: p.lastText}
+	end := domain.AttemptEnd{ExitCode: exitCode, SessionID: p.sessionID, FinalText: p.lastText, Usage: p.usage(true)}
 	switch {
 	case cancelled:
 		end.Class, end.Error = domain.ClassCancelled, domain.T("execution_cancelled", "cancelled")
