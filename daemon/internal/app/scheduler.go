@@ -120,9 +120,12 @@ type dueFiring struct {
 	skip         bool
 }
 
-// Tick fires every due task. A firing later than MisfireAfter is a misfire — the machine slept, was off, or the
-// daemon was down — and all misfires coalesce into one catch-up or are skipped, per the task's policy (D-071).
+// Tick fires every due task. A firing scheduled while the daemon was unavailable is a misfire, however late it is;
+// so is one later than MisfireAfter. All misfires coalesce into one catch-up or are skipped, per the task's policy
+// (D-071).
 func (a *App) Tick() {
+	a.tickMu.Lock()
+	defer a.tickMu.Unlock()
 	now := a.now()
 	var due []dueFiring
 	a.mu.Lock()
@@ -149,7 +152,7 @@ func (a *App) Tick() {
 		fired := now
 		s.LastFiredAt = &fired
 		f := dueFiring{taskID: id, trigger: domain.TriggerSchedule, scheduledFor: scheduled}
-		if now.Sub(scheduled) > a.d.MisfireAfter {
+		if scheduled.Before(a.unavailableUntil) || now.Sub(scheduled) > a.d.MisfireAfter {
 			f.missed = countMissed(rule, scheduled, now)
 			f.trigger = domain.TriggerCatchUp
 			f.skip = e.doc.Effective().Spec.Schedule.MissedRun.Policy == domain.MissedRunSkip

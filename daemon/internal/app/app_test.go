@@ -283,6 +283,7 @@ type env struct {
 	codex  *fakeHarness
 	events *hookedEvents
 	home   string
+	paths  Paths
 }
 
 // newEnv starts an App on fake harnesses; configure sets up the env, its fakes included, before the App starts.
@@ -298,22 +299,30 @@ func openEnv(t *testing.T, home string, configure ...func(*env)) *env {
 	_ = os.MkdirAll(filepath.Join(builtins, "skills", "harmflow-github-draft-pr"), 0o700)
 	_ = os.WriteFile(filepath.Join(builtins, "skills", "harmflow-github-draft-pr", "SKILL.md"), []byte("---\nname: harmflow-github-draft-pr\ndescription: d\n---\n"), 0o600)
 	_ = os.MkdirAll(filepath.Join(builtins, "agents"), 0o700)
-	paths := NewPaths(home, t.TempDir(), builtins)
-	tasks, _ := fsstore.NewTasks(paths.Tasks)
-	state, _ := fsstore.NewState(paths.State)
-	execs, _ := fsstore.NewExecutions(paths.Executions)
-	clock := &fakeClock{now: time.Date(2026, 10, 20, 8, 0, 0, 0, time.UTC)}
-	events, _ := eventlog.New(paths.Logs, time.Now)
+	e := &env{t: t, clock: &fakeClock{now: time.Date(2026, 10, 20, 8, 0, 0, 0, time.UTC)}, home: home,
+		paths: NewPaths(home, t.TempDir(), builtins), claude: &fakeHarness{id: domain.HarnessClaudeCode},
+		codex: &fakeHarness{id: domain.HarnessCodex}}
+	e.start(t, configure...)
+	return e
+}
+
+// start runs a new App on the env's data directory, with adapters of its own as a new daemon process has; configure
+// runs once they exist, before the App starts.
+func (e *env) start(t *testing.T, configure ...func(*env)) {
+	t.Helper()
+	tasks, _ := fsstore.NewTasks(e.paths.Tasks)
+	state, _ := fsstore.NewState(e.paths.State)
+	execs, _ := fsstore.NewExecutions(e.paths.Executions)
+	events, _ := eventlog.New(e.paths.Logs, time.Now)
 	v, err := schema.New()
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := &env{t: t, clock: clock, home: home, events: newHookedEvents(t, events, v),
-		claude: &fakeHarness{id: domain.HarnessClaudeCode}, codex: &fakeHarness{id: domain.HarnessCodex}}
+	e.events = newHookedEvents(t, events, v)
 	for _, c := range configure {
 		c(e)
 	}
-	a, err := New(Deps{Paths: paths, Version: "test", Clock: clock, Location: time.UTC, Tasks: tasks, State: state,
+	a, err := New(Deps{Paths: e.paths, Version: "test", Clock: e.clock, Location: time.UTC, Tasks: tasks, State: state,
 		Executions: execs, Events: e.events, Validator: v, Harnesses: []ports.HarnessAdapter{e.claude, e.codex},
 		TickInterval: time.Hour, Logger: log.New(io.Discard, "", 0)})
 	if err != nil {
@@ -324,36 +333,34 @@ func openEnv(t *testing.T, home string, configure ...func(*env)) *env {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { a.Stop(domain.Text{Message: "test done"}) })
-	return e
 }
 
 // restart stops the daemon, if it still runs, and starts a new App on the same data directory, fake clock, and
-// stand-in harnesses, as a daemon restart does.
+// stand-in harnesses, as a daemon restart does. The scheduler loop of a test ticks hourly, so the clock may move
+// before the restart as if the daemon were already down.
 func (e *env) restart(t *testing.T) *env {
 	t.Helper()
-	e.app.Stop(domain.Text{Message: "test restart"})
-	paths := e.app.Paths()
-	tasks, _ := fsstore.NewTasks(paths.Tasks)
-	state, _ := fsstore.NewState(paths.State)
-	execs, _ := fsstore.NewExecutions(paths.Executions)
-	events, _ := eventlog.New(paths.Logs, time.Now)
-	v, err := schema.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	n := &env{t: t, clock: e.clock, home: e.home, events: newHookedEvents(t, events, v), claude: e.claude, codex: e.codex}
-	a, err := New(Deps{Paths: paths, Version: "test", Clock: e.clock, Location: time.UTC, Tasks: tasks, State: state,
-		Executions: execs, Events: n.events, Validator: v, Harnesses: []ports.HarnessAdapter{n.claude, n.codex},
-		TickInterval: time.Hour, Logger: log.New(io.Discard, "", 0)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	n.app = a
-	if err := a.Start(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { a.Stop(domain.Text{Message: "test done"}) })
+	e.app.Stop(domain.Text{Message: "restart"})
+	n := &env{t: t, clock: e.clock, claude: e.claude, codex: e.codex, home: e.home, paths: e.paths}
+	n.start(t)
 	return n
+}
+
+// published lists the events of a type the daemon published since it started, from its replay buffer.
+func (e *env) published(eventType string) []domain.Event {
+	ch, _, cancel := e.app.Subscribe(1)
+	defer cancel()
+	var out []domain.Event
+	for {
+		select {
+		case ev := <-ch:
+			if ev.Type == eventType {
+				out = append(out, ev)
+			}
+		default:
+			return out
+		}
+	}
 }
 
 func taskYAML(id string, extra string) string {
@@ -1507,6 +1514,45 @@ func TestChangedScheduleTakesEffect(t *testing.T) {
 				t.Errorf("next firing after it ran %v, want %v", view.NextFireAt, want)
 			}
 		})
+	}
+}
+
+// FS-002 AC-004, AC-005, D-080: a firing that came due while the daemon was down is a misfire however short the
+// outage, here a restart 60 seconds after it, and follows the task's missed-run policy.
+func TestMisfireAcrossShortRestart(t *testing.T) {
+	e := newEnv(t)
+	e.create("daily", "  schedule:\n    cron: \"0 9 * * *\"\n    timezone: UTC\n")
+	e.create("daily-skip", "  schedule:\n    cron: \"0 9 * * *\"\n    timezone: UTC\n    missedRun:\n      policy: skip\n")
+	e.clock.Advance(61 * time.Minute) // 09:01, a minute after the firing
+	e = e.restart(t)
+	e.app.Tick() // waits for the tick the start ran
+	runs := e.executions("daily")
+	if len(runs) != 1 || runs[0].Trigger != domain.TriggerCatchUp {
+		t.Fatalf("daily: %+v", runs)
+	}
+	if x, _ := e.app.GetExecution(runs[0].ID); x.ScheduledFor == nil ||
+		!x.ScheduledFor.Equal(time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)) {
+		t.Errorf("catch-up scheduled for %v", x.ScheduledFor)
+	}
+	if n := len(e.executions("daily-skip")); n != 0 {
+		t.Errorf("skip policy ran %d executions", n)
+	}
+	policies := map[string]any{}
+	for _, ev := range e.published(domain.EventFiringMissed) {
+		policies[ev.TaskID] = ev.Payload["policy"]
+	}
+	if policies["daily"] != domain.MissedRunOnResume || policies["daily-skip"] != domain.MissedRunSkip {
+		t.Errorf("firing.missed policies %v", policies)
+	}
+	e.wait(runs[0].ID, domain.StatusCompleted)
+	// A firing that comes due while the daemon runs is on time.
+	e.clock.Advance(24*time.Hour + 10*time.Second)
+	e.app.Tick()
+	if runs = e.executions("daily"); len(runs) != 2 || runs[0].Trigger != domain.TriggerSchedule {
+		t.Fatalf("on-time firing: %+v", runs)
+	}
+	if runs = e.executions("daily-skip"); len(runs) != 1 || runs[0].Trigger != domain.TriggerSchedule {
+		t.Fatalf("on-time firing of daily-skip: %+v", runs)
 	}
 }
 
