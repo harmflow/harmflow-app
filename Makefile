@@ -6,10 +6,13 @@ VERSION := 0.1.0
 # here because go build stamps none in a git worktree; the interface reads it itself (desktop/ui/vite.config.ts).
 COMMIT := $(shell git rev-parse --verify --quiet HEAD 2>/dev/null | cut -c1-7)
 COMMIT := $(COMMIT)$(if $(COMMIT),$(if $(shell git status --porcelain),-dirty))
+# The time make runs, in UTC RFC 3339, as the daemon's build time: go build stamps only vcs.time, the commit's time.
+# The interface takes its own when Vite loads its config (desktop/ui/vite.config.ts).
+BUILT_AT := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 TRIPLE := $(shell rustc -vV 2>/dev/null | sed -n 's/^host: //p')
 DEV_HOME := $(CURDIR)/.harmflow-dev/home
 SIDECAR := desktop/src-tauri/binaries/harmflowd-$(TRIPLE)
-LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.Commit=$(COMMIT)
+LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuiltAt=$(BUILT_AT)
 COVERAGE := $(CURDIR)/build/coverage
 
 .PHONY: help

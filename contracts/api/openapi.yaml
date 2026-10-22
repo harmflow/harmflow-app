@@ -877,6 +877,7 @@ components:
         status: { type: string, enum: [ok] }
         version: { type: string }
         commit: { type: string, description: "The commit it was built from, 7 characters, -dirty with uncommitted changes." }
+        builtAt: { type: string, format: date-time, description: "When it was built; left out when the build stamped no time." }
         apiVersion: { type: string, enum: [v1] }
         pid: { type: integer }
         startedAt: { type: string, format: date-time }

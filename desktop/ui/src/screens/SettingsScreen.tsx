@@ -9,7 +9,7 @@ import { HarnessInventory, ToolRow } from "../components/Harnesses";
 import { toast } from "../components/toast";
 import { Banner, Button, Chip, Field, IconButton, KeyValue, NumberInput, Panel, Select, TextInput, Toggle } from "../components/ui";
 import { applyLanguage } from "../i18n";
-import { formatBytes, formatDuration } from "../lib/format";
+import { formatBytes, formatDateTime, formatDuration } from "../lib/format";
 import { useNow } from "../lib/hooks";
 import { actions, useStore } from "../state/store";
 
@@ -23,6 +23,7 @@ export function SettingsScreen() {
   const health = useStore((s) => s.health);
   const appVersion = useStore((s) => s.appVersion);
   const appCommit = useStore((s) => s.appCommit);
+  const appBuiltAt = useStore((s) => s.appBuiltAt);
   const running = useStore((s) => s.stats?.running ?? 0);
   const connection = useStore((s) => s.connection);
   const now = useNow(1000);
@@ -262,8 +263,11 @@ export function SettingsScreen() {
         <Panel title={t("settings.sections.about")} icon="sparkle">
           <KeyValue
             items={[
-              [t("settings.appVersion"), <span className="mono">{build(appVersion, appCommit)}</span>],
-              [t("settings.daemonVersion"), health ? <span className="mono">{build(health.version, health.commit)}</span> : null],
+              [t("settings.appVersion"), <span className="mono">{build(locale, appVersion, appCommit, appBuiltAt)}</span>],
+              [
+                t("settings.daemonVersion"),
+                health ? <span className="mono">{build(locale, health.version, health.commit, health.builtAt)}</span> : null,
+              ],
             ]}
           />
         </Panel>
@@ -272,9 +276,14 @@ export function SettingsScreen() {
   );
 }
 
-/** A version with the commit it was built from, such as `0.1.0 (45a57bb)`; the version alone without a commit. */
-function build(version: string, commit?: string): string {
-  return commit ? `${version} (${commit})` : version;
+/**
+ * A version with the commit it was built from and when, such as `0.1.0 (45a57bb) · 22 Oct 2026, 17:30`; the commit
+ * and the time are each left out when unknown.
+ */
+function build(locale: string, version: string, commit?: string, builtAt?: string): string {
+  const parts = [commit ? `${version} (${commit})` : version];
+  if (builtAt && !Number.isNaN(Date.parse(builtAt))) parts.push(formatDateTime(builtAt, locale));
+  return parts.join(" · ");
 }
 
 function RetentionField({ value, onSave }: { value?: number; onSave: (days: number) => void }) {

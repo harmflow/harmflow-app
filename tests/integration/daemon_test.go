@@ -23,13 +23,16 @@ import (
 
 var binary string
 
+// builtAt is the build time the binary is stamped with, as make stamps it.
+const builtAt = "2026-10-22T20:30:05Z"
+
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "harmflowd-bin")
 	if err != nil {
 		panic(err)
 	}
 	binary = filepath.Join(dir, "harmflowd")
-	args := []string{"build", "-o", binary}
+	args := []string{"build", "-ldflags", "-X main.BuiltAt=" + builtAt, "-o", binary}
 	// make coverage-daemon sets GOCOVERDIR: each daemon then writes its counters there when it exits, to be merged
 	// with the unit tests' own, in the same counter mode (ADR-015).
 	if os.Getenv("GOCOVERDIR") != "" {
@@ -288,6 +291,14 @@ func TestHealthNamesTheCommit(t *testing.T) {
 		t.Errorf("commit %q, but go build stamped none", commit)
 	case revision != "" && commit != revision[:7] && commit != revision[:7]+"-dirty":
 		t.Errorf("commit %q, want %s with or without -dirty", commit, revision[:7])
+	}
+}
+
+// GET /health names the build time stamped with -X main.BuiltAt, as make stamps it.
+func TestHealthNamesTheBuildTime(t *testing.T) {
+	d := startDaemon(t, t.TempDir())
+	if got := d.call("GET", "/health", nil, 200)["builtAt"]; got != builtAt {
+		t.Errorf("builtAt %v, want %s", got, builtAt)
 	}
 }
 

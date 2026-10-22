@@ -47,6 +47,8 @@ export interface State {
   appVersion: string;
   /** The commit the interface was built from; empty without git information. */
   appCommit: string;
+  /** When the interface was built, in ISO 8601; empty without a build time. */
+  appBuiltAt: string;
   /** The latest event that asked the interface to show something: a navigation target. */
   navigation?: { executionId?: string; screen?: string; nonce: number };
 }
@@ -70,6 +72,7 @@ let state: State = {
   externalChanges: {},
   appVersion: __APP_VERSION__,
   appCommit: __APP_COMMIT__,
+  appBuiltAt: __APP_BUILT_AT__,
 };
 
 const listeners = new Set<() => void>();

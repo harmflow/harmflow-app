@@ -234,6 +234,9 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	if commit := s.App.Commit(); commit != "" {
 		body["commit"] = commit
 	}
+	if builtAt := s.App.BuiltAt(); !builtAt.IsZero() {
+		body["builtAt"] = builtAt
+	}
 	writeJSON(w, 200, body)
 }
 

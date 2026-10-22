@@ -3,6 +3,7 @@ package main
 import (
 	"runtime/debug"
 	"testing"
+	"time"
 )
 
 // The commit go build stamps tells builds of the same version apart in Settings → About.
@@ -34,5 +35,17 @@ func TestBuildCommitPrefersMake(t *testing.T) {
 	Commit = "45a57bb-dirty"
 	if got := buildCommit(); got != "45a57bb-dirty" {
 		t.Errorf("got %q", got)
+	}
+}
+
+// The build time make stamps tells two builds of the same commit apart; a stamp that is missing or not RFC 3339 is none.
+func TestBuildTime(t *testing.T) {
+	if got, want := buildTime("2026-10-22T20:30:05Z"), time.Date(2026, 10, 22, 20, 30, 5, 0, time.UTC); !got.Equal(want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	for _, stamp := range []string{"", "2026-10-22", "22/10/2026 17:30", "$(BUILT_AT)"} {
+		if got := buildTime(stamp); !got.IsZero() {
+			t.Errorf("%q: got %v, want none", stamp, got)
+		}
 	}
 }

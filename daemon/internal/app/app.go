@@ -76,7 +76,8 @@ func NewPaths(home, userHome, builtins string) Paths {
 type Deps struct {
 	Paths      Paths
 	Version    string
-	Commit     string // the short commit it was built from, "-dirty" from uncommitted changes; empty without one
+	Commit     string    // the short commit it was built from, "-dirty" from uncommitted changes; empty without one
+	BuiltAt    time.Time // when it was built; zero without a build time
 	Clock      ports.Clock
 	Location   *time.Location
 	Tasks      ports.TaskRepository
@@ -283,6 +284,7 @@ func (a *App) emit(e domain.Event) domain.Event {
 
 func (a *App) Version() string      { return a.d.Version }
 func (a *App) Commit() string       { return a.d.Commit }
+func (a *App) BuiltAt() time.Time   { return a.d.BuiltAt }
 func (a *App) StartedAt() time.Time { return a.startedAt }
 func (a *App) Paths() Paths         { return a.d.Paths }
 
