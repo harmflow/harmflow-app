@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/eventlog"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/fsstore"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/schema"
@@ -1297,6 +1299,75 @@ spec:
 	if t.Failed() {
 		t.Logf("the export:\n%s", exported)
 	}
+}
+
+// FS-001 FR-004, AC-001; FS-011 FR-002; FS-005 FR-001: an empty list of notified events or failover triggers is a
+// choice. Saved from the form or as YAML, and duplicated, the file keeps the key and the API's document and effective
+// carry the empty list; an execution then neither notifies nor fails over.
+func TestEmptyListsAreKept(t *testing.T) {
+	e := newEnv(t)
+	doc, _ := json.Marshal(map[string]any{"apiVersion": "harmflow/v1alpha1", "kind": "Task",
+		"metadata": map[string]any{"id": "form-empty", "name": "Form empty"},
+		"spec": map[string]any{"type": "general", "prompt": "p",
+			"harness": map[string]any{"preferred": map[string]any{"provider": "claude-code"},
+				"fallback": map[string]any{"on": []any{}, "candidates": []any{map[string]any{"provider": "codex"}}}},
+			"notifications": map[string]any{"native": map[string]any{"events": []any{}}}}})
+	if _, err := e.app.CreateTask(TaskInput{Document: doc}); err != nil {
+		t.Fatalf("create from a document: %v", err)
+	}
+	e.create("yaml-empty", "    fallback:\n      on: []\n      candidates:\n        - provider: codex\n"+
+		"  notifications:\n    native:\n      events: []\n")
+	ids := []string{"form-empty", "yaml-empty"}
+	for _, id := range []string{"form-empty", "yaml-empty"} {
+		cp, err := e.app.DuplicateTask(id)
+		if err != nil {
+			t.Fatalf("duplicate %s: %v", id, err)
+		}
+		ids = append(ids, cp.ID)
+	}
+	for _, id := range ids {
+		v, _ := e.app.GetTask(id)
+		data, err := os.ReadFile(v.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var file map[string]any
+		if err := yaml.Unmarshal(data, &file); err != nil {
+			t.Fatal(err)
+		}
+		for name, m := range map[string]any{"the file": file, "document": v.Document, "effective": v.Effective} {
+			for _, path := range [][]string{{"spec", "harness", "fallback", "on"}, {"spec", "notifications", "native", "events"}} {
+				if l, ok := valueAt(m, path...).([]any); !ok || len(l) != 0 {
+					t.Errorf("%s: %s in %s is %#v, want []", id, strings.Join(path, "."), name, valueAt(m, path...))
+				}
+			}
+		}
+	}
+	r, _ := e.app.RunTask("form-empty")
+	e.wait(r.ExecutionID, domain.StatusCompleted)
+	e.idle("form-empty")
+	e.claude.setScript(func(ports.RunRequest) string { return "echo 'END quota'" })
+	r, _ = e.app.RunTask("yaml-empty")
+	x := e.wait(r.ExecutionID, domain.StatusFailed)
+	e.idle("yaml-empty")
+	if len(x.Attempts) != 1 || x.HarnessSwitches != 0 {
+		t.Errorf("quota failed over with no trigger chosen: %d attempts, %d switches", len(x.Attempts), x.HarnessSwitches)
+	}
+	if n := e.app.Notifications(false); len(n) != 0 {
+		t.Errorf("a task that chose no events notified: %+v", n)
+	}
+}
+
+// valueAt reads a nested key of a decoded YAML or JSON document, nil when one is missing.
+func valueAt(v any, keys ...string) any {
+	for _, k := range keys {
+		m, ok := v.(map[string]any)
+		if !ok {
+			return nil
+		}
+		v = m[k]
+	}
+	return v
 }
 
 // FS-001 AC-005, AC-006: an external edit converges and is announced; an invalid one keeps the last valid definition.
