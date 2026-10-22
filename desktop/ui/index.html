@@ -7,7 +7,48 @@
     <title>HarmFlow</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!--
+        The logo mark, painted before the bundle runs; the first render replaces it (harmflow-app#96). No text, since
+        the language is not known yet, and no inline style: once Tauri adds its nonce to an inline style, the CSP's
+        'unsafe-inline' stops counting. app.css styles it.
+      -->
+      <div class="boot" aria-hidden="true">
+        <svg class="boot__mark" width="72" height="72" viewBox="48 48 416 416">
+          <defs>
+            <linearGradient id="boot-neon" gradientUnits="userSpaceOnUse" x1="128" y1="0" x2="384" y2="0">
+              <stop offset="0" stop-color="var(--hf-color-logo-cyan)" />
+              <stop offset="0.5" stop-color="var(--hf-color-logo-violet)" />
+              <stop offset="1" stop-color="var(--hf-color-logo-magenta)" />
+            </linearGradient>
+            <linearGradient id="boot-core" gradientUnits="userSpaceOnUse" x1="128" y1="0" x2="384" y2="0">
+              <stop offset="0" stop-color="var(--hf-color-logo-core-cyan)" />
+              <stop offset="0.5" stop-color="var(--hf-color-logo-core-violet)" />
+              <stop offset="1" stop-color="var(--hf-color-logo-core-magenta)" />
+            </linearGradient>
+            <linearGradient id="boot-fade" gradientUnits="userSpaceOnUse" x1="56" y1="0" x2="456" y2="0">
+              <stop offset="0" stop-color="#fff" stop-opacity="0" />
+              <stop offset="0.235" stop-color="#fff" stop-opacity="1" />
+              <stop offset="0.765" stop-color="#fff" stop-opacity="1" />
+              <stop offset="1" stop-color="#fff" stop-opacity="0" />
+            </linearGradient>
+            <mask id="boot-flow" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
+              <rect x="56" width="400" height="512" fill="url(#boot-fade)" />
+            </mask>
+          </defs>
+          <g fill="none" stroke-linecap="round">
+            <g stroke="url(#boot-neon)">
+              <path d="M150 128V384M362 128V384" stroke-width="44" />
+              <path d="M44 256q53 104 106 0t106 0t106 0t106 0" stroke-width="32" mask="url(#boot-flow)" />
+            </g>
+            <g stroke="url(#boot-core)">
+              <path d="M150 128V384M362 128V384" stroke-width="15" />
+              <path d="M44 256q53 104 106 0t106 0t106 0t106 0" stroke-width="10" mask="url(#boot-flow)" />
+            </g>
+          </g>
+        </svg>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

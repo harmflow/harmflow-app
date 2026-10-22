@@ -1047,6 +1047,12 @@ export const esES: Resources = {
     failed: "El daemon no se inició: {{message}}",
     browserHint: "Inícialo desde una terminal con `harmflowd` y recarga esta página.",
   },
+  crash: {
+    screenTitle: "No se pudo mostrar esta pantalla",
+    rootTitle: "No se pudo mostrar la interfaz",
+    hint: "Recarga para intentarlo de nuevo. Si vuelve a ocurrir, copia los detalles en un informe de error.",
+    details: "Detalles del error",
+  },
   time: {
     justNow: "ahora mismo",
   },

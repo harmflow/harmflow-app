@@ -43,6 +43,11 @@ export const native = {
     if (isTauri()) await invoke("set_tray_labels", { labels });
   },
 
+  /** The first render committed. The shell decides whether that shows the window: a login start stays hidden. */
+  async interfaceReady(): Promise<void> {
+    if (isTauri()) await invoke("interface_ready");
+  },
+
   async openPath(path: string): Promise<void> {
     if (isTauri()) await invoke("open_path", { path });
   },

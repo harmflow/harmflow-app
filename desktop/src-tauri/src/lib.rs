@@ -83,6 +83,13 @@ fn set_tray_labels(app: tauri::AppHandle, state: Shared<'_>, labels: HashMap<Str
     tray::render(&app);
 }
 
+/// The interface committed its first render: a normal start shows the window now, unless the fallback already did
+/// (harmflow-app#96). The interface only signals; whether to show stays the shell's call.
+#[tauri::command]
+fn interface_ready(app: tauri::AppHandle) {
+    window::show_at_start(&app, true, false);
+}
+
 #[tauri::command]
 fn write_text_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(&path, content).map_err(|e| format!("{path}: {e}"))
@@ -112,7 +119,7 @@ fn open_url(url: String) -> Result<(), String> {
 
 pub fn run() {
     let start_hidden = std::env::args().any(|a| a == "--hidden");
-    let state = Arc::new(AppState::new());
+    let state = Arc::new(AppState::new(start_hidden));
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -124,10 +131,11 @@ pub fn run() {
             notice::listen(app.handle())?;
             sse::spawn(app.handle().clone());
             tray::schedule_refresh(app.handle().clone());
+            // A normal start shows the window once the interface has painted, not before (harmflow-app#96).
             if start_hidden {
                 window::hide_main(app.handle());
             } else {
-                window::show_main(app.handle());
+                window::schedule_fallback_show(app.handle().clone());
             }
             Ok(())
         })
@@ -148,6 +156,7 @@ pub fn run() {
             daemon_start,
             set_tray_enabled,
             set_tray_labels,
+            interface_ready,
             write_text_file,
             open_path,
             open_url,

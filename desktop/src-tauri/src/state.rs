@@ -24,10 +24,14 @@ pub struct AppState {
     /// Tray texts in the interface's language, sent by the webview; English until it does.
     pub tray_labels: Mutex<HashMap<String, String>>,
     pub tray_refresh_pending: AtomicBool,
+    /// Started with `--hidden`, as a login item: only a reopen or the tray shows the window.
+    pub start_hidden: bool,
+    /// The interface's readiness or the fallback already decided the window's first show.
+    pub start_show_decided: AtomicBool,
 }
 
 impl AppState {
-    pub fn new() -> Self {
+    pub fn new(start_hidden: bool) -> Self {
         Self {
             daemon: DaemonClient::new(),
             connection: Mutex::new("connecting".into()),
@@ -36,6 +40,8 @@ impl AppState {
             tray_running: Mutex::new(Vec::new()),
             tray_labels: Mutex::new(HashMap::new()),
             tray_refresh_pending: AtomicBool::new(false),
+            start_hidden,
+            start_show_decided: AtomicBool::new(false),
         }
     }
 

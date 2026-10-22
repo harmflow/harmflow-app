@@ -1031,6 +1031,12 @@ export const enUS = {
     failed: "The daemon did not start: {{message}}",
     browserHint: "Start it from a terminal with `harmflowd`, then reload this page.",
   },
+  crash: {
+    screenTitle: "This screen could not be shown",
+    rootTitle: "The interface could not be shown",
+    hint: "Reload to try again. If it happens again, copy the details into a bug report.",
+    details: "Error details",
+  },
   time: {
     justNow: "just now",
   },

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { native } from "./api/native";
+import { RootBoundary, ScreenBoundary } from "./components/ErrorBoundary";
 import { Header, Sidebar, noticeText, type Screen } from "./components/Shell";
 import { Toasts } from "./components/toast";
 import { applyLanguage } from "./i18n";
@@ -31,6 +32,15 @@ function wasSidebarCollapsed(): boolean {
   }
 }
 
+/** What `main.tsx` renders: the interface inside the boundary that keeps the root from ending up empty. */
+export function Root() {
+  return (
+    <RootBoundary>
+      <App />
+    </RootBoundary>
+  );
+}
+
 export function App() {
   const { t } = useTranslation();
   const [screen, setScreen] = useState<Screen>("executions");
@@ -45,6 +55,10 @@ export function App() {
   const settings = useStore((s) => s.settings);
   const daemonRunning = useStore((s) => s.daemonRunning);
   const navigation = useStore((s) => s.navigation);
+
+  // The first render committed: the shell may show the window now (harmflow-app#96). An effect rather than an
+  // animation frame, which WebKit may throttle for a hidden page; the shell acts on the first signal alone.
+  useEffect(() => void native.interfaceReady(), []);
 
   useEffect(() => {
     startSync();
@@ -173,27 +187,29 @@ export function App() {
       <Sidebar screen={screen} onNavigate={navigate} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
       <main className="app__content">
         <Header screen={screen} onNewTask={() => setPicker(true)} onNavigate={navigate} onOpenExecution={openExecution} />
-        {screen === "executions" ? (
-          <ExecutionsScreen
-            selectedId={selectedExecution}
-            onSelect={setSelectedExecution}
-            onGoToTasks={() => navigate("tasks")}
-            onSeeHistory={() => navigate("history")}
-          />
-        ) : null}
-        {screen === "overview" ? (
-          <OverviewScreen
-            onOpenExecution={openExecution}
-            onNewTask={() => setPicker(true)}
-            onOpenTask={(id) => {
-              setScreen("tasks");
-              setTaskView({ kind: "edit", id });
-            }}
-          />
-        ) : null}
-        {screen === "tasks" ? <TasksScreen view={taskView} onView={setTaskView} onOpenExecution={openExecution} /> : null}
-        {screen === "history" ? <HistoryScreen openId={historyOpen} onOpen={setHistoryOpen} /> : null}
-        {screen === "settings" ? <SettingsScreen /> : null}
+        <ScreenBoundary key={screen}>
+          {screen === "executions" ? (
+            <ExecutionsScreen
+              selectedId={selectedExecution}
+              onSelect={setSelectedExecution}
+              onGoToTasks={() => navigate("tasks")}
+              onSeeHistory={() => navigate("history")}
+            />
+          ) : null}
+          {screen === "overview" ? (
+            <OverviewScreen
+              onOpenExecution={openExecution}
+              onNewTask={() => setPicker(true)}
+              onOpenTask={(id) => {
+                setScreen("tasks");
+                setTaskView({ kind: "edit", id });
+              }}
+            />
+          ) : null}
+          {screen === "tasks" ? <TasksScreen view={taskView} onView={setTaskView} onOpenExecution={openExecution} /> : null}
+          {screen === "history" ? <HistoryScreen openId={historyOpen} onOpen={setHistoryOpen} /> : null}
+          {screen === "settings" ? <SettingsScreen /> : null}
+        </ScreenBoundary>
       </main>
       {picker ? (
         <TemplatePicker

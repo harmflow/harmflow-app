@@ -3546,6 +3546,100 @@ button.queue-item:hover,
   margin-top: var(--hf-space-6);
 }
 
+/* ---------- Startup placeholder and render errors (harmflow-app#96) ---------- */
+
+/* index.html paints this before the bundle runs; the first render replaces it. */
+.boot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.boot__mark {
+  animation: boot-breathe 1.6s ease-in-out infinite;
+}
+
+@keyframes boot-breathe {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.crash {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--hf-space-3);
+  width: min(760px, 100%);
+  margin: var(--hf-space-6) auto 0;
+  padding: var(--hf-space-6);
+  border: 1px solid var(--hf-color-border-strong);
+  border-radius: var(--hf-radius-lg);
+  background: var(--hf-gradient-panel);
+  text-align: center;
+}
+
+.crash h1 {
+  font-size: var(--hf-font-size-xl);
+}
+
+.crash__icon {
+  color: var(--hf-color-danger);
+}
+
+.crash__message {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.crash__hint {
+  max-width: 520px;
+  color: var(--hf-color-text-muted);
+}
+
+.crash__details {
+  align-self: stretch;
+  text-align: left;
+}
+
+.crash__details > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  color: var(--hf-color-text-muted);
+  font-size: var(--hf-font-size-sm);
+  cursor: pointer;
+  list-style: none;
+}
+
+.crash__details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.crash__details > summary svg {
+  transition: transform var(--hf-duration-fast) ease;
+}
+
+.crash__details[open] > summary svg {
+  transform: rotate(90deg);
+}
+
+/* Above the whole interface, the error has the window to itself. */
+.crash-root {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  padding: var(--hf-space-6);
+  background: var(--hf-color-bg);
+}
+
+.crash-root .crash {
+  margin: 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
