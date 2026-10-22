@@ -302,4 +302,16 @@ describe("screens", () => {
     expect(form(newTaskDocument("github-issue-implementation", undefined, "A"))).toContain("Repositórios");
     expect(form(newTaskDocument("general", undefined, "B"))).not.toContain("Repositórios");
   });
+
+  it("asks a script task for its program, and for no prompt, agents, or harness (FS-013 FR-013, AC-013)", () => {
+    const html = renderToString(
+      <TaskForm doc={newTaskDocument("script", undefined, "Auditoria")} onChange={() => {}} mode="create" harnesses={[harness]} errorPaths={new Set()} />,
+    );
+    for (const shown of ["Programa e argumentos", "Diretório de trabalho", "Variáveis de ambiente", "Executa em", "macOS", "Windows"]) {
+      expect(html).toContain(shown);
+    }
+    for (const hidden of ["O que a tarefa faz vive aqui", "Agentes", "Harness preferido", "Cadeia de fallback", "Novas tentativas por limite de taxa"]) {
+      expect(html).not.toContain(hidden);
+    }
+  });
 });

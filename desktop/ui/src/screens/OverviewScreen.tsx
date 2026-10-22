@@ -108,7 +108,7 @@ export function OverviewScreen({
                       <strong>{task.name}</strong>
                       <span className="mono muted">{task.schedule}</span>
                     </span>
-                    <HarnessLabel harness={task.harness} />
+                    <HarnessLabel harness={task.harness} taskType={task.type} />
                     <span className="simple-row__aside">{formatRelative(task.nextFireAt, locale, now)}</span>
                   </button>
                 </li>

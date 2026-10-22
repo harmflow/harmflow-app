@@ -275,7 +275,8 @@ function handleEvent(e: HarmflowEvent) {
   if (family === "task" || (family === "execution" && e.type !== "execution.status_changed")) {
     debounce("tasks", () => void actions.refreshTasks(), 400);
   }
-  if (e.executionId && state.details[e.executionId] && e.type !== "harness.output") {
+  // Output lines change nothing in the record, and a program can print many of them.
+  if (e.executionId && state.details[e.executionId] && e.type !== "harness.output" && e.type !== "script.output") {
     const id = e.executionId;
     debounce(`detail:${id}`, () => void actions.loadExecution(id), 500);
   }

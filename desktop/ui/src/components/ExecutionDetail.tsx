@@ -18,7 +18,7 @@ import { HarnessLabel } from "./Shell";
 import { Icon } from "./Icon";
 import { Banner, Button, Chip, CopyButton, EmptyState, KeyValue, StatusChip, Tabs, cx, type TabDef } from "./ui";
 
-type TabKey = "events" | "raw" | "files" | "commands" | "results" | "attempts" | "costs";
+type TabKey = "events" | "output" | "program" | "raw" | "files" | "commands" | "results" | "attempts" | "costs";
 
 const PROMINENT = new Set(["harness.switched", "policy.unenforced", "repository.unprotected", "harness.no_alternative"]);
 
@@ -48,6 +48,7 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
     return merged;
   }, [detail, events]);
   const prominent = useMemo(() => (events ?? []).filter((e) => PROMINENT.has(e.type)), [events]);
+  const outputLines = useMemo(() => (events ?? []).filter((e) => e.type === "script.output"), [events]);
 
   if (!exec) {
     return (
@@ -63,16 +64,27 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
   const issueNumber = workItem?.issueNumber ?? parseIssue(exec.workItem);
   const commands = detail?.commands ?? [];
   const attempts = detail?.attempts ?? [];
+  // A script task runs a program: its output and the program as it ran, and no harness, model, prompt, or cost
+  // (FS-013 FR-012).
+  const isScript = exec.taskType === "script";
 
-  const tabs: TabDef<TabKey>[] = [
-    { key: "events", label: t("executions.detail.tabs.events"), icon: "list", count: timeline.length },
-    { key: "raw", label: t("executions.detail.tabs.raw"), icon: "terminal" },
-    { key: "files", label: t("executions.detail.tabs.files"), icon: "file", count: files.length },
-    { key: "commands", label: t("executions.detail.tabs.commands"), icon: "prompt", count: commands.length },
-    { key: "results", label: t("executions.detail.tabs.results"), icon: "pr" },
-    { key: "attempts", label: t("executions.detail.tabs.attempts"), icon: "layers", count: attempts.length },
-    { key: "costs", label: t("executions.detail.tabs.costs"), icon: "coin" },
-  ];
+  const tabs: TabDef<TabKey>[] = isScript
+    ? [
+        { key: "events", label: t("executions.detail.tabs.events"), icon: "list", count: timeline.length },
+        { key: "output", label: t("executions.detail.tabs.output"), icon: "terminal", count: outputLines.length },
+        { key: "program", label: t("executions.detail.tabs.program"), icon: "prompt" },
+        { key: "raw", label: t("executions.detail.tabs.raw"), icon: "file" },
+        { key: "results", label: t("executions.detail.tabs.results"), icon: "pr" },
+      ]
+    : [
+        { key: "events", label: t("executions.detail.tabs.events"), icon: "list", count: timeline.length },
+        { key: "raw", label: t("executions.detail.tabs.raw"), icon: "terminal" },
+        { key: "files", label: t("executions.detail.tabs.files"), icon: "file", count: files.length },
+        { key: "commands", label: t("executions.detail.tabs.commands"), icon: "prompt", count: commands.length },
+        { key: "results", label: t("executions.detail.tabs.results"), icon: "pr" },
+        { key: "attempts", label: t("executions.detail.tabs.attempts"), icon: "layers", count: attempts.length },
+        { key: "costs", label: t("executions.detail.tabs.costs"), icon: "coin" },
+      ];
 
   // With nothing chosen, the details follow the latest step.
   const selected = timeline.find((i) => i.id === selectedEvent) ?? timeline[timeline.length - 1];
@@ -81,7 +93,7 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
     <section className="detail panel">
       <header className="detail__header">
         <span className="exec-card__glyph exec-card__glyph--lg" aria-hidden="true">
-          <Icon name={exec.taskType === "github-issue-implementation" ? "code" : "settings"} size={24} />
+          <Icon name={exec.taskType === "github-issue-implementation" ? "code" : isScript ? "terminal" : "settings"} size={24} />
         </span>
         <div className="detail__heading">
           <div className="detail__title-row">
@@ -92,7 +104,12 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
             <StatusChip status={exec.status} />
           </div>
           <div className="detail__meta">
-            <HarnessLabel harness={exec.harness} model={exec.model} />
+            <HarnessLabel harness={exec.harness} model={exec.model} taskType={exec.taskType} />
+            {detail?.script?.program ? (
+              <span className="meta mono" title={detail.script.program}>
+                {detail.script.program.split("/").pop()}
+              </span>
+            ) : null}
             {exec.repository ? (
               <span className="meta mono">
                 <Icon name="repo" size={14} /> {exec.repository}
@@ -141,6 +158,8 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
             <EventDetails item={selected} events={events ?? []} locale={i18n.language} />
           </div>
         ) : null}
+        {tab === "output" ? <ScriptOutput lines={outputLines} /> : null}
+        {tab === "program" ? <ScriptProgram detail={detail} active={active} /> : null}
         {tab === "raw" ? <RawOutput key={executionId} executionId={executionId} active={active} /> : null}
         {tab === "files" ? <FileList files={files} /> : null}
         {tab === "commands" ? <CommandList commands={commands} locale={i18n.language} /> : null}
@@ -409,6 +428,104 @@ export function RawCaptures({ output }: { output?: ExecutionOutput }) {
         ))}
       </pre>
     </div>
+  );
+}
+
+/** A script's output, line by line, each marked with its stream, as the daemon redacted it (FS-013 FR-008). */
+function ScriptOutput({ lines }: { lines: HarmflowEvent[] }) {
+  const { t } = useTranslation();
+  const ref = useRef<HTMLPreElement | null>(null);
+  const following = useRef(true);
+  useEffect(() => {
+    if (ref.current && following.current) ref.current.scrollTop = ref.current.scrollHeight;
+  }, [lines.length]);
+  if (lines.length === 0) return <EmptyState icon="terminal" title={t("executions.detail.script.noOutput")} />;
+  const text = lines.map((e) => e.message ?? "").join("\n");
+  return (
+    <div className="codebox codebox--tall">
+      <div className="codebox__tools">
+        <CopyButton text={text} />
+      </div>
+      <pre
+        className="mono script-output"
+        ref={ref}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+        }}
+      >
+        {lines.map((e) => {
+          const stream = (e.payload as { stream?: string } | undefined)?.stream === "stderr" ? "stderr" : "stdout";
+          return (
+            <span key={e.id} className={cx("script-line", `script-line--${stream}`)} data-stream={stream}>
+              <span className="script-line__stream" aria-label={stream}>
+                {t(`executions.detail.script.streams.${stream}`)}
+              </span>
+              {e.message ?? ""}
+              {"\n"}
+            </span>
+          );
+        })}
+      </pre>
+    </div>
+  );
+}
+
+/** The program as it ran, its working directory and variables, and how it ended (FS-013 FR-011, FR-012). */
+function ScriptProgram({ detail, active }: { detail?: Execution; active: boolean }) {
+  const { t } = useTranslation();
+  const s = detail?.script;
+  if (!s) return <EmptyState icon="prompt" title={t("executions.detail.script.notStarted")} />;
+  const env = Object.entries(s.environment ?? {});
+  const failed = s.signal !== undefined || (s.exitCode !== undefined && s.exitCode !== 0);
+  const status =
+    s.exitCode === undefined ? (
+      <Chip tone={active ? "cyan" : "neutral"}>{active ? t("executions.detail.script.running") : "—"}</Chip>
+    ) : (
+      <Chip tone={failed ? "danger" : "success"} icon={failed ? "x" : "check"}>
+        {s.signal ? t("executions.detail.script.signal", { signal: s.signal }) : t("executions.detail.script.exitCode", { code: s.exitCode })}
+      </Chip>
+    );
+  return (
+    <div className="results">
+      <KeyValue
+        items={[
+          [t("executions.detail.script.exitStatus"), status],
+          [t("executions.detail.script.program"), <span className="mono">{s.program}</span>],
+          [t("executions.detail.script.command"), s.command?.length ? <ArgList args={s.command} /> : null],
+          [t("executions.detail.script.interpreter"), s.interpreter?.length ? <ArgList args={s.interpreter} /> : null],
+          [t("executions.detail.script.scriptPath"), s.scriptPath ? <span className="mono">{s.scriptPath}</span> : null],
+          [t("executions.detail.script.workingDirectory"), <span className="mono">{s.workingDirectory}</span>],
+          [
+            t("executions.detail.script.environment"),
+            env.length ? <span className="mono">{env.map(([k, v]) => `${k}=${v}`).join("\n")}</span> : null,
+          ],
+        ]}
+      />
+      {s.source ? (
+        <div className="results__block">
+          <h4>{t("executions.detail.script.source")}</h4>
+          <div className="codebox">
+            <div className="codebox__tools">
+              <CopyButton text={s.source} />
+            </div>
+            <pre className="mono">{s.source}</pre>
+          </div>
+        </div>
+      ) : null}
+      <p className="muted small">{t("executions.detail.script.noHarness")}</p>
+    </div>
+  );
+}
+
+/** An argument list, one argument per line, so an argument with spaces reads as one. */
+function ArgList({ args }: { args: string[] }) {
+  return (
+    <ol className="arg-list mono">
+      {args.map((a, i) => (
+        <li key={i}>{a === "" ? '""' : a}</li>
+      ))}
+    </ol>
   );
 }
 

@@ -29,6 +29,7 @@ export type WorkItemResult = S["WorkItemResult"];
 export type ExecutionSummary = S["ExecutionSummary"];
 export type Execution = S["Execution"];
 export type ExecutionCommand = Execution["commands"][number];
+export type ScriptRun = S["ScriptRun"];
 export type ExecutionOutput = S["ExecutionOutput"];
 export type AttemptOutput = S["AttemptOutput"];
 export type HarmflowEvent = S["Event"];
