@@ -338,3 +338,47 @@ func TestModelsFromCache(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+// FS-004 FR-005: with no readable models cache, Codex's capabilities are only declared, so a model or effort other
+// than default cannot be checked and says so; with the cache, it is checked as before and nothing warns.
+func TestProfileWarningWithoutTheModelsCache(t *testing.T) {
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	a := &Adapter{Home: t.TempDir()}
+	info := ports.HarnessInfo{Detected: true, Version: "0.163.0"}
+	info.Models, info.Efforts, info.CapabilitySource = a.models()
+	if info.CapabilitySource != "declared" {
+		t.Fatalf("source %q without the cache", info.CapabilitySource)
+	}
+	for _, p := range [][2]string{{"no-such-model", "ultra"}, {"no-such-model", "default"}, {"default", "ultra"}} {
+		if err := a.ValidateProfile(info, p[0], p[1]); err != nil {
+			t.Errorf("%v refused unchecked: %v", p, err)
+		}
+		if w, ok := a.ProfileWarning(info, p[0], p[1]); !ok || w.Key != "codex_profile_unchecked" ||
+			!strings.Contains(w.Message, "Codex") {
+			t.Errorf("%v saved with no warning: %+v", p, w)
+		}
+	}
+	for _, p := range [][2]string{{"default", "default"}, {"", ""}} {
+		if w, ok := a.ProfileWarning(info, p[0], p[1]); ok {
+			t.Errorf("the default profile %v warns: %+v", p, w)
+		}
+	}
+	if w, ok := a.ProfileWarning(ports.HarnessInfo{}, "no-such-model", "ultra"); ok {
+		t.Errorf("a Codex not detected warns here too: %+v", w)
+	}
+
+	_ = os.WriteFile(filepath.Join(codexHome, "models_cache.json"), []byte(`{"models":[
+		{"slug":"gpt-test","supported_reasoning_levels":[{"effort":"low"},{"effort":"high"}]}]}`), 0o600)
+	info.Models, info.Efforts, info.CapabilitySource = a.models()
+	if w, ok := a.ProfileWarning(info, "no-such-model", "ultra"); ok {
+		t.Errorf("a checked profile warns: %+v", w)
+	}
+	if err := a.ValidateProfile(info, "no-such-model", "default"); err == nil ||
+		domain.TextOf(err).Key != "codex_model_unknown" {
+		t.Errorf("unknown model: %v", err)
+	}
+	if err := a.ValidateProfile(info, "gpt-test", "ultra"); err == nil || domain.TextOf(err).Key != "codex_effort_invalid" {
+		t.Errorf("invalid effort: %v", err)
+	}
+}

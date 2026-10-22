@@ -304,6 +304,8 @@ export const ptBR: Resources = {
       'o Claude Code {{version}} não aceita o esforço "{{effort}}"; ele aceita {{efforts}}',
     codex_model_unknown: 'o Codex {{version}} não oferece o modelo "{{model}}"; ele oferece {{models}}',
     codex_effort_invalid: 'o modelo do Codex "{{model}}" não aceita o esforço "{{effort}}"; ele aceita {{efforts}}',
+    codex_profile_unchecked:
+      "a lista de modelos do Codex não pôde ser lida, então o modelo e o esforço não foram verificados",
     harness_not_detected: "{{harness}} não foi detectado nesta máquina",
     harness_not_ready: "{{harness}} não está pronto: {{detail}}",
     agent_not_found: 'o agente "{{name}}" não foi encontrado para {{harness}} ($t(itemSource.{{source}}))',

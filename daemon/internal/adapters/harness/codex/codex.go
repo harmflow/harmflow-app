@@ -238,6 +238,19 @@ func (a *Adapter) ValidateProfile(info ports.HarnessInfo, model, effort string) 
 		"model", chosen.ID, "effort", effort, "efforts", strings.Join(efforts, ", "))
 }
 
+// ProfileWarning says a model or effort other than default goes unchecked when Codex has no readable models cache, so
+// its capabilities are only declared.
+func (a *Adapter) ProfileWarning(info ports.HarnessInfo, model, effort string) (domain.Text, bool) {
+	if !info.Detected || info.CapabilitySource == "reported" {
+		return domain.Text{}, false
+	}
+	if (model == "" || model == domain.DefaultModel) && (effort == "" || effort == domain.DefaultEffort) {
+		return domain.Text{}, false
+	}
+	return domain.T("codex_profile_unchecked",
+		"Codex's list of models could not be read, so the model and effort were not checked"), true
+}
+
 func (a *Adapter) userDir() catalog.Dir { return catalog.Dir{Root: a.codexHome()} }
 
 func (a *Adapter) UserItem(kind, name string) (ports.ResolvedItem, bool) {

@@ -300,6 +300,7 @@ export const enUS = {
     claude_effort_invalid: 'Claude Code {{version}} does not accept the effort "{{effort}}"; it accepts {{efforts}}',
     codex_model_unknown: 'Codex {{version}} does not offer the model "{{model}}"; it offers {{models}}',
     codex_effort_invalid: 'Codex model "{{model}}" does not accept the effort "{{effort}}"; it accepts {{efforts}}',
+    codex_profile_unchecked: "Codex's list of models could not be read, so the model and effort were not checked",
     harness_not_detected: "{{harness}} was not detected on this machine",
     harness_not_ready: "{{harness}} is not ready: {{detail}}",
     agent_not_found: 'agent "{{name}}" cannot be found for {{harness}} ($t(itemSource.{{source}}))',
