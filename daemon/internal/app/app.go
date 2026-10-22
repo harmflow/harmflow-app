@@ -79,6 +79,7 @@ type Deps struct {
 	Commit     string    // the short commit it was built from, "-dirty" from uncommitted changes; empty without one
 	BuiltAt    time.Time // when it was built; zero without a build time
 	Clock      ports.Clock
+	Wake       ports.WakeMonitor
 	Location   *time.Location
 	Tasks      ports.TaskRepository
 	State      ports.StateStore
@@ -138,8 +139,9 @@ type App struct {
 	accepting     bool
 	stopping      bool
 	adapters      map[string]ports.HarnessAdapter
-	// unavailableUntil is when the daemon last became available again: a firing scheduled before it and still due came
-	// due while the daemon was down, and is a misfire however late it is.
+	// unavailableUntil is when the daemon last became available again, at its start or when the machine woke: a firing
+	// scheduled before it and still due came due while the daemon or the machine was down, and is a misfire however
+	// late it is.
 	unavailableUntil time.Time
 
 	// tickMu runs one Tick at a time, whole.
@@ -158,6 +160,9 @@ type App struct {
 func New(d Deps) (*App, error) {
 	if d.Clock == nil {
 		d.Clock = realClock{}
+	}
+	if d.Wake == nil {
+		d.Wake = noWake{}
 	}
 	if d.Location == nil {
 		d.Location = time.Local
@@ -195,6 +200,11 @@ func New(d Deps) (*App, error) {
 type realClock struct{}
 
 func (realClock) Now() time.Time { return time.Now() }
+
+// noWake sees no suspension; a firing missed while the machine slept then counts as missed only by its lateness.
+type noWake struct{}
+
+func (noWake) LastWake() time.Time { return time.Time{} }
 
 func (a *App) now() time.Time { return a.d.Clock.Now() }
 

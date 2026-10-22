@@ -120,15 +120,21 @@ type dueFiring struct {
 	skip         bool
 }
 
-// Tick fires every due task. A firing scheduled while the daemon was unavailable is a misfire, however late it is;
-// so is one later than MisfireAfter. All misfires coalesce into one catch-up or are skipped, per the task's policy
-// (D-071).
+// Tick fires every due task. A firing scheduled while the daemon or the machine was unavailable is a misfire, however
+// late it is; so is one later than MisfireAfter. All misfires coalesce into one catch-up or are skipped, per the
+// task's policy (D-071).
 func (a *App) Tick() {
 	a.tickMu.Lock()
 	defer a.tickMu.Unlock()
+	// Asked at every check, so the monitor compares its clocks over one interval and sees a wake when it happens.
+	wake := a.d.Wake.LastWake()
 	now := a.now()
 	var due []dueFiring
 	a.mu.Lock()
+	woke := wake.After(a.unavailableUntil)
+	if woke {
+		a.unavailableUntil = wake // the machine slept until then (FS-002 FR-004)
+	}
 	if !a.accepting {
 		a.mu.Unlock()
 		return
@@ -160,6 +166,9 @@ func (a *App) Tick() {
 		due = append(due, f)
 	}
 	a.mu.Unlock()
+	if woke {
+		a.log.Printf("the machine woke from sleep; firings scheduled before %s are misfires", wake.Format(time.RFC3339))
+	}
 	if len(due) == 0 {
 		return
 	}

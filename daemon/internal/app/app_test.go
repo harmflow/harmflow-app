@@ -43,6 +43,24 @@ func (c *fakeClock) Advance(d time.Duration) {
 	c.mu.Unlock()
 }
 
+// fakeWake is the machine's sleep as the test makes it: the test says when the machine woke.
+type fakeWake struct {
+	mu sync.Mutex
+	at time.Time
+}
+
+func (w *fakeWake) LastWake() time.Time {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.at
+}
+
+func (w *fakeWake) woke(at time.Time) {
+	w.mu.Lock()
+	w.at = at
+	w.mu.Unlock()
+}
+
 // fakeHarness runs /bin/sh with a script the test chooses. The script prints the outcome on its last line:
 // "END ok", "END quota", "END rate", or "END error"; "STARTED <model> <effort>" reports what the session runs with.
 type fakeHarness struct {
@@ -282,6 +300,7 @@ type env struct {
 	claude *fakeHarness
 	codex  *fakeHarness
 	events *hookedEvents
+	wake   *fakeWake
 	home   string
 	paths  Paths
 }
@@ -299,8 +318,8 @@ func openEnv(t *testing.T, home string, configure ...func(*env)) *env {
 	_ = os.MkdirAll(filepath.Join(builtins, "skills", "harmflow-github-draft-pr"), 0o700)
 	_ = os.WriteFile(filepath.Join(builtins, "skills", "harmflow-github-draft-pr", "SKILL.md"), []byte("---\nname: harmflow-github-draft-pr\ndescription: d\n---\n"), 0o600)
 	_ = os.MkdirAll(filepath.Join(builtins, "agents"), 0o700)
-	e := &env{t: t, clock: &fakeClock{now: time.Date(2026, 10, 20, 8, 0, 0, 0, time.UTC)}, home: home,
-		paths: NewPaths(home, t.TempDir(), builtins), claude: &fakeHarness{id: domain.HarnessClaudeCode},
+	e := &env{t: t, clock: &fakeClock{now: time.Date(2026, 10, 20, 8, 0, 0, 0, time.UTC)}, wake: &fakeWake{},
+		home: home, paths: NewPaths(home, t.TempDir(), builtins), claude: &fakeHarness{id: domain.HarnessClaudeCode},
 		codex: &fakeHarness{id: domain.HarnessCodex}}
 	e.start(t, configure...)
 	return e
@@ -322,8 +341,8 @@ func (e *env) start(t *testing.T, configure ...func(*env)) {
 	for _, c := range configure {
 		c(e)
 	}
-	a, err := New(Deps{Paths: e.paths, Version: "test", Clock: e.clock, Location: time.UTC, Tasks: tasks, State: state,
-		Executions: execs, Events: e.events, Validator: v, Harnesses: []ports.HarnessAdapter{e.claude, e.codex},
+	a, err := New(Deps{Paths: e.paths, Version: "test", Clock: e.clock, Wake: e.wake, Location: time.UTC, Tasks: tasks,
+		State: state, Executions: execs, Events: e.events, Validator: v, Harnesses: []ports.HarnessAdapter{e.claude, e.codex},
 		TickInterval: time.Hour, Logger: log.New(io.Discard, "", 0)})
 	if err != nil {
 		t.Fatal(err)
@@ -341,7 +360,7 @@ func (e *env) start(t *testing.T, configure ...func(*env)) {
 func (e *env) restart(t *testing.T) *env {
 	t.Helper()
 	e.app.Stop(domain.Text{Message: "restart"})
-	n := &env{t: t, clock: e.clock, claude: e.claude, codex: e.codex, home: e.home, paths: e.paths}
+	n := &env{t: t, clock: e.clock, wake: e.wake, claude: e.claude, codex: e.codex, home: e.home, paths: e.paths}
 	n.start(t)
 	return n
 }
@@ -1547,6 +1566,44 @@ func TestMisfireAcrossShortRestart(t *testing.T) {
 	e.wait(runs[0].ID, domain.StatusCompleted)
 	// A firing that comes due while the daemon runs is on time.
 	e.clock.Advance(24*time.Hour + 10*time.Second)
+	e.app.Tick()
+	if runs = e.executions("daily"); len(runs) != 2 || runs[0].Trigger != domain.TriggerSchedule {
+		t.Fatalf("on-time firing: %+v", runs)
+	}
+	if runs = e.executions("daily-skip"); len(runs) != 1 || runs[0].Trigger != domain.TriggerSchedule {
+		t.Fatalf("on-time firing of daily-skip: %+v", runs)
+	}
+}
+
+// FS-002 FR-004, AC-006: a firing due while the machine slept is a misfire however soon the machine wakes, here 60
+// seconds after it; a sleep that ended before a firing's time changes nothing.
+func TestMisfireDuringSleep(t *testing.T) {
+	e := newEnv(t)
+	e.create("daily", "  schedule:\n    cron: \"0 9 * * *\"\n    timezone: UTC\n")
+	e.create("daily-skip", "  schedule:\n    cron: \"0 9 * * *\"\n    timezone: UTC\n    missedRun:\n      policy: skip\n")
+	e.clock.Advance(61 * time.Minute) // asleep across 09:00, awake at 09:01
+	e.wake.woke(e.clock.Now())
+	e.app.Tick()
+	runs := e.executions("daily")
+	if len(runs) != 1 || runs[0].Trigger != domain.TriggerCatchUp {
+		t.Fatalf("daily: %+v", runs)
+	}
+	if n := len(e.executions("daily-skip")); n != 0 {
+		t.Errorf("skip policy ran %d executions", n)
+	}
+	policies := map[string]any{}
+	for _, ev := range e.published(domain.EventFiringMissed) {
+		policies[ev.TaskID] = ev.Payload["policy"]
+	}
+	if policies["daily"] != domain.MissedRunOnResume || policies["daily-skip"] != domain.MissedRunSkip {
+		t.Errorf("firing.missed policies %v", policies)
+	}
+	e.wait(runs[0].ID, domain.StatusCompleted)
+	// Asleep again, awake at 08:59 the next day: the 09:00 firing is on time.
+	e.clock.Advance(24*time.Hour - 2*time.Minute)
+	e.wake.woke(e.clock.Now())
+	e.app.Tick()
+	e.clock.Advance(65 * time.Second)
 	e.app.Tick()
 	if runs = e.executions("daily"); len(runs) != 2 || runs[0].Trigger != domain.TriggerSchedule {
 		t.Fatalf("on-time firing: %+v", runs)
