@@ -35,7 +35,9 @@ func Start(inv ports.Invocation, raw io.Writer, onLine func([]byte)) (*Process, 
 }
 
 // StartLines is Start with stderr read line by line too: onStderr, when given, receives each stderr line, and the
-// tail is still kept. The process counts as done once both streams are drained.
+// tail is still kept. One goroutine records every line, so raw and the callbacks hold the lines in one order: each
+// stream's own, and across the two the order they arrived (FS-013 FR-008, D-112). The process counts as done once
+// both streams are drained and recorded.
 func StartLines(inv ports.Invocation, raw io.Writer, onStdout, onStderr func([]byte)) (*Process, error) {
 	cmd := exec.Command(inv.Path, inv.Args...)
 	cmd.Dir = inv.Dir
@@ -56,7 +58,7 @@ func StartLines(inv ports.Invocation, raw io.Writer, onStdout, onStderr func([]b
 	}
 	p := &Process{cmd: cmd, done: make(chan struct{}), stderr: &tail{max: 64 * 1024}}
 	if raw != nil {
-		// The stream readers below and os/exec's stderr copy write from their own goroutines.
+		// The recorder below and os/exec's stderr copy write from their own goroutines.
 		raw = &lockedWriter{w: raw}
 	}
 	var stderr io.ReadCloser
@@ -72,22 +74,39 @@ func StartLines(inv ports.Invocation, raw io.Writer, onStdout, onStderr func([]b
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
+	lines := make(chan streamLine, 64)
 	var readers sync.WaitGroup
-	readers.Add(1)
-	go func() {
-		defer readers.Done()
-		readLines(stdout, raw, nil, onStdout)
-	}()
-	if stderr != nil {
+	read := func(r io.Reader, stderr bool) {
 		readers.Add(1)
 		go func() {
 			defer readers.Done()
-			readLines(stderr, raw, p.stderr, onStderr)
+			readLines(r, func(line []byte) { lines <- streamLine{text: line, stderr: stderr} })
 		}()
 	}
+	read(stdout, false)
+	if stderr != nil {
+		read(stderr, true)
+	}
+	recorded := make(chan struct{})
+	go func() {
+		defer close(recorded)
+		for l := range lines {
+			if raw != nil {
+				_, _ = raw.Write(l.text)
+			}
+			on := onStdout
+			if l.stderr {
+				_, _ = p.stderr.Write(l.text)
+				on = onStderr
+			}
+			on(bytes.TrimRight(l.text, "\r\n"))
+		}
+	}()
 	go func() {
 		// os/exec closes the pipes in Wait, so it is called only once every read is done.
 		readers.Wait()
+		close(lines)
+		<-recorded
 		werr := cmd.Wait()
 		p.exitCode, p.signal = exitStatus(werr)
 		close(p.done)
@@ -95,18 +114,19 @@ func StartLines(inv ports.Invocation, raw io.Writer, onStdout, onStderr func([]b
 	return p, nil
 }
 
-func readLines(r io.Reader, raw, tail io.Writer, onLine func([]byte)) {
+// streamLine is one line a reader took from the process, its line ending included, and the stream it came from.
+type streamLine struct {
+	text   []byte
+	stderr bool
+}
+
+// readLines hands each line of r to emit, its line ending included. Each line is a slice of its own.
+func readLines(r io.Reader, emit func([]byte)) {
 	br := bufio.NewReaderSize(r, 256*1024)
 	for {
 		line, err := br.ReadBytes('\n')
 		if len(line) > 0 {
-			if raw != nil {
-				_, _ = raw.Write(line)
-			}
-			if tail != nil {
-				_, _ = tail.Write(line)
-			}
-			onLine(bytes.TrimRight(line, "\r\n"))
+			emit(line)
 		}
 		if err != nil {
 			return
