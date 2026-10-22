@@ -22,6 +22,46 @@ func TestRedact(t *testing.T) {
 	if !strings.Contains(out, "Authorization: Bearer [REDACTED]") {
 		t.Errorf("header prefix lost: %s", out)
 	}
+
+	// Passwords, cookies, and session values are masked where a key and its separator name them; the same words in
+	// ordinary text, or inside another word, are left as they are (FS-001 FR-006, FS-009 FR-005).
+	for _, c := range []struct{ in, want string }{
+		{"Sign in with password: hunter2 today", "Sign in with password: [REDACTED] today"},
+		{"PASSWORD=hunter2", "PASSWORD=[REDACTED]"},
+		{"passwd:s3cret", "passwd:[REDACTED]"},
+		{"mysql --pwd=s3cret db", "mysql --pwd=[REDACTED] db"},
+		{`password: "hunter2"`, `password: "[REDACTED]"`},
+		{`"use password='hunter2' once"`, `"use password='[REDACTED]' once"`},
+		{"Cookie: sessionid=abc123def456; theme=dark", "Cookie: [REDACTED]"},
+		{"Set-Cookie: id=a3fWa; Expires=Wed, 21 Oct 2026 07:28:00 GMT; HttpOnly",
+			"Set-Cookie: [REDACTED]"},
+		{`curl -H "Cookie: sid=abc123" https://example.test`, `curl -H "Cookie: [REDACTED]" https://example.test`},
+		{"sessionid=abc123def456", "sessionid=[REDACTED]"},
+		{"Session: 9f8e7d6c", "Session: [REDACTED]"},
+		{"SID=abc123; theme=dark", "SID=[REDACTED]; theme=dark"},
+		{"https://example.test/cb?sid=abc123&next=/home", "https://example.test/cb?sid=[REDACTED]&next=/home"},
+
+		{"password:\nthe next line", "password:\nthe next line"},
+		{"Fill in the password field, then submit.", "Fill in the password field, then submit."},
+		{"passwords: rotated monthly", "passwords: rotated monthly"},
+		{"run pwd to print the directory", "run pwd to print the directory"},
+		{"OLDPWD=/tmp/old", "OLDPWD=/tmp/old"},
+		{"cookies: 3, and the Cookie jar is empty", "cookies: 3, and the Cookie jar is empty"},
+		{"sessionContext: the previous attempt", "sessionContext: the previous attempt"},
+		{"the session started at 10:00", "the session started at 10:00"},
+		{"session 0b5c-77 on model sonnet", "session 0b5c-77 on model sonnet"},
+		{"This session is run by HarmFlow, a local scheduler.", "This session is run by HarmFlow, a local scheduler."},
+		{"inside=1, side: left, consider=yes", "inside=1, side: left, consider=yes"},
+	} {
+		out := Redact(c.in)
+		if out != c.want {
+			t.Errorf("Redact(%q) = %q, want %q", c.in, out, c.want)
+		}
+		// A capture is redacted as it is written and again as it is read.
+		if again := Redact(out); again != out {
+			t.Errorf("Redact is not idempotent on %q: %q", out, again)
+		}
+	}
 }
 
 // The agent's and the harness's text reaches the daemon as structs, so every string in one is redacted in place, however
