@@ -1440,6 +1440,74 @@ func TestNotificationLevels(t *testing.T) {
 	}
 }
 
+// FS-001 FR-013, D-083: whether a running execution notifies is decided by the definition it started with, its task's
+// name included; an edit to the task's notifications applies from the next execution.
+func TestNoticesFollowTheStartingDefinition(t *testing.T) {
+	e := newEnv(t)
+	gates := t.TempDir()
+	e.claude.setScript(func(req ports.RunRequest) string {
+		return fmt.Sprintf("while [ ! -e %s ]; do sleep 0.05; done; echo 'END ok'", filepath.Join(gates, req.TaskID))
+	})
+	events := func(list string) string { return "  notifications:\n    native:\n      events: [" + list + "]\n" }
+	for _, c := range []struct {
+		id, before, after string
+		first, next       int // the execution.completed notices of the running execution and of the next one
+	}{
+		{"removed", "execution.completed", "execution.failed", 1, 0},
+		{"added", "execution.failed", "execution.completed", 0, 1},
+	} {
+		e.create(c.id, events(c.before))
+		first, _ := e.app.RunTask(c.id)
+		e.wait(first.ExecutionID, domain.StatusRunning)
+		view, _ := e.app.GetTask(c.id)
+		edited := strings.Replace(taskYAML(c.id, events(c.after)), "name: Task "+c.id, "name: Renamed "+c.id, 1)
+		if _, err := e.app.UpdateTask(c.id, TaskInput{YAML: edited, BaseRevision: view.Revision}); err != nil {
+			t.Fatal(err)
+		}
+		if view, _ := e.app.GetTask(c.id); view.Name != "Renamed "+c.id {
+			t.Fatalf("%s: the edit was not saved: %+v", c.id, view)
+		}
+		if err := os.WriteFile(filepath.Join(gates, c.id), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		e.wait(first.ExecutionID, domain.StatusCompleted)
+		e.idle(c.id) // the notice is decided once the execution has returned
+		got := e.completedNotices(first.ExecutionID)
+		if len(got) != c.first {
+			t.Errorf("%s: the running execution made %d completed notices, want %d", c.id, len(got), c.first)
+		}
+		for _, n := range got {
+			if n.Params["taskName"] != "Task "+c.id || n.Body != "Task "+c.id+" completed." {
+				t.Errorf("%s: a notice names the task as edited, not as it started: %+v", c.id, n)
+			}
+		}
+
+		next, _ := e.app.RunTask(c.id)
+		e.wait(next.ExecutionID, domain.StatusCompleted)
+		e.idle(c.id)
+		got = e.completedNotices(next.ExecutionID)
+		if len(got) != c.next {
+			t.Errorf("%s: the next execution made %d completed notices, want %d", c.id, len(got), c.next)
+		}
+		for _, n := range got {
+			if n.Params["taskName"] != "Renamed "+c.id {
+				t.Errorf("%s: the next execution's notice misses the rename: %+v", c.id, n)
+			}
+		}
+	}
+}
+
+// completedNotices returns the execution.completed notices of one execution.
+func (e *env) completedNotices(executionID string) []Notification {
+	var out []Notification
+	for _, n := range e.app.Notifications(false) {
+		if n.EventType == domain.EventExecutionCompleted && n.ExecutionID == executionID {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
 // FS-011 FR-005: past the cap the oldest read notices go first, and an unread notice is never dropped.
 func TestNotificationCapKeepsUnread(t *testing.T) {
 	e := newEnv(t)
@@ -1455,13 +1523,13 @@ func TestNotificationCapKeepsUnread(t *testing.T) {
 	completed := domain.Event{Type: domain.EventExecutionCompleted, TaskID: "noisy"}
 
 	hold(func(int) bool { return false })
-	e.app.notifyFor(completed)
+	e.app.notifyFor(completed, nil)
 	if n := e.app.Notifications(true); len(n) != maxNotifications+1 {
 		t.Errorf("%d unread notices kept, want %d", len(n), maxNotifications+1)
 	}
 	// Once they are read, the next notice trims the list back to the cap, oldest first.
 	e.app.MarkNotificationsRead(nil)
-	e.app.notifyFor(completed)
+	e.app.notifyFor(completed, nil)
 	all := e.app.Notifications(false)
 	if len(all) != maxNotifications {
 		t.Fatalf("%d read notices kept, want %d", len(all), maxNotifications)
@@ -1472,7 +1540,7 @@ func TestNotificationCapKeepsUnread(t *testing.T) {
 
 	// Only the two notices before the oldest are read: the older of them is dropped, not the oldest unread one.
 	hold(func(i int) bool { return i == maxNotifications-2 || i == maxNotifications-3 })
-	e.app.notifyFor(completed)
+	e.app.notifyFor(completed, nil)
 	kept := map[string]bool{}
 	for _, n := range e.app.Notifications(false) {
 		kept[n.ID] = true
