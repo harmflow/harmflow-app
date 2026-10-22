@@ -273,11 +273,16 @@ func (a *App) RequestShutdown(force bool) error {
 
 // emit publishes an event through the event log.
 func (a *App) emit(e domain.Event) domain.Event {
+	return a.emitFor(e, nil)
+}
+
+// emitFor is emit for an event of a running execution: its notice follows the definition the execution started with.
+func (a *App) emitFor(e domain.Event, started *domain.TaskDocument) domain.Event {
 	if e.Timestamp.IsZero() {
 		e.Timestamp = a.now()
 	}
 	stored := a.d.Events.Append(e)
-	a.notifyFor(stored)
+	a.notifyFor(stored, started)
 	return stored
 }
 

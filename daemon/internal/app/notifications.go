@@ -52,8 +52,11 @@ func notifiable(e domain.Event) string {
 	return ""
 }
 
-// notifyFor creates a notice when the event is one the task chose and the global level lets it through (D-074).
-func (a *App) notifyFor(e domain.Event) {
+// notifyFor creates a notice when the event is one the task chose and the global level lets it through (D-074). An
+// event of a running execution comes with the definition it started with, so an edit, a new name included, applies from
+// the next execution (D-083); any other event reads the current one. The global level is a setting, not part of the
+// task, and applies at once.
+func (a *App) notifyFor(e domain.Event, started *domain.TaskDocument) {
 	kind := notifiable(e)
 	if kind == "" || e.TaskID == "" {
 		return
@@ -62,7 +65,9 @@ func (a *App) notifyFor(e domain.Event) {
 	level := a.settings.NotificationLevel
 	t := a.tasks[e.TaskID]
 	var doc domain.TaskDocument
-	if t != nil {
+	if started != nil {
+		doc = *started
+	} else if t != nil {
 		doc = t.doc
 	}
 	a.mu.Unlock()

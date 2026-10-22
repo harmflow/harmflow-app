@@ -167,7 +167,15 @@ func (r *run) event(e domain.Event) domain.Event {
 		e.WorkItemID = r.x.WorkItem
 		r.a.mu.Unlock()
 	}
-	return r.a.emit(e)
+	return r.a.emitFor(e, r.started())
+}
+
+// started is the definition the execution started with, or nil when it ended before it took one: its task was gone.
+func (r *run) started() *domain.TaskDocument {
+	if r.def.Metadata.ID == "" {
+		return nil
+	}
+	return &r.def
 }
 
 // save persists the record, at most every second unless forced.
