@@ -13,11 +13,17 @@ import (
 	"os/exec"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
+
+// outputDelay bounds the wait for the end of the process's output once the process has exited. A process it left
+// running outside its group can keep the pipes open; past the bound, the output is taken as ended, so the execution
+// ends, frees its task, and lets the daemon stop (FS-003 FR-005).
+const outputDelay = 2 * time.Second
 
 type Process struct {
 	cmd      *exec.Cmd
@@ -39,12 +45,15 @@ func Start(inv ports.Invocation, raw io.Writer, onLine func([]byte)) (*Process, 
 // StartLines is Start with stderr read line by line too: onStderr, when given, receives each stderr line, and the
 // tail is still kept. One goroutine records every line, so raw and the callbacks hold the lines in one order: each
 // stream's own, and across the two the order they arrived (FS-013 FR-008, D-112). The process counts as done once
-// both streams are drained and recorded.
+// both streams are drained and recorded, or once outputDelay has passed since it exited.
 func StartLines(inv ports.Invocation, raw io.Writer, onStdout, onStderr func([]byte)) (*Process, error) {
 	cmd := exec.Command(inv.Path, inv.Args...)
 	cmd.Dir = inv.Dir
 	cmd.Env = inv.Env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// os/exec writes stdin from its own goroutine, which a process left holding the pipe unread would block.
+	cmd.WaitDelay = outputDelay
+	var files []*os.File // the child's ends, closed here once it has them
 	if inv.Stdin != "" {
 		cmd.Stdin = bytes.NewBufferString(inv.Stdin)
 	} else {
@@ -53,35 +62,39 @@ func StartLines(inv ports.Invocation, raw io.Writer, onStdout, onStderr func([]b
 			return nil, err
 		}
 		cmd.Stdin = devnull
+		files = append(files, devnull)
 	}
-	stdout, err := cmd.StdoutPipe()
+	// The daemon's own pipes rather than os/exec's: os/exec closes its pipes in Wait, which could drop output not yet
+	// read, and it waits for their end with no limit.
+	stdout, stdoutW, err := os.Pipe()
 	if err != nil {
+		closeAll(files)
 		return nil, err
 	}
-	p := &Process{cmd: cmd, done: make(chan struct{}), stderr: &tail{max: 64 * 1024}}
-	if raw != nil {
-		// The recorder below and os/exec's stderr copy write from their own goroutines.
-		raw = &lockedWriter{w: raw}
+	stderr, stderrW, err := os.Pipe()
+	if err != nil {
+		closeAll(append(files, stdout, stdoutW))
+		return nil, err
 	}
-	var stderr io.ReadCloser
-	if onStderr != nil {
-		if stderr, err = cmd.StderrPipe(); err != nil {
-			return nil, err
-		}
-	} else if raw != nil {
-		cmd.Stderr = io.MultiWriter(p.stderr, raw)
-	} else {
-		cmd.Stderr = p.stderr
-	}
-	if err := cmd.Start(); err != nil {
+	cmd.Stdout, cmd.Stderr = stdoutW, stderrW
+	files = append(files, stdoutW, stderrW)
+	err = cmd.Start()
+	closeAll(files)
+	if err != nil {
+		closeAll([]*os.File{stdout, stderr})
 		return nil, err
 	}
 	pid := cmd.Process.Pid
-	p.tree = Tree{Pid: pid, Group: pid, ExecutionID: inv.ExecutionID}
+	p := &Process{cmd: cmd, done: make(chan struct{}), stderr: &tail{max: 64 * 1024},
+		tree: Tree{Pid: pid, Group: pid, ExecutionID: inv.ExecutionID}}
 	// Read before Wait can reap the process, while its pid is surely its own.
 	if start, err := startTime(pid); err == nil {
 		p.tree.Start = start
 	}
+	if onStderr == nil {
+		onStderr = func([]byte) {}
+	}
+	out, errs := &pipeReader{f: stdout}, &pipeReader{f: stderr}
 	lines := make(chan streamLine, 64)
 	var readers sync.WaitGroup
 	read := func(r io.Reader, stderr bool) {
@@ -91,10 +104,13 @@ func StartLines(inv ports.Invocation, raw io.Writer, onStdout, onStderr func([]b
 			readLines(r, func(line []byte) { lines <- streamLine{text: line, stderr: stderr} })
 		}()
 	}
-	read(stdout, false)
-	if stderr != nil {
-		read(stderr, true)
-	}
+	read(out, false)
+	read(errs, true)
+	drained := make(chan struct{})
+	go func() {
+		readers.Wait()
+		close(drained)
+	}()
 	recorded := make(chan struct{})
 	go func() {
 		defer close(recorded)
@@ -111,12 +127,18 @@ func StartLines(inv ports.Invocation, raw io.Writer, onStdout, onStderr func([]b
 		}
 	}()
 	go func() {
-		// os/exec closes the pipes in Wait, so it is called only once every read is done.
-		readers.Wait()
+		_ = cmd.Wait()
+		select {
+		case <-drained:
+		case <-time.After(outputDelay):
+			out.stop()
+			errs.stop()
+			<-drained
+		}
 		close(lines)
 		<-recorded
-		werr := cmd.Wait()
-		p.exitCode, p.signal = exitStatus(werr)
+		closeAll([]*os.File{stdout, stderr})
+		p.exitCode, p.signal = exitStatus(cmd.ProcessState)
 		close(p.done)
 	}()
 	return p, nil
@@ -126,6 +148,71 @@ func StartLines(inv ports.Invocation, raw io.Writer, onStdout, onStderr func([]b
 type streamLine struct {
 	text   []byte
 	stderr bool
+}
+
+func closeAll(files []*os.File) {
+	for _, f := range files {
+		_ = f.Close()
+	}
+}
+
+// pipeReader reads the daemon's end of a pipe the process writes to. Until stop, a read waits for data, and the
+// stream ends once every process holding the other end has closed it. After stop, a read takes only what the pipe
+// already holds, then the stream ends: what the harness wrote before it exited is read, and a process left holding
+// the other end no longer holds up the end of the output.
+type pipeReader struct {
+	f       *os.File
+	stopped atomic.Bool
+	drained int
+}
+
+// maxDrain bounds what is read after stop, in case the process left holding the pipe keeps writing to it; a pipe
+// holds at most 64 KiB.
+const maxDrain = 1 << 20
+
+func (r *pipeReader) Read(b []byte) (int, error) {
+	if !r.stopped.Load() {
+		n, err := r.f.Read(b)
+		// Only stop sets a deadline.
+		if !errors.Is(err, os.ErrDeadlineExceeded) {
+			return n, err
+		}
+		if n > 0 {
+			return n, nil
+		}
+	}
+	if r.drained >= maxDrain || len(b) == 0 {
+		return 0, io.EOF
+	}
+	if len(b) > maxDrain-r.drained {
+		b = b[:maxDrain-r.drained]
+	}
+	rc, err := r.f.SyscallConn()
+	if err != nil {
+		return 0, io.EOF
+	}
+	n, rerr := 0, error(nil)
+	// Control ignores the deadline, and the pipe does not block, so a read of an empty pipe returns EAGAIN at once.
+	if err := rc.Control(func(fd uintptr) {
+		_ = syscall.SetNonblock(int(fd), true)
+		for {
+			if n, rerr = syscall.Read(int(fd), b); rerr != syscall.EINTR {
+				return
+			}
+		}
+	}); err != nil || rerr != nil || n <= 0 {
+		return 0, io.EOF
+	}
+	r.drained += n
+	return n, nil
+}
+
+// stop ends the wait for more data, waking a read that waits.
+func (r *pipeReader) stop() {
+	r.stopped.Store(true)
+	if err := r.f.SetReadDeadline(time.Now()); err != nil {
+		_ = r.f.Close()
+	}
 }
 
 // readLines hands each line of r to emit, its line ending included. Each line is a slice of its own.
@@ -144,18 +231,14 @@ func readLines(r io.Reader, emit func([]byte)) {
 
 // exitStatus is the exit code — 128 plus the signal's number for a process a signal ended, as a shell reports it —
 // and the signal's name, empty when the process exited by itself.
-func exitStatus(err error) (int, string) {
-	if err == nil {
-		return 0, ""
+func exitStatus(ps *os.ProcessState) (int, string) {
+	if ps == nil {
+		return -1, ""
 	}
-	var ee *exec.ExitError
-	if errors.As(err, &ee) {
-		if ws, ok := ee.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
-			return 128 + int(ws.Signal()), signalName(ws.Signal())
-		}
-		return ee.ExitCode(), ""
+	if ws, ok := ps.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+		return 128 + int(ws.Signal()), signalName(ws.Signal())
 	}
-	return -1, ""
+	return ps.ExitCode(), ""
 }
 
 var signalNames = map[syscall.Signal]string{
@@ -172,7 +255,7 @@ func signalName(s syscall.Signal) string {
 	return "signal " + strconv.Itoa(int(s))
 }
 
-// Done is closed when the process has exited and its output is drained.
+// Done is closed when the process has exited and its output is drained, or has stayed open outputDelay past its exit.
 func (p *Process) Done() <-chan struct{} { return p.done }
 
 func (p *Process) ExitCode() int { return p.exitCode }
@@ -244,18 +327,6 @@ func (t *tail) String() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return string(t.buf)
-}
-
-// lockedWriter hands w one write at a time.
-type lockedWriter struct {
-	mu sync.Mutex
-	w  io.Writer
-}
-
-func (l *lockedWriter) Write(b []byte) (int, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.w.Write(b)
 }
 
 // LookPath finds a binary on PATH, then in the given known locations, returning every hit in order.
