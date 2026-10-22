@@ -15,12 +15,19 @@ import { actions, useStore } from "../state/store";
 import { CostsTab } from "./CostsTab";
 import { useCancel } from "./ExecutionCard";
 import { HarnessLabel } from "./Shell";
-import { Icon } from "./Icon";
+import { Icon, type IconName } from "./Icon";
 import { Banner, Button, Chip, CopyButton, EmptyState, KeyValue, StatusChip, Tabs, cx, type TabDef } from "./ui";
 
 type TabKey = "events" | "output" | "program" | "raw" | "files" | "commands" | "results" | "attempts" | "costs";
 
-const PROMINENT = new Set(["harness.switched", "policy.unenforced", "repository.unprotected", "harness.no_alternative"]);
+const PROMINENT = new Set([
+  "harness.switched",
+  "policy.unenforced",
+  "repository.unprotected",
+  "work_item.conflicting_activity",
+  "harness.no_alternative",
+]);
+const BANNER_ICON: Record<string, IconName> = { "harness.switched": "switch", "work_item.conflicting_activity": "alert" };
 
 export function ExecutionDetail({ executionId, summary }: { executionId: string; summary?: ExecutionSummary }) {
   const { t, i18n } = useTranslation();
@@ -140,7 +147,7 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
       {prominent.length ? (
         <div className="detail__alerts">
           {prominent.slice(-3).map((e) => (
-            <Banner key={e.id} tone={e.type === "harness.switched" ? "magenta" : e.type === "harness.no_alternative" ? "danger" : "warning"} icon={e.type === "harness.switched" ? "switch" : "shield"}>
+            <Banner key={e.id} tone={e.type === "harness.switched" ? "magenta" : e.type === "harness.no_alternative" ? "danger" : "warning"} icon={BANNER_ICON[e.type] ?? "shield"}>
               <strong>{t(`eventTypes.${e.type}` as never, { defaultValue: e.type }) as string}</strong>
               {e.message ? <span className="mono"> — {eventText(e)}</span> : null}
             </Banner>

@@ -200,7 +200,7 @@ export const ptBR: Resources = {
     script: { started: "Programa iniciado", output: "Saída do programa", exited: "Programa encerrado" },
     tool: { started: "Ferramenta iniciada", completed: "Ferramenta concluída" },
     step: { started: "Etapa" },
-    work_item: { selected: "Item de trabalho selecionado" },
+    work_item: { selected: "Item de trabalho selecionado", conflicting_activity: "Atividade conflitante" },
     workspace: { changed: "Workspace alterado" },
     test: { started: "Executando testes", completed: "Testes concluídos", failed: "Testes falharam" },
     pull_request: { created: "Pull request em rascunho criado", updated: "Pull request em rascunho atualizado" },
@@ -217,6 +217,7 @@ export const ptBR: Resources = {
   warnings: {
     policy_unenforced: "Restrição não aplicada",
     repository_unprotected: "Branch base sem proteção",
+    conflicting_activity: "Atividade conflitante",
     missing_agent: "Agente não encontrado",
     missing_skill: "Skill não encontrada",
     invalid_fallback: "Fallback inválido",

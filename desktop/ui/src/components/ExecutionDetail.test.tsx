@@ -296,6 +296,27 @@ describe("execution detail", () => {
     }
   });
 
+  it("shows a conflict the agent met as a warning above the timeline, in it, and in the results (FS-006 AC-015)", async () => {
+    const said = "someone pushed to feature/123-agent; rebased and continued";
+    await open(
+      { ...completed, id: "exec-conflict", warnings: [{ code: "conflicting_activity", message: said, subject: "org/core-banking" }] },
+      [
+        event(1, "execution.started"),
+        event(2, "work_item.conflicting_activity", {
+          severity: "warning",
+          message: said,
+          payload: { code: "conflicting_activity", subject: "org/core-banking" },
+        }),
+        event(3, "execution.completed"),
+      ],
+      capture(""),
+    );
+
+    expect(host!.querySelector(".detail__alerts")!.textContent).toBe(`Conflicting activity — ${said}`);
+    expect(body()).toContain("Conflicting activity");
+    expect(await choose("Results")).toContain(`Conflicting activity — ${said}`);
+  });
+
   // harmflow-app#39: a failover's attempts and their sum, each figure with its source, the estimate said as such, and
   // the itemized receipt inside the tab.
   it("shows each attempt's token use and estimated cost, their sum, and the receipt", async () => {

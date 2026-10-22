@@ -755,7 +755,7 @@ export interface components {
         };
         Warning: {
             /** @enum {string} */
-            code: "policy_unenforced" | "repository_unprotected" | "missing_agent" | "missing_skill" | "invalid_fallback" | "harness_not_ready" | "version_untested" | "external_edit_invalid" | "other";
+            code: "policy_unenforced" | "repository_unprotected" | "conflicting_activity" | "missing_agent" | "missing_skill" | "invalid_fallback" | "harness_not_ready" | "version_untested" | "external_edit_invalid" | "other";
             /** @description The en-US text, or the agent's own words, which have no messageKey. */
             message: string;
             messageKey?: components["schemas"]["MessageKey"];

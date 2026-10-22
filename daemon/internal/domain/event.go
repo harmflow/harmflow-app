@@ -42,6 +42,7 @@ const (
 	EventToolCompleted           = "tool.completed"
 	EventStepStarted             = "step.started"
 	EventWorkItemSelected        = "work_item.selected"
+	EventWorkItemConflicting     = "work_item.conflicting_activity"
 	EventWorkspaceChanged        = "workspace.changed"
 	EventTestStarted             = "test.started"
 	EventTestCompleted           = "test.completed"
