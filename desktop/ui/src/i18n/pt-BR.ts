@@ -332,6 +332,7 @@ export const ptBR: Resources = {
     restriction_codex_tool_lists:
       "o Codex não tem lista de ferramentas permitidas ou negadas; as listas personalizadas não são aplicadas",
     harness_version_untested: "{{harness}} {{version}} é mais novo que as versões com que o HarmFlow foi testado",
+    harness_version_unknown: "{{harness}} não informou um número de versão, então o HarmFlow não sabe se foi testado com ela",
     repository_unprotected: "{{repository}}: a branch base não está protegida contra merge sem revisão",
     report_not_json: "report.json não é um JSON válido; foi ignorado",
     report_schema_invalid: "report.json não segue o seu schema ({{path}}: {{detail}}); foi ignorado",

@@ -2,6 +2,7 @@ package claudecode
 
 import (
 	"bufio"
+	"context"
 	"math"
 	"os"
 	"path/filepath"
@@ -279,6 +280,61 @@ func TestUsageAcrossModels(t *testing.T) {
 	}
 	if u.CostSource != domain.CostReported || *u.CostUSD != 0.5 {
 		t.Errorf("the CLI's total is the attempt's cost: %+v", u)
+	}
+}
+
+// standIn writes a stand-in for the claude CLI whose --version and `auth status` run the given shell commands, and
+// whose --help lists every flag the adapter needs.
+func standIn(t *testing.T, version, auth string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "claude")
+	script := `#!/bin/bash
+case "$1" in
+  --version) ` + version + ` ;;
+  --help) echo "-p, --print  --output-format <format>  --permission-mode <mode>  --allowedTools <tools...>  --append-system-prompt <prompt>" ;;
+  auth) ` + auth + ` ;;
+esac
+`
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// FS-004 FR-006, FR-008 (harmflow-app#71): what the probes could not establish reads unknown, never a known state. A
+// sign-in is invalid only when the CLI says it is signed out; a probe that is killed, as one is at its timeout, or that
+// fails otherwise leaves the harness ready with a diagnostic, and the first execution proves the sign-in.
+func TestDetectReadsOnlyWhatTheProbesEstablish(t *testing.T) {
+	version, signedIn := `echo "2.1.239 (Claude Code)"`, `echo '{"loggedIn": true}'`
+	cases := []struct {
+		name, version, auth                         string
+		wantVersion, wantSupport, wantAuth, wantKey string
+		wantReadiness                               string
+	}{
+		{"signed in", version, signedIn, "2.1.239", "supported", "valid", "", "ready"},
+		{"no version number", `echo "Claude Code (dev build)"`, signedIn, "", "unknown", "valid", "", "ready"},
+		// The shell ends itself as the probe's timeout would end it, with no 20-second wait.
+		{"sign-in probe killed", version, `kill -KILL $$`, "2.1.239", "supported", "unknown",
+			"authentication_unverified", "ready"},
+		{"sign-in probe fails", version, `echo "Error: could not reach the credential store" >&2; exit 1`, "2.1.239",
+			"supported", "unknown", "authentication_unverified", "ready"},
+		// What the CLI prints when it is signed out, exiting 1.
+		{"signed out", version, `echo '{"loggedIn": false, "authMethod": "none"}'; exit 1`, "2.1.239", "supported",
+			"invalid", "claude_not_signed_in", "not_ready"},
+		{"signed out in text", version, `echo "Not logged in" >&2; exit 1`, "2.1.239", "supported", "invalid",
+			"claude_not_signed_in", "not_ready"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			info := (&Adapter{Home: t.TempDir()}).Detect(context.Background(), standIn(t, c.version, c.auth))
+			if info.Version != c.wantVersion || info.VersionSupport != c.wantSupport || info.Authentication != c.wantAuth ||
+				info.DiagnosticKey != c.wantKey || info.Readiness != c.wantReadiness {
+				t.Errorf("version %q %s, authentication %s, diagnostic %q (%s), readiness %s; want version %q %s, "+
+					"authentication %s, diagnostic %q, readiness %s", info.Version, info.VersionSupport, info.Authentication,
+					info.DiagnosticKey, info.Diagnostic, info.Readiness, c.wantVersion, c.wantSupport, c.wantAuth, c.wantKey,
+					c.wantReadiness)
+			}
+		})
 	}
 }
 

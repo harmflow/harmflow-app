@@ -2,6 +2,7 @@ package codex
 
 import (
 	"bufio"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +26,60 @@ func replay(t *testing.T, file string) (*parser, []ports.HarnessEvent) {
 		events = append(events, p.Line(sc.Bytes())...)
 	}
 	return p, events
+}
+
+// standIn writes a stand-in for the codex CLI whose --version and `login status` run the given shell commands, and
+// whose `exec --help` lists every flag the adapter needs.
+func standIn(t *testing.T, version, login string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "codex")
+	script := `#!/bin/bash
+case "$1" in
+  --version) ` + version + ` ;;
+  login) ` + login + ` ;;
+  exec) echo "Usage: codex exec  --json  --sandbox <MODE>  --cd <DIR>  --skip-git-repo-check" ;;
+esac
+`
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// FS-004 FR-006, FR-008 (harmflow-app#71): what the probes could not establish reads unknown, never a known state. A
+// sign-in is invalid only when the CLI says it is signed out; a probe that is killed, as one is at its timeout, or that
+// fails otherwise leaves the harness ready with a diagnostic, and the first execution proves the sign-in.
+func TestDetectReadsOnlyWhatTheProbesEstablish(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	version, signedIn := `echo "codex-cli 0.163.0"`, `echo "Logged in using ChatGPT" >&2`
+	cases := []struct {
+		name, version, login                        string
+		wantVersion, wantSupport, wantAuth, wantKey string
+		wantReadiness                               string
+	}{
+		{"signed in", version, signedIn, "0.163.0", "supported", "valid", "", "ready"},
+		{"no version number", `echo "codex-cli (dev build)"`, signedIn, "", "unknown", "valid", "", "ready"},
+		// The shell ends itself as the probe's timeout would end it, with no 20-second wait.
+		{"sign-in probe killed", version, `kill -KILL $$`, "0.163.0", "supported", "unknown",
+			"authentication_unverified", "ready"},
+		{"sign-in probe fails", version, `echo "Error checking login status: permission denied" >&2; exit 1`, "0.163.0",
+			"supported", "unknown", "authentication_unverified", "ready"},
+		// What the CLI prints when it is signed out, exiting 1.
+		{"signed out", version, `echo "Not logged in" >&2; exit 1`, "0.163.0", "supported", "invalid", "not_signed_in",
+			"not_ready"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			info := (&Adapter{Home: t.TempDir()}).Detect(context.Background(), standIn(t, c.version, c.login))
+			if info.Version != c.wantVersion || info.VersionSupport != c.wantSupport || info.Authentication != c.wantAuth ||
+				info.DiagnosticKey != c.wantKey || info.Readiness != c.wantReadiness {
+				t.Errorf("version %q %s, authentication %s, diagnostic %q (%s), readiness %s; want version %q %s, "+
+					"authentication %s, diagnostic %q, readiness %s", info.Version, info.VersionSupport, info.Authentication,
+					info.DiagnosticKey, info.Diagnostic, info.Readiness, c.wantVersion, c.wantSupport, c.wantAuth, c.wantKey,
+					c.wantReadiness)
+			}
+		})
+	}
 }
 
 func TestParseSuccess(t *testing.T) {

@@ -758,6 +758,7 @@ components:
         - restriction_script_unenforced
         - script_leftovers_ended
         - harness_version_untested
+        - harness_version_unknown
         - repository_unprotected
         - report_not_json
         - report_schema_invalid

@@ -557,11 +557,18 @@ func (r *run) runAttempt(ad ports.HarnessAdapter, info ports.HarnessInfo, p doma
 				domain.EventPolicyUnenforced, true)
 		}
 	}
-	if info.VersionSupport == "untested_newer" {
+	switch info.VersionSupport {
+	case "untested_newer":
 		r.warn(domain.Warning{Code: domain.WarningVersionUntested, Subject: p.Provider,
 			Text: domain.T("harness_version_untested",
 				"{{harness}} {{version}} is newer than the versions HarmFlow was tested with",
 				"harness", ad.Name(), "version", info.Version)},
+			domain.EventHarnessVersionUntested, true)
+	case "unknown":
+		r.warn(domain.Warning{Code: domain.WarningVersionUntested, Subject: p.Provider,
+			Text: domain.T("harness_version_unknown",
+				"{{harness}} reported no version number, so HarmFlow cannot tell whether it was tested with it",
+				"harness", ad.Name())},
 			domain.EventHarnessVersionUntested, true)
 	}
 	raw, err := a.d.Events.RawWriter(r.x.ID, n)
