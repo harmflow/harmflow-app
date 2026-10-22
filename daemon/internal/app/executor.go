@@ -561,6 +561,7 @@ func (r *run) runAttempt(ad ports.HarnessAdapter, info ports.HarnessInfo, p doma
 		r.endAttempt(end, -1)
 		return end
 	}
+	inv.ExecutionID = r.x.ID
 	for _, res := range inv.Restrictions {
 		if !res.Enforced {
 			r.warn(domain.Warning{Code: domain.WarningPolicyUnenforced, Subject: res.Name, Text: res.Text},
@@ -624,6 +625,7 @@ func (r *run) runAttempt(ad ports.HarnessAdapter, info ports.HarnessInfo, p doma
 	}()
 	grace := time.Duration(*r.eff.Spec.Execution.CancelGraceSeconds) * time.Second
 	proc.Wait(r.ctx, grace)
+	r.logEnded(proc.Ended())
 	close(stopProgress)
 	<-progressDone
 	if raw != nil {

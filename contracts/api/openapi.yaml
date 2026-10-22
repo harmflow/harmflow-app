@@ -826,6 +826,7 @@ components:
         - script_signaled
         - script_start_failed
         - script_write_failed
+        - process_ended
         # Harness and tool diagnostics
         - detection_running
         - harness_manual_path_invalid

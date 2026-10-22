@@ -208,6 +208,7 @@ export const ptBR: Resources = {
     policy: { unenforced: "Restrição não aplicada" },
     repository: { unprotected: "Branch base sem proteção" },
     notification: { created: "Notificação" },
+    process: { ended: "Processo encerrado" },
   },
   severity: {
     debug: "Depuração",
@@ -409,6 +410,7 @@ export const ptBR: Resources = {
     script_signaled: "o programa foi encerrado por {{signal}}",
     script_start_failed: "iniciando {{program}}: {{detail}}",
     script_write_failed: "gravando o script inline: {{detail}}",
+    process_ended: "{{executable}} (pid {{pid}}), que estava fora do grupo de processos, foi encerrado",
     detection_running: "a detecção está em andamento",
     harness_manual_path_invalid: "o caminho definido manualmente não existe ou não é um arquivo",
     claude_not_found: "claude não foi encontrado no PATH nem nos locais de instalação habituais",

@@ -256,8 +256,8 @@ func (r *run) runScript(deadline time.Time) (domain.ExecutionStatus, domain.Text
 				Payload: map[string]any{"stream": stream}})
 		}
 	}
-	proc, err := procutil.StartLines(ports.Invocation{Path: program, Args: argv[1:], Env: env, Dir: wd}, raw,
-		output("stdout"), output("stderr"))
+	proc, err := procutil.StartLines(ports.Invocation{Path: program, Args: argv[1:], Env: env, Dir: wd,
+		ExecutionID: r.x.ID}, raw, output("stdout"), output("stderr"))
 	if err != nil {
 		if raw != nil {
 			raw.Close()
@@ -279,6 +279,7 @@ func (r *run) runScript(deadline time.Time) (domain.ExecutionStatus, domain.Text
 
 	grace := time.Duration(*r.eff.Spec.Execution.CancelGraceSeconds) * time.Second
 	proc.Wait(r.ctx, grace)
+	r.logEnded(proc.Ended())
 	if raw != nil {
 		raw.Close()
 	}

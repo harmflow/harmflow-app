@@ -92,7 +92,8 @@
         "pull_request.updated",
         "policy.unenforced",
         "repository.unprotected",
-        "notification.created"
+        "notification.created",
+        "process.ended"
       ]
     }
   }
