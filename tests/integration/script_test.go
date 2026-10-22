@@ -1,0 +1,177 @@
+package integration
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"testing"
+	"time"
+)
+
+// Script tasks run a program of the user's instead of a harness session (FS-013). These run the real harmflowd and
+// real programs, across the daemon's process boundary.
+
+func scriptTask(id, body string) string {
+	return fmt.Sprintf(`apiVersion: harmflow/v1alpha1
+kind: Task
+metadata:
+  id: %s
+  name: Script %s
+spec:
+  type: script
+%s`, id, id, body)
+}
+
+// outputLines waits for the execution's terminal event and returns its program's output, each line with its stream.
+func (d *daemon) outputLines(id string) []string {
+	d.t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		events := d.call("GET", "/executions/"+id+"/events", nil, 200)["events"].([]any)
+		var lines []string
+		ended := false
+		for _, raw := range events {
+			e := raw.(map[string]any)
+			switch e["type"] {
+			case "script.output":
+				payload, _ := e["payload"].(map[string]any)
+				lines = append(lines, fmt.Sprint(payload["stream"])+": "+fmt.Sprint(e["message"]))
+			case "execution.completed", "execution.failed", "execution.cancelled", "execution.interrupted":
+				ended = true
+			}
+		}
+		if ended {
+			return lines
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	d.t.Fatalf("execution %s never ended", id)
+	return nil
+}
+
+func readPid(t *testing.T, path string) int {
+	t.Helper()
+	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		if data, err := os.ReadFile(path); err == nil {
+			if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
+				return pid
+			}
+		}
+	}
+	t.Fatalf("no pid in %s", path)
+	return 0
+}
+
+func gone(pid int) bool {
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		if err := syscall.Kill(pid, 0); err == syscall.ESRCH {
+			return true
+		}
+	}
+	return false
+}
+
+// FS-013 AC-001 to AC-003, AC-006, AC-008, AC-012, AC-016: a script task is created and imported over the API, runs
+// its program with no shell and no harness, ends by its exit status, and keeps its output marked and redacted.
+func TestScriptTaskOverTheAPI(t *testing.T) {
+	d := startDaemon(t, t.TempDir())
+	token := "ghp_" + strings.Repeat("b", 36)
+	inline := fmt.Sprintf(`  script:
+    inline:
+      interpreter: [/bin/sh]
+      source: |
+        echo "to stdout"
+        echo "%s" >&2
+        exit 3
+`, token)
+	created := d.call("POST", "/tasks", map[string]any{"yaml": scriptTask("audit", inline)}, 201)
+	if created["harness"] != "" || created["type"] != "script" {
+		t.Fatalf("created %v", created)
+	}
+	id := d.call("POST", "/tasks/audit/run", nil, 202)["executionId"].(string)
+	x := d.waitStatus(id, "failed")
+	script, _ := x["script"].(map[string]any)
+	if x["errorKey"] != "script_exit_code" || script == nil || script["exitCode"] != float64(3) || x["harness"] != "" {
+		t.Errorf("execution %v", x)
+	}
+	if attempts := x["attempts"].([]any); len(attempts) != 1 || attempts[0].(map[string]any)["harness"] != "" {
+		t.Errorf("attempts %v", attempts)
+	}
+	lines := d.outputLines(id)
+	if strings.Join(lines, "|") != "stdout: to stdout|stderr: [REDACTED]" {
+		t.Errorf("output %q", lines)
+	}
+	output := d.call("GET", "/executions/"+id+"/output", nil, 200)
+	text := output["attempts"].([]any)[0].(map[string]any)["text"].(string)
+	if strings.Contains(text, token) || !strings.Contains(text, "to stdout") {
+		t.Errorf("raw capture %q", text)
+	}
+
+	d.call("POST", "/tasks", map[string]any{"yaml": scriptTask("echo", "  script:\n    command: [/bin/echo, \"$HOME; echo injected\"]\n")}, 201)
+	id = d.call("POST", "/tasks/echo/run", nil, 202)["executionId"].(string)
+	d.waitStatus(id, "completed")
+	if lines := d.outputLines(id); len(lines) != 1 || lines[0] != "stdout: $HOME; echo injected" {
+		t.Errorf("argument list output %q", lines)
+	}
+
+	imported := d.call("POST", "/tasks/import", map[string]any{"yaml": scriptTask("imported",
+		"  enabled: true\n  script:\n    command: [/bin/echo]\n")}, 201)
+	if imported["enabled"] != false {
+		t.Errorf("an imported script task is enabled: %v", imported)
+	}
+	if s, _ := d.request("POST", "/tasks/imported/run", nil, nil); s < 400 {
+		t.Errorf("an imported script task ran before it was enabled: %d", s)
+	}
+}
+
+// FS-013 AC-009: cancelling a script execution ends its program and the child it started in the background.
+func TestScriptCancelEndsItsProcesses(t *testing.T) {
+	d := startDaemon(t, t.TempDir())
+	dir := t.TempDir()
+	d.call("POST", "/tasks", map[string]any{"yaml": scriptTask("slow", fmt.Sprintf(
+		"  script:\n    command: [/bin/sh, -c, \"sleep 600 & echo $! > %s/child; sleep 600\"]\n  execution:\n    cancelGraceSeconds: 1\n",
+		dir))}, 201)
+	id := d.call("POST", "/tasks/slow/run", nil, 202)["executionId"].(string)
+	d.waitStatus(id, "running")
+	child := readPid(t, filepath.Join(dir, "child"))
+	d.call("POST", "/executions/"+id+"/cancel", nil, 202)
+	d.waitStatus(id, "cancelled")
+	if !gone(child) {
+		t.Errorf("the program's child %d survived the cancellation", child)
+	}
+}
+
+// FS-013 AC-011: a daemon killed while a script runs leaves the program running in its own group; started again, it
+// marks the execution interrupted and ends what the program left.
+func TestRestartEndsWhatTheScriptLeft(t *testing.T) {
+	home, dir := t.TempDir(), t.TempDir()
+	d := startDaemon(t, home)
+	d.call("POST", "/tasks", map[string]any{"yaml": scriptTask("left", fmt.Sprintf(
+		"  script:\n    command: [/bin/sh, -c, \"echo $$ > %[1]s/leader; sleep 600 & echo $! > %[1]s/child; sleep 600\"]\n", dir))}, 201)
+	id := d.call("POST", "/tasks/left/run", nil, 202)["executionId"].(string)
+	d.waitStatus(id, "running")
+	leader, child := readPid(t, filepath.Join(dir, "leader")), readPid(t, filepath.Join(dir, "child"))
+	time.Sleep(1500 * time.Millisecond) // let the record, with the program's process group, reach the disk
+	d.kill()
+	if gone(leader) {
+		t.Fatal("the program ended with the daemon; nothing is left to end")
+	}
+	d2 := startDaemon(t, home)
+	x := d2.call("GET", "/executions/"+id, nil, 200)
+	if x["status"] != "interrupted" {
+		t.Fatalf("status %v", x["status"])
+	}
+	if !gone(leader) || !gone(child) {
+		t.Errorf("after the restart, the program (%d) or its child (%d) still runs", leader, child)
+	}
+	found := false
+	for _, raw := range x["warnings"].([]any) {
+		found = found || raw.(map[string]any)["messageKey"] == "script_leftovers_ended"
+	}
+	if !found {
+		t.Errorf("warnings %v", x["warnings"])
+	}
+}
