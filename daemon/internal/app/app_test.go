@@ -1286,7 +1286,6 @@ loop:
 	}
 }
 
-// FS-003 AC-009, AC-013: a restart marks active executions interrupted and counts the failure against the item.
 // FS-009 FR-007: a record or a ledger saved before the agent's text was redacted on arrival would keep a credential
 // with no time limit, so the daemon redacts both as it loads them, and saves them back.
 func TestRedactsWhatWasKeptBefore(t *testing.T) {
@@ -1329,6 +1328,7 @@ func TestRedactsWhatWasKeptBefore(t *testing.T) {
 	}
 }
 
+// FS-003 AC-009, AC-013: a restart marks active executions interrupted and counts the failure against the item.
 func TestRecoveryMarksInterrupted(t *testing.T) {
 	e := newEnv(t)
 	e.create("crash", "")
