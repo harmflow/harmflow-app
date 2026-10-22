@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -65,8 +66,12 @@ type CleanResult struct {
 	Kept    []KeptPath `json:"kept"`
 }
 
-// CleanWorkspaces removes the worktrees no longer needed (D-073): it keeps those of running tasks, of a draft pull
-// request still in progress, and of a failed or cancelled execution whose log has not expired.
+// CleanWorkspaces removes the worktrees no longer needed (FS-006 FR-016, D-073). A worktree is tied to its work item
+// through the path harmflow-github-worktree §2 gives it, <workspace>/<repo-name>-<issue-number>, or the worktreePath a
+// report named; it is removed only when that item reads closed in the ledger, or when the item's last execution was
+// cancelled, failed (a timeout included), or interrupted and its log has expired. Every other worktree is kept: those
+// of running tasks, of completed and needs_attention items, and any HarmFlow cannot tie to a work item, whether or
+// not its task still exists.
 func (a *App) CleanWorkspaces() CleanResult {
 	res := CleanResult{Removed: []string{}, Kept: []KeptPath{}}
 	taskDirs, err := os.ReadDir(a.d.Paths.Workspace)
@@ -82,22 +87,7 @@ func (a *App) CleanWorkspaces() CleanResult {
 	for id := range a.tasks {
 		exists[id] = true
 	}
-	keep := map[string]string{}
-	for _, x := range a.executions {
-		for _, w := range x.WorkItems {
-			if w.WorktreePath == "" {
-				continue
-			}
-			item := a.ledger[x.TaskID][w.Key]
-			switch {
-			case item != nil && item.Status == domain.WorkItemInProgress:
-				keep[filepath.Clean(w.WorktreePath)] = "its draft pull request is still in progress"
-			case (x.Status == domain.StatusFailed || x.Status == domain.StatusCancelled ||
-				x.Status == domain.StatusInterrupted) && !x.LogExpired:
-				keep[filepath.Clean(w.WorktreePath)] = "kept for diagnosis until its execution's log expires"
-			}
-		}
-	}
+	fates := a.worktreeFatesLocked()
 	a.mu.Unlock()
 	for _, td := range taskDirs {
 		if !td.IsDir() {
@@ -108,34 +98,131 @@ func (a *App) CleanWorkspaces() CleanResult {
 			res.Kept = append(res.Kept, KeptPath{taskDir, "the task is running"})
 			continue
 		}
-		if !exists[td.Name()] {
-			removeWorktrees(taskDir)
-			if os.RemoveAll(taskDir) == nil {
-				res.Removed = append(res.Removed, taskDir)
-			}
-			continue
-		}
 		entries, _ := os.ReadDir(taskDir)
 		for _, en := range entries {
 			if !en.IsDir() {
 				continue
 			}
 			p := filepath.Join(taskDir, en.Name())
-			if reason, ok := keep[filepath.Clean(p)]; ok {
-				res.Kept = append(res.Kept, KeptPath{p, reason})
-				continue
-			}
-			if !isWorktree(p) {
+			fate, known := fates[worktreeKey(p)]
+			switch {
+			case !known:
+				res.Kept = append(res.Kept, KeptPath{p, "HarmFlow has no record of its work item"})
+			case !fate.remove:
+				res.Kept = append(res.Kept, KeptPath{p, fate.reason})
+			case !isWorktree(p):
 				res.Kept = append(res.Kept, KeptPath{p, "not a Git worktree HarmFlow created"})
-				continue
+			default:
+				removeWorktree(p)
+				if os.RemoveAll(p) == nil {
+					res.Removed = append(res.Removed, p)
+				}
 			}
-			removeWorktree(p)
-			if os.RemoveAll(p) == nil {
-				res.Removed = append(res.Removed, p)
-			}
+		}
+		// A deleted task's directory goes once nothing is left in it; os.Remove never removes a non-empty one.
+		if !exists[td.Name()] && os.Remove(taskDir) == nil {
+			res.Removed = append(res.Removed, taskDir)
 		}
 	}
 	return res
+}
+
+// worktreeFate is what the clean-up does with one worktree, and why it keeps it.
+type worktreeFate struct {
+	remove bool
+	reason string
+}
+
+// worktreeFatesLocked decides, from the ledger, the fate of each worktree HarmFlow can tie to a work item, keyed by
+// worktreeKey. The path harmflow-github-worktree §2 derives from an item decides first; a worktreePath a report named
+// only adds a path no item derives. Where two claims meet, keeping wins.
+func (a *App) worktreeFatesLocked() map[string]worktreeFate {
+	fates := map[string]worktreeFate{}
+	claim := func(m map[string]worktreeFate, p string, f worktreeFate) {
+		k := worktreeKey(p)
+		if old, ok := m[k]; ok && !old.remove {
+			return
+		}
+		m[k] = f
+	}
+	for taskID, items := range a.ledger {
+		for key, item := range items {
+			name, ok := worktreeName(key)
+			if !ok {
+				continue
+			}
+			x := a.executions[item.LastExecutionID]
+			dir := filepath.Join(a.d.Paths.Workspace, taskID)
+			if x != nil && x.WorkspacePath != "" {
+				dir = x.WorkspacePath
+			}
+			claim(fates, filepath.Join(dir, name), fateOf(item, x))
+		}
+	}
+	reported := map[string]worktreeFate{}
+	for _, x := range a.executions {
+		for _, w := range x.WorkItems {
+			if w.WorktreePath == "" {
+				continue
+			}
+			f := worktreeFate{reason: "HarmFlow has no record of its work item"}
+			if item := a.ledger[x.TaskID][w.Key]; item != nil {
+				f = fateOf(item, a.executions[item.LastExecutionID])
+			}
+			claim(reported, w.WorktreePath, f)
+		}
+	}
+	for k, f := range reported {
+		if _, ok := fates[k]; !ok {
+			fates[k] = f
+		}
+	}
+	return fates
+}
+
+// fateOf decides a work item's worktree from the item's status and from its last execution, x, nil when HarmFlow has
+// no record of it.
+func fateOf(item *domain.WorkItem, x *domain.Execution) worktreeFate {
+	switch item.Status {
+	case domain.WorkItemClosed:
+		return worktreeFate{remove: true}
+	case domain.WorkItemCompleted:
+		return worktreeFate{reason: "its draft pull request is still in progress"}
+	case domain.WorkItemNeedsAttention:
+		return worktreeFate{reason: "its work item needs attention"}
+	}
+	if x == nil {
+		return worktreeFate{reason: "HarmFlow has no record of its execution"}
+	}
+	switch {
+	case x.Status == domain.StatusFailed || x.Status == domain.StatusCancelled || x.Status == domain.StatusInterrupted:
+		if x.LogExpired {
+			return worktreeFate{remove: true}
+		}
+		return worktreeFate{reason: "kept for diagnosis until its execution's log expires"}
+	case !x.Status.IsTerminal():
+		return worktreeFate{reason: "its execution has not ended"}
+	}
+	return worktreeFate{reason: "its work item has not ended"}
+}
+
+// githubItemKey is a GitHub work item's key, OWNER/REPO#N.
+var githubItemKey = regexp.MustCompile(`^[\w.-]+/([\w.-]+)#([1-9][0-9]*)$`)
+
+// worktreeName is the directory harmflow-github-worktree §2 gives a work item's worktree, <repo-name>-<issue-number>;
+// false for a key that names no GitHub issue.
+func worktreeName(key string) (string, bool) {
+	m := githubItemKey.FindStringSubmatch(key)
+	if m == nil {
+		return "", false
+	}
+	return m[1] + "-" + m[2], true
+}
+
+// worktreeKey compares worktree paths as the default macOS volume and GitHub do, ignoring case: a key that spells
+// the repository's name in another case still names the same worktree.
+func worktreeKey(p string) string {
+	return strings.ToLower(filepath.Clean(p))
 }
 
 // isWorktree reports a linked Git worktree: its .git is a file pointing at the main repository.
@@ -154,14 +241,4 @@ func removeWorktree(p string) {
 	repo := filepath.Dir(filepath.Dir(filepath.Dir(gitdir)))
 	_ = exec.Command("git", "-C", repo, "worktree", "remove", "--force", p).Run()
 	_ = exec.Command("git", "-C", repo, "worktree", "prune").Run()
-}
-
-func removeWorktrees(dir string) {
-	entries, _ := os.ReadDir(dir)
-	for _, en := range entries {
-		p := filepath.Join(dir, en.Name())
-		if en.IsDir() && isWorktree(p) {
-			removeWorktree(p)
-		}
-	}
 }
