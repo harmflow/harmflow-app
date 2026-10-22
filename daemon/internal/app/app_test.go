@@ -104,9 +104,11 @@ func (f *fakeHarness) running() bool {
 	return f.live > 0
 }
 
-// fakeParser also reads "USAGE <input tokens>", the usage so far, which is final once the attempt ends well.
+// fakeParser also reads "USAGE <input tokens>", the usage so far, which is final once the attempt ends well. Any other
+// line is the agent's message, and the last one is what a quota end reports as its final text, as the real adapters do.
 type fakeParser struct {
 	last     string
+	text     string
 	input    int64
 	finished func() // the executor calls Finish once the process has exited and its output is drained
 }
@@ -125,6 +127,7 @@ func (p *fakeParser) Line(b []byte) []ports.HarnessEvent {
 		p.input, _ = strconv.ParseInt(n, 10, 64)
 		return []ports.HarnessEvent{{Kind: ports.HarnessUsage, Usage: p.usage(domain.UsagePartial)}}
 	}
+	p.text = s
 	return []ports.HarnessEvent{{Kind: ports.HarnessMessage, Message: s}}
 }
 
@@ -151,7 +154,7 @@ func (p *fakeParser) Finish(exit int, _ string, timedOut, cancelled bool) domain
 		return domain.AttemptEnd{FinalText: "done", Usage: p.usage(domain.UsageReported)}
 	case "quota":
 		return domain.AttemptEnd{Class: domain.ClassQuotaExhausted, Error: domain.Text{Message: "usage limit reached"},
-			Usage: p.usage(domain.UsagePartial)}
+			FinalText: p.text, Usage: p.usage(domain.UsagePartial)}
 	case "rate":
 		return domain.AttemptEnd{Class: domain.ClassRateLimited, Error: domain.Text{Message: "429"}, RetryAfter: 10 * time.Millisecond}
 	}
@@ -661,6 +664,52 @@ func TestRunningAttemptShowsItsInput(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.wait(r.ExecutionID, domain.StatusCancelled)
+}
+
+// FS-008 FR-008, FR-010: the record redacts the session context like the prompt. A failover's context quotes the
+// previous attempt's last message as the harness printed it, so a secret the agent wrote reaches the next harness, and
+// only the record's redaction keeps it out of the history.
+func TestFailoverContextRedacted(t *testing.T) {
+	e := newEnv(t)
+	token := "ghp_" + strings.Repeat("b", 36)
+	e.create("leak", "    fallback:\n      candidates:\n        - provider: codex\n")
+	var mu sync.Mutex
+	var sent string
+	e.claude.setScript(func(ports.RunRequest) string { return "echo 'Pushed with " + token + "'; echo 'END quota'" })
+	e.codex.setScript(func(req ports.RunRequest) string {
+		if req.Prompt != "" { // validation's policy check prepares with no prompt
+			mu.Lock()
+			sent = req.Context
+			mu.Unlock()
+		}
+		return "echo 'END ok'"
+	})
+	r, _ := e.app.RunTask("leak")
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	e.idle("leak")
+	mu.Lock()
+	defer mu.Unlock()
+	if !strings.Contains(sent, "Its last message: Pushed with "+token) {
+		t.Fatalf("the failover's context does not quote the previous attempt's last message:\n%s", sent)
+	}
+	if len(x.Attempts) != 2 {
+		t.Fatalf("%d attempts, want 2", len(x.Attempts))
+	}
+	want := strings.ReplaceAll(sent, token, "[REDACTED]")
+	if got := x.Attempts[1].SessionContext; got != want {
+		t.Errorf("the record keeps the context\n%s\nwant\n%s", got, want)
+	}
+	data, err := os.ReadFile(filepath.Join(e.home, "state", "executions", r.ExecutionID+".json"))
+	var saved domain.Execution
+	if err == nil {
+		err = json.Unmarshal(data, &saved)
+	}
+	if err != nil || len(saved.Attempts) != 2 || saved.Attempts[1].SessionContext != want {
+		t.Errorf("the record on disk lacks the redacted context (%v):\n%s", err, data)
+	}
+	if strings.Contains(string(data), "ghp_") {
+		t.Errorf("the token survived in the record:\n%s", data)
+	}
 }
 
 // HarmFlow's context never names the task, since a prompt may name the same thing as the task's id or name, and it
