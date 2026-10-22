@@ -14,6 +14,10 @@ export const enUS = {
     history: "History",
     settings: "Settings",
   },
+  sidebar: {
+    collapse: "Collapse sidebar",
+    expand: "Expand sidebar",
+  },
   common: {
     cancel: "Cancel",
     save: "Save",
@@ -71,7 +75,6 @@ export const enUS = {
     lastUpdate: "Last update: {{time}}",
     lostHint:
       "The connection to the daemon was lost. Executions keep running in the daemon; the dashboard reconnects and replays the events it missed.",
-    readyHint: "Agents ready to run scheduled tasks.",
     versionMismatch:
       "The daemon runs version {{daemon}} and this dashboard version {{desktop}}. Reinstall HarmFlow so both match.",
   },

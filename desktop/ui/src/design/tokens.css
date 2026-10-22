@@ -137,6 +137,7 @@
 
   /* Layout */
   --hf-sidebar-width: 236px;
+  --hf-sidebar-width-collapsed: 72px;
   --hf-aside-width: 318px;
 
   /* Motion — only active work animates */
