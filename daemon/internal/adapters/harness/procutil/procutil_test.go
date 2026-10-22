@@ -3,7 +3,11 @@ package procutil
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
+	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,6 +17,38 @@ import (
 
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
+
+// helperVariable makes the test binary stand in for a program that is not an Apple platform binary, whose environment
+// KERN_PROCARGS2 returns: "daemonize" starts a daemon and exits, the first half of a double fork; "daemon" ignores
+// SIGTERM and sleeps.
+const helperVariable = "PROCUTIL_HELPER"
+
+func TestMain(m *testing.M) {
+	switch os.Getenv(helperVariable) {
+	case "daemonize":
+		// The daemon gets a session of its own and /dev/null for its output; once this process exits, launchd adopts it.
+		cmd := exec.Command(os.Args[0])
+		cmd.Env = append(os.Environ(), helperVariable+"=daemon")
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		if cmd.Start() != nil || writePid(os.Getenv("PROCUTIL_PIDFILE"), cmd.Process.Pid) != nil {
+			os.Exit(2)
+		}
+		os.Exit(0)
+	case "daemon":
+		signal.Ignore(syscall.SIGTERM)
+		time.Sleep(10 * time.Minute)
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
+// writePid writes the file whole, so a reader never sees part of the pid.
+func writePid(path string, pid int) error {
+	if err := os.WriteFile(path+".tmp", []byte(strconv.Itoa(pid)), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(path+".tmp", path)
+}
 
 // FS-003 AC-007: cancelling ends the whole process tree after the grace period, even a child that ignores SIGTERM.
 func TestStopKillsTheProcessTree(t *testing.T) {
@@ -180,5 +216,207 @@ func TestExitCode(t *testing.T) {
 	<-p.Done()
 	if p.ExitCode() != 3 || !strings.Contains(p.StderrTail(), "err") {
 		t.Errorf("exit %d stderr %q", p.ExitCode(), p.StderrTail())
+	}
+}
+
+// testEnv is the test's environment with none of HarmFlow's variables, which it has when it runs inside a HarmFlow
+// execution, and with extra added.
+func testEnv(extra ...string) []string {
+	var env []string
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "HARMFLOW_") && !strings.HasPrefix(kv, helperVariable+"=") {
+			env = append(env, kv)
+		}
+	}
+	return append(env, extra...)
+}
+
+// executionID is an id that no other run of these tests uses, even one running at the same time.
+func executionID(t *testing.T) string {
+	return fmt.Sprintf("procutil-%s-%d-%d", t.Name(), os.Getpid(), time.Now().UnixNano())
+}
+
+func needProcessTable(t *testing.T) {
+	t.Helper()
+	if _, err := processTable(); err != nil {
+		t.Skip(err)
+	}
+}
+
+// startShell starts script with /bin/sh as the harness; args are $1 and on.
+func startShell(t *testing.T, script string, env []string, id string, onLine func([]byte), args ...string) *Process {
+	t.Helper()
+	if onLine == nil {
+		onLine = func([]byte) {}
+	}
+	p, err := Start(ports.Invocation{Path: "/bin/sh", Args: append([]string{"-c", script, "sh"}, args...), Env: env,
+		ExecutionID: id}, nil, onLine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		p.Stop(0)
+		<-p.Done()
+	})
+	return p
+}
+
+// waitFor polls cond up to a ceiling that a loaded host needs.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(3 * time.Minute); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if cond() {
+			return
+		}
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+// waitForPid reads the pid the harness's tree wrote to path, and knows the process by it and its start time. The
+// process is killed when the test ends, whatever the test found.
+func waitForPid(t *testing.T, p *Process, path string) ident {
+	t.Helper()
+	var id ident
+	waitFor(t, "a pid in "+filepath.Base(path), func() bool {
+		select {
+		case <-p.Done():
+			t.Fatalf("the harness exited first, exit %d: %q", p.ExitCode(), p.StderrTail())
+		default:
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return false
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+		if err != nil {
+			return false
+		}
+		info, ok := processInfo(pid)
+		id = ident{pid, info.start}
+		return ok
+	})
+	t.Cleanup(func() {
+		if running(id) {
+			_ = syscall.Kill(id.pid, syscall.SIGKILL)
+		}
+	})
+	return id
+}
+
+// cancelAndWait cancels the execution and returns how long Wait took.
+func cancelAndWait(p *Process, grace time.Duration) time.Duration {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	start := time.Now()
+	p.Wait(ctx, grace)
+	return time.Since(start)
+}
+
+func endedOne(ended []Ended, pid int) (Ended, bool) {
+	for _, e := range ended {
+		if e.Pid == pid {
+			return e, true
+		}
+	}
+	return Ended{}, false
+}
+
+// FS-003 AC-007: a descendant that left the group and the session, ignores SIGTERM, and redirects its output is ended,
+// though the harness exits on SIGTERM first. The snapshot taken before SIGTERM, while its parent ran, keeps it.
+func TestStopEndsADescendantThatLeftTheGroup(t *testing.T) {
+	needProcessTable(t)
+	pidFile := t.TempDir() + "/escaped.pid"
+	// macOS has no setsid command; Perl's POSIX::setsid stands in for it.
+	script := `perl -e 'use POSIX; POSIX::setsid() or die; $SIG{TERM} = "IGNORE"; ` +
+		`open STDOUT, ">/dev/null"; open STDERR, ">/dev/null"; ` +
+		`open F, ">", "$ARGV[0].tmp"; print F $$; close F; rename "$ARGV[0].tmp", $ARGV[0]; ` +
+		`exec "sleep", "300"' "$1" & echo started; wait`
+	p := startShell(t, script, testEnv(), executionID(t), nil, pidFile)
+	escaped := waitForPid(t, p, pidFile)
+	waitFor(t, "the escaped process to run sleep in a session of its own", func() bool {
+		info, ok := processInfo(escaped.pid)
+		return ok && info.name == "sleep" && info.pgid == escaped.pid
+	})
+	grace := 300 * time.Millisecond
+	if took := cancelAndWait(p, grace); took < grace {
+		t.Errorf("Wait took %v: the grace period did not apply to the descendant that ignores SIGTERM", took)
+	}
+	if running(escaped) {
+		t.Errorf("the descendant %d that left the group survived", escaped.pid)
+	}
+	if e, ok := endedOne(p.Ended(), escaped.pid); !ok || e.Executable != "sleep" || !e.OutsideGroup {
+		t.Errorf("ended %+v, want pid %d, sleep, outside the group", p.Ended(), escaped.pid)
+	}
+	if e, ok := endedOne(p.Ended(), p.Pid()); !ok || e.OutsideGroup {
+		t.Errorf("ended %+v, want the harness %d, in its group", p.Ended(), p.Pid())
+	}
+}
+
+// FS-003 AC-007: a descendant that daemonized with a double fork, so launchd adopted it before the cancel, is found by
+// the execution's id in its environment, and ended. The test binary stands in for it: unlike an Apple platform
+// binary's, its environment can be read.
+func TestStopEndsADaemonThatCarriesTheExecutionID(t *testing.T) {
+	needProcessTable(t)
+	id := executionID(t)
+	pidFile := t.TempDir() + "/daemon.pid"
+	env := testEnv(executionIDVariable+"="+id, helperVariable+"=daemonize", "PROCUTIL_PIDFILE="+pidFile)
+	p := startShell(t, `"$1"; echo started; sleep 300`, env, id, nil, os.Args[0])
+	daemon := waitForPid(t, p, pidFile)
+	waitFor(t, "launchd to adopt the daemon", func() bool {
+		info, ok := processInfo(daemon.pid)
+		return ok && info.ppid == 1
+	})
+	cancelAndWait(p, 300*time.Millisecond)
+	if running(daemon) {
+		t.Errorf("the daemon %d that carries the execution's id survived", daemon.pid)
+	}
+	name := filepath.Base(os.Args[0])
+	if len(name) > 16 {
+		name = name[:16]
+	}
+	if e, ok := endedOne(p.Ended(), daemon.pid); !ok || e.Executable != name || !e.OutsideGroup {
+		t.Errorf("ended %+v, want pid %d, %s, outside the group", p.Ended(), daemon.pid, name)
+	}
+}
+
+// FS-003 BR-003: a process outside the tree that carries another execution's id keeps running, even one whose id
+// begins with this execution's. This execution's own daemon shows that the scan ran.
+func TestStopLeavesAnotherExecutionsProcess(t *testing.T) {
+	needProcessTable(t)
+	id := executionID(t)
+	var others []ident
+	for _, other := range []string{id + "0", "other-" + id} {
+		cmd := exec.Command(os.Args[0])
+		cmd.Env = testEnv(executionIDVariable+"="+other, helperVariable+"=daemon")
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		})
+		info, _ := processInfo(cmd.Process.Pid)
+		others = append(others, ident{cmd.Process.Pid, info.start})
+	}
+	pidFile := t.TempDir() + "/daemon.pid"
+	env := testEnv(executionIDVariable+"="+id, helperVariable+"=daemonize", "PROCUTIL_PIDFILE="+pidFile)
+	p := startShell(t, `"$1"; echo started; sleep 300`, env, id, nil, os.Args[0])
+	ours := waitForPid(t, p, pidFile)
+	waitFor(t, "launchd to adopt the daemon", func() bool {
+		info, ok := processInfo(ours.pid)
+		return ok && info.ppid == 1
+	})
+	cancelAndWait(p, 300*time.Millisecond)
+	if running(ours) {
+		t.Errorf("this execution's daemon %d survived", ours.pid)
+	}
+	for _, o := range others {
+		if !running(o) {
+			t.Errorf("process %d, which carries another execution's id, was ended", o.pid)
+		}
+		if _, ok := endedOne(p.Ended(), o.pid); ok {
+			t.Errorf("ended %+v names process %d, which carries another execution's id", p.Ended(), o.pid)
+		}
 	}
 }

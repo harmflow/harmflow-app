@@ -1825,12 +1825,13 @@ func tokensOf(usage map[string]any) map[string]any {
 	return tokens
 }
 
-// FS-003 AC-007, AC-006: cancelling ends the harness and its children; another task keeps running.
+// FS-003 AC-007, AC-006: cancelling ends the harness and its children, the one in its group and the one in a session
+// of its own, as Claude Code runs a tool command, and the log names the second; another task keeps running.
 // FS-003 FR-005: the execution ends cancelled, and its record, log, raw output, workspace, and execution directory are
 // kept.
 func TestCancelEndsTheTree(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
-	d.call("POST", "/tasks", map[string]any{"yaml": task("slow-a", "SCENARIO=slow PARTIAL=1", "  execution:\n    cancelGraceSeconds: 1\n")}, 201)
+	d.call("POST", "/tasks", map[string]any{"yaml": task("slow-a", "SCENARIO=session PARTIAL=1", "  execution:\n    cancelGraceSeconds: 1\n")}, 201)
 	d.call("POST", "/tasks", map[string]any{"yaml": task("slow-b", "SCENARIO=slow", "")}, 201)
 	a := d.call("POST", "/tasks/slow-a/run", nil, 202)["executionId"].(string)
 	b := d.call("POST", "/tasks/slow-b/run", nil, 202)["executionId"].(string)
@@ -1841,6 +1842,9 @@ func TestCancelEndsTheTree(t *testing.T) {
 	killHarnessGroup(t, y["executionDir"].(string))
 	// The stand-in writes child.pid after its partial work, so both are there before the cancel.
 	child := readPid(t, filepath.Join(x["executionDir"].(string), "child.pid"))
+	session := readPid(t, filepath.Join(x["executionDir"].(string), "session.pid"))
+	// Named in the log as what it runs when the cancel finds it.
+	waitPs(t, session, "ucomm", "sleep")
 	d.call("POST", "/executions/"+a+"/cancel", nil, 202)
 	x = d.waitStatus(a, "cancelled", "failed")
 	if x["status"] != "cancelled" {
@@ -1851,6 +1855,25 @@ func TestCancelEndsTheTree(t *testing.T) {
 	}
 	if !gone(child) {
 		t.Errorf("the harness's child %d survived the cancellation", child)
+	}
+	if !gone(session) {
+		t.Errorf("the harness's child %d in a session of its own survived the cancellation", session)
+	}
+	named := false
+	for _, raw := range d.call("GET", "/executions/"+a+"/events", nil, 200)["events"].([]any) {
+		ev := raw.(map[string]any)
+		p, _ := ev["payload"].(map[string]any)
+		msg, _ := ev["message"].(string)
+		if ev["type"] == "process.ended" && p["pid"] == float64(session) && p["executable"] == "sleep" &&
+			ev["messageKey"] == "process_ended" && strings.Contains(msg, "sleep (pid "+strconv.Itoa(session)+")") {
+			named = true
+		}
+		if ev["type"] == "process.ended" && p["pid"] == float64(child) {
+			t.Errorf("the log names the child %d in the harness's group as ended outside it", child)
+		}
+	}
+	if !named {
+		t.Errorf("the log does not name the child %d in a session of its own", session)
 	}
 	if got := d.call("GET", "/executions/"+b, nil, 200); got["status"] != "running" {
 		t.Errorf("the other task's execution is %v", got["status"])
@@ -1916,6 +1939,19 @@ func (d *daemon) waitEvent(id, eventType string) map[string]any {
 	}
 	d.t.Fatalf("the log of %s has no %s", id, eventType)
 	return nil
+}
+
+// waitPs waits until ps shows the value for the process's field.
+func waitPs(t *testing.T, pid int, field, want string) {
+	t.Helper()
+	var got string
+	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		out, _ := exec.Command("ps", "-o", field+"=", "-p", strconv.Itoa(pid)).Output()
+		if got = strings.TrimSpace(string(out)); got == want {
+			return
+		}
+	}
+	t.Fatalf("process %d: %s is %q, want %q", pid, field, got, want)
 }
 
 // FS-003 AC-009: an execution running when the daemon is killed reads interrupted after the restart, with its log.

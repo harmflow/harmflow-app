@@ -1,6 +1,6 @@
 // Package procutil runs one harness process in its own process group, streams its stdout line by line, keeps the
-// tail of its stderr, and ends the whole group on cancellation: a graceful SIGTERM, then SIGKILL after the grace
-// period, so no orphan survives (FS-003 FR-005).
+// tail of its stderr, and on cancellation ends every process the harness started, inside its group or not: a graceful
+// SIGTERM, then SIGKILL after the grace period, so no orphan survives (FS-003 FR-005).
 package procutil
 
 import (
@@ -21,12 +21,14 @@ import (
 
 type Process struct {
 	cmd      *exec.Cmd
+	tree     Tree
 	done     chan struct{}
 	exitCode int
 	signal   string
 	stderr   *tail
 	mu       sync.Mutex
 	stopping bool
+	ended    []Ended
 }
 
 // Start launches the invocation; onLine receives each stdout line, raw receives stdout and stderr verbatim.
@@ -73,6 +75,12 @@ func StartLines(inv ports.Invocation, raw io.Writer, onStdout, onStderr func([]b
 	}
 	if err := cmd.Start(); err != nil {
 		return nil, err
+	}
+	pid := cmd.Process.Pid
+	p.tree = Tree{Pid: pid, Group: pid, ExecutionID: inv.ExecutionID}
+	// Read before Wait can reap the process, while its pid is surely its own.
+	if start, err := startTime(pid); err == nil {
+		p.tree.Start = start
 	}
 	lines := make(chan streamLine, 64)
 	var readers sync.WaitGroup
@@ -181,7 +189,7 @@ func (p *Process) Pid() int {
 	return p.cmd.Process.Pid
 }
 
-// Stop asks the process group to end, and kills it after the grace period.
+// Stop ends the process and every process it started, with EndTree: SIGTERM, then SIGKILL after the grace period.
 func (p *Process) Stop(grace time.Duration) {
 	p.mu.Lock()
 	if p.stopping {
@@ -190,21 +198,23 @@ func (p *Process) Stop(grace time.Duration) {
 	}
 	p.stopping = true
 	p.mu.Unlock()
-	pgid := p.Pid()
-	if pgid == 0 {
+	if p.tree.Pid == 0 {
 		return
 	}
-	_ = syscall.Kill(-pgid, syscall.SIGTERM)
-	select {
-	case <-p.done:
-	case <-time.After(grace):
-		_ = syscall.Kill(-pgid, syscall.SIGKILL)
-	}
-	// Children that ignored the group signal or left the group are killed too.
-	_ = syscall.Kill(-pgid, syscall.SIGKILL)
+	ended := EndTree(p.tree, grace)
+	p.mu.Lock()
+	p.ended = ended
+	p.mu.Unlock()
 }
 
-// Wait waits for the end or for the context; on the context's end the group is stopped with the grace period.
+// Ended lists the processes Stop ended, the harness among them, for the execution's log.
+func (p *Process) Ended() []Ended {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.ended
+}
+
+// Wait waits for the end or for the context; on the context's end the process is stopped with the grace period.
 func (p *Process) Wait(ctx context.Context, grace time.Duration) {
 	select {
 	case <-p.done:

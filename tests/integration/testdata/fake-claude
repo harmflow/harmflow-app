@@ -1,12 +1,12 @@
 #!/bin/bash
 # A stand-in for the Claude Code CLI that speaks its stream-json format. The task's prompt picks the scenario:
 # SCENARIO=ok (default), SCENARIO=quota, SCENARIO=quotausage (a quota after the result line reported usage and cost),
-# SCENARIO=slow, SCENARIO=report, SCENARIO=secret, SCENARIO=ticks (a message every half second for five seconds, then
-# success), SCENARIO=push (commits on a branch of the workspace's repository, pushes it, reports the push, and waits),
-# SCENARIO=pullrequest (reports a pull request and waits). A session of push or pullrequest whose context.json lists an
-# interrupted execution repeats nothing and ends at once. With PARTIAL=1 in the prompt, it first leaves partial work,
-# in any scenario: a file in its workspace and a step in progress.jsonl. ITEM=<key> in the prompt makes any scenario
-# select that work item first, and go on once the daemon has logged the selection.
+# SCENARIO=slow, SCENARIO=session, SCENARIO=report, SCENARIO=secret, SCENARIO=ticks (a message every half second for
+# five seconds, then success), SCENARIO=push (commits on a branch of the workspace's repository, pushes it, reports the
+# push, and waits), SCENARIO=pullrequest (reports a pull request and waits). A session of push or pullrequest whose
+# context.json lists an interrupted execution repeats nothing and ends at once. With PARTIAL=1 in the prompt, it first
+# leaves partial work, in any scenario: a file in its workspace and a step in progress.jsonl. ITEM=<key> in the prompt
+# makes any scenario select that work item first, and go on once the daemon has logged the selection.
 case "$1" in
   --version) echo "2.1.239 (Claude Code)"; exit 0 ;;
   --help) cat <<'HELP'
@@ -75,6 +75,17 @@ case "$SCENARIO" in
   slow)
     sleep 300 &
     echo $! > "$HARMFLOW_EXECUTION_DIR/child.pid"
+    echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"sleep 300","description":"Waiting"}}]}}'
+    wait
+    exit 0 ;;
+  session)
+    # A child in the group, and a tool command in a session of its own with its output redirected, as Claude Code
+    # runs each Bash tool command: the group's signal misses it. macOS has no setsid command; Perl's POSIX::setsid
+    # stands in for it, then the process becomes sleep.
+    sleep 300 &
+    echo $! > "$HARMFLOW_EXECUTION_DIR/child.pid"
+    perl -e 'use POSIX; POSIX::setsid() or die; open STDOUT, ">/dev/null"; open STDERR, ">/dev/null"; exec "sleep", "300"' &
+    echo $! > "$HARMFLOW_EXECUTION_DIR/session.tmp" && mv "$HARMFLOW_EXECUTION_DIR/session.tmp" "$HARMFLOW_EXECUTION_DIR/session.pid"
     echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"sleep 300","description":"Waiting"}}]}}'
     wait
     exit 0 ;;

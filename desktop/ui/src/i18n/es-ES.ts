@@ -208,6 +208,7 @@ export const esES: Resources = {
     policy: { unenforced: "Restricción no aplicada" },
     repository: { unprotected: "Rama base sin protección" },
     notification: { created: "Notificación" },
+    process: { ended: "Proceso terminado" },
   },
   severity: {
     debug: "Depuración",
@@ -411,6 +412,7 @@ export const esES: Resources = {
     script_signaled: "el programa fue terminado por {{signal}}",
     script_start_failed: "iniciando {{program}}: {{detail}}",
     script_write_failed: "escribiendo el script inline: {{detail}}",
+    process_ended: "se terminó {{executable}} (pid {{pid}}), que estaba fuera del grupo de procesos",
     detection_running: "la detección está en curso",
     harness_manual_path_invalid: "la ruta definida a mano no existe o no es un archivo",
     claude_not_found: "no se encontró claude en el PATH ni en las ubicaciones de instalación habituales",

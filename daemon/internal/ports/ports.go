@@ -173,6 +173,9 @@ type Invocation struct {
 	Dir          string
 	Stdin        string
 	Restrictions []Restriction
+	// ExecutionID is the value of HARMFLOW_EXECUTION_ID in Env. Ending the process also ends every process that still
+	// carries it, wherever it moved; empty, only the process's own tree is ended (FS-003 FR-005).
+	ExecutionID string
 }
 
 // HarnessEventKind is a normalized observation of the harness's structured output.

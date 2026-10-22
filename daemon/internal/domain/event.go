@@ -53,6 +53,7 @@ const (
 	EventPolicyUnenforced        = "policy.unenforced"
 	EventRepositoryUnprotected   = "repository.unprotected"
 	EventNotificationCreated     = "notification.created"
+	EventProcessEnded            = "process.ended"
 )
 
 type Severity string
