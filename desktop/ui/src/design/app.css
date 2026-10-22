@@ -1796,6 +1796,35 @@ li:last-child .tl-item__rail::before {
   color: var(--hf-color-text-faint);
 }
 
+/* A script's output, each line marked with its stream (FS-013 FR-008). */
+.script-line__stream {
+  display: inline-block;
+  min-width: 3.5ch;
+  margin-right: var(--hf-space-2);
+  color: var(--hf-color-text-faint);
+  user-select: none;
+}
+
+.script-line--stderr {
+  color: var(--hf-color-warning);
+}
+
+.arg-list {
+  margin: 0;
+  padding-left: 2.5ch;
+}
+
+.harness--script {
+  color: var(--hf-color-cyan);
+}
+
+.import-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--hf-space-3);
+  margin-top: var(--hf-space-3);
+}
+
 .file-list {
   display: grid;
   gap: 4px;

@@ -138,7 +138,7 @@ export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpe
                   </td>
                   <td className="mono">{r.workItem ?? "—"}</td>
                   <td>
-                    <HarnessLabel harness={r.harness} model={r.model} />
+                    <HarnessLabel harness={r.harness} model={r.model} taskType={r.taskType} />
                     {r.attemptCount && r.attemptCount > 1 ? <span className="muted small"> ×{r.attemptCount}</span> : null}
                   </td>
                   <td>{t(`trigger.${r.trigger}`)}</td>

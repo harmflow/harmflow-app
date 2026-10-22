@@ -41,8 +41,8 @@ export interface TimelineItem {
   attempt?: number;
 }
 
-/** Events that belong to the raw-output tab rather than to the step timeline. */
-const RAW_TYPES = new Set(["harness.output"]);
+/** Events that belong to the raw-output and output tabs rather than to the step timeline. */
+const RAW_TYPES = new Set(["harness.output", "script.output"]);
 /** Events with no place in an execution's own timeline. */
 const HIDDEN_TYPES = new Set(["notification.created", "execution.status_changed"]);
 
@@ -129,6 +129,10 @@ function styleOf(e: HarmflowEvent): Style {
     case "harness.rate_limited":
     case "harness.version_untested":
       return { tone: "warning", icon: "alert" };
+    case "script.started":
+      return { tone: "cyan", icon: "terminal" };
+    case "script.exited":
+      return { tone: e.severity === "info" ? "success" : "danger", icon: "terminal" };
     case "tool.started":
     case "tool.completed":
       return { tone: "blue", icon: toolIcon(e) };

@@ -80,12 +80,18 @@ export function listToLines(list: unknown): string {
   return Array.isArray(list) ? list.join("\n") : "";
 }
 
-export type TemplateKind = "github-issue-implementation" | "general";
+export type TemplateKind = "github-issue-implementation" | "general" | "script";
 
 const BASE_DOCUMENT = { apiVersion: "harmflow/v1alpha1", kind: "Task" } as const;
 
+/** The fields a script task does not take: it runs a program, not a harness session (FS-013 FR-002). */
+const HARNESS_FIELDS = ["prompt", "agents", "skills", "workspace", "harness"] as const;
+
 /** A new task of a type, with the type's built-in agents, skills, and prompt as the catalog declares them. */
 export function newTaskDocument(kind: TemplateKind, catalog: Catalog | undefined, name: string): Doc {
+  if (kind === "script") {
+    return { ...BASE_DOCUMENT, metadata: { id: slugify(name), name }, spec: { enabled: true, type: "script", script: { command: [""] } } };
+  }
   const type = catalog?.taskTypes.find((t) => t.id === kind);
   const spec: Doc = {
     enabled: true,
@@ -103,6 +109,68 @@ export function newTaskDocument(kind: TemplateKind, catalog: Catalog | undefined
     metadata: { id: slugify(name), name },
     spec,
   };
+}
+
+/**
+ * Switches a document to another task type. A script task leaves the prompt, agents, skills, workspace, and harness
+ * out; another type gets a prompt and a harness back, and loses the script block.
+ */
+export function switchTaskType(doc: Doc, next: string, catalog?: Catalog): Doc {
+  let d = setIn(doc, ["spec", "type"], next);
+  if (next === "github-issue-implementation" && !getIn(d, ["spec", "githubIssueImplementation"])) {
+    d = setIn(d, ["spec", "githubIssueImplementation"], { repositories: [{ name: "", localPath: "", baseBranch: "main" }] });
+  }
+  if (next !== "github-issue-implementation") d = setIn(d, ["spec", "githubIssueImplementation"], undefined);
+  if (next === "script") {
+    for (const field of HARNESS_FIELDS) d = setIn(d, ["spec", field], undefined);
+    if (!getIn(d, ["spec", "script"])) d = setIn(d, ["spec", "script"], { command: [""] });
+    return d;
+  }
+  d = setIn(d, ["spec", "script"], undefined);
+  const prompt = catalog?.taskTypes.find((t) => t.id === next)?.defaultPrompt;
+  if (getIn(d, ["spec", "prompt"]) === undefined && prompt) d = setIn(d, ["spec", "prompt"], prompt);
+  if (!getIn(d, ["spec", "harness"])) d = setIn(d, ["spec", "harness"], { preferred: { provider: "claude-code" } });
+  return d;
+}
+
+/** Which form a script task's program takes: an argument list, or an inline script (FS-013 FR-003). */
+export function programKind(doc: Doc): "command" | "inline" {
+  return getIn(doc, ["spec", "script", "inline"]) !== undefined ? "inline" : "command";
+}
+
+/** Switches the program's form, keeping the working directory, the environment, and the systems. */
+export function setProgramKind(doc: Doc, kind: "command" | "inline"): Doc {
+  if (kind === programKind(doc)) return doc;
+  if (kind === "inline") {
+    const next = setIn(doc, ["spec", "script", "command"], undefined);
+    return setIn(next, ["spec", "script", "inline"], { interpreter: ["/bin/sh"] });
+  }
+  const next = setIn(doc, ["spec", "script", "inline"], undefined);
+  return setIn(next, ["spec", "script", "command"], [""]);
+}
+
+/** An argument list, one argument per line; an empty line is dropped and nothing else is trimmed. */
+export function linesToArgs(text: string): string[] {
+  return text.split("\n").filter((l) => l !== "");
+}
+
+/** Environment variables as NAME=value lines. */
+export function envToLines(env: unknown): string {
+  if (!env || typeof env !== "object") return "";
+  return Object.entries(env as Record<string, string>)
+    .map(([k, v]) => `${k}=${v}`)
+    .join("\n");
+}
+
+/** Reads NAME=value lines; the value is everything after the first =, and a line with no name is dropped. */
+export function linesToEnv(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of text.split("\n")) {
+    const i = line.indexOf("=");
+    const name = (i < 0 ? line : line.slice(0, i)).trim();
+    if (name) out[name] = i < 0 ? "" : line.slice(i + 1);
+  }
+  return out;
 }
 
 /** Which kind of schedule the document holds. */

@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
 import type { Catalog } from "../api/types";
 import { schemaDefault, schemaEnum } from "./schema";
-import { getIn, newTaskDocument, scheduleKind, setIn, setScheduleKind, slugify } from "./taskForm";
+import {
+  envToLines,
+  getIn,
+  linesToArgs,
+  linesToEnv,
+  newTaskDocument,
+  programKind,
+  scheduleKind,
+  setIn,
+  setProgramKind,
+  setScheduleKind,
+  slugify,
+  switchTaskType,
+} from "./taskForm";
 
 const catalog: Catalog = {
   agents: [],
@@ -82,8 +95,54 @@ describe("schema", () => {
   });
 
   it("reads closed sets from the contract", () => {
-    expect(schemaEnum(["spec", "type"])).toEqual(["github-issue-implementation", "general"]);
+    expect(schemaEnum(["spec", "type"])).toEqual(["github-issue-implementation", "general", "script"]);
     expect(schemaEnum(["spec", "schedule", "missedRun", "policy"])).toEqual(["run_on_resume", "skip"]);
     expect(schemaEnum(["spec", "notifications", "native", "events"])).toContain("pull_request.created");
+    expect(schemaEnum(["spec", "script", "systems"])).toEqual(["macos", "linux", "windows"]);
+  });
+});
+
+describe("script tasks (FS-013 FR-013)", () => {
+  it("starts with an empty argument list and no prompt or harness", () => {
+    const doc = newTaskDocument("script", catalog, "Weekly audit");
+    expect(getIn(doc, ["spec"])).toEqual({ enabled: true, type: "script", script: { command: [""] } });
+    expect(getIn(doc, ["metadata", "id"])).toBe("weekly-audit");
+  });
+
+  it("drops what a script task does not take, and gives it back to another type", () => {
+    const general = newTaskDocument("general", catalog, "Notes");
+    const withWorkspace = setIn(general, ["spec", "workspace", "path"], "~/notes");
+    const script = switchTaskType(withWorkspace, "script", catalog);
+    for (const field of ["prompt", "agents", "skills", "workspace", "harness", "githubIssueImplementation"]) {
+      expect(getIn(script, ["spec", field])).toBeUndefined();
+    }
+    expect(getIn(script, ["spec", "script"])).toEqual({ command: [""] });
+    const back = switchTaskType(script, "github-issue-implementation", catalog);
+    expect(getIn(back, ["spec", "script"])).toBeUndefined();
+    expect(getIn(back, ["spec", "prompt"])).toBe("Implement the oldest issue labeled agent-ready.");
+    expect(getIn(back, ["spec", "harness", "preferred", "provider"])).toBe("claude-code");
+  });
+
+  it("switches between an argument list and an inline script, keeping the rest", () => {
+    let doc = setIn(newTaskDocument("script", catalog, "Job"), ["spec", "script", "workingDirectory"], "~/jobs");
+    expect(programKind(doc)).toBe("command");
+    doc = setProgramKind(doc, "inline");
+    expect(getIn(doc, ["spec", "script"])).toEqual({ workingDirectory: "~/jobs", inline: { interpreter: ["/bin/sh"] } });
+    expect(programKind(doc)).toBe("inline");
+    doc = setProgramKind(doc, "command");
+    expect(getIn(doc, ["spec", "script"])).toEqual({ workingDirectory: "~/jobs", command: [""] });
+  });
+
+  it("keeps each argument as typed, spaces included", () => {
+    expect(linesToArgs("/bin/echo\n  two words \n\n$HOME; rm x")).toEqual(["/bin/echo", "  two words ", "$HOME; rm x"]);
+  });
+
+  it("reads and writes environment variables as NAME=value lines", () => {
+    expect(linesToEnv("TZ=America/Sao_Paulo\nQUERY=a=b\n\n=nameless\nEMPTY")).toEqual({
+      TZ: "America/Sao_Paulo",
+      QUERY: "a=b",
+      EMPTY: "",
+    });
+    expect(envToLines({ A: "1", B: "x=y" })).toBe("A=1\nB=x=y");
   });
 });

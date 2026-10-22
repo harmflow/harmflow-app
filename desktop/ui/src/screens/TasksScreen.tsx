@@ -9,11 +9,11 @@ import { HarnessLabel } from "../components/Shell";
 import { Icon } from "../components/Icon";
 import { TaskEditor, ValidationPanel } from "../components/TaskEditor";
 import { toast } from "../components/toast";
-import { Banner, Button, Checkbox, Chip, EmptyState, IconButton, Modal, Select, StatusChip, TextArea, TextInput, Toggle, cx } from "../components/ui";
+import { Banner, Button, Checkbox, Chip, EmptyState, IconButton, KeyValue, Modal, Select, StatusChip, TextArea, TextInput, Toggle, cx } from "../components/ui";
 import { daemonText } from "../lib/daemonText";
 import { formatRelative } from "../lib/format";
 import { useNow } from "../lib/hooks";
-import { newTaskDocument, type TemplateKind } from "../lib/taskForm";
+import { getIn, newTaskDocument, type TemplateKind } from "../lib/taskForm";
 import { actions, useStore } from "../state/store";
 
 export type TaskView = { kind: "list" } | { kind: "new"; template: TemplateKind } | { kind: "edit"; id: string };
@@ -38,7 +38,16 @@ function NewTask({ template, onDone, onSaved }: { template: TemplateKind; onDone
   const { t } = useTranslation();
   const catalog = useStore((s) => s.catalog);
   const initial = useMemo(
-    () => newTaskDocument(template, catalog, template === "github-issue-implementation" ? t("tasks.templates.github") : t("tasks.templates.general")),
+    () =>
+      newTaskDocument(
+        template,
+        catalog,
+        template === "github-issue-implementation"
+          ? t("tasks.templates.github")
+          : template === "script"
+            ? t("tasks.templates.script")
+            : t("tasks.templates.general"),
+      ),
     // A template is built once per editor; later catalog loads must not reset the user's input.
     [template],
   );
@@ -83,6 +92,13 @@ export function TemplatePicker({ onPick, onClose }: { onPick: (k: TemplateKind) 
           <strong>{t("tasks.templates.general")}</strong>
           <span className="muted">{t("tasks.templates.generalHint")}</span>
         </button>
+        <button type="button" className="template" onClick={() => onPick("script")}>
+          <span className="template__icon">
+            <Icon name="terminal" size={24} />
+          </span>
+          <strong>{t("tasks.templates.script")}</strong>
+          <span className="muted">{t("tasks.templates.scriptHint")}</span>
+        </button>
       </div>
     </Modal>
   );
@@ -94,12 +110,23 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
   const [overwrite, setOverwrite] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
+  // A script task runs a program with the user's rights: its program is shown before anything is saved, and the
+  // daemon saves it disabled (FS-013 SEC-001).
+  const [script, setScript] = useState<{ yaml: string; doc: Record<string, unknown> } | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   const submit = async () => {
     setBusy(true);
     setError(null);
     try {
+      if (script?.yaml !== yaml) {
+        const check = await api.validateTask({ yaml });
+        const doc = check.document as Record<string, unknown> | undefined;
+        if (check.valid && getIn(doc, ["spec", "type"]) === "script") {
+          setScript({ yaml, doc: doc! });
+          return;
+        }
+      }
       const task = await api.importTask(yaml, overwrite);
       toast(t("tasks.imported"));
       for (const w of task.warnings) toast(`${t(`warnings.${w.code}`)}: ${daemonText(w)}`, "warning", 6000);
@@ -123,7 +150,7 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
             {t("common.cancel")}
           </Button>
           <Button variant="primary" icon="upload" disabled={!yaml.trim() || busy} onClick={() => void submit()}>
-            {t("common.import")}
+            {script?.yaml === yaml ? t("tasks.importScriptConfirm") : t("common.import")}
           </Button>
         </>
       }
@@ -146,6 +173,7 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
         <Checkbox checked={overwrite} onChange={setOverwrite} label={t("tasks.importOverwrite")} />
       </div>
       <TextArea className="mono" rows={14} value={yaml} placeholder={t("tasks.importPaste")} onChange={(e) => setYaml(e.target.value)} />
+      {script?.yaml === yaml ? <ScriptImportPreview doc={script.doc} /> : null}
       {error ? (
         error.validation ? (
           <ValidationPanel validation={error.validation} />
@@ -156,6 +184,37 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
         )
       ) : null}
     </Modal>
+  );
+}
+
+/** What an imported script task would run — its whole argument list or script, where, with what, and when. */
+function ScriptImportPreview({ doc }: { doc: Record<string, unknown> }) {
+  const { t } = useTranslation();
+  const command = getIn<string[]>(doc, ["spec", "script", "command"]);
+  const interpreter = getIn<string[]>(doc, ["spec", "script", "inline", "interpreter"]);
+  const source = getIn<string>(doc, ["spec", "script", "inline", "source"]);
+  const env = Object.entries(getIn<Record<string, string>>(doc, ["spec", "script", "environment"]) ?? {});
+  const schedule = getIn<string>(doc, ["spec", "schedule", "cron"]) ?? getIn<string>(doc, ["spec", "schedule", "interval"]);
+  return (
+    <div className="import-preview" data-testid="script-import-preview">
+      <Banner tone="warning" icon="shield">
+        <strong>{t("tasks.importScriptTitle")}</strong> — {t("tasks.importScriptBody")}
+      </Banner>
+      <KeyValue
+        items={[
+          [t("executions.detail.script.command"), command ? <span className="mono">{command.join("\n")}</span> : null],
+          [t("executions.detail.script.interpreter"), interpreter ? <span className="mono">{interpreter.join("\n")}</span> : null],
+          [t("executions.detail.script.workingDirectory"), <span className="mono">{getIn<string>(doc, ["spec", "script", "workingDirectory"]) ?? "~"}</span>],
+          [t("executions.detail.script.environment"), env.length ? <span className="mono">{env.map(([k, v]) => `${k}=${v}`).join("\n")}</span> : null],
+          [t("tasks.columns.schedule"), <span className="mono">{schedule ?? t("tasks.manualOnly")}</span>],
+        ]}
+      />
+      {source ? (
+        <div className="codebox">
+          <pre className="mono">{source}</pre>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -294,7 +353,7 @@ function TaskList({ onView, onOpenExecution }: { onView: (v: TaskView) => void; 
                 <div className="task-row__meta">
                   <span className="meta">{t(`tasks.types.${task.type}` as never, { defaultValue: task.type }) as string}</span>
                   <span className="meta">
-                    <HarnessLabel harness={task.harness} />
+                    <HarnessLabel harness={task.harness} taskType={task.type} />
                     {task.fallbackHarnesses?.length ? (
                       <span className="muted">
                         {" "}

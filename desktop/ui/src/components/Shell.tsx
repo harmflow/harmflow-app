@@ -309,8 +309,11 @@ export function noticeText(t: TFn, n: Notification): { title: string; body: stri
   const values = translateNested(n.params);
   const params: Record<string, string> = { taskName: "", harness: "", summary: "", error: "", reason: "", url: "", ...values };
   const key = `notify.${n.eventType}`;
-  const title = t(`${key}.title` as never, { ...params, defaultValue: n.title }) as string;
-  const body = t(`${key}.body` as never, { ...params, defaultValue: n.body }) as string;
+  // The key is built at run time, so the typed overloads, which walk every key of the resources, are left out: past
+  // a size, checking them exceeds TypeScript's instantiation depth.
+  const translate = t as unknown as (key: string, options: Record<string, string>) => string;
+  const title = translate(`${key}.title`, { ...params, defaultValue: n.title });
+  const body = translate(`${key}.body`, { ...params, defaultValue: n.body });
   return { title, body };
 }
 
@@ -367,8 +370,17 @@ function MenuItem({ icon, children, onClick, tone }: { icon: IconName; children:
   );
 }
 
-export function HarnessLabel({ harness, model }: { harness?: string; model?: string }) {
+/** The harness a task or an execution runs on; a script task runs a program instead, and says so (FS-013). */
+export function HarnessLabel({ harness, model, taskType }: { harness?: string; model?: string; taskType?: string }) {
   const { t } = useTranslation();
+  if (!harness && taskType === "script") {
+    return (
+      <span className="harness harness--script">
+        <Icon name="terminal" size={15} />
+        <span>{t("harness.scriptLabel")}</span>
+      </span>
+    );
+  }
   if (!harness) return <span className="muted">—</span>;
   const name = t(`harness.names.${harness}` as never, { defaultValue: harness }) as string;
   return (

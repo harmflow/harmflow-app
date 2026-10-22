@@ -8,7 +8,23 @@ import { daemonText } from "../lib/daemonText";
 import { formatDateTime } from "../lib/format";
 import { useDebounced } from "../lib/hooks";
 import { HARNESS_PROVIDERS, NOTIFIABLE_EVENTS, TASK_TYPES, schemaDefault, schemaEnum, schemaRange } from "../lib/schema";
-import { getIn, linesToList, listToLines, scheduleKind, setIn, setScheduleKind, slugify, type Doc, type Path } from "../lib/taskForm";
+import {
+  envToLines,
+  getIn,
+  linesToArgs,
+  linesToEnv,
+  linesToList,
+  listToLines,
+  programKind,
+  scheduleKind,
+  setIn,
+  setProgramKind,
+  setScheduleKind,
+  slugify,
+  switchTaskType,
+  type Doc,
+  type Path,
+} from "../lib/taskForm";
 import { Icon, type IconName } from "./Icon";
 import { Button, Checkbox, Field, IconButton, NumberInput, Select, TextArea, TextInput, Toggle, cx } from "./ui";
 
@@ -75,6 +91,8 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
 
   const type = get<string>(["spec", "type"]) ?? "general";
   const isGithub = type === "github-issue-implementation";
+  // A script task runs a program instead of a harness session: no prompt, agents, skills, or harness (FS-013 FR-013).
+  const isScript = type === "script";
 
   const setName = (name: string) => {
     let next = setIn(doc, ["metadata", "name"], name);
@@ -82,14 +100,7 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
     onChange(next);
   };
 
-  const setType = (next: string) => {
-    let d = setIn(doc, ["spec", "type"], next);
-    if (next === "github-issue-implementation" && !getIn(d, ["spec", "githubIssueImplementation"])) {
-      d = setIn(d, ["spec", "githubIssueImplementation"], { repositories: [{ name: "", localPath: "", baseBranch: "main" }] });
-    }
-    if (next !== "github-issue-implementation") d = setIn(d, ["spec", "githubIssueImplementation"], undefined);
-    onChange(d);
-  };
+  const setType = (next: string) => onChange(switchTaskType(doc, next, catalog));
 
   return (
     <div className="task-form">
@@ -133,6 +144,13 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
         </div>
       </Section>
 
+      {isScript ? (
+        <Section id="script" title={t("tasks.sections.script")} icon="terminal">
+          <ScriptFields doc={doc} onChange={onChange} set={set} err={err} />
+        </Section>
+      ) : null}
+
+      {isScript ? null : (
       <Section id="prompt" title={t("tasks.sections.prompt")} icon="message">
         <Field label={t("tasks.fields.prompt")} hint={t("tasks.fields.promptHint")} error={err(["spec", "prompt"])}>
           <TextArea className="mono input--prompt" rows={8} value={get<string>(["spec", "prompt"]) ?? ""} onChange={(e) => set(["spec", "prompt"], e.target.value)} />
@@ -155,6 +173,7 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
           <TextInput className="mono" value={get<string>(["spec", "workspace", "path"]) ?? ""} onChange={(e) => set(["spec", "workspace", "path"], e.target.value)} />
         </Field>
       </Section>
+      )}
 
       {isGithub ? (
         <Section id="type" title={`${t("tasks.sections.type")} — ${t("tasks.types.github-issue-implementation")}`} icon="code">
@@ -179,6 +198,7 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
         </Section>
       ) : null}
 
+      {isScript ? null : (
       <Section id="harness" title={t("tasks.sections.harness")} icon="agent">
         <h4 className="subhead">{t("tasks.fields.preferred")}</h4>
         <HarnessProfile
@@ -215,12 +235,18 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
           <IntField path={["spec", "harness", "fallback", "maxSwitches"]} label={t("tasks.fields.maxSwitches")} doc={doc} set={set} />
         </div>
       </Section>
+      )}
 
       <Section id="schedule" title={t("tasks.sections.schedule")} icon="clock">
         <ScheduleFields doc={doc} onChange={onChange} set={set} defLabel={defLabel} locale={i18n.language} errorPaths={errorPaths} />
       </Section>
 
       <Section id="permissions" title={t("tasks.sections.permissions")} icon="shield">
+        {isScript ? (
+          <p className="hint-line">
+            <Icon name="shield" size={13} /> {t("tasks.fields.scriptPermissionsHint")}
+          </p>
+        ) : null}
         <div className="grid-3">
           <EnumField path={["spec", "permissions", "profile"]} label={t("tasks.fields.profile")} optionKey="profile" doc={doc} set={set} defLabel={defLabel} />
           <EnumField path={["spec", "permissions", "network"]} label={t("tasks.fields.network")} optionKey="network" doc={doc} set={set} defLabel={defLabel} />
@@ -247,9 +273,13 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
         <div className="grid-3">
           <IntField path={["spec", "execution", "timeoutMinutes"]} label={t("tasks.fields.timeoutMinutes")} doc={doc} set={set} />
           <IntField path={["spec", "execution", "cancelGraceSeconds"]} label={t("tasks.fields.cancelGraceSeconds")} doc={doc} set={set} />
-          <IntField path={["spec", "execution", "rateLimit", "maxRetries"]} label={t("tasks.fields.rateLimitMaxRetries")} doc={doc} set={set} />
-          <IntField path={["spec", "execution", "rateLimit", "initialWaitSeconds"]} label={t("tasks.fields.rateLimitInitialWait")} doc={doc} set={set} />
-          <IntField path={["spec", "execution", "rateLimit", "maxWaitSeconds"]} label={t("tasks.fields.rateLimitMaxWait")} doc={doc} set={set} />
+          {isScript ? null : (
+            <>
+              <IntField path={["spec", "execution", "rateLimit", "maxRetries"]} label={t("tasks.fields.rateLimitMaxRetries")} doc={doc} set={set} />
+              <IntField path={["spec", "execution", "rateLimit", "initialWaitSeconds"]} label={t("tasks.fields.rateLimitInitialWait")} doc={doc} set={set} />
+              <IntField path={["spec", "execution", "rateLimit", "maxWaitSeconds"]} label={t("tasks.fields.rateLimitMaxWait")} doc={doc} set={set} />
+            </>
+          )}
         </div>
       </Section>
 
@@ -284,6 +314,116 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
 }
 
 type SetFn = (path: Path, value: unknown) => void;
+
+/** A script task's program, in either form, its working directory, environment, and systems (FS-013 FR-003, FR-004, FR-014). */
+function ScriptFields({ doc, onChange, set, err }: { doc: Doc; onChange: (doc: Doc) => void; set: SetFn; err: (path: Path) => string | undefined }) {
+  const { t } = useTranslation();
+  const kind = programKind(doc);
+  const systems = getIn<string[]>(doc, ["spec", "script", "systems"]) ?? [];
+  return (
+    <>
+      <div className="segmented" role="radiogroup" aria-label={t("tasks.fields.programKind")}>
+        {(["command", "inline"] as const).map((k) => (
+          <button
+            key={k}
+            type="button"
+            role="radio"
+            aria-checked={kind === k}
+            className={cx("segmented__item", kind === k && "segmented__item--active")}
+            onClick={() => onChange(setProgramKind(doc, k))}
+          >
+            {k === "command" ? t("tasks.fields.programCommand") : t("tasks.fields.programInline")}
+          </button>
+        ))}
+      </div>
+      {kind === "command" ? (
+        <Field label={t("tasks.fields.command")} hint={t("tasks.fields.commandHint")} error={err(["spec", "script", "command"]) ?? err(["spec", "script", "command", 0])}>
+          <ArgsArea rows={4} value={getIn(doc, ["spec", "script", "command"])} onValue={(v) => set(["spec", "script", "command"], v)} placeholder={"/usr/bin/python3\n/Users/me/jobs/audit.py\n--weekly"} />
+        </Field>
+      ) : (
+        <>
+          <Field label={t("tasks.fields.interpreter")} hint={t("tasks.fields.interpreterHint")} error={err(["spec", "script", "inline", "interpreter"])}>
+            <ArgsArea rows={2} value={getIn(doc, ["spec", "script", "inline", "interpreter"])} onValue={(v) => set(["spec", "script", "inline", "interpreter"], v)} placeholder={"/bin/zsh"} />
+          </Field>
+          <Field label={t("tasks.fields.source")} error={err(["spec", "script", "inline", "source"])}>
+            <TextArea
+              className="mono input--prompt"
+              rows={10}
+              value={getIn<string>(doc, ["spec", "script", "inline", "source"]) ?? ""}
+              onChange={(e) => set(["spec", "script", "inline", "source"], e.target.value)}
+            />
+          </Field>
+        </>
+      )}
+      <div className="grid-2">
+        <Field label={t("tasks.fields.workingDirectory")} hint={t("tasks.fields.workingDirectoryHint")} error={err(["spec", "script", "workingDirectory"])}>
+          <TextInput
+            className="mono"
+            value={getIn<string>(doc, ["spec", "script", "workingDirectory"]) ?? ""}
+            placeholder="~"
+            onChange={(e) => set(["spec", "script", "workingDirectory"], e.target.value)}
+          />
+        </Field>
+        <Field label={t("tasks.fields.systems")} hint={t("tasks.fields.systemsHint")}>
+          <div className="check-row">
+            {schemaEnum(["spec", "script", "systems"]).map((system) => (
+              <Checkbox
+                key={system}
+                checked={systems.includes(system)}
+                label={t(`tasks.options.systems.${system}` as never, { defaultValue: system }) as string}
+                onChange={(on) => set(["spec", "script", "systems"], on ? [...systems, system] : systems.filter((s) => s !== system))}
+              />
+            ))}
+          </div>
+        </Field>
+      </div>
+      <Field label={t("tasks.fields.environment")} hint={t("tasks.fields.environmentHint")} error={err(["spec", "script", "environment"])}>
+        <EnvArea value={getIn(doc, ["spec", "script", "environment"])} onValue={(v) => set(["spec", "script", "environment"], v)} />
+      </Field>
+    </>
+  );
+}
+
+/** An argument list, one argument per line, kept as typed: spaces inside an argument are its own (FS-013 FR-003). */
+function ArgsArea({ value, onValue, rows, placeholder }: { value: unknown; onValue: (v: string[] | undefined) => void; rows: number; placeholder?: string }) {
+  const [text, setText] = useState(listToLines(value));
+  useEffect(() => {
+    if (JSON.stringify(linesToArgs(text)) !== JSON.stringify(value ?? [])) setText(listToLines(value));
+  }, [JSON.stringify(value)]); // keep in sync with YAML edits
+  return (
+    <TextArea
+      rows={rows}
+      className="mono"
+      value={text}
+      placeholder={placeholder}
+      onChange={(e) => {
+        setText(e.target.value);
+        const args = linesToArgs(e.target.value);
+        onValue(args.length ? args : undefined);
+      }}
+    />
+  );
+}
+
+function EnvArea({ value, onValue }: { value: unknown; onValue: (v: Record<string, string> | undefined) => void }) {
+  const [text, setText] = useState(envToLines(value));
+  useEffect(() => {
+    if (JSON.stringify(linesToEnv(text)) !== JSON.stringify(value ?? {})) setText(envToLines(value));
+  }, [JSON.stringify(value)]); // keep in sync with YAML edits
+  return (
+    <TextArea
+      rows={3}
+      className="mono"
+      value={text}
+      placeholder="TZ=America/Sao_Paulo"
+      onChange={(e) => {
+        setText(e.target.value);
+        const env = linesToEnv(e.target.value);
+        onValue(Object.keys(env).length ? env : undefined);
+      }}
+    />
+  );
+}
 
 function IntField({ path, label, doc, set }: { path: Path; label: string; doc: Doc; set: SetFn }) {
   const { t } = useTranslation();

@@ -550,3 +550,65 @@ describe("execution detail", () => {
     expect(reads()).toBe(3);
   });
 });
+
+describe("a script task's execution (FS-013 FR-012, AC-012)", () => {
+  const script: Execution = {
+    ...completed,
+    id: "exec-script",
+    taskId: "weekly-audit",
+    taskName: "Weekly audit",
+    taskType: "script",
+    status: "failed",
+    harness: "",
+    repository: undefined,
+    workItem: undefined,
+    pullRequestUrl: undefined,
+    errorMessage: "the program exited with code 3",
+    errorKey: "script_exit_code",
+    errorParams: { code: "3" },
+    attempts: [{ number: 1, harness: "", configuredModel: "", configuredEffort: "", startedAt: started, endedAt: ended, outcome: "failed", exitCode: 3 }],
+    workItems: [],
+    changedFiles: [],
+    commands: [],
+    script: {
+      interpreter: ["/bin/sh"],
+      source: "echo audit\nexit 3",
+      scriptPath: "/runs/exec-script/script.sh",
+      program: "/bin/sh",
+      workingDirectory: "/Users/me/jobs",
+      environment: { TZ: "America/Sao_Paulo" },
+      exitCode: 3,
+    },
+  };
+  const lines = [
+    event(1, "script.started", { executionId: script.id, message: "sh started", messageKey: "script_started", params: { program: "sh" } }),
+    event(2, "script.output", { executionId: script.id, message: "audit", payload: { stream: "stdout" } }),
+    event(3, "script.output", { executionId: script.id, message: "token [REDACTED]", payload: { stream: "stderr" } }),
+    event(4, "script.exited", { executionId: script.id, severity: "warning", message: "the program exited with code 3", messageKey: "script_exit_code", params: { code: "3" } }),
+  ];
+
+  it("shows its output by stream and the program as it ran, and no harness, attempts, or costs", async () => {
+    await open(script, lines, capture("audit\ntoken [REDACTED]\n"));
+    const tabs = [...host!.querySelectorAll('[role="tab"]')].map((b) => b.textContent ?? "");
+    for (const absent of ["Attempts", "Costs", "Changed files", "Commands"]) {
+      expect(tabs.some((t) => t.startsWith(absent)), absent).toBe(false);
+    }
+    expect(host!.querySelector(".detail__meta")!.textContent).toContain("Program");
+
+    // The output lines stay out of the timeline, and the exit reads there.
+    expect(body()).not.toContain("audit");
+    expect(body()).toContain("the program exited with code 3");
+
+    await choose("Output");
+    const streams = [...host!.querySelectorAll<HTMLElement>(".script-line")].map((l) => [l.dataset.stream, l.textContent]);
+    expect(streams).toEqual([
+      ["stdout", "outaudit\n"],
+      ["stderr", "errtoken [REDACTED]\n"],
+    ]);
+
+    const program = await choose("Program");
+    for (const shown of ["code 3", "/bin/sh", "echo audit", "/Users/me/jobs", "TZ=America/Sao_Paulo", "/runs/exec-script/script.sh"]) {
+      expect(program).toContain(shown);
+    }
+  });
+});
