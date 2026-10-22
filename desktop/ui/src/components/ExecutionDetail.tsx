@@ -554,8 +554,8 @@ function Attempts({ detail, locale, now }: { detail?: Execution; locale: string;
           </header>
           <KeyValue
             items={[
-              [t("executions.detail.model"), <span className="mono">{a.model}</span>],
-              [t("executions.detail.effort"), <span className="mono">{a.effort}</span>],
+              [t("executions.detail.model"), <UsedValue used={a.model} configured={a.configuredModel} />],
+              [t("executions.detail.effort"), <UsedValue used={a.effort} configured={a.configuredEffort} />],
               [t("executions.detail.harnessVersion"), a.harnessVersion ? <span className="mono">{a.harnessVersion}</span> : null],
               [t("executions.detail.reason"), fieldText(a.reason, a.reasonKey, a.reasonParams) ?? null],
               [t("executions.detail.started"), formatDateTime(a.startedAt, locale)],
@@ -570,5 +570,18 @@ function Attempts({ detail, locale, now }: { detail?: Execution; locale: string;
         </li>
       ))}
     </ol>
+  );
+}
+
+/** What the harness reported using, or that it reported nothing — never the configured value in its place (D-105). */
+function UsedValue({ used, configured }: { used?: string; configured: string }) {
+  const { t } = useTranslation();
+  return (
+    <>
+      {used ? <span className="mono">{used}</span> : <span className="muted">{t("executions.detail.notReported")}</span>}
+      {configured && configured !== used ? (
+        <span className="muted"> · {t("executions.detail.configured", { value: configured })}</span>
+      ) : null}
+    </>
   );
 }

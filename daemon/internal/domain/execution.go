@@ -81,23 +81,27 @@ const (
 	AttemptInterrupted        AttemptOutcome = "interrupted"
 )
 
+// Attempt is one harness process. Model and Effort are what the harness reported using, empty when it reported
+// nothing; the configured ones, default when the task set none, are kept apart and never stand in for them (D-105).
 type Attempt struct {
-	Number         int               `json:"number"`
-	Harness        string            `json:"harness"`
-	HarnessVersion string            `json:"harnessVersion,omitempty"`
-	Model          string            `json:"model"`
-	Effort         string            `json:"effort"`
-	StartedAt      time.Time         `json:"startedAt"`
-	EndedAt        *time.Time        `json:"endedAt,omitempty"`
-	Outcome        AttemptOutcome    `json:"outcome,omitempty"`
-	ExitCode       *int              `json:"exitCode,omitempty"`
-	SessionID      string            `json:"sessionId,omitempty"`
-	ErrorMessage   string            `json:"errorMessage,omitempty"`
-	ErrorKey       string            `json:"errorKey,omitempty"`
-	ErrorParams    map[string]string `json:"errorParams,omitempty"`
-	Reason         string            `json:"reason,omitempty"`
-	ReasonKey      string            `json:"reasonKey,omitempty"`
-	ReasonParams   map[string]string `json:"reasonParams,omitempty"`
+	Number           int               `json:"number"`
+	Harness          string            `json:"harness"`
+	HarnessVersion   string            `json:"harnessVersion,omitempty"`
+	Model            string            `json:"model,omitempty"`
+	Effort           string            `json:"effort,omitempty"`
+	ConfiguredModel  string            `json:"configuredModel"`
+	ConfiguredEffort string            `json:"configuredEffort"`
+	StartedAt        time.Time         `json:"startedAt"`
+	EndedAt          *time.Time        `json:"endedAt,omitempty"`
+	Outcome          AttemptOutcome    `json:"outcome,omitempty"`
+	ExitCode         *int              `json:"exitCode,omitempty"`
+	SessionID        string            `json:"sessionId,omitempty"`
+	ErrorMessage     string            `json:"errorMessage,omitempty"`
+	ErrorKey         string            `json:"errorKey,omitempty"`
+	ErrorParams      map[string]string `json:"errorParams,omitempty"`
+	Reason           string            `json:"reason,omitempty"`
+	ReasonKey        string            `json:"reasonKey,omitempty"`
+	ReasonParams     map[string]string `json:"reasonParams,omitempty"`
 	// Usage is what the harness reported of its token use, as it runs and when it ends; absent when it reported none.
 	Usage *Usage `json:"usage,omitempty"`
 }
@@ -186,7 +190,7 @@ type Execution struct {
 	WorkspacePath      string            `json:"workspacePath,omitempty"`
 	ExecutionDir       string            `json:"executionDir,omitempty"`
 	Harness            string            `json:"harness"`
-	Model              string            `json:"model,omitempty"`
+	Model              string            `json:"model,omitempty"` // the current attempt's, as its harness reported it
 	CurrentStep        string            `json:"currentStep,omitempty"`
 	CurrentStepKey     string            `json:"currentStepKey,omitempty"`
 	CurrentStepParams  map[string]string `json:"currentStepParams,omitempty"`
@@ -208,7 +212,20 @@ type Execution struct {
 	LogExpired         bool              `json:"logExpired,omitempty"`
 }
 
-const ExecutionSchemaVersion = "1"
+const ExecutionSchemaVersion = "2"
+
+// Upgrade reads a record of an older schema as the current one. In schema 1, an attempt's model and effort were the
+// configured ones, so they move to ConfiguredModel and ConfiguredEffort, and the used ones read not reported (D-105).
+func (x *Execution) Upgrade() {
+	if x.SchemaVersion == "1" {
+		for i := range x.Attempts {
+			at := &x.Attempts[i]
+			at.ConfiguredModel, at.ConfiguredEffort, at.Model, at.Effort = at.Model, at.Effort, "", ""
+		}
+		x.Model = ""
+	}
+	x.SchemaVersion = ExecutionSchemaVersion
+}
 
 // NewExecution creates a record for a firing of a task.
 func NewExecution(task TaskDocument, trigger Trigger, scheduledFor *time.Time, now time.Time) *Execution {
@@ -224,7 +241,6 @@ func NewExecution(task TaskDocument, trigger Trigger, scheduledFor *time.Time, n
 		ScheduledFor:  scheduledFor,
 		CreatedAt:     now,
 		Harness:       e.Spec.Harness.Preferred.Provider,
-		Model:         e.Spec.Harness.Preferred.Model,
 		Attempts:      []Attempt{},
 		WorkItems:     []WorkItemResult{},
 		Warnings:      []Warning{},

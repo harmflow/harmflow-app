@@ -39,7 +39,7 @@ func (c *fakeClock) Advance(d time.Duration) {
 }
 
 // fakeHarness runs /bin/sh with a script the test chooses. The script prints the outcome on its last line:
-// "END ok", "END quota", "END rate", or "END error".
+// "END ok", "END quota", "END rate", or "END error"; "STARTED <model> <effort>" reports what the session runs with.
 type fakeHarness struct {
 	id          string
 	mu          sync.Mutex
@@ -100,6 +100,10 @@ func (p *fakeParser) Line(b []byte) []ports.HarnessEvent {
 	if strings.HasPrefix(s, "END ") {
 		p.last = strings.TrimPrefix(s, "END ")
 		return nil
+	}
+	if rest, ok := strings.CutPrefix(s, "STARTED "); ok {
+		model, effort, _ := strings.Cut(rest, " ")
+		return []ports.HarnessEvent{{Kind: ports.HarnessStarted, Model: model, Effort: effort}}
 	}
 	if n, ok := strings.CutPrefix(s, "USAGE "); ok {
 		p.input, _ = strconv.ParseInt(n, 10, 64)
@@ -450,6 +454,40 @@ func TestQuotaFailover(t *testing.T) {
 	x = e.wait(r.ExecutionID, domain.StatusFailed)
 	if !strings.Contains(x.ErrorMessage, "no alternative") {
 		t.Errorf("error %q", x.ErrorMessage)
+	}
+}
+
+// FS-005 FR-008 (D-105): an attempt records the model and effort its harness reported, and says nothing about the
+// ones it did not report; the configured values are kept apart and never stand in for them.
+func TestAttemptRecordsTheReportedModel(t *testing.T) {
+	e := newEnv(t)
+	e.create("attributed", "      effort: high\n    fallback:\n      candidates:\n        - provider: codex\n")
+	e.claude.setScript(func(ports.RunRequest) string { return "echo 'STARTED claude-haiku-4-5'; echo 'END quota'" })
+	e.codex.setScript(func(ports.RunRequest) string { return "echo 'END ok'" })
+	r, _ := e.app.RunTask("attributed")
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	if len(x.Attempts) != 2 {
+		t.Fatalf("attempts: %+v", x.Attempts)
+	}
+	claude, codex := x.Attempts[0], x.Attempts[1]
+	if claude.Model != "claude-haiku-4-5" || claude.Effort != "" || claude.ConfiguredModel != "default" ||
+		claude.ConfiguredEffort != "high" {
+		t.Errorf("Claude Code's attempt: %+v", claude)
+	}
+	if codex.Model != "" || codex.Effort != "" || codex.ConfiguredModel != "default" ||
+		codex.ConfiguredEffort != "default" {
+		t.Errorf("Codex's attempt: %+v", codex)
+	}
+	// The execution's model follows its current attempt, which reported none.
+	if x.Model != "" {
+		t.Errorf("execution model %q", x.Model)
+	}
+	// A harness that reports its effort has it recorded too.
+	e.claude.setScript(func(ports.RunRequest) string { return "echo 'STARTED claude-opus-4-1 max'; echo 'END ok'" })
+	r, _ = e.app.RunTask("attributed")
+	x = e.wait(r.ExecutionID, domain.StatusCompleted)
+	if at := x.Attempts[0]; at.Model != "claude-opus-4-1" || at.Effort != "max" || x.Model != "claude-opus-4-1" {
+		t.Errorf("attempt %+v, execution model %q", at, x.Model)
 	}
 }
 

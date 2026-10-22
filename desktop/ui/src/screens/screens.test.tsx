@@ -37,7 +37,7 @@ const finished: ExecutionSummary = { ...running, id: "exec-1", status: "complete
 
 const detail: Execution = {
   ...running,
-  attempts: [{ number: 1, harness: "claude-code", model: "default", effort: "high", startedAt: running.startedAt!, outcome: "running" }],
+  attempts: [{ number: 1, harness: "claude-code", configuredModel: "default", configuredEffort: "high", startedAt: running.startedAt!, outcome: "running" }],
   workItems: [{ key: "org/core-banking#123", branch: "feature/123-agent", issueNumber: 123 }],
   warnings: [{ code: "policy_unenforced", message: "network: deny is not enforced for shell commands" }],
   changedFiles: ["src/auth/token.ts"],

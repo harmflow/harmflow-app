@@ -9,8 +9,9 @@ const haiku = { input: 1, cacheWriteShort: 1.25, cacheWriteLong: 2, cacheRead: 0
 const claudeRun: Attempt = {
   number: 1,
   harness: "claude-code",
-  model: "haiku",
-  effort: "default",
+  model: "claude-haiku-4-5-20251001",
+  configuredModel: "haiku",
+  configuredEffort: "default",
   startedAt: "2026-10-21T09:00:00Z",
   endedAt: "2026-10-21T09:00:30Z",
   outcome: "succeeded",
@@ -35,8 +36,8 @@ const claudeRun: Attempt = {
 const codexRun = (price?: typeof haiku, model = "gpt-test"): Attempt => ({
   number: 2,
   harness: "codex",
-  model: "default",
-  effort: "default",
+  configuredModel: "default",
+  configuredEffort: "default",
   startedAt: "2026-10-21T09:01:00Z",
   endedAt: "2026-10-21T09:02:30Z",
   outcome: "succeeded",
@@ -105,7 +106,8 @@ describe("costs", () => {
     const a = attemptCost(codexRun(undefined, ""));
     expect(a.source).toBe("unpriced");
     expect(a.modelSource).toBeUndefined();
-    expect(a.model).toBe("default");
+    // Codex reported no model, and the configured default never stands in for one (D-105).
+    expect(a.model).toBeUndefined();
     expect(a.cost).toBeUndefined();
     expect(a.tokens?.cacheRead).toBe(135680);
     expect(a.lines.every((l) => l.amount === undefined && l.price === undefined)).toBe(true);

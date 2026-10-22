@@ -123,6 +123,24 @@ func TestLifecycleTransitions(t *testing.T) {
 	}
 }
 
+// D-105: a record of schema 1 kept the configured model and effort as the used ones, so they read as configured and
+// the used ones as not reported; a current record is left as it is.
+func TestUpgradeMovesConfiguredValues(t *testing.T) {
+	x := Execution{SchemaVersion: "1", Model: "default",
+		Attempts: []Attempt{{Number: 1, Harness: HarnessClaudeCode, Model: "sonnet", Effort: "high"}}}
+	x.Upgrade()
+	at := x.Attempts[0]
+	if x.SchemaVersion != ExecutionSchemaVersion || x.Model != "" || at.Model != "" || at.Effort != "" ||
+		at.ConfiguredModel != "sonnet" || at.ConfiguredEffort != "high" {
+		t.Errorf("upgraded: %+v", x)
+	}
+	x.Attempts[0].Model = "claude-sonnet-4-5"
+	x.Upgrade()
+	if x.Attempts[0].Model != "claude-sonnet-4-5" || x.Attempts[0].ConfiguredModel != "sonnet" {
+		t.Errorf("a current record changed: %+v", x.Attempts[0])
+	}
+}
+
 // FS-007 FR-006, FR-011, FS-003 AC-013: past the limits an item needs a human.
 func TestWorkItemLimits(t *testing.T) {
 	limits := WorkItemLimits{MaxResumeAttempts: 3, MaxFailedRetries: 3}

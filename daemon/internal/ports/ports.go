@@ -193,8 +193,10 @@ type HarnessEvent struct {
 	IsError   bool
 	Output    string
 	SessionID string
-	Model     string
-	Usage     *domain.Usage
+	// Model and Effort are what the harness says it runs with, on HarnessStarted; empty when it does not say.
+	Model  string
+	Effort string
+	Usage  *domain.Usage
 }
 
 // OutputParser turns one attempt's stdout lines into events and classifies its end.

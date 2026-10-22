@@ -229,7 +229,7 @@ function SourceChip({ a }: { a: AttemptCost }) {
     case "unpriced":
       return (
         <Chip tone="neutral" icon="alert">
-          {a.modelSource ? t("executions.detail.costs.source.unpriced", { model: a.model }) : t("executions.detail.costs.source.unpricedNoModel")}
+          {a.modelSource ? t("executions.detail.costs.source.unpriced", { model: a.model ?? "" }) : t("executions.detail.costs.source.unpricedNoModel")}
         </Chip>
       );
     case "running":
@@ -254,7 +254,7 @@ function BillingNote({ cost, active }: { cost: ExecutionCost; active: boolean })
   const { t, i18n } = useTranslation();
   const harnessName = useHarnessName();
   const notes = cost.attempts.flatMap((a) => {
-    const params = { number: a.attempt.number, harness: harnessName(a.attempt.harness), model: a.model };
+    const params = { number: a.attempt.number, harness: harnessName(a.attempt.harness), model: a.model ?? "" };
     if (a.source === "partial") return [t("executions.detail.costs.noteAttemptPartial", params)];
     if (a.source === "unpriced") return [t(a.modelSource ? "executions.detail.costs.noteAttemptUnpriced" : "executions.detail.costs.noteAttemptNoModel", params)];
     if (a.modelSource === "config" && a.tokens) return [t("executions.detail.costs.noteAttemptConfig", params)];
@@ -296,7 +296,7 @@ function Receipt({ cost, active, onBack }: { cost: ExecutionCost; active: boolea
   const text: string[] = [t("executions.detail.costs.receiptTitle").toUpperCase()];
   if (cost.pricesAsOf) text.push(t("executions.detail.costs.pricesAsOf", { date: formatDay(cost.pricesAsOf, locale) }));
   for (const a of cost.attempts) {
-    text.push("", `${t("executions.detail.costs.receiptAttempt", { number: a.attempt.number })} · ${harnessName(a.attempt.harness)} · ${a.model}`);
+    text.push("", `${t("executions.detail.costs.receiptAttempt", { number: a.attempt.number })} · ${harnessName(a.attempt.harness)}${a.model ? ` · ${a.model}` : ""}`);
     for (const l of a.lines) {
       const qty = formatNumber(l.tokens, locale);
       text.push(`  ${className(l, a.attempt.harness).padEnd(20)} ${qty.padStart(12)} × ${rate(l).padStart(10)} = ${formatUsd(l.amount, locale).padStart(10)}`);

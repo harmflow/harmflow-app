@@ -103,6 +103,7 @@ func (a *App) recover() error {
 	var interrupted []*domain.Execution
 	a.mu.Lock()
 	for _, x := range all {
+		x.Upgrade()
 		if x.Attempts == nil {
 			x.Attempts = []domain.Attempt{}
 		}

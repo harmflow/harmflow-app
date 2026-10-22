@@ -38,6 +38,10 @@ func TestParseSuccess(t *testing.T) {
 		kinds[ports.HarnessFileChanged] != 1 || kinds[ports.HarnessMessage] != 1 {
 		t.Fatalf("unexpected events: %v", kinds)
 	}
+	// FS-005 FR-008: the init line names the model the session runs, which the attempt records (D-105).
+	if e := events[0]; e.Kind != ports.HarnessStarted || e.Model != "claude-haiku-4-5-20251001" || e.Effort != "" {
+		t.Errorf("start: %+v", e)
+	}
 	if events[1].Command != "go test ./..." || events[1].Message != "Run the tests" {
 		t.Errorf("tool start: %+v", events[1])
 	}

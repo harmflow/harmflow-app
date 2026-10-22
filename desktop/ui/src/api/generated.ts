@@ -826,8 +826,14 @@ export interface components {
             number: number;
             harness: string;
             harnessVersion?: string;
-            model: string;
-            effort: string;
+            /** @description The model the harness reported using; absent when it reported none (D-105). */
+            model?: string;
+            /** @description The effort the harness reported using; absent when it reported none (D-105). */
+            effort?: string;
+            /** @description The model the task asked for, default when it set none. Never the one used. */
+            configuredModel: string;
+            /** @description The effort the task asked for, default when it set none. Never the one used. */
+            configuredEffort: string;
             /** Format: date-time */
             startedAt: string;
             /** Format: date-time */
@@ -939,6 +945,7 @@ export interface components {
             endedAt?: string;
             /** @description The harness of the current or last attempt. */
             harness: string;
+            /** @description The model the current or last attempt's harness reported using; absent when it reported none (D-105). */
             model?: string;
             attemptCount?: number;
             /** @description The latest step; no percentage is invented (FS-008 FR-009). The daemon's own step is in en-US, beside its currentStepKey; the agent's and a tool's have none. */

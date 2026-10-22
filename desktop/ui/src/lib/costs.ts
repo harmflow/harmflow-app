@@ -32,8 +32,11 @@ export interface ReceiptLine {
 export interface AttemptCost {
   attempt: Attempt;
   source: FigureSource;
-  /** The model that priced the attempt: the harness's full id, or the attempt's own when nothing named it. */
-  model: string;
+  /**
+   * The model that priced the attempt: the harness's full id, or the model the attempt's harness reported when the
+   * usage names none; undefined when neither names one, never the configured value (D-105).
+   */
+  model?: string;
   modelSource?: Usage["modelSource"];
   /** Undefined when the harness reported no usage, which is not zero. */
   tokens?: Tokens;

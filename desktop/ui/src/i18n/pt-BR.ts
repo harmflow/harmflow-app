@@ -501,6 +501,8 @@ export const ptBR: Resources = {
       attempt: "Tentativa {{number}}",
       model: "Modelo",
       effort: "Esforço",
+      notReported: "Não informado",
+      configured: "configurado: {{value}}",
       harnessVersion: "Versão",
       reason: "Motivo",
       exitCode: "Código de saída",

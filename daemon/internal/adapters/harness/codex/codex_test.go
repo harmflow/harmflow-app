@@ -50,6 +50,10 @@ func TestParseSuccess(t *testing.T) {
 	if started != 1 || done != 1 || changed != 1 || msgs != 1 || warnings != 1 {
 		t.Errorf("events: started %d done %d changed %d messages %d warnings %d", started, done, changed, msgs, warnings)
 	}
+	// thread.started names the thread only: the attempt's model and effort read not reported (D-105).
+	if e := events[0]; e.Kind != ports.HarnessStarted || e.SessionID == "" || e.Model != "" || e.Effort != "" {
+		t.Errorf("start: %+v", e)
+	}
 	// A configuration notice reported as an error item does not fail the turn.
 	if end := p.Finish(0, "Reading additional input from stdin...", false, false); end.Class != domain.ClassNone {
 		t.Errorf("end: %+v", end)
