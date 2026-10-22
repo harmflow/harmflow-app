@@ -12,10 +12,14 @@ import { HarnessMark, Icon } from "./Icon";
 import { toast } from "./toast";
 import { Button, Chip, KeyValue, TextInput } from "./ui";
 
+// A ready harness with something detection could not establish — its sign-in, or a version it can vouch for — is a
+// warning, with the diagnostic saying why (FS-004 FR-006, FR-008).
 export function readinessTone(h: Harness): Tone {
   switch (h.readiness) {
     case "ready":
-      return h.versionSupport === "untested_newer" ? "warning" : "success";
+      return h.versionSupport === "untested_newer" || h.versionSupport === "unknown" || h.authentication === "unknown" || h.diagnostic
+        ? "warning"
+        : "success";
     case "not_installed":
       return "neutral";
     case "not_ready":
@@ -36,7 +40,11 @@ export function HarnessRow({ harness }: { harness: Harness }) {
         <strong>{harness.name || t(`harness.names.${harness.id}`)}</strong>
         <span className="mono muted">{harness.detected ? `${harness.version ?? "?"} · ${harness.path ?? ""}` : t("harness.notDetected")}</span>
       </span>
-      <Chip tone={readinessTone(harness)} icon={harness.readiness === "ready" ? "check" : harness.readiness === "not_installed" ? "circle" : "alert"}>
+      <Chip
+        tone={readinessTone(harness)}
+        icon={harness.readiness === "ready" ? "check" : harness.readiness === "not_installed" ? "circle" : "alert"}
+        title={fieldText(harness.diagnostic, harness.diagnosticKey, harness.diagnosticParams)}
+      >
         {t(`harness.readiness.${harness.readiness}`)}
       </Chip>
     </div>
@@ -103,16 +111,31 @@ export function HarnessInventory({ harness, locale }: { harness: Harness; locale
           [t("harness.installations"), harness.installations.length ? <span className="mono">{harness.installations.join("\n")}</span> : null],
           [
             t("harness.version"),
-            harness.version ? (
+            harness.version || harness.versionSupport ? (
               <span className="mono">
                 {harness.version}
-                {harness.versionSupport ? <span className="muted"> · {t(`harness.versionSupport.${harness.versionSupport}`)}</span> : null}
+                {harness.versionSupport ? (
+                  <span className="muted">
+                    {harness.version ? " · " : ""}
+                    {t(`harness.versionSupport.${harness.versionSupport}`)}
+                  </span>
+                ) : null}
               </span>
             ) : null,
           ],
           [
             t("harness.authLabel"),
-            <Chip tone={harness.authentication === "valid" ? "success" : harness.authentication === "invalid" ? "danger" : "neutral"}>
+            <Chip
+              tone={
+                harness.authentication === "valid"
+                  ? "success"
+                  : harness.authentication === "invalid"
+                    ? "danger"
+                    : harness.detected
+                      ? "warning"
+                      : "neutral"
+              }
+            >
               {t(`harness.authentication.${harness.authentication}`)}
             </Chip>,
           ],
