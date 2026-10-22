@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,6 +47,7 @@ type fakeHarness struct {
 	unavailable bool
 	script      func(req ports.RunRequest) string
 	prompts     []string
+	live        int // attempts prepared to run whose parser has not finished
 }
 
 func (f *fakeHarness) ID() string   { return f.id }
@@ -72,15 +74,22 @@ func (f *fakeHarness) UserItem(kind, name string) (ports.ResolvedItem, bool) {
 func (f *fakeHarness) UserItems(string) []ports.ResolvedItem { return nil }
 func (f *fakeHarness) Prepare(_ ports.HarnessInfo, req ports.RunRequest) (ports.Invocation, ports.OutputParser, error) {
 	f.mu.Lock()
+	parser := &fakeParser{}
 	if req.Prompt != "" { // validation's policy check prepares with no prompt
 		f.prompts = append(f.prompts, req.Prompt)
+		f.live++
+		parser.finished = func() {
+			f.mu.Lock()
+			f.live--
+			f.mu.Unlock()
+		}
 	}
 	script := "echo 'END ok'"
 	if f.script != nil {
 		script = f.script(req)
 	}
 	f.mu.Unlock()
-	return ports.Invocation{Path: "/bin/sh", Args: []string{"-c", script}, Env: req.Env, Dir: req.WorkDir}, &fakeParser{}, nil
+	return ports.Invocation{Path: "/bin/sh", Args: []string{"-c", script}, Env: req.Env, Dir: req.WorkDir}, parser, nil
 }
 
 func (f *fakeHarness) setScript(s func(ports.RunRequest) string) {
@@ -89,10 +98,17 @@ func (f *fakeHarness) setScript(s func(ports.RunRequest) string) {
 	f.mu.Unlock()
 }
 
+func (f *fakeHarness) running() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.live > 0
+}
+
 // fakeParser also reads "USAGE <input tokens>", the usage so far, which is final once the attempt ends well.
 type fakeParser struct {
-	last  string
-	input int64
+	last     string
+	input    int64
+	finished func() // the executor calls Finish once the process has exited and its output is drained
 }
 
 func (p *fakeParser) Line(b []byte) []ports.HarnessEvent {
@@ -120,6 +136,10 @@ func (p *fakeParser) usage(s domain.UsageStatus) *domain.Usage {
 }
 
 func (p *fakeParser) Finish(exit int, _ string, timedOut, cancelled bool) domain.AttemptEnd {
+	if p.finished != nil {
+		p.finished()
+		p.finished = nil
+	}
 	switch {
 	case cancelled:
 		return domain.AttemptEnd{Class: domain.ClassCancelled, Usage: p.usage(domain.UsagePartial)}
@@ -226,22 +246,40 @@ func (e *env) create(id, extra string) {
 	}
 }
 
+// A loaded host can take seconds to run each process a fake harness starts, while the daemon's own work stays fast.
+// poll spends its budget only while no fake attempt is running, from Prepare to its parser's Finish, so a daemon that
+// hangs still fails within the budget; slow processes stretch it up to processCeiling in all.
+const processCeiling = 3 * time.Minute
+
+// poll checks cond every 20 ms until it holds, and reports whether it did.
+func (e *env) poll(budget time.Duration, cond func() bool) bool {
+	start, last := time.Now(), time.Now()
+	for spent := time.Duration(0); ; time.Sleep(20 * time.Millisecond) {
+		if cond() {
+			return true
+		}
+		now := time.Now()
+		if !e.claude.running() && !e.codex.running() {
+			spent += now.Sub(last)
+		}
+		last = now
+		if spent >= budget || now.Sub(start) >= processCeiling {
+			return false
+		}
+	}
+}
+
+// wait returns the execution once it has one of the statuses; a final status it does not want fails at once.
 func (e *env) wait(id string, want ...domain.ExecutionStatus) ExecutionView {
 	e.t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		x, err := e.app.GetExecution(id)
-		if err == nil {
-			for _, w := range want {
-				if x.Status == w {
-					return x
-				}
-			}
-		}
-		time.Sleep(20 * time.Millisecond)
+	var x ExecutionView
+	e.poll(10*time.Second, func() bool {
+		x, _ = e.app.GetExecution(id)
+		return slices.Contains(want, x.Status) || x.Status.IsTerminal()
+	})
+	if !slices.Contains(want, x.Status) {
+		e.t.Fatalf("execution %s is %s, want %v", id, x.Status, want)
 	}
-	x, _ := e.app.GetExecution(id)
-	e.t.Fatalf("execution %s is %s, want %v", id, x.Status, want)
 	return x
 }
 
@@ -252,15 +290,14 @@ func (e *env) executions(task string) []ExecutionSummary {
 // idle waits until the task's execution has returned and freed the task.
 func (e *env) idle(task string) {
 	e.t.Helper()
-	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+	if !e.poll(10*time.Second, func() bool {
 		e.app.mu.Lock()
+		defer e.app.mu.Unlock()
 		_, busy := e.app.running[task]
-		e.app.mu.Unlock()
-		if !busy {
-			return
-		}
+		return !busy
+	}) {
+		e.t.Fatalf("task %s is still running", task)
 	}
-	e.t.Fatalf("task %s is still running", task)
 }
 
 const slow = "echo working; sleep 30; echo 'END ok'"
@@ -499,12 +536,11 @@ func TestUsagePerAttempt(t *testing.T) {
 	e.claude.setScript(func(ports.RunRequest) string { return "echo 'USAGE 100'; echo 'END quota'" })
 	e.codex.setScript(func(ports.RunRequest) string { return "echo 'USAGE 40'; sleep 1; echo 'USAGE 50'; echo 'END ok'" })
 	r, _ := e.app.RunTask("usage")
-	live := false
-	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline) && !live; time.Sleep(20 * time.Millisecond) {
+	live := e.poll(10*time.Second, func() bool {
 		x, _ := e.app.GetExecution(r.ExecutionID)
-		live = len(x.Attempts) == 2 && x.Attempts[1].Usage != nil && x.Attempts[1].Usage.Status == domain.UsagePartial &&
+		return len(x.Attempts) == 2 && x.Attempts[1].Usage != nil && x.Attempts[1].Usage.Status == domain.UsagePartial &&
 			x.Attempts[1].Usage.Total().Input == 40
-	}
+	})
 	if !live {
 		t.Error("the running attempt did not show its usage so far")
 	}
@@ -939,17 +975,17 @@ func TestExecutionTextsCarryKeys(t *testing.T) {
 func (e *env) eventKeys(id, last string) map[string]string {
 	e.t.Helper()
 	keys := map[string]string{}
-	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+	if !e.poll(5*time.Second, func() bool {
 		events, _, _ := e.app.ExecutionEvents(id, 0, 0)
 		for _, ev := range events {
 			keys[ev.Type] = ev.MessageKey
 		}
-		if _, ok := keys[last]; ok {
-			return keys
-		}
+		_, ok := keys[last]
+		return ok
+	}) {
+		e.t.Fatalf("no %s event for %s: %v", last, id, keys)
 	}
-	e.t.Fatalf("no %s event for %s: %v", last, id, keys)
-	return nil
+	return keys
 }
 
 // FS-001 AC-002: duplicate creates a disabled copy with a new identifier.
@@ -1161,15 +1197,19 @@ func TestNoticeSendsTheParamsItsTextReads(t *testing.T) {
 // noticeParams waits for the newest notice of an event type and returns its params.
 func (e *env) noticeParams(eventType string) map[string]string {
 	e.t.Helper()
-	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+	var params map[string]string
+	if !e.poll(5*time.Second, func() bool {
 		for _, n := range e.app.Notifications(false) {
 			if n.EventType == eventType {
-				return n.Params
+				params = n.Params
+				return true
 			}
 		}
+		return false
+	}) {
+		e.t.Fatalf("no %s notice", eventType)
 	}
-	e.t.Fatalf("no %s notice", eventType)
-	return nil
+	return params
 }
 
 // FS-009 FR-010: an unenforced restriction runs with a warning on the task and on the execution.

@@ -23,14 +23,18 @@ func TestStopKillsTheProcessTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(5 * time.Second)
+	// A loaded host can take seconds to run a shell: wait for the pid while the shell lives, up to a ceiling.
 	var child int
-	for time.Now().Before(deadline) {
+	for deadline := time.Now().Add(3 * time.Minute); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
 		if data, err := os.ReadFile(pidFile); err == nil && len(strings.TrimSpace(string(data))) > 0 {
 			child, _ = strconv.Atoi(strings.TrimSpace(string(data)))
 			break
 		}
-		time.Sleep(50 * time.Millisecond)
+		select {
+		case <-p.Done():
+			t.Fatalf("the shell exited before starting the child, exit %d: %q", p.ExitCode(), p.StderrTail())
+		default:
+		}
 	}
 	if child == 0 {
 		t.Fatal("the child did not start")
@@ -42,7 +46,10 @@ func TestStopKillsTheProcessTree(t *testing.T) {
 	if time.Since(start) > 5*time.Second {
 		t.Fatal("stopping took too long")
 	}
-	time.Sleep(100 * time.Millisecond)
+	// The killed child is gone once it has been reaped, which a loaded host can take a while to do.
+	for deadline := time.Now().Add(10 * time.Second); syscall.Kill(child, 0) == nil && time.Now().Before(deadline); {
+		time.Sleep(20 * time.Millisecond)
+	}
 	if err := syscall.Kill(child, 0); err == nil {
 		t.Errorf("child %d survived", child)
 	}
