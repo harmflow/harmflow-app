@@ -10,6 +10,7 @@ TRIPLE := $(shell rustc -vV 2>/dev/null | sed -n 's/^host: //p')
 DEV_HOME := $(CURDIR)/.harmflow-dev/home
 SIDECAR := desktop/src-tauri/binaries/harmflowd-$(TRIPLE)
 LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.Commit=$(COMMIT)
+COVERAGE := $(CURDIR)/build/coverage
 
 .PHONY: help
 help: ## List the targets
@@ -59,6 +60,24 @@ test-desktop: ## Type check and unit tests of the desktop
 .PHONY: test-integration
 test-integration: daemon ## Tests across the daemon's process boundary, with fake harnesses
 	go -C tests test -count=1 ./...
+
+# Coverage is read, never targeted (ADR-015); COVERAGE.md holds the reading. Nothing here fails on a figure.
+.PHONY: coverage
+coverage: coverage-daemon coverage-desktop ## Read the tests' coverage of the daemon, the interface, and the shell
+
+.PHONY: coverage-daemon
+coverage-daemon: ## Statements per package of the daemon, its unit and integration data merged
+	rm -rf $(COVERAGE)/daemon $(COVERAGE)/daemon.out
+	mkdir -p $(COVERAGE)/daemon/unit $(COVERAGE)/daemon/integration
+	go -C daemon test -count=1 -covermode=atomic -coverpkg=./... ./... -args -test.gocoverdir=$(COVERAGE)/daemon/unit
+	GOCOVERDIR=$(COVERAGE)/daemon/integration go -C tests test -count=1 ./...
+	go tool covdata textfmt -i=$(COVERAGE)/daemon/unit,$(COVERAGE)/daemon/integration -o $(COVERAGE)/daemon.out
+	go -C tests run ./coverage $(COVERAGE)/daemon.out
+
+.PHONY: coverage-desktop
+coverage-desktop: ## Coverage of the interface and of the shell by their unit tests (needs cargo-llvm-cov)
+	pnpm -C desktop test:coverage
+	cd desktop/src-tauri && cargo llvm-cov
 
 .PHONY: dev-daemon
 dev-daemon: daemon ## Run the daemon on a development data directory

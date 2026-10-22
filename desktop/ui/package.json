@@ -8,6 +8,7 @@
     "build": "tsc --noEmit -p . && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit -p .",
     "generate": "openapi-typescript ../../contracts/api/openapi.yaml -o src/api/generated.ts"
   },
@@ -32,6 +33,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.1.2",
+    "@vitest/coverage-v8": "^5.0.5",
     "happy-dom": "^21.0.4",
     "openapi-typescript": "^7.13.0",
     "typescript": "~5.9.3",

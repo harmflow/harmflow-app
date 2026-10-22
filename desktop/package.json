@@ -8,6 +8,7 @@
     "build": "pnpm -C ui build",
     "tauri": "tauri",
     "test": "pnpm -C ui test",
+    "test:coverage": "pnpm -C ui test:coverage",
     "generate": "pnpm -C ui generate",
     "icons": "node scripts/render-icons.mjs",
     "typecheck": "pnpm -C ui typecheck"
