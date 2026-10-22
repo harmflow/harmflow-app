@@ -495,6 +495,39 @@ func TestFailoverAcrossHarnesses(t *testing.T) {
 	}
 }
 
+// FS-008 AC-012: a failover whose attempts both reported their usage. Claude Code's cost is the one its CLI printed;
+// Codex's, at the model its configuration sets, is estimated from the price table and stamped on the attempt.
+func TestFailoverCostsReportedAndEstimated(t *testing.T) {
+	d := startDaemon(t, t.TempDir())
+	_ = os.MkdirAll(filepath.Join(d.home, "codex"), 0o700)
+	_ = os.WriteFile(filepath.Join(d.home, "codex", "config.toml"), []byte("model = \"gpt-5.6-terra\"\n"), 0o600)
+	d.call("POST", "/tasks", map[string]any{"yaml": task("costs", "SCENARIO=quotausage",
+		"    fallback:\n      candidates:\n        - provider: codex\n")}, 201)
+	run := d.call("POST", "/tasks/costs/run", nil, 202)
+	x := d.waitStatus(run["executionId"].(string), "completed", "failed")
+	attempts := x["attempts"].([]any)
+	if x["status"] != "completed" || len(attempts) != 2 {
+		t.Fatalf("status %v attempts %v error %v", x["status"], attempts, x["errorMessage"])
+	}
+	a1, a2 := attempts[0].(map[string]any), attempts[1].(map[string]any)
+	if a1["harness"] != "claude-code" || a1["outcome"] != "quota_exhausted" || a2["harness"] != "codex" {
+		t.Fatalf("attempts %v %v", a1, a2)
+	}
+	u1, _ := a1["usage"].(map[string]any)
+	if u1["status"] != "reported" || u1["costSource"] != "reported" || u1["costUsd"] != 0.0364015 ||
+		tokensOf(u1)["cacheWriteLong"] != float64(12752) || tokensOf(u1)["output"] != float64(866) {
+		t.Errorf("attempt 1 usage: %v", u1)
+	}
+	u2, _ := a2["usage"].(map[string]any)
+	m2, _ := u2["models"].([]any)[0].(map[string]any)
+	cost, _ := u2["costUsd"].(float64)
+	if u2["status"] != "reported" || u2["costSource"] != "estimated" || cost <= 0 || u2["pricesAsOf"] == "" ||
+		u2["modelSource"] != "config" || m2["model"] != "gpt-5.6-terra" || m2["price"] == nil ||
+		tokensOf(u2)["input"] != float64(160035-135680) {
+		t.Errorf("attempt 2 usage: %v", u2)
+	}
+}
+
 // tokensOf is the first model's token counts of an attempt's usage.
 func tokensOf(usage map[string]any) map[string]any {
 	models, _ := usage["models"].([]any)

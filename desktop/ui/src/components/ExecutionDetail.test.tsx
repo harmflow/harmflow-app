@@ -288,6 +288,139 @@ describe("execution detail", () => {
     expect(await choose("Costs")).toContain("No token usage for this execution");
   });
 
+  // FS-008 AC-012: a completed failover from Claude Code to Codex whose attempts both reported their usage.
+  it("shows a failover's costs, the CLI's and the table's, each with its source, and their sum (FS-008 AC-012)", async () => {
+    const haiku = { input: 1, cacheWriteShort: 1.25, cacheWriteLong: 2, cacheRead: 0.1, output: 5 };
+    const terra = { input: 2, cacheWriteShort: 2.5, cacheWriteLong: 5, cacheRead: 0.2, output: 12 };
+    const failover: Execution = {
+      ...completed,
+      id: "exec-ac-012",
+      attempts: [
+        {
+          ...base.attempts[0],
+          usage: {
+            status: "reported",
+            modelSource: "harness",
+            costSource: "reported",
+            costUsd: 0.0364015,
+            pricesAsOf: "2026-10-22",
+            models: [
+              {
+                model: "claude-haiku-4-5-20251001",
+                tokens: { input: 25, cacheWriteShort: 0, cacheWriteLong: 12752, cacheRead: 65425, output: 866 },
+                price: haiku,
+                costUsd: 0.0364015,
+              },
+            ],
+          },
+        },
+        {
+          ...base.attempts[1],
+          usage: {
+            status: "reported",
+            modelSource: "config",
+            costSource: "estimated",
+            costUsd: 0.090174,
+            pricesAsOf: "2026-10-22",
+            models: [
+              {
+                model: "gpt-5.6-terra",
+                tokens: { input: 24355, cacheWriteShort: 0, cacheWriteLong: 0, cacheRead: 135680, output: 1194 },
+                price: terra,
+                costUsd: 0.090174,
+              },
+            ],
+          },
+        },
+      ],
+    };
+    await open(failover, [], capture());
+    const summary = await choose("Costs");
+    const rows = [...host!.querySelectorAll(".costs-table tbody tr")].map((r) => r.textContent ?? "");
+    // Each attempt: its harness, its model, its tokens, its cost, and the source of that cost.
+    for (const shown of ["Claude Code", "claude-haiku-4-5-20251001", "12,777", "65,425", "866", "$0.0364", "reported by Claude Code"]) {
+      expect(rows[0]).toContain(shown);
+    }
+    for (const shown of ["Codex", "gpt-5.6-terra", "24,355", "135,680", "1,194", "$0.0902", "estimated · price table"]) {
+      expect(rows[1]).toContain(shown);
+    }
+    // The total is their sum, $0.0364015 + $0.090174, with no part left out.
+    const total = host!.querySelector(".costs-table__total")!.textContent ?? "";
+    expect(total).toContain("$0.1266");
+    expect(total).not.toContain("+ ?");
+    expect(host!.querySelector(".costs-tile--hero .costs-tile__value")!.textContent).toBe("$0.1266");
+    expect(summary).toContain("An estimate at API list prices of Oct 22, 2026");
+
+    // The receipt itemizes each attempt's tokens by class, at the price that made its amount.
+    const receiptButton = [...host!.querySelectorAll<HTMLButtonElement>(".detail__body button")].find((b) => b.textContent === "Receipt");
+    await act(async () => receiptButton!.click());
+    const sections = [...host!.querySelectorAll(".costs-receipt__section")].map((s) => s.textContent ?? "");
+    for (const line of ["Input25×$1.00/M=< $0.0001", "Cache write (1 h)12,752×$2.00/M=$0.0255", "Cache read65,425×$0.10/M=$0.0065", "Output866×$5.00/M=$0.0043"]) {
+      expect(sections[0]).toContain(line);
+    }
+    expect(sections[0]).toContain("matches the $0.0364 Claude Code reported");
+    for (const line of ["Input24,355×$2.00/M=$0.0487", "Cache read135,680×$0.20/M=$0.0271", "Output1,194×$12.00/M=$0.0143"]) {
+      expect(sections[1]).toContain(line);
+    }
+    const receiptTotal = host!.querySelector(".costs-receipt__total")!.textContent ?? "";
+    expect(receiptTotal).toContain("Total (estimate)");
+    expect(receiptTotal).toContain("$0.1266");
+    expect(receiptTotal).not.toContain("unpriced");
+  });
+
+  // FS-008 FR-012: while an attempt runs, its tokens so far and no cost; the cost the attempt ended with, once it ends.
+  it("shows a running attempt's tokens so far without a cost, and its cost once it ends (FS-008 FR-012)", async () => {
+    const tokens = (input: number, cacheWriteLong: number, cacheRead: number, output: number) => ({ input, cacheWriteShort: 0, cacheWriteLong, cacheRead, output });
+    const attempt = { ...base.attempts[0], outcome: "running" as const, endedAt: undefined };
+    const running: Execution = {
+      ...base,
+      id: "exec-running-costs",
+      harness: "claude-code",
+      attempts: [{ ...attempt, usage: { status: "partial", modelSource: "harness", models: [{ model: "claude-haiku-4-5-20251001", tokens: tokens(9, 10857, 14129, 0) }] } }],
+    };
+    await open(running, [], capture());
+    const first = await choose("Costs");
+    const hero = () => host!.querySelector(".costs-tile--hero")!.textContent ?? "";
+    const row = () => host!.querySelector(".costs-table tbody tr")!.textContent ?? "";
+    expect(hero()).toContain("Estimated cost so far");
+    expect(host!.querySelector(".costs-tile--hero .costs-tile__value")!.textContent).toBe("—");
+    for (const shown of ["10,866", "14,129", "so far · priced when it ends"]) expect(row()).toContain(shown);
+    expect(row()).not.toContain("$");
+    expect(first).toContain("the cost appears when the attempt ends");
+
+    // A later message adds to the count; still no cost.
+    const grown = { ...running, attempts: [{ ...attempt, usage: { status: "partial" as const, modelSource: "harness" as const, models: [{ model: "claude-haiku-4-5-20251001", tokens: tokens(25, 12752, 65425, 0) }] } }] };
+    await act(async () => patchStateForTests({ details: { ...getState().details, [running.id]: grown } }));
+    for (const shown of ["12,777", "65,425"]) expect(row()).toContain(shown);
+    expect(row()).not.toContain("$");
+
+    // The attempt ends: the cost stamped on it appears, from its source.
+    const finished: Execution = {
+      ...completed,
+      id: running.id,
+      harness: "claude-code",
+      attempts: [
+        {
+          ...base.attempts[0],
+          outcome: "succeeded",
+          endedAt: ended,
+          usage: {
+            status: "reported",
+            modelSource: "harness",
+            costSource: "reported",
+            costUsd: 0.0364015,
+            pricesAsOf: "2026-10-22",
+            models: [{ model: "claude-haiku-4-5-20251001", tokens: tokens(25, 12752, 65425, 866), costUsd: 0.0364015 }],
+          },
+        },
+      ],
+    };
+    await act(async () => patchStateForTests({ details: { ...getState().details, [running.id]: finished } }));
+    expect(hero()).not.toContain("so far");
+    expect(host!.querySelector(".costs-tile--hero .costs-tile__value")!.textContent).toBe("$0.0364");
+    for (const shown of ["866", "$0.0364", "reported by Claude Code"]) expect(row()).toContain(shown);
+  });
+
   it("reads the raw output from the daemon's route again every 2 s while the execution runs (FS-008 FR-008)", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     const live: Execution = { ...base, id: "exec-live" };
