@@ -179,13 +179,15 @@ main() {
 	[[ $branch == main ]] || die "the checkout is on $branch, not main; nothing was changed"
 	[[ -z $(git -C "$root" status --porcelain) ]] ||
 		die "the working tree has uncommitted changes; commit or stash them first. Nothing was changed"
-	local out
+	local out before
+	before=$(git -C "$root" rev-parse HEAD | cut -c1-7)
 	out=$(git -C "$root" pull --ff-only origin main 2>&1) ||
 		die "git pull --ff-only origin main cannot fast-forward; nothing was changed:"$'\n'"$out"
-	say "$(tail -n 1 <<<"$out")"
+	# The Makefile's COMMIT for the new HEAD: a fixed 7 characters, where --short=7 may give more.
+	commit=$(git -C "$root" rev-parse HEAD | cut -c1-7)
+	if [[ $commit == "$before" ]]; then say "main is up to date at $commit"; else say "main fast-forwarded from $before to $commit"; fi
 
 	# 2. Build, in a make of its own, so its COMMIT is read after the pull.
-	commit=$(git -C "$root" rev-parse HEAD | cut -c1-7)
 	say "building $commit with make app"
 	"${MAKE:-make}" -C "$root" app || die "make app failed; the window and the daemon were left as they were"
 
