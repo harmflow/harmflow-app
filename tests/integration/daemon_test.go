@@ -18,10 +18,12 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/santhosh-tekuri/jsonschema/v6"
 	"gopkg.in/yaml.v3"
 )
 
@@ -730,6 +732,7 @@ type sseEvent struct {
 	ID   int64
 	Type string
 	Data map[string]any
+	Raw  []byte // the data line as the daemon wrote it
 }
 
 func (d *daemon) stream(t *testing.T, lastID int64) (<-chan sseEvent, func()) {
@@ -756,7 +759,8 @@ func (d *daemon) stream(t *testing.T, lastID int64) (<-chan sseEvent, func()) {
 			case strings.HasPrefix(line, "event: "):
 				cur.Type = strings.TrimPrefix(line, "event: ")
 			case strings.HasPrefix(line, "data: "):
-				_ = json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &cur.Data)
+				cur.Raw = []byte(strings.TrimPrefix(line, "data: "))
+				_ = json.Unmarshal(cur.Raw, &cur.Data)
 			case line == "" && cur.Type != "":
 				ch <- cur
 				cur = sseEvent{}
@@ -766,7 +770,121 @@ func (d *daemon) stream(t *testing.T, lastID int64) (<-chan sseEvent, func()) {
 	return ch, func() { resp.Body.Close() }
 }
 
-// FS-008 AC: live events over SSE, the same events on replay, and a reconnection that resumes after the last id.
+// eventSchemaURL is the $id of contracts/schemas/event.schema.json.
+const eventSchemaURL = "https://harmflow.com/schemas/v1alpha1/event.schema.json"
+
+// eventSchema is contracts/schemas/event.schema.json, compiled once. Like the daemon's own validator, it checks the
+// timestamp as a date-time.
+var eventSchema = sync.OnceValues(func() (*jsonschema.Schema, error) {
+	f, err := os.Open(filepath.Join(repoRoot(), "contracts", "schemas", "event.schema.json"))
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	doc, err := jsonschema.UnmarshalJSON(f)
+	if err != nil {
+		return nil, err
+	}
+	c := jsonschema.NewCompiler()
+	c.AssertFormat()
+	if err := c.AddResource(eventSchemaURL, doc); err != nil {
+		return nil, err
+	}
+	return c.Compile(eventSchemaURL)
+})
+
+// loggedEvent is an event as one of its sources holds it: an SSE frame, the replay the API serves, or a JSONL line.
+type loggedEvent struct {
+	ID   int64  `json:"id"`
+	Type string `json:"type"`
+}
+
+// checkEvent checks one event's JSON against event.schema.json (FS-008 FR-007) and returns its id and type.
+func checkEvent(t *testing.T, source string, raw []byte) loggedEvent {
+	t.Helper()
+	s, err := eventSchema()
+	if err != nil {
+		t.Fatalf("compiling event.schema.json: %v", err)
+	}
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
+	if err == nil {
+		err = s.Validate(doc)
+	}
+	if err != nil {
+		t.Errorf("%s: an event does not fit event.schema.json: %v\n%s", source, err, raw)
+	}
+	var e loggedEvent
+	_ = json.Unmarshal(raw, &e)
+	return e
+}
+
+// checkFrame checks an SSE frame's data against the schema, and its id and event lines against its data.
+func checkFrame(t *testing.T, e sseEvent) loggedEvent {
+	t.Helper()
+	got := checkEvent(t, "SSE", e.Raw)
+	if got.ID != e.ID || got.Type != e.Type {
+		t.Errorf("the frame's id %d and event %s differ from its data's %d and %s", e.ID, e.Type, got.ID, got.Type)
+	}
+	return got
+}
+
+// storedLog returns an execution's events from GET /executions/{executionId}/events and from the lines of
+// logs/<execution>.jsonl, once both hold its execution.completed, each checked against event.schema.json.
+func (d *daemon) storedLog(t *testing.T, executionID string) (api, jsonl []loggedEvent) {
+	t.Helper()
+	var replay struct {
+		Events []json.RawMessage `json:"events"`
+	}
+	var lines [][]byte
+	for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(100 * time.Millisecond) {
+		status, body := d.request("GET", "/executions/"+executionID+"/events", nil, nil)
+		if status != 200 {
+			t.Fatalf("GET /executions/%s/events: %d %s", executionID, status, body)
+		}
+		if err := json.Unmarshal(body, &replay); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(filepath.Join(d.home, "logs", executionID+".jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines = bytes.Split(bytes.TrimSuffix(data, []byte("\n")), []byte("\n"))
+		completed := []byte(`"type":"execution.completed"`)
+		if bytes.Contains(body, completed) && bytes.Contains(data, completed) || time.Now().After(deadline) {
+			break
+		}
+	}
+	for _, raw := range replay.Events {
+		api = append(api, checkEvent(t, "GET /executions/{executionId}/events", raw))
+	}
+	for _, line := range lines {
+		jsonl = append(jsonl, checkEvent(t, executionID+".jsonl", line))
+	}
+	return api, jsonl
+}
+
+// throughCompletion is a source's events from its first, which must be execution.created, to its execution.completed.
+// A notice of the completion may follow it, so the sources are compared up to there.
+func throughCompletion(t *testing.T, source string, events []loggedEvent) []loggedEvent {
+	t.Helper()
+	end := slices.IndexFunc(events, func(e loggedEvent) bool { return e.Type == "execution.completed" })
+	if len(events) == 0 || events[0].Type != "execution.created" || end < 0 {
+		t.Errorf("%s does not run from execution.created to execution.completed: %v", source, events)
+		return events
+	}
+	return events[:end+1]
+}
+
+// sameEvents reports a source whose events differ from what the client received, by id, type, or order.
+func sameEvents(t *testing.T, source string, got, received []loggedEvent) {
+	t.Helper()
+	if !slices.Equal(got, received) {
+		t.Errorf("%s holds other events than the client received:\n%v\nreceived:\n%v", source, got, received)
+	}
+}
+
+// FS-008 FR-002, AC-001: live events over SSE, and the same events, in the same order, in the replay the API serves and
+// in the JSONL log; a reconnection resumes after the last id.
 func TestRunStreamAndReplay(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	d.call("POST", "/tasks", map[string]any{"yaml": task("streamed", "SCENARIO=report", "")}, 201)
@@ -774,12 +892,18 @@ func TestRunStreamAndReplay(t *testing.T) {
 	run := d.call("POST", "/tasks/streamed/run", nil, 202)
 	id := run["executionId"].(string)
 	var seen []sseEvent
+	var streamed []loggedEvent
 	timeout := time.After(20 * time.Second)
 	for done := false; !done; {
 		select {
-		case e := <-events:
+		case e, ok := <-events:
+			if !ok {
+				t.Fatalf("the stream closed; saw %d events", len(seen))
+			}
+			got := checkFrame(t, e)
 			if e.Data["executionId"] == id {
 				seen = append(seen, e)
+				streamed = append(streamed, got)
 				done = e.Type == "execution.completed"
 			}
 		case <-timeout:
@@ -807,22 +931,189 @@ func TestRunStreamAndReplay(t *testing.T) {
 		tokensOf(usage)["output"] != float64(866) || usage["models"].([]any)[0].(map[string]any)["price"] == nil {
 		t.Errorf("usage %v", usage)
 	}
-	replay := d.call("GET", "/executions/"+id+"/events", nil, 200)
-	stored := replay["events"].([]any)
-	if len(stored) < len(seen) {
-		t.Errorf("replay has %d events, the stream delivered %d", len(stored), len(seen))
-	}
+	// The JSONL log is one file per execution; it and the replay agree with the stream event for event.
+	api, jsonl := d.storedLog(t, id)
+	received := throughCompletion(t, "the stream", streamed)
+	sameEvents(t, "GET /executions/{executionId}/events", throughCompletion(t, "the replay", api), received)
+	sameEvents(t, id+".jsonl", throughCompletion(t, id+".jsonl", jsonl), received)
 	// Reconnecting after the third event delivers only the later ones.
 	again, closeAgain := d.stream(t, seen[2].ID)
 	defer closeAgain()
 	first := <-again
+	checkFrame(t, first)
 	if first.ID <= seen[2].ID {
 		t.Errorf("reconnect replayed %d, already received %d", first.ID, seen[2].ID)
 	}
-	// The JSONL log is one file per execution.
-	if _, err := os.Stat(filepath.Join(d.home, "logs", id+".jsonl")); err != nil {
-		t.Error(err)
+}
+
+// FS-008 AC-007: a client that disconnects while an execution runs, and reconnects with Last-Event-ID set to the last
+// event it received, receives every event emitted while it was away, in order, once each and with no replay_gap, and
+// then live ones. What it received in the end is the stored log.
+func TestReconnectionIsLossless(t *testing.T) {
+	d := startDaemon(t, t.TempDir())
+	// With no notice, the stored log ends at execution.completed, so it can equal what the client received whole.
+	d.call("POST", "/tasks", map[string]any{"yaml": task("ticking", "SCENARIO=ticks",
+		"  notifications:\n    native:\n      events: []\n")}, 201)
+	events, closeStream := d.stream(t, 0)
+	id := d.call("POST", "/tasks/ticking/run", nil, 202)["executionId"].(string)
+	var received []loggedEvent
+	var lastID int64
+	receive := func(e sseEvent) loggedEvent {
+		if e.Type == "replay_gap" {
+			t.Fatalf("replay_gap: %s", e.Raw)
+		}
+		got := checkFrame(t, e)
+		lastID = max(lastID, e.ID)
+		if e.Data["executionId"] == id {
+			received = append(received, got)
+		}
+		return got
 	}
+
+	// 1. The client receives the execution's first events, up to its first message.
+	timeout := time.After(20 * time.Second)
+	for first := false; !first; {
+		select {
+		case e, ok := <-events:
+			if !ok {
+				t.Fatal("the stream closed")
+			}
+			got := receive(e)
+			first = got.Type == "harness.message" && e.Data["executionId"] == id
+		case <-timeout:
+			t.Fatalf("no message of the execution; received %v", received)
+		}
+	}
+	// 2. It disconnects, keeping what was already on its way, while the execution goes on emitting.
+	closeStream()
+	for e := range events {
+		receive(e)
+	}
+	var missed []loggedEvent
+	for deadline := time.Now().Add(20 * time.Second); len(missed) < 2; time.Sleep(100 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the execution emitted %v after event %d, want at least two events", missed, lastID)
+		}
+		missed = d.eventsAfter(t, id, lastID)
+	}
+	if slices.ContainsFunc(missed, func(e loggedEvent) bool { return e.Type == "execution.completed" }) {
+		t.Fatalf("the execution ended while the client was away, so no event can be live: %v", missed)
+	}
+
+	// 3. It reconnects. The daemon subscribed it before answering, so an event the log does not hold yet is live.
+	again, closeAgain := d.stream(t, lastID)
+	defer closeAgain()
+	reconnectedAt := lastID
+	if held := d.eventsAfter(t, id, lastID); len(held) > 0 {
+		reconnectedAt = held[len(held)-1].ID
+	}
+	before := len(received)
+	timeout = time.After(20 * time.Second)
+	for done := false; !done; {
+		select {
+		case e, ok := <-again:
+			if !ok {
+				t.Fatal("the stream closed after the reconnection")
+			}
+			got := receive(e)
+			done = got.Type == "execution.completed" && e.Data["executionId"] == id
+		case <-timeout:
+			t.Fatalf("no execution.completed after the reconnection; received %v", received[before:])
+		}
+	}
+
+	// 4. Every event emitted while it was away arrived, in order and once each, then at least one live event.
+	for i := 1; i < len(received); i++ {
+		if received[i].ID <= received[i-1].ID {
+			t.Errorf("event %d arrived after event %d", received[i].ID, received[i-1].ID)
+		}
+	}
+	if again := received[before:]; len(again) < len(missed) || !slices.Equal(again[:len(missed)], missed) {
+		t.Errorf("after the reconnection the client received %v, want the missed %v first", again, missed)
+	}
+	if received[len(received)-1].ID <= reconnectedAt {
+		t.Errorf("no live event: the last one received, %d, was already in the log at %d", received[len(received)-1].ID,
+			reconnectedAt)
+	}
+	api, jsonl := d.storedLog(t, id)
+	sameEvents(t, "GET /executions/{executionId}/events", api, received)
+	sameEvents(t, id+".jsonl", jsonl, received)
+}
+
+// eventsAfter is the execution's stored events after an id, by id and type.
+func (d *daemon) eventsAfter(t *testing.T, executionID string, after int64) []loggedEvent {
+	t.Helper()
+	status, body := d.request("GET", fmt.Sprintf("/executions/%s/events?after=%d", executionID, after), nil, nil)
+	var replay struct {
+		Events []loggedEvent `json:"events"`
+	}
+	if err := json.Unmarshal(body, &replay); status != 200 || err != nil {
+		t.Fatalf("GET /executions/%s/events: %d %v %s", executionID, status, err, body)
+	}
+	return replay.Events
+}
+
+// FS-008 FR-009, AC-009: a running execution's detail and its row in the list give its current step and when it
+// started, and no field of either speaks of a percentage or of progress.
+func TestRunningExecutionShowsStepAndStart(t *testing.T) {
+	d := startDaemon(t, t.TempDir())
+	d.call("POST", "/tasks", map[string]any{"yaml": task("steady", "SCENARIO=slow", "  execution:\n    cancelGraceSeconds: 1\n")}, 201)
+	id := d.call("POST", "/tasks/steady/run", nil, 202)["executionId"].(string)
+	d.waitStatus(id, "running")
+	// The execution reads running before its harness's first line names a step.
+	views := map[string]map[string]any{}
+	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		views["GET /executions/{executionId}"] = d.call("GET", "/executions/"+id, nil, 200)
+		views["its row in GET /executions"] = nil
+		for _, row := range d.list("/executions?taskId=steady") {
+			if row["id"] == id {
+				views["its row in GET /executions"] = row
+			}
+		}
+		if stepOf(views["GET /executions/{executionId}"]) != "" && stepOf(views["its row in GET /executions"]) != "" {
+			break
+		}
+	}
+	for name, view := range views {
+		if view["status"] != "running" || stepOf(view) == "" {
+			t.Errorf("%s: status %v, current step %q", name, view["status"], stepOf(view))
+		}
+		if started, _ := view["startedAt"].(string); started == "" {
+			t.Errorf("%s: no startedAt", name)
+		} else if _, err := time.Parse(time.RFC3339Nano, started); err != nil {
+			t.Errorf("%s: startedAt %q: %v", name, started, err)
+		}
+		if keys := progressKeys(view, ""); len(keys) > 0 {
+			t.Errorf("%s has %v", name, keys)
+		}
+	}
+	d.call("POST", "/executions/"+id+"/cancel", nil, 202)
+	d.waitStatus(id, "cancelled")
+}
+
+// stepOf is the current step of an execution's view, empty when it has none.
+func stepOf(view map[string]any) string {
+	s, _ := view["currentStep"].(string)
+	return s
+}
+
+// progressKeys lists the keys of a decoded JSON value, at any depth, whose name contains "percent" or "progress".
+func progressKeys(v any, path string) []string {
+	var out []string
+	switch t := v.(type) {
+	case map[string]any:
+		for k, x := range t {
+			if name := strings.ToLower(k); strings.Contains(name, "percent") || strings.Contains(name, "progress") {
+				out = append(out, path+"/"+k)
+			}
+			out = append(out, progressKeys(x, path+"/"+k)...)
+		}
+	case []any:
+		for i, x := range t {
+			out = append(out, progressKeys(x, path+"/"+strconv.Itoa(i))...)
+		}
+	}
+	return out
 }
 
 // FS-008 AC-008: the raw output of a completed execution is what the CLI printed, stdout and stderr, with the token
@@ -949,12 +1240,15 @@ func TestFailoverAcrossHarnesses(t *testing.T) {
 	if x["model"] != nil {
 		t.Errorf("the execution's model %v is not its current attempt's", x["model"])
 	}
-	events := d.call("GET", "/executions/"+run["executionId"].(string)+"/events", nil, 200)["events"].([]any)
+	// FS-008 FR-007: the replay and the JSONL log hold the same events, each fitting event.schema.json.
+	id := run["executionId"].(string)
+	events, jsonl := d.storedLog(t, id)
+	sameEvents(t, id+".jsonl", throughCompletion(t, id+".jsonl", jsonl), throughCompletion(t, "the replay", events))
 	var order []string
 	for _, e := range events {
-		switch typ := e.(map[string]any)["type"].(string); typ {
+		switch e.Type {
 		case "harness.quota_exhausted", "harness.switched", "harness.started":
-			order = append(order, typ)
+			order = append(order, e.Type)
 		}
 	}
 	if strings.Join(order, ",") != "harness.started,harness.quota_exhausted,harness.switched,harness.started" {
@@ -1017,6 +1311,10 @@ func TestFailoverCostsReportedAndEstimated(t *testing.T) {
 		tokensOf(u2)["input"] != float64(160035-135680) {
 		t.Errorf("attempt 2 usage: %v", u2)
 	}
+	// FS-008 FR-007: the replay and the JSONL log hold the same events, each fitting event.schema.json.
+	id := run["executionId"].(string)
+	events, jsonl := d.storedLog(t, id)
+	sameEvents(t, id+".jsonl", throughCompletion(t, id+".jsonl", jsonl), throughCompletion(t, "the replay", events))
 }
 
 // tokensOf is the first model's token counts of an attempt's usage.

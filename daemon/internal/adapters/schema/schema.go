@@ -1,5 +1,5 @@
-// Package schema validates task documents and execution reports against the embedded copies of contracts/schemas,
-// and locates each problem in the YAML by line and column (FS-001 FR-007, FR-011).
+// Package schema validates task documents, execution reports, and events against the embedded copies of
+// contracts/schemas, and locates each problem in the YAML by line and column (FS-001 FR-007, FR-011).
 package schema
 
 import (
@@ -34,10 +34,13 @@ type Issue struct {
 type Validator struct {
 	task   *jsonschema.Schema
 	report *jsonschema.Schema
+	event  *jsonschema.Schema
 }
 
 func New() (*Validator, error) {
 	c := jsonschema.NewCompiler()
+	// An event's timestamp is checked as a date-time; the task and report schemas name no format.
+	c.AssertFormat()
 	for url, raw := range map[string][]byte{
 		contracts.TaskSchemaURL:   contracts.TaskSchema,
 		contracts.ReportSchemaURL: contracts.ExecutionReportSchema,
@@ -59,7 +62,11 @@ func New() (*Validator, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Validator{task: task, report: report}, nil
+	event, err := c.Compile(contracts.EventSchemaURL)
+	if err != nil {
+		return nil, err
+	}
+	return &Validator{task: task, report: report, event: event}, nil
 }
 
 var yamlLine = regexp.MustCompile(`line (\d+)(?::|,)?\s*(?:column (\d+))?`)
@@ -142,6 +149,12 @@ func (v *Validator) ValidateTask(doc any, node *yaml.Node) []Issue {
 // ValidateReport checks report.json against execution-report.schema.json.
 func (v *Validator) ValidateReport(doc any) []Issue {
 	return collect(v.report.Validate(doc), nil)
+}
+
+// ValidateEvent checks an event, decoded from the JSON its log line or SSE frame carries, against event.schema.json
+// (FS-008 FR-007).
+func (v *Validator) ValidateEvent(doc any) []Issue {
+	return collect(v.event.Validate(doc), nil)
 }
 
 var printer = message.NewPrinter(language.English)

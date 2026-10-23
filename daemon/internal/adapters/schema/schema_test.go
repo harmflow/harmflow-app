@@ -531,3 +531,27 @@ func TestReportSchema(t *testing.T) {
 		t.Fatal("unknown outcome accepted")
 	}
 }
+
+// FS-008 FR-007: an event follows the event model. A type the schema does not list, or a timestamp that is not a
+// date-time, fails, and the issue names that field alone.
+func TestEventSchema(t *testing.T) {
+	v, _ := New()
+	const event = `{"id":1784534400000000,"schemaVersion":"1","timestamp":"2026-10-20T08:00:00.123456-03:00",` +
+		`"taskId":"notes","executionId":"exec-20261020-080000-a1b2c3","attempt":1,"harness":"claude-code",` +
+		`"type":"execution.status_changed","severity":"info","message":"running","messageKey":"execution_status",` +
+		`"params":{"status":"running"},"payload":{"from":"queued","status":"running"}}`
+	good, _ := FromJSON([]byte(event))
+	if issues := v.ValidateEvent(good); len(issues) > 0 {
+		t.Fatalf("a valid event was rejected: %+v", issues)
+	}
+	for _, c := range []struct{ from, to, path, key string }{
+		{`"type":"execution.status_changed"`, `"type":"execution.progressed"`, "/type", "schema_enum"},
+		{`"timestamp":"2026-10-20T08:00:00.123456-03:00"`, `"timestamp":"yesterday"`, "/timestamp", ""},
+	} {
+		doc, _ := FromJSON([]byte(strings.Replace(event, c.from, c.to, 1)))
+		issues := v.ValidateEvent(doc)
+		if len(issues) != 1 || issues[0].Path != c.path || issues[0].Key != c.key {
+			t.Errorf("%s: got %+v, want one issue at %s", c.to, issues, c.path)
+		}
+	}
+}
