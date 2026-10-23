@@ -23,7 +23,7 @@ serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 futures-util = "0.3"
-dirs = "6"
+dirs = "7"
 
 [profile.release]
 codegen-units = 1
