@@ -4,8 +4,9 @@
 //! Keychain (D-090). The desktop reads both and holds the token here, in the Rust core, so it never reaches the
 //! webview (FS-009 FR-005).
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -281,8 +282,15 @@ fn target_triple() -> &'static str {
 /// Starts the daemon detached in its own process group, so it outlives the window and the app (FS-010 FR-004).
 pub fn spawn_daemon() -> Result<(), String> {
     let bin = daemon_binary().ok_or_else(|| "the harmflowd binary was not found".to_string())?;
-    let mut cmd = Command::new(&bin);
-    if let Some(home) = std::env::var_os("HARMFLOW_HOME").filter(|v| !v.is_empty()) {
+    let home = std::env::var_os("HARMFLOW_HOME").filter(|v| !v.is_empty());
+    spawn_detached(&bin, home.as_deref()).map(|_| ())
+}
+
+/// Starts `bin` in a process group of its own, with its standard streams closed, so neither the app's exit nor a
+/// signal to the app's group reaches it.
+fn spawn_detached(bin: &Path, home: Option<&OsStr>) -> Result<Child, String> {
+    let mut cmd = Command::new(bin);
+    if let Some(home) = home {
         cmd.arg("--home").arg(home);
     }
     cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
@@ -291,7 +299,7 @@ pub fn spawn_daemon() -> Result<(), String> {
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
-    cmd.spawn().map(|_| ()).map_err(|e| format!("{}: {e}", bin.display()))
+    cmd.spawn().map_err(|e| format!("{}: {e}", bin.display()))
 }
 
 #[cfg(test)]
@@ -327,5 +335,30 @@ mod tests {
         assert_eq!(rt.address, "127.0.0.1:4321");
         assert_eq!(read_token(&dir, rt.token_store.as_deref()).unwrap(), "secret");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The daemon `daemon_start` launches leads a process group of its own, apart from the app's (FS-010 FR-004). The
+    /// stand-in for harmflowd comes as a path, so no process-wide variable is touched.
+    #[cfg(unix)]
+    #[test]
+    fn daemon_starts_in_its_own_process_group() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("harmflow-spawn-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bin = dir.join("harmflowd");
+        std::fs::write(&bin, "#!/bin/sh\nexec sleep 60\n").unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let pgid = |pid: u32| -> Option<u32> {
+            let out = Command::new("/bin/ps").args(["-o", "pgid=", "-p", &pid.to_string()]).output().ok()?;
+            String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+        };
+
+        let mut child = spawn_detached(&bin, Some(dir.as_os_str())).unwrap();
+        let (group, own) = (pgid(child.id()), pgid(std::process::id()));
+        child.kill().ok();
+        child.wait().ok();
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(group, Some(child.id()), "the child's process group is not its own");
+        assert!(own.is_some() && own != group, "the child shares the test's process group {own:?}");
     }
 }
