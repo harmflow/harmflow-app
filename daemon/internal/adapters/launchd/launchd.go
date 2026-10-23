@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/fsstore"
+	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
 const Label = "com.harmflow.daemon"
@@ -23,6 +24,8 @@ type Agent struct {
 	// that, and so none reaches the user's launchd session.
 	Launchctl func(args ...string) error
 }
+
+var _ ports.HostServiceManager = (*Agent)(nil)
 
 func NewAgent(home, logPath string) *Agent {
 	return &Agent{PlistPath: filepath.Join(home, "Library", "LaunchAgents", Label+".plist"), LogPath: logPath,

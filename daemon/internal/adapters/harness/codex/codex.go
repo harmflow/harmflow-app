@@ -40,6 +40,12 @@ type Adapter struct {
 	KnownLocations []string
 }
 
+var (
+	_ ports.HarnessAdapter    = (*Adapter)(nil)
+	_ ports.HarnessIdentifier = (*Adapter)(nil)
+	_ ports.ProfileWarner     = (*Adapter)(nil)
+)
+
 func (a *Adapter) ID() string   { return ID }
 func (a *Adapter) Name() string { return Name }
 
@@ -476,6 +482,8 @@ type parser struct {
 	reported    bool // a turn reported its usage
 	tokens      domain.Tokens
 }
+
+var _ ports.OutputParser = (*parser)(nil)
 
 // turnUsage is a turn's usage. As in OpenAI's API, input_tokens include the tokens read from and written to the cache,
 // so the plain input is what remains; output_tokens include the reasoning tokens, which bill as output. Codex does not

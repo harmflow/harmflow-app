@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/fsstore"
+	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
 const (
@@ -36,6 +37,8 @@ type Keychain struct {
 	Service, Account string
 	Path             string
 }
+
+var _ ports.SecretStore = Keychain{}
 
 func (k Keychain) Kind() string { return "keychain" }
 
@@ -121,6 +124,8 @@ func (k Keychain) Set(token string) error {
 type File struct {
 	Path string
 }
+
+var _ ports.SecretStore = File{}
 
 func (f File) Kind() string { return "file" }
 

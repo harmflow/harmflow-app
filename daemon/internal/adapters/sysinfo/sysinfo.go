@@ -12,6 +12,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
 type Reader struct {
@@ -21,6 +23,8 @@ type Reader struct {
 	cpu      float64
 	cpuAt    time.Time
 }
+
+var _ ports.SystemInfo = (*Reader)(nil)
 
 func (r *Reader) Snapshot(dir string) map[string]any {
 	out := map[string]any{}
