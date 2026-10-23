@@ -27,8 +27,12 @@ func (a *App) maintenanceLoop() {
 }
 
 // ApplyRetention deletes the logs and execution directories older than the retention period. The execution records
-// themselves are kept with no limit (D-073).
+// themselves are kept with no limit (D-073). A pass waits for one already running: beside it, it would skip a log the
+// other had just deleted, since a missing log is aged by its execution's end, and return before that log's record
+// says it expired.
 func (a *App) ApplyRetention() {
+	a.retentionMu.Lock()
+	defer a.retentionMu.Unlock()
 	a.mu.Lock()
 	days := a.settings.LogRetentionDays
 	var candidates []*domain.Execution
