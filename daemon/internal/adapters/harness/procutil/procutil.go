@@ -96,6 +96,9 @@ func StartLines(inv ports.Invocation, raw io.Writer, onStdout, onStderr func([]b
 		onStderr = func([]byte) {}
 	}
 	out, errs := &pipeReader{f: stdout}, &pipeReader{f: stderr}
+	// Up to 64 lines wait between the two readers and the recorder, so a burst of output does not stall a pipe while the
+	// recorder runs its callbacks. When the buffer fills, the readers wait, and once the pipe's own buffer fills, so does
+	// the process's write: no line is dropped.
 	lines := make(chan streamLine, 64)
 	var readers sync.WaitGroup
 	read := func(r io.Reader, stderr bool) {

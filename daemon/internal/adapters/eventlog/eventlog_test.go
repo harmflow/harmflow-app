@@ -231,3 +231,50 @@ func TestAppendReplaySubscribe(t *testing.T) {
 		t.Error("another execution's log was touched")
 	}
 }
+
+// A subscriber that stops reading never holds up Append: once its buffer is full it is dropped, its channel closed
+// after the events it holds, and a new subscription replays from where it stopped.
+func TestSlowSubscriberIsDropped(t *testing.T) {
+	l, err := New(t.TempDir(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch, _, cancel := l.Subscribe(0)
+	defer cancel()
+	appended := make(chan domain.Event)
+	go func() {
+		var last domain.Event
+		for range subscriberBuffer + 10 {
+			last = l.Append(domain.Event{Type: domain.EventDaemonStarted})
+		}
+		appended <- last
+	}()
+	var last domain.Event
+	select {
+	case last = <-appended:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Append waited for a subscriber that does not read")
+	}
+	var got []domain.Event
+	for e := range ch {
+		got = append(got, e)
+	}
+	if len(got) != subscriberBuffer {
+		t.Fatalf("subscriber received %d events before its channel closed, want %d", len(got), subscriberBuffer)
+	}
+	again, gap, cancel2 := l.Subscribe(got[len(got)-1].ID)
+	defer cancel2()
+	if gap {
+		t.Fatal("Subscribe(last received) reported a gap, want the missed events replayed")
+	}
+	var replayed int
+	for e := range again {
+		replayed++
+		if e.ID == last.ID {
+			break
+		}
+	}
+	if replayed != 10 {
+		t.Errorf("replayed %d events, want the 10 the dropped subscriber missed", replayed)
+	}
+}
