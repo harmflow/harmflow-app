@@ -3,16 +3,28 @@ package app
 import "testing"
 
 // fakeAutostart stands in for the launchd agent: it keeps whether autostart is on, and never reaches launchctl or the
-// user's LaunchAgents folder.
-type fakeAutostart struct{ enabled bool }
+// user's LaunchAgents folder. It records each Enable, with what it was asked to start, and counts each Disable.
+type fakeAutostart struct {
+	enabled  bool
+	enables  []autostartCall
+	disables int
+}
+
+type autostartCall struct {
+	executable string
+	args       []string
+	env        map[string]string
+}
 
 func (f *fakeAutostart) Enabled() bool { return f.enabled }
-func (f *fakeAutostart) Enable(string, []string, map[string]string) error {
+func (f *fakeAutostart) Enable(executable string, args []string, env map[string]string) error {
 	f.enabled = true
+	f.enables = append(f.enables, autostartCall{executable, args, env})
 	return nil
 }
 func (f *fakeAutostart) Disable() error {
 	f.enabled = false
+	f.disables++
 	return nil
 }
 func (f *fakeAutostart) Mechanism() string { return "launchd" }
