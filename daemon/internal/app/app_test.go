@@ -77,16 +77,25 @@ type fakeHarness struct {
 	live        int           // attempts prepared to run whose parser has not finished
 	gate        chan struct{} // Detect waits for it to close, when set
 	held        int           // Detect calls waiting for the gate
+	// cutLag is how long a held Detect takes to return once its context ends, as a CLI takes time to exit.
+	cutLag time.Duration
 }
 
 func (f *fakeHarness) ID() string   { return f.id }
 func (f *fakeHarness) Name() string { return f.id }
-func (f *fakeHarness) Detect(context.Context, string) ports.HarnessInfo {
+func (f *fakeHarness) Detect(ctx context.Context, _ string) ports.HarnessInfo {
 	f.mu.Lock()
 	if gate := f.gate; gate != nil {
 		f.held++
 		f.mu.Unlock()
-		<-gate
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			f.mu.Lock()
+			lag := f.cutLag
+			f.mu.Unlock()
+			time.Sleep(lag)
+		}
 		f.mu.Lock()
 		f.held--
 	}
@@ -140,7 +149,7 @@ func (f *fakeHarness) running() bool {
 	return f.live > 0
 }
 
-// hold makes Detect wait until the returned release is called; the test's end releases it too.
+// hold makes Detect wait until the returned release is called, or its context ends; the test's end releases it too.
 func (f *fakeHarness) hold(t *testing.T) (release func()) {
 	gate := make(chan struct{})
 	f.mu.Lock()
@@ -3563,5 +3572,37 @@ func TestCancellingStartContextEndsTheLoops(t *testing.T) {
 	case <-ended:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the loops still run 5s after Start's context was cancelled")
+	}
+}
+
+// Stop ends the harness detection Start launched and returns only once it has ended, so the event log holds no harness
+// check after daemon.stopping.
+func TestStopEndsAndWaitsForHarnessDetection(t *testing.T) {
+	var mu sync.Mutex
+	var types []string
+	e := newEnv(t, func(e *env) {
+		e.codex.hold(t)
+		e.codex.cutLag = 300 * time.Millisecond
+		e.events.setHook(func(ev domain.Event) {
+			mu.Lock()
+			types = append(types, ev.Type)
+			mu.Unlock()
+		})
+	})
+	if !e.poll(5*time.Second, e.codex.holding) {
+		t.Fatal("the detection Start launched never reached Detect")
+	}
+	e.app.Stop(domain.Text{Message: "test stop"})
+	if e.codex.holding() {
+		t.Fatal("Stop returned while a detection it launched was still running")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	stopping := slices.Index(types, domain.EventDaemonStopping)
+	if stopping < 0 {
+		t.Fatalf("events = %v, want %s among them", types, domain.EventDaemonStopping)
+	}
+	if after := slices.Index(types[stopping:], domain.EventHarnessChecked); after >= 0 {
+		t.Errorf("events = %v, want no %s after %s", types, domain.EventHarnessChecked, domain.EventDaemonStopping)
 	}
 }
