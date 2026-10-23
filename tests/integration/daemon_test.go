@@ -6,8 +6,10 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -16,6 +18,7 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -289,6 +292,440 @@ func TestAPIProtection(t *testing.T) {
 // rejectionEntry is a line of daemon.log recording rejected requests: the last one's method and path, the reason, and
 // how many requests the entry stands for since when.
 var rejectionEntry = regexp.MustCompile(`local API rejected (\S+) ("(?:[^"\\]|\\.)*"): ([^(]+) \((\d+) requests? since (\S+)\)$`)
+
+// FS-009 FR-004, AC-004, FR-011: no request without the token changes anything. Every operation of the contract, the
+// control routes, the read routes, /health, and the SSE stream, gets 401 with no Authorization header and with a wrong
+// token. Each request would change something if the guard let it through; afterwards the task files, the tasks, the
+// executions, the notices, the settings, the harness paths, and the token are as they were, the execution started
+// before still runs, and the daemon still answers.
+func TestAPIGuardOnEveryRoute(t *testing.T) {
+	d := startDaemon(t, t.TempDir())
+	d.call("POST", "/tasks", map[string]any{"yaml": task("finished", "SCENARIO=ok", "")}, 201)
+	d.call("POST", "/tasks", map[string]any{"yaml": task("guarded", "SCENARIO=slow", "")}, 201)
+	d.call("POST", "/tasks", map[string]any{"yaml": task("dormant", "p", "  enabled: false\n")}, 201)
+	finished := d.call("POST", "/tasks/finished/run", nil, 202)["executionId"].(string)
+	d.waitStatus(finished, "completed")
+	running := d.call("POST", "/tasks/guarded/run", nil, 202)["executionId"].(string)
+	d.waitStatus(running, "running")
+	var notices []any
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline) && len(notices) == 0; {
+		for _, n := range d.list("/notifications?unread=true") {
+			notices = append(notices, n["id"])
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if len(notices) == 0 {
+		t.Fatal("the completed execution left no unread notice to mark read")
+	}
+	idle := d.call("GET", "/tasks/finished", nil, 200)
+	renamed := strings.Replace(idle["yaml"].(string), "name: Task finished", "name: Renamed", 1)
+
+	control := []guardedRoute{
+		{"POST /harnesses/refresh", "/harnesses/refresh", nil},
+		{"PUT /harnesses/{harnessId}", "/harnesses/claude-code", map[string]any{"path": nil}},
+		{"POST /tasks", "/tasks", map[string]any{"yaml": task("intruder", "p", "")}},
+		{"POST /tasks/validate", "/tasks/validate", map[string]any{"yaml": task("intruder", "p", "")}},
+		{"POST /tasks/import", "/tasks/import", map[string]any{"yaml": task("imported", "p", "")}},
+		{"PUT /tasks/{taskId}", "/tasks/finished", map[string]any{"yaml": renamed, "baseRevision": idle["revision"]}},
+		{"DELETE /tasks/{taskId}", "/tasks/finished", nil},
+		{"POST /tasks/{taskId}/run", "/tasks/finished/run", nil},
+		{"POST /tasks/{taskId}/duplicate", "/tasks/finished/duplicate", nil},
+		{"POST /tasks/{taskId}/enable", "/tasks/dormant/enable", nil},
+		{"POST /tasks/{taskId}/disable", "/tasks/finished/disable", nil},
+		{"POST /schedules/preview", "/schedules/preview",
+			map[string]any{"schedule": map[string]any{"cron": "0 9 * * *", "timezone": "UTC"}, "count": 3}},
+		{"POST /executions/{executionId}/cancel", "/executions/" + running + "/cancel", nil},
+		{"PATCH /settings", "/settings", map[string]any{"language": "pt-BR", "trayEnabled": false, "logRetentionDays": 7}},
+		{"POST /settings/token/rotate", "/settings/token/rotate", nil},
+		{"POST /workspaces/clean", "/workspaces/clean", nil},
+		{"POST /notifications/read", "/notifications/read", map[string]any{"ids": notices}},
+		// Last: a stop the guard let through would leave no daemon to send the other requests to.
+		{"POST /daemon/stop", "/daemon/stop", map[string]any{"force": true}},
+	}
+	read := []guardedRoute{
+		{"GET /health", "/health", nil},
+		{"GET /diagnostics", "/diagnostics", nil},
+		{"GET /stats", "/stats", nil},
+		{"GET /harnesses", "/harnesses", nil},
+		{"GET /tools", "/tools", nil},
+		{"GET /catalog", "/catalog", nil},
+		{"GET /tasks", "/tasks", nil},
+		{"GET /tasks/{taskId}", "/tasks/finished", nil},
+		{"GET /tasks/{taskId}/export", "/tasks/finished/export", nil},
+		{"GET /executions", "/executions", nil},
+		{"GET /executions/{executionId}", "/executions/" + finished, nil},
+		{"GET /executions/{executionId}/events", "/executions/" + finished + "/events", nil},
+		{"GET /executions/{executionId}/output", "/executions/" + finished + "/output", nil},
+		{"GET /events/stream", "/events/stream", nil},
+		{"GET /queue", "/queue", nil},
+		{"GET /settings", "/settings", nil},
+		{"GET /notifications", "/notifications", nil},
+	}
+	// The tables are checked against the contract both ways, so an operation added to it cannot be left out.
+	listed := map[string]bool{}
+	for _, r := range control {
+		listed[r.op] = true
+		if r.method() == "GET" {
+			t.Errorf("%s is a read route in the control table", r.op)
+		}
+	}
+	for _, r := range read {
+		listed[r.op] = true
+		if r.method() != "GET" {
+			t.Errorf("%s is a control route in the read table", r.op)
+		}
+	}
+	inContract := map[string]bool{}
+	for _, op := range contractOperations(t) {
+		inContract[op] = true
+		if !listed[op] {
+			t.Errorf("%s of contracts/api/openapi.yaml is not tested", op)
+		}
+	}
+	for op := range listed {
+		if !inContract[op] {
+			t.Errorf("%s is not an operation of contracts/api/openapi.yaml", op)
+		}
+	}
+
+	pid := d.call("GET", "/health", nil, 200)["pid"]
+	before := d.guardState()
+	wrong := []byte(d.token)
+	wrong[len(wrong)-1] ^= 1 // the token with its last character changed
+	for _, r := range append(read, control...) {
+		for _, c := range []struct{ name, token string }{{"no Authorization header", ""}, {"a wrong token", string(wrong)}} {
+			if status, kind, body := d.requestAs(c.token, r.method(), r.path, r.body); !unauthorized(status, kind, body) {
+				t.Errorf("%s with %s: %d %s %s", r.op, c.name, status, kind, body)
+			}
+		}
+	}
+	after := d.guardState()
+	for _, key := range sortedUnion(before, after) {
+		if before[key] != after[key] {
+			t.Errorf("%s changed:\n%s\nwas:\n%s", key, after[key], before[key])
+		}
+	}
+	x := d.call("GET", "/executions/"+running, nil, 200)
+	if x["status"] != "running" || x["cancelRequestedAt"] != nil {
+		t.Errorf("the execution started before is %v, cancel requested at %v", x["status"], x["cancelRequestedAt"])
+	}
+	if got := d.call("GET", "/health", nil, 200)["pid"]; got != pid {
+		t.Errorf("the daemon answering is pid %v, want %v", got, pid)
+	}
+}
+
+// guardedRoute is one operation of the contract, named as contracts/api/openapi.yaml names it, and a request to it
+// that would change something if the guard let it through.
+type guardedRoute struct {
+	op, path string
+	body     any
+}
+
+func (r guardedRoute) method() string { return strings.Fields(r.op)[0] }
+
+var (
+	contractPath   = regexp.MustCompile(`^  (/\S*):$`)
+	contractMethod = regexp.MustCompile(`^    (get|put|post|patch|delete):$`)
+)
+
+// contractOperations are the operations under paths: in contracts/api/openapi.yaml, as "METHOD /path/{param}".
+func contractOperations(t *testing.T) []string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(), "contracts", "api", "openapi.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ops []string
+	var path string
+	inPaths := false
+	for _, line := range strings.Split(string(data), "\n") {
+		switch {
+		case line == "paths:":
+			inPaths = true
+		case !inPaths:
+		case line != "" && !strings.HasPrefix(line, " "):
+			inPaths = false
+		case contractPath.MatchString(line):
+			path = contractPath.FindStringSubmatch(line)[1]
+		case contractMethod.MatchString(line):
+			ops = append(ops, strings.ToUpper(contractMethod.FindStringSubmatch(line)[1])+" "+path)
+		}
+	}
+	if len(ops) == 0 {
+		t.Fatal("no operation found in contracts/api/openapi.yaml")
+	}
+	return ops
+}
+
+// guardClient's timeout ends a request the guard let through to the SSE stream, which would otherwise never end.
+var guardClient = &http.Client{Timeout: 5 * time.Second}
+
+// requestAs sends a request with token as its bearer token, or with no Authorization header when token is empty, and
+// returns its status, Content-Type, and body. A request that fails is an error of the test, not its end, so every
+// route is reported.
+func (d *daemon) requestAs(token, method, path string, body any) (int, string, string) {
+	d.t.Helper()
+	var r io.Reader
+	if body != nil {
+		data, _ := json.Marshal(body)
+		r = bytes.NewReader(data)
+	}
+	req, _ := http.NewRequest(method, d.base+path, r)
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := guardClient.Do(req)
+	if err != nil {
+		d.t.Errorf("%s %s: %v", method, path, err)
+		return 0, "", ""
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		d.t.Errorf("%s %s: status %d, reading the body: %v", method, path, resp.StatusCode, err)
+	}
+	return resp.StatusCode, resp.Header.Get("Content-Type"), string(data)
+}
+
+// unauthorized says whether a response is the guard's 401: its JSON error, never a stream.
+func unauthorized(status int, kind, body string) bool {
+	var e struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	return status == 401 && strings.HasPrefix(kind, "application/json") && json.Unmarshal([]byte(body), &e) == nil &&
+		e.Error.Code == "unauthorized"
+}
+
+// guardState is what a request the guard let through would change: the task files and the harness paths byte for
+// byte, the token, the settings, and the fields of the tasks, executions, and notices any change sets. A running
+// execution's record and the harness inventory change on their own, so they are left out.
+func (d *daemon) guardState() map[string]string {
+	d.t.Helper()
+	state := map[string]string{}
+	entries, err := os.ReadDir(filepath.Join(d.home, "tasks"))
+	if err != nil {
+		d.t.Fatal(err)
+	}
+	for _, e := range entries {
+		data, err := os.ReadFile(filepath.Join(d.home, "tasks", e.Name()))
+		if err != nil {
+			d.t.Fatal(err)
+		}
+		state["tasks/"+e.Name()] = string(data)
+	}
+	for _, name := range []string{"state/harnesses.json", "run/token"} {
+		data, err := os.ReadFile(filepath.Join(d.home, name))
+		if err != nil {
+			d.t.Fatal(err)
+		}
+		state[name] = string(data)
+	}
+	// A read that fails is part of the state, so a token that no longer works is reported with every other change.
+	for _, read := range []struct {
+		path string
+		keys []string // nil keeps the whole body
+	}{
+		{"/settings", nil},
+		{"/tasks", []string{"id", "revision", "enabled", "running", "queued", "deletePending"}},
+		{"/executions", []string{"id", "taskId", "status"}},
+		{"/notifications", []string{"id", "read"}},
+	} {
+		status, body := d.request("GET", read.path, nil, nil)
+		switch {
+		case status != 200:
+			state["GET "+read.path] = fmt.Sprintf("status %d: %s", status, body)
+		case read.keys == nil:
+			state["GET "+read.path] = string(body)
+		default:
+			var items []map[string]any
+			_ = json.Unmarshal(body, &items)
+			state["GET "+read.path] = fieldsOf(items, read.keys...)
+		}
+	}
+	return state
+}
+
+// fieldsOf is one line per item, with the values of its keys.
+func fieldsOf(items []map[string]any, keys ...string) string {
+	lines := make([]string, 0, len(items))
+	for _, it := range items {
+		fields := make([]string, 0, len(keys))
+		for _, k := range keys {
+			fields = append(fields, fmt.Sprintf("%s=%v", k, it[k]))
+		}
+		lines = append(lines, strings.Join(fields, " "))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func sortedUnion(a, b map[string]string) []string {
+	keys := make([]string, 0, len(a)+len(b))
+	for k := range a {
+		keys = append(keys, k)
+	}
+	for k := range b {
+		if _, ok := a[k]; !ok {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// FS-009 FR-005, AC-005: the API listens on loopback only, and the SSE stream refuses a request with no Authorization
+// header like any other route.
+func TestAPILoopbackOnly(t *testing.T) {
+	d := startDaemon(t, t.TempDir())
+	if status, kind, body := d.requestAs("", "GET", "/events/stream", nil); !unauthorized(status, kind, body) ||
+		strings.HasPrefix(body, "retry:") {
+		t.Errorf("the stream with no Authorization header: %d %s %s", status, kind, body)
+	}
+	data, err := os.ReadFile(filepath.Join(d.home, "run", "daemon.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rt struct {
+		Address string `json:"address"`
+		Port    int    `json:"port"`
+	}
+	if err := json.Unmarshal(data, &rt); err != nil || rt.Port == 0 || rt.Address != fmt.Sprintf("127.0.0.1:%d", rt.Port) {
+		t.Fatalf("the runtime file's address %q and port %d (%v)", rt.Address, rt.Port, err)
+	}
+	if conn, err := net.DialTimeout("tcp", rt.Address, 2*time.Second); err != nil {
+		t.Fatalf("the API's own address refused a connection: %v", err)
+	} else {
+		conn.Close()
+	}
+	// Each non-loopback address of the machine's interfaces must refuse the port. The kernel answers for an address it
+	// delivers locally, so a listener on every interface would accept there; an address it does not deliver locally,
+	// such as a tunnel's link-local one, times out, which cannot tell a listener from none, so it is left out.
+	addrs := nonLoopbackAddresses(t)
+	errs := make([]error, len(addrs))
+	var wg sync.WaitGroup
+	for i, addr := range addrs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			conn, err := net.DialTimeout("tcp", net.JoinHostPort(addr, strconv.Itoa(rt.Port)), 2*time.Second)
+			if conn != nil {
+				conn.Close()
+			}
+			errs[i] = err
+		}()
+	}
+	wg.Wait()
+	var refused, unanswered []string
+	for i, err := range errs {
+		switch {
+		case err == nil:
+			t.Errorf("%s accepted a connection on the API's port", addrs[i])
+		case errors.Is(err, syscall.ECONNREFUSED):
+			refused = append(refused, addrs[i])
+		default:
+			unanswered = append(unanswered, addrs[i])
+		}
+	}
+	if len(unanswered) > 0 {
+		t.Logf("left out %v, which this host does not answer for", unanswered)
+	}
+	if len(refused) == 0 {
+		t.Skipf("no non-loopback address this host answers for, of %v", addrs)
+	}
+	t.Logf("refused on %v", refused)
+}
+
+// nonLoopbackAddresses are the addresses of the machine's interfaces but the loopback one, link-local ones with their
+// zone.
+func nonLoopbackAddresses(t *testing.T) []string {
+	t.Helper()
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, ifc := range ifaces {
+		if ifc.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := ifc.Addrs()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range addrs {
+			ip, ok := a.(*net.IPNet)
+			if !ok || ip.IP.IsLoopback() {
+				continue
+			}
+			host := ip.IP.String()
+			if ip.IP.IsLinkLocalUnicast() {
+				host += "%" + ifc.Name
+			}
+			out = append(out, host)
+		}
+	}
+	return out
+}
+
+// FS-009 FR-013, AC-013: a restart keeps the token, and only a rotation replaces it. A client holds the token it read
+// from run/token, as a script does: it keeps working across a restart, and fails on a REST route and on the stream
+// once the token is rotated, while the token read again works, also after another restart. The rotation's response
+// never holds the new token.
+func TestAPITokenAcrossRestartAndRotation(t *testing.T) {
+	home := t.TempDir()
+	tokenFile := filepath.Join(home, "run", "token")
+	d := startDaemon(t, home)
+	stored, err := os.ReadFile(tokenFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held := strings.TrimSpace(string(stored))
+	d.stop()
+
+	d = startDaemon(t, home)
+	d.token = held // the client's own token, not the one startDaemon read again
+	if again, err := os.ReadFile(tokenFile); err != nil || !bytes.Equal(again, stored) {
+		t.Fatalf("the restart changed run/token (%v)", err)
+	}
+	d.call("GET", "/tasks", nil, 200)
+	_, closeStream := d.stream(t, 0)
+	closeStream()
+
+	status, answer := d.request("POST", "/settings/token/rotate", nil, nil)
+	if status != 200 {
+		t.Fatalf("rotation: %d %s", status, answer)
+	}
+	rotated, err := os.ReadFile(tokenFile)
+	fresh := strings.TrimSpace(string(rotated))
+	if err != nil || fresh == "" || fresh == held {
+		t.Fatalf("run/token after the rotation is empty or unchanged (%v)", err)
+	}
+	if strings.Contains(string(answer), fresh) {
+		t.Errorf("the rotation's response holds the new token: %s", answer)
+	}
+	for _, path := range []string{"/tasks", "/events/stream"} {
+		if status, kind, body := d.requestAs(held, "GET", path, nil); !unauthorized(status, kind, body) {
+			t.Errorf("GET %s with the rotated token: %d %s %s", path, status, kind, body)
+		}
+	}
+	d.token = fresh
+	d.call("GET", "/tasks", nil, 200)
+	_, closeStream = d.stream(t, 0)
+	closeStream()
+	d.stop()
+
+	d = startDaemon(t, home)
+	if again, err := os.ReadFile(tokenFile); err != nil || !bytes.Equal(again, rotated) {
+		t.Fatalf("the restart after the rotation changed run/token (%v)", err)
+	}
+	d.token = fresh
+	d.call("GET", "/tasks", nil, 200)
+	if status, kind, body := d.requestAs(held, "GET", "/tasks", nil); !unauthorized(status, kind, body) {
+		t.Errorf("the rotated token after a restart: %d %s %s", status, kind, body)
+	}
+}
 
 // GET /health names the commit go build stamped in the binary, and leaves it out when go build stamped none: outside
 // a checkout, or in a git worktree.
