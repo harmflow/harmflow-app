@@ -1,6 +1,8 @@
 package app
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,12 +10,14 @@ import (
 	"log"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -2808,6 +2812,140 @@ func TestBrokenFileFromTheWatcherIsNamed(t *testing.T) {
 			ev.Payload["file"] != "ext.yaml" {
 			t.Errorf("%s: task.invalid %+v", c.name, ev)
 		}
+	}
+}
+
+// The child of TestStartAfterAKillMidSave is a re-run of the same test binary, told by these variables to save a task
+// file and hold before its rename until it is killed.
+const (
+	taskFileCrashDirEnv     = "HARMFLOW_TEST_TASK_FILE_CRASH_DIR"
+	taskFileCrashContentEnv = "HARMFLOW_TEST_TASK_FILE_CRASH_CONTENT"
+	taskFileCrashHeld       = "held before the rename"
+)
+
+// FS-001 AC-009: a daemon killed while it saves a task file starts again with the task's old definition. A child
+// process saves a new version through the real fsstore and holds once its temporary file is written and synced, before
+// the rename; it is killed there with SIGKILL, and a new App starts over the directory the kill left.
+func TestStartAfterAKillMidSave(t *testing.T) {
+	if taskFileCrashChild() {
+		return
+	}
+	e := newEnv(t)
+	e.create("crash-save", "")
+	view, _ := e.app.GetTask("crash-save")
+	old, err := os.ReadFile(view.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := strings.Replace(string(old), "name: Task crash-save", "name: Renamed before the kill", 1)
+	if next == string(old) {
+		t.Fatalf("the new version changes nothing in:\n%s", old)
+	}
+	e.app.Stop(domain.Text{Message: "test kill"})
+	dir := e.app.Paths().Tasks
+	killTaskFileSave(t, dir, next)
+	if temps, _ := filepath.Glob(filepath.Join(dir, ".crash-save.yaml.tmp-*")); len(temps) != 1 {
+		t.Fatalf("temporary files %v, want the one the kill left", temps)
+	}
+	e = e.restart(t)
+	list := e.app.ListTasks()
+	if len(list) != 1 || list[0].ID != "crash-save" || list[0].Invalid || list[0].Name != "Task crash-save" {
+		t.Fatalf("listed %+v, want crash-save alone, valid, with its old name", list)
+	}
+	got, err := e.app.GetTask("crash-save")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.YAML != string(old) || got.Validation != nil || len(got.Warnings) > 0 {
+		t.Errorf("after the kill: validation %+v, warnings %+v, yaml:\n%s\nwant the old one:\n%s", got.Validation,
+			got.Warnings, got.YAML, old)
+	}
+}
+
+// taskFileCrashChild is the child's part, run when the variables name a directory: it saves the new version of
+// crash-save there and holds before the rename, printing taskFileCrashHeld, until it is killed. It returns false in any
+// other process.
+func taskFileCrashChild() bool {
+	dir := os.Getenv(taskFileCrashDirEnv)
+	if dir == "" {
+		return false
+	}
+	fsstore.HoldAt = func(p fsstore.WritePoint) {
+		if p != fsstore.BeforeRename {
+			return
+		}
+		fmt.Println(taskFileCrashHeld)
+		// Held until killed. Should the parent die first, its end of stdin closes and the child exits.
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		os.Exit(2)
+	}
+	tasks, err := fsstore.NewTasks(dir)
+	if err == nil {
+		_, err = tasks.Save("crash-save", []byte(os.Getenv(taskFileCrashContentEnv)), "")
+	}
+	fmt.Fprintf(os.Stderr, "the save returned without holding: %v\n", err)
+	os.Exit(3)
+	return true
+}
+
+// killTaskFileSave runs the child that saves content as crash-save in dir, waits until it holds before the rename, and
+// kills it there with SIGKILL.
+func killTaskFileSave(t *testing.T, dir, content string) {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(exe, "-test.run=^"+t.Name()+"$")
+	cmd.Env = append(os.Environ(), taskFileCrashDirEnv+"="+dir, taskFileCrashContentEnv+"="+content)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stdin.Close()
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	held, drained := make(chan bool, 1), make(chan struct{})
+	go func() {
+		defer close(drained)
+		found := false
+		for scan := bufio.NewScanner(stdout); scan.Scan(); {
+			if !found && scan.Text() == taskFileCrashHeld {
+				found = true
+				held <- true
+			}
+		}
+		if !found {
+			held <- false
+		}
+	}()
+	select {
+	case ok := <-held:
+		if !ok {
+			<-drained
+			err := cmd.Wait()
+			t.Fatalf("the child ended (%v) without holding:\n%s", err, stderr.String())
+		}
+	case <-time.After(2 * time.Minute): // only a broken child gets here: the kill itself waits for the hold
+		_ = cmd.Process.Kill()
+		<-drained
+		_ = cmd.Wait()
+		t.Fatalf("the child never held:\n%s", stderr.String())
+	}
+	if err := cmd.Process.Signal(syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	<-drained
+	err = cmd.Wait()
+	if ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); !ok || !ws.Signaled() || ws.Signal() != syscall.SIGKILL {
+		t.Fatalf("the child ended with %v, want it killed by SIGKILL:\n%s", err, stderr.String())
 	}
 }
 

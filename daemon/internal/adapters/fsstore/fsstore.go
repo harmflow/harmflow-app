@@ -18,6 +18,26 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
+// WritePoint names a step of WriteAtomic where a crash test holds a write, to kill the process there (FS-001 AC-009).
+type WritePoint string
+
+const (
+	// BeforeRename: the temporary file is written, synced, and closed; the target still holds its old content.
+	BeforeRename WritePoint = "before_rename"
+	// AfterRename: the temporary file has just replaced the target.
+	AfterRename WritePoint = "after_rename"
+)
+
+// HoldAt, when set, is called at each WritePoint. Only a crash test sets it, in a child process that it then kills;
+// nothing in the daemon does, so it stays nil.
+var HoldAt func(WritePoint)
+
+func hold(p WritePoint) {
+	if HoldAt != nil {
+		HoldAt(p)
+	}
+}
+
 // WriteAtomic replaces path with data so a crash leaves either the complete old file or the complete new one.
 func WriteAtomic(path string, data []byte, perm os.FileMode) error {
 	dir := filepath.Dir(path)
@@ -48,10 +68,12 @@ func WriteAtomic(path string, data []byte, perm os.FileMode) error {
 		cleanup()
 		return err
 	}
+	hold(BeforeRename)
 	if err := os.Rename(name, path); err != nil {
 		cleanup()
 		return err
 	}
+	hold(AfterRename)
 	if d, err := os.Open(dir); err == nil {
 		_ = d.Sync()
 		d.Close()
