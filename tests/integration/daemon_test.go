@@ -1928,6 +1928,355 @@ func TestAnotherHarnessIsNotBlocked(t *testing.T) {
 	d.call("POST", "/executions/"+busy+"/cancel", nil, 202)
 }
 
+// FS-003 AC-009, BR-002 (FS-003-F07): the session selects a work item, Claude Code exhausts its quota, and Codex takes
+// over; the daemon is killed while Codex runs. After the restart, the execution is interrupted with both its attempts,
+// and the log and raw capture of each; the interruption counts once against the item. Starting again over that
+// recovered state changes nothing.
+func TestKillDuringTheSecondAttempt(t *testing.T) {
+	home := t.TempDir()
+	d := startDaemon(t, home)
+	d.call("POST", "/tasks", map[string]any{"yaml": task("failover-crash", "ITEM=o/r#5 SCENARIO=quota CODEX=slow",
+		"    fallback:\n      candidates:\n        - provider: codex\n")}, 201)
+	id := d.call("POST", "/tasks/failover-crash/run", nil, 202)["executionId"].(string)
+	d.waitLogUntil(id, func(events []map[string]any) bool {
+		for _, e := range events {
+			if e["type"] == "tool.started" && e["attempt"] == float64(2) {
+				return true
+			}
+		}
+		return false
+	})
+	killHarnessGroup(t, d.call("GET", "/executions/"+id, nil, 200)["executionDir"].(string))
+	before := d.events(id)
+	d.kill()
+
+	d2 := startDaemon(t, home)
+	x := d2.call("GET", "/executions/"+id, nil, 200)
+	attempts, _ := x["attempts"].([]any)
+	if x["status"] != "interrupted" || len(attempts) != 2 {
+		t.Fatalf("status %v, attempts %v", x["status"], attempts)
+	}
+	a1, a2 := attempts[0].(map[string]any), attempts[1].(map[string]any)
+	if a1["harness"] != "claude-code" || a1["outcome"] != "quota_exhausted" || a2["harness"] != "codex" ||
+		a2["outcome"] != "interrupted" {
+		t.Errorf("attempts %v %v", a1, a2)
+	}
+	// The log keeps every event the API showed before the kill, in its order, with the events of both attempts.
+	after := d2.events(id)
+	if len(after) < len(before) {
+		t.Fatalf("the log has %d events, the API showed %d before the kill", len(after), len(before))
+	}
+	for i, e := range before {
+		if after[i]["id"] != e["id"] || after[i]["type"] != e["type"] {
+			t.Fatalf("event %d is %v %v, the API showed %v %v before the kill", i, after[i]["id"], after[i]["type"],
+				e["id"], e["type"])
+		}
+	}
+	perAttempt := map[any]int{}
+	for _, e := range after {
+		perAttempt[e["attempt"]]++
+	}
+	if perAttempt[float64(1)] == 0 || perAttempt[float64(2)] == 0 {
+		t.Errorf("events per attempt %v", perAttempt)
+	}
+	// The raw capture of each attempt holds a line its CLI printed.
+	out := d2.call("GET", "/executions/"+id+"/output", nil, 200)
+	captures, _ := out["attempts"].([]any)
+	if len(captures) != 2 {
+		t.Fatalf("output %v", out)
+	}
+	for i, want := range []struct{ harness, line string }{
+		{"claude-code", `"type":"rate_limit_event"`}, {"codex", `"type":"item.started"`}} {
+		c := captures[i].(map[string]any)
+		if text, _ := c["text"].(string); c["attempt"] != float64(i+1) || c["harness"] != want.harness ||
+			!strings.Contains(text, want.line) {
+			t.Errorf("attempt %d's capture %v lacks %s", i+1, c, want.line)
+		}
+	}
+	d2.interruptedOnce(id, "o/r#5")
+
+	// A second start recovers nothing more: the record, the log, and the item stay as the first one left them.
+	d2.kill()
+	d3 := startDaemon(t, home)
+	if again := d3.call("GET", "/executions/"+id, nil, 200); again["status"] != "interrupted" ||
+		!reflect.DeepEqual(again["attempts"], x["attempts"]) || again["endedAt"] != x["endedAt"] {
+		t.Errorf("the second start changed the execution:\n%v\nwas\n%v", again, x)
+	}
+	d3.interruptedOnce(id, "o/r#5")
+}
+
+// interruptedOnce checks that recovery recorded the execution's interruption once, in its log and against its work
+// item, which keeps its key, has one entry in the queue, and reads failed after its one failure.
+func (d *daemon) interruptedOnce(id, key string) {
+	d.t.Helper()
+	n := 0
+	for _, e := range d.events(id) {
+		if e["type"] == "execution.interrupted" {
+			n++
+		}
+	}
+	if n != 1 {
+		d.t.Errorf("the log has %d execution.interrupted events, want 1", n)
+	}
+	items, _ := d.call("GET", "/queue", nil, 200)["workItems"].([]any)
+	if len(items) != 1 {
+		d.t.Fatalf("GET /queue lists %d work items, want 1: %v", len(items), items)
+	}
+	w := items[0].(map[string]any)
+	if w["key"] != key || w["status"] != "failed" || w["failures"] != float64(1) || w["lastExecutionId"] != id {
+		d.t.Errorf("work item %v; want %s failed once by %s", w, key, id)
+	}
+}
+
+// FS-003 AC-012, FR-010, the daemon's side (FS-003-F10): the session selects a work item, completes a git push, and
+// waits; the daemon is killed as soon as the push's tool.completed is in the log. After the restart, the execution is
+// interrupted and never continued, the item is failed with the push as its last operation, and the next run is a new
+// execution whose context names both.
+func TestKillAfterAPush(t *testing.T) {
+	const item, push = "o/r#7", "git push -u origin harmflow/7-crash"
+	home := t.TempDir()
+	d := startDaemon(t, home)
+	_, repo := pushRepository(t)
+	id, _ := d.runUntilPushed("pusher", repo, push)
+
+	d2 := startDaemon(t, home)
+	x := d2.call("GET", "/executions/"+id, nil, 200)
+	if attempts, _ := x["attempts"].([]any); x["status"] != "interrupted" || len(attempts) != 1 ||
+		attempts[0].(map[string]any)["outcome"] != "interrupted" {
+		t.Fatalf("status %v, attempts %v", x["status"], x["attempts"])
+	}
+	items, _ := d2.call("GET", "/queue", nil, 200)["workItems"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("GET /queue lists %d work items, want 1: %v", len(items), items)
+	}
+	if w := items[0].(map[string]any); w["key"] != item || w["status"] != "failed" || w["failures"] != float64(1) ||
+		w["lastOperation"] != push || w["lastExecutionId"] != id {
+		t.Errorf("work item %v; want %s failed once by %s, after %q", w, item, id, push)
+	}
+
+	run := d2.call("POST", "/tasks/pusher/run", nil, 202)
+	next := d2.waitStatus(run["executionId"].(string), "completed", "failed", "interrupted")
+	if next["id"] == id || next["status"] != "completed" {
+		t.Fatalf("the next run: %v %v, error %v", next["id"], next["status"], next["errorMessage"])
+	}
+	ctx := readContext(t, next)
+	if want := (interruptedEntry{id, item, push}); len(ctx.Interrupted) != 1 || ctx.Interrupted[0] != want {
+		t.Errorf("the next context's interruptedExecutions %+v, want [%+v]", ctx.Interrupted, want)
+	}
+	if again := d2.call("GET", "/executions/"+id, nil, 200); again["status"] != "interrupted" ||
+		len(again["attempts"].([]any)) != 1 {
+		t.Errorf("the interrupted execution was continued: %v, attempts %v", again["status"], again["attempts"])
+	}
+}
+
+// FS-003 AC-014, FR-012 (FS-003-F12): the session commits on a branch, pushes it to the workspace repository's
+// origin, a local bare repository, and waits; the daemon is killed and restarted, and the task's next execution runs to
+// its end. Nothing the interrupted one did is undone: the pushed branch and its commit, the local branch, and the
+// workspace's files, the uncommitted one included.
+func TestNothingUndoneAfterAKill(t *testing.T) {
+	const branch = "refs/heads/harmflow/7-crash"
+	home := t.TempDir()
+	d := startDaemon(t, home)
+	remote, repo := pushRepository(t)
+	_, pushed := d.runUntilPushed("no-undo", repo, "git push -u origin harmflow/7-crash")
+
+	d2 := startDaemon(t, home)
+	run := d2.call("POST", "/tasks/no-undo/run", nil, 202)
+	if next := d2.waitStatus(run["executionId"].(string), "completed", "failed", "interrupted"); next["status"] != "completed" {
+		t.Fatalf("the next execution: %v, error %v", next["status"], next["errorMessage"])
+	}
+	if got := git(t, remote, "rev-parse", branch); got != pushed {
+		t.Errorf("the remote's branch is at %s, was pushed at %s", got, pushed)
+	}
+	if got := git(t, repo, "rev-parse", branch); got != pushed {
+		t.Errorf("the local branch is at %s, was pushed at %s", got, pushed)
+	}
+	if got := git(t, repo, "symbolic-ref", "HEAD"); got != branch {
+		t.Errorf("the workspace is on %s, was on %s", got, branch)
+	}
+	if got := git(t, repo, "log", "--format=%s", "main.."+branch); got != "fix: end the crash" {
+		t.Errorf("the branch's commits since main: %q", got)
+	}
+	if got := git(t, repo, "status", "--porcelain"); got != "?? notes.txt" {
+		t.Errorf("the workspace's status: %q", got)
+	}
+	for name, want := range map[string]string{"fix.txt": "the fix\n", "notes.txt": "work in progress\n"} {
+		if data, err := os.ReadFile(filepath.Join(repo, name)); err != nil || string(data) != want {
+			t.Errorf("%s: %q, %v; want %q", name, data, err, want)
+		}
+	}
+}
+
+// FS-003 FR-006, the daemon's side (FS-003-F06): the session selects a work item, opens a pull request, and waits; the
+// daemon is killed once the execution names the pull request. The next execution's context lists the interrupted
+// execution with its work item and the pull request as its last operation, and its recent executions carry the pull
+// request's URL: what the next session reconciles with, instead of opening another.
+func TestKillAfterAPullRequest(t *testing.T) {
+	const item, url = "o/r#8", "https://github.com/o/r/pull/8"
+	home := t.TempDir()
+	d := startDaemon(t, home)
+	d.call("POST", "/tasks", map[string]any{"yaml": task("opener", "ITEM="+item+" SCENARIO=pullrequest", "")}, 201)
+	id := d.call("POST", "/tasks/opener/run", nil, 202)["executionId"].(string)
+	// The record is saved before the pull request's event is logged, so once the log has the event, the record on
+	// disk names the pull request too.
+	d.waitLogUntil(id, func(events []map[string]any) bool {
+		for _, e := range events {
+			if p, _ := e["payload"].(map[string]any); e["type"] == "pull_request.created" && p["url"] == url {
+				return true
+			}
+		}
+		return false
+	})
+	x := d.call("GET", "/executions/"+id, nil, 200)
+	if x["pullRequestUrl"] != url {
+		t.Fatalf("the execution's pullRequestUrl is %v once the log has the pull request", x["pullRequestUrl"])
+	}
+	killHarnessGroup(t, x["executionDir"].(string))
+	d.kill()
+
+	d2 := startDaemon(t, home)
+	if x := d2.call("GET", "/executions/"+id, nil, 200); x["status"] != "interrupted" || x["pullRequestUrl"] != url {
+		t.Fatalf("status %v, pullRequestUrl %v", x["status"], x["pullRequestUrl"])
+	}
+	run := d2.call("POST", "/tasks/opener/run", nil, 202)
+	next := d2.waitStatus(run["executionId"].(string), "completed", "failed", "interrupted")
+	if next["status"] != "completed" {
+		t.Fatalf("the next execution: %v, error %v", next["status"], next["errorMessage"])
+	}
+	ctx := readContext(t, next)
+	if want := (interruptedEntry{id, item, "pull_request.created " + url}); len(ctx.Interrupted) != 1 ||
+		ctx.Interrupted[0] != want {
+		t.Errorf("the next context's interruptedExecutions %+v, want [%+v]", ctx.Interrupted, want)
+	}
+	var recent *recentEntry
+	for i := range ctx.Recent {
+		if ctx.Recent[i].ExecutionID == id {
+			recent = &ctx.Recent[i]
+		}
+	}
+	if recent == nil || recent.Status != "interrupted" || recent.WorkItem != item || recent.PullRequestURL != url {
+		t.Errorf("the next context's recentExecutions %+v; want %s interrupted, on %s, with %s", ctx.Recent, id, item, url)
+	}
+}
+
+// pushRepository makes a local bare repository and a workspace repository on main whose origin it is.
+func pushRepository(t *testing.T) (remote, repo string) {
+	t.Helper()
+	root := t.TempDir()
+	remote, repo = filepath.Join(root, "remote.git"), filepath.Join(root, "repo")
+	git(t, root, "init", "-q", "--bare", remote)
+	git(t, root, "init", "-q", "-b", "main", repo)
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("A repository.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "add", "README.md")
+	git(t, repo, "commit", "-q", "-m", "chore: start")
+	git(t, repo, "remote", "add", "origin", remote)
+	git(t, repo, "push", "-q", "origin", "main")
+	return remote, repo
+}
+
+// runUntilPushed runs a task whose session selects o/r#7, commits on a branch of repo, pushes it, and waits. It kills
+// the daemon as soon as the push's tool.completed is in the log, and returns the execution and the commit the session
+// reported pushing.
+func (d *daemon) runUntilPushed(taskID, repo, push string) (id, pushed string) {
+	t := d.t
+	t.Helper()
+	d.call("POST", "/tasks", map[string]any{"yaml": task(taskID, "ITEM=o/r#7 SCENARIO=push",
+		"  workspace:\n    path: "+strconv.Quote(repo)+"\n")}, 201)
+	id = d.call("POST", "/tasks/"+taskID+"/run", nil, 202)["executionId"].(string)
+	d.waitLogUntil(id, func(events []map[string]any) bool {
+		var tool any
+		for _, e := range events {
+			p, _ := e["payload"].(map[string]any)
+			switch {
+			case e["type"] == "tool.started" && p["command"] == push:
+				tool = p["toolId"]
+			case e["type"] == "tool.completed" && tool != nil && p["toolId"] == tool && p["status"] == "succeeded":
+				output, _ := p["output"].(string)
+				pushed = strings.TrimPrefix(output, "pushed ")
+				return true
+			}
+		}
+		return false
+	})
+	d.kill()
+	// The daemon is gone, and the stand-in waits where it wrote its child's pid.
+	killHarnessGroup(t, filepath.Join(d.home, "runs", id))
+	if len(pushed) != 40 {
+		t.Fatalf("the push reported %q, not a commit", pushed)
+	}
+	return id, pushed
+}
+
+// git runs git in dir with none of the user's or the system's configuration, and returns its trimmed output.
+func git(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-c", "user.name=HarmFlow", "-c", "user.email=harmflow@example.invalid"},
+		args...)...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// events returns the execution's log, as GET /executions/{id}/events serves it.
+func (d *daemon) events(id string) []map[string]any {
+	d.t.Helper()
+	list, _ := d.call("GET", "/executions/"+id+"/events", nil, 200)["events"].([]any)
+	out := make([]map[string]any, 0, len(list))
+	for _, e := range list {
+		m, _ := e.(map[string]any)
+		out = append(out, m)
+	}
+	return out
+}
+
+// waitLogUntil polls the execution's log until done holds for the whole of it: unlike waitEvent, the condition can
+// name an attempt or a tool, and the wait leaves room for a loaded host and the stand-ins' progress tick.
+func (d *daemon) waitLogUntil(id string, done func([]map[string]any) bool) {
+	d.t.Helper()
+	for deadline := time.Now().Add(60 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		if done(d.events(id)) {
+			return
+		}
+	}
+	d.t.Fatalf("the log of %s never reached the event awaited:\n%v", id, d.events(id))
+}
+
+// interruptedEntry and recentEntry are entries of context.json's interruptedExecutions and recentExecutions.
+type interruptedEntry struct {
+	ExecutionID   string `json:"executionId"`
+	WorkItem      string `json:"workItem"`
+	LastOperation string `json:"lastOperation"`
+}
+
+type recentEntry struct {
+	ExecutionID    string `json:"executionId"`
+	Status         string `json:"status"`
+	WorkItem       string `json:"workItem"`
+	PullRequestURL string `json:"pullRequestUrl"`
+}
+
+// readContext reads the context.json the daemon gave the execution's session.
+func readContext(t *testing.T, x map[string]any) (ctx struct {
+	Interrupted []interruptedEntry `json:"interruptedExecutions"`
+	Recent      []recentEntry      `json:"recentExecutions"`
+}) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(x["executionDir"].(string), "context.json"))
+	if err == nil {
+		err = json.Unmarshal(data, &ctx)
+	}
+	if err != nil {
+		t.Fatalf("context.json of %v: %v", x["id"], err)
+	}
+	return ctx
+}
+
 // FS-003 FR-007, AC-009; FS-001 FR-015 (D-083): a firing waiting when the daemon is killed starts after the restart;
 // when its task file was disabled or deleted while the daemon was down, it is cancelled instead and never starts.
 func TestWaitingFiringAcrossKill(t *testing.T) {
