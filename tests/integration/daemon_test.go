@@ -1083,3 +1083,173 @@ func waitRecord(t *testing.T, home, id, status string) {
 	}
 	t.Fatalf("the record of %s on disk is %q, want %q", id, rec.Status, status)
 }
+
+const daily = "  schedule:\n    cron: \"0 9 * * *\"\n    timezone: UTC\n"
+
+// setNextFire moves tasks' next firing in state/scheduler.json while the daemon is stopped: the accepted way to
+// simulate the daemon being down when a firing came due. The rest of the file is kept as it is.
+func setNextFire(t *testing.T, home string, at time.Time, ids ...string) {
+	t.Helper()
+	path := filepath.Join(home, "state", "scheduler.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state map[string]any
+	if err := json.Unmarshal(data, &state); err != nil {
+		t.Fatal(err)
+	}
+	tasks, _ := state["tasks"].(map[string]any)
+	for _, id := range ids {
+		s, ok := tasks[id].(map[string]any)
+		if !ok {
+			t.Fatalf("no scheduler state for %s: %s", id, data)
+		}
+		s["nextFireAt"] = at.UTC().Format(time.RFC3339)
+	}
+	if data, err = json.Marshal(state); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// waitExecutions waits until a task has n executions and returns them.
+func (d *daemon) waitExecutions(taskID string, n int) []map[string]any {
+	d.t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	var runs []map[string]any
+	for time.Now().Before(deadline) {
+		if runs = d.list("/executions?taskId=" + taskID); len(runs) >= n {
+			return runs
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	d.t.Fatalf("%s has %d executions, want %d", taskID, len(runs), n)
+	return nil
+}
+
+// nextFireAt is the task's next firing, as the API reports it.
+func (d *daemon) nextFireAt(id string) time.Time {
+	d.t.Helper()
+	next, err := time.Parse(time.RFC3339, fmt.Sprint(d.call("GET", "/tasks/"+id, nil, 200)["nextFireAt"]))
+	if err != nil {
+		d.t.Fatalf("%s's next firing: %v", id, err)
+	}
+	return next
+}
+
+// scheduleOf reads the scheduler's record of a task from state/scheduler.json, with its last and next firings.
+func scheduleOf(t *testing.T, home, id string) map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(home, "state", "scheduler.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state struct {
+		Tasks map[string]map[string]any `json:"tasks"`
+	}
+	if err := json.Unmarshal(data, &state); err != nil {
+		t.Fatal(err)
+	}
+	return state.Tasks[id]
+}
+
+// startCheck is how long a test gives the scheduler check a daemon runs as it starts, alongside its API, to fire what
+// it finds due before the test asserts that it fired nothing: the check leaves no other trace.
+const startCheck = time.Second
+
+// FS-002 AC-004, AC-005, AC-008: firings missed while the daemon was down follow each task's missed-run policy once
+// after it starts again: one catch-up, or none. One more restart runs nothing.
+func TestMissedFiringsAcrossRestart(t *testing.T) {
+	home := t.TempDir()
+	d := startDaemon(t, home)
+	d.call("POST", "/tasks", map[string]any{"yaml": task("daily", "Say hi.", daily)}, 201)
+	d.call("POST", "/tasks", map[string]any{"yaml": task("daily-skip", "Say hi.", daily+"    missedRun:\n      policy: skip\n")}, 201)
+	next := d.nextFireAt("daily")
+	d.stop()
+	setNextFire(t, home, next.Add(-3*24*time.Hour), "daily", "daily-skip") // down for three days
+	d = startDaemon(t, home)
+	// Both firings are decided in the same check, so the catch-up shows the skip was decided too.
+	runs := d.waitExecutions("daily", 1)
+	if len(runs) != 1 || runs[0]["trigger"] != "catch_up" {
+		t.Fatalf("daily: %v", runs)
+	}
+	if runs := d.list("/executions?taskId=daily-skip"); len(runs) != 0 {
+		t.Errorf("the skip policy ran %v", runs)
+	}
+	if next := d.nextFireAt("daily-skip"); !next.After(time.Now()) {
+		t.Errorf("daily-skip's next firing is %v, in the past", next)
+	}
+	d.waitStatus(runs[0]["id"].(string), "completed")
+	d.stop()
+	d = startDaemon(t, home)
+	time.Sleep(startCheck)
+	if runs := d.list("/executions?taskId=daily"); len(runs) != 1 {
+		t.Errorf("the second restart ran daily again: %v", runs)
+	}
+	if runs := d.list("/executions?taskId=daily-skip"); len(runs) != 0 {
+		t.Errorf("the second restart ran daily-skip: %v", runs)
+	}
+}
+
+// FS-002 AC-008; FS-003 FR-007, AC-009: firings survive the daemon being killed. The firing it was running reads
+// interrupted and is not caught up again; the one waiting keeps its ID and starts, the task's only new execution; the
+// scheduler's record of the last and next firings is what it was before the kill. One more restart runs nothing.
+func TestFiringsSurviveAKill(t *testing.T) {
+	home := t.TempDir()
+	d := startDaemon(t, home)
+	d.call("POST", "/tasks", map[string]any{"yaml": task("waits", "SCENARIO=slow", daily)}, 201)
+	next := d.nextFireAt("waits")
+	d.stop()
+	// The firing running at the kill is a catch-up, so the scheduler has processed it.
+	setNextFire(t, home, next.Add(-3*24*time.Hour), "waits")
+	d = startDaemon(t, home)
+	runs := d.waitExecutions("waits", 1)
+	if runs[0]["trigger"] != "catch_up" {
+		t.Fatalf("the first execution: %v", runs[0])
+	}
+	caughtUp := runs[0]["id"].(string)
+	x := d.waitStatus(caughtUp, "running")
+	killHarnessGroup(t, x["executionDir"].(string))
+	second := d.call("POST", "/tasks/waits/run", nil, 202)
+	if second["outcome"] != "queued" {
+		t.Fatalf("second run: %v", second)
+	}
+	waiting := second["executionId"].(string)
+	before := scheduleOf(t, home, "waits")
+	if before["lastFiredAt"] == nil || before["nextFireAt"] == nil {
+		t.Fatalf("the scheduler's record before the kill: %v", before)
+	}
+	waitRecord(t, home, caughtUp, "running")
+	d.kill()
+	d = startDaemon(t, home)
+	if got := d.call("GET", "/executions/"+caughtUp, nil, 200); got["status"] != "interrupted" {
+		t.Errorf("the running execution is %v, want interrupted", got["status"])
+	}
+	got := d.waitStatus(waiting, "running")
+	killHarnessGroup(t, got["executionDir"].(string))
+	ids := map[string]bool{}
+	catchUps := 0
+	for _, r := range d.list("/executions?taskId=waits") {
+		ids[r["id"].(string)] = true
+		if r["trigger"] == "catch_up" {
+			catchUps++
+		}
+	}
+	if len(ids) != 2 || !ids[caughtUp] || !ids[waiting] || catchUps != 1 {
+		t.Errorf("executions after the restart: %v, %d catch-ups; want %s and %s, one catch-up", ids, catchUps, caughtUp,
+			waiting)
+	}
+	after := scheduleOf(t, home, "waits")
+	if after["lastFiredAt"] != before["lastFiredAt"] || after["nextFireAt"] != before["nextFireAt"] {
+		t.Errorf("the scheduler's record changed across the kill:\n before %v\n after  %v", before, after)
+	}
+	d.stop()
+	d = startDaemon(t, home)
+	time.Sleep(startCheck)
+	if runs := d.list("/executions?taskId=waits"); len(runs) != 2 {
+		t.Errorf("the second restart created an execution: %v", runs)
+	}
+}
