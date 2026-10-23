@@ -128,12 +128,13 @@ make dev-ui        # in a second terminal: the interface at http://localhost:142
 | `make app` | Build `HarmFlow.app` and the DMG, unsigned |
 | `make icons` | Render every app and tray icon from the SVGs in `desktop/src-tauri/icons/source` |
 
-Two environment variables change where the daemon keeps its data and its token:
+Three environment variables change where the daemon keeps its data and its token:
 
 | Variable | Default | Effect |
 |---|---|---|
 | `HARMFLOW_HOME` | `~/Library/Application Support/HarmFlow` | The data directory |
 | `HARMFLOW_TOKEN_STORE` | the Keychain | `file` keeps the local API token in a user-only file instead |
+| `HARMFLOW_KEYCHAIN` | the default keychain | The keychain file that holds the token, for tests; the desktop reads the token from it too |
 
 ## A task is a file
 

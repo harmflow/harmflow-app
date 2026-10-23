@@ -30,8 +30,11 @@ func NewToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b[:]), nil
 }
 
+// Keychain keeps the token in the default keychain, or in the keychain file at Path when it is set: a test points it at
+// a throwaway keychain, so it never reaches the user's login keychain (#79).
 type Keychain struct {
 	Service, Account string
+	Path             string
 }
 
 func (k Keychain) Kind() string { return "keychain" }
@@ -39,7 +42,14 @@ func (k Keychain) Kind() string { return "keychain" }
 var ErrNoToken = errors.New("no token stored")
 
 func (k Keychain) Get() (string, error) {
-	out, err := exec.Command("/usr/bin/security", "find-generic-password", "-s", k.Service, "-a", k.Account, "-w").Output()
+	args := []string{"find-generic-password", "-s", k.Service, "-a", k.Account, "-w"}
+	if k.Path != "" {
+		if err := k.checkPath(); err != nil {
+			return "", err
+		}
+		args = append(args, k.Path)
+	}
+	out, err := exec.Command("/usr/bin/security", args...).Output()
 	if err != nil {
 		return "", keychainError(err)
 	}
@@ -63,11 +73,31 @@ func keychainError(err error) error {
 	return fmt.Errorf("keychain: %w", err)
 }
 
+// checkPath refuses a keychain file that is missing or that security's interactive mode cannot read quoted: given a
+// keychain it cannot open, add-generic-password writes to the default keychain instead, and would replace the user's
+// token there (#79).
+func (k Keychain) checkPath() error {
+	if strings.ContainsAny(k.Path, "\"\\\n") {
+		return fmt.Errorf("keychain: the path %q cannot be passed to security", k.Path)
+	}
+	if _, err := os.Stat(k.Path); err != nil {
+		return fmt.Errorf("keychain: %w", err)
+	}
+	return nil
+}
+
 // Set writes through security's interactive mode so the token never appears in a process's arguments.
 func (k Keychain) Set(token string) error {
+	keychain := ""
+	if k.Path != "" {
+		if err := k.checkPath(); err != nil {
+			return err
+		}
+		keychain = ` "` + k.Path + `"`
+	}
 	cmd := exec.Command("/usr/bin/security", "-i")
-	cmd.Stdin = strings.NewReader(fmt.Sprintf("add-generic-password -U -s %s -a %s -l HarmFlow -w %s\n",
-		k.Service, k.Account, token))
+	cmd.Stdin = strings.NewReader(fmt.Sprintf("add-generic-password -U -s %s -a %s -l HarmFlow -w %s%s\n",
+		k.Service, k.Account, token, keychain))
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

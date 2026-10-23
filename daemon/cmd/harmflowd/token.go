@@ -18,14 +18,16 @@ import (
 var tokenRetries = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
 
 // tokenStore is the credential store the token lives in: the Keychain, or a user-only file when
-// HARMFLOW_TOKEN_STORE=file chooses it. The second value is the run/token an earlier daemon fell back to, to delete once
-// the Keychain is read; it is empty when that file is the store.
+// HARMFLOW_TOKEN_STORE=file chooses it. HARMFLOW_KEYCHAIN names the keychain file to use instead of the default
+// keychain, so a test keeps its token in a throwaway keychain (#79). The second value is the run/token an earlier
+// daemon fell back to, to delete once the Keychain is read; it is empty when that file is the store.
 func tokenStore(p app.Paths) (ports.SecretStore, string) {
 	file := filepath.Join(p.Run, "token")
 	if os.Getenv("HARMFLOW_TOKEN_STORE") == "file" {
 		return secret.File{Path: file}, ""
 	}
-	return secret.Keychain{Service: secret.KeychainService, Account: secret.KeychainAccount}, file
+	return secret.Keychain{Service: secret.KeychainService, Account: secret.KeychainAccount,
+		Path: os.Getenv("HARMFLOW_KEYCHAIN")}, file
 }
 
 // startupToken reads the local API token from store, and makes one only on a first start, when store holds none. A
