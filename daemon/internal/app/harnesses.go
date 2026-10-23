@@ -50,14 +50,17 @@ func (a *App) RefreshHarnesses(ctx context.Context) []ports.HarnessInfo {
 	return a.Harnesses()
 }
 
+// refreshHarnessesAsync detects every harness, each on a goroutine of its own that a.detection counts, and that ends
+// with ctx.
 func (a *App) refreshHarnessesAsync(ctx context.Context) {
 	for _, id := range sortedKeys(a.adapters) {
-		go a.detect(ctx, id)
+		a.detection.Go(func() { a.detect(ctx, id) })
 	}
 }
 
 // detect revalidates one harness and stores what it found, including the resolved path (FS-004 FR-006), then
-// announces it, so the dashboard reads the inventory again (FS-004 FR-007).
+// announces it, so the dashboard reads the inventory again (FS-004 FR-007). A detection whose ctx ended, or that ends
+// once the daemon is stopping, is neither stored nor announced: it was cut short, and the inventory keeps what it had.
 func (a *App) detect(ctx context.Context, id string) ports.HarnessInfo {
 	ad := a.adapters[id]
 	a.mu.Lock()
@@ -65,7 +68,14 @@ func (a *App) detect(ctx context.Context, id string) ports.HarnessInfo {
 	a.mu.Unlock()
 	info := ad.Detect(ctx, manual)
 	info.LastCheckedAt = a.now()
+	// Taken only once Detect returns, so a slow check never holds up Stop; see announceMu.
+	a.announceMu.RLock()
+	defer a.announceMu.RUnlock()
 	a.mu.Lock()
+	if ctx.Err() != nil || a.stopping {
+		a.mu.Unlock()
+		return info
+	}
 	a.inventory[id] = info
 	a.mu.Unlock()
 	a.emit(domain.Event{Type: domain.EventHarnessChecked, Harness: id, Severity: domain.SeverityInfo,

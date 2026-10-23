@@ -153,9 +153,17 @@ type App struct {
 	saveMu sync.Mutex
 
 	stopOnce sync.Once
-	// stopLoops cancels the context Start runs the loops under; nil until Start.
-	stopLoops context.CancelFunc
-	wg        sync.WaitGroup
+	// stopLoops cancels the context Start runs the loops under, and stopDetection the one of the harness detection it
+	// launches; both are nil until Start.
+	stopLoops     context.CancelFunc
+	stopDetection context.CancelFunc
+	wg            sync.WaitGroup
+	// detection counts the harness detections Start launched, which Stop waits for.
+	detection sync.WaitGroup
+	// announceMu orders harness checks before daemon.stopping: a detection holds it for reading while it decides to
+	// announce and announces, and Stop holds it for writing to announce the stop, so a detection an API request or an
+	// execution started either announces first or sees the daemon stopping and announces nothing.
+	announceMu sync.RWMutex
 	// ShutdownRequested is closed when the API asks the daemon to stop.
 	ShutdownRequested chan struct{}
 	shutdownOnce      sync.Once
@@ -216,8 +224,9 @@ func (a *App) now() time.Time { return a.d.Clock.Now() }
 // watcher, and maintenance. The loops run until ctx ends or Stop is called, whichever comes first.
 func (a *App) Start(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
+	detectCtx, stopDetection := context.WithCancel(ctx)
 	a.mu.Lock()
-	a.stopLoops = cancel
+	a.stopLoops, a.stopDetection = cancel, stopDetection
 	a.mu.Unlock()
 	if err := a.loadSettings(); err != nil {
 		return err
@@ -232,7 +241,7 @@ func (a *App) Start(ctx context.Context) error {
 	if err := a.recover(ctx); err != nil {
 		return err
 	}
-	a.refreshHarnessesAsync(ctx)
+	a.refreshHarnessesAsync(detectCtx)
 	a.emit(domain.Event{Type: domain.EventDaemonStarted, Payload: map[string]any{"version": a.d.Version, "pid": os.Getpid()}}.Says(
 		domain.T("daemon_started", "HarmFlow daemon {{version}} started", "version", a.d.Version)))
 	a.mu.Lock()
@@ -246,13 +255,15 @@ func (a *App) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop ends the loops and interrupts running executions: a stopped daemon never continues them (D-089).
+// Stop ends the loops and the harness detection Start launched, and interrupts running executions: a stopped daemon
+// never continues them (D-089). The detection ends before the daemon announces that it stops, so no harness check is
+// recorded after that.
 func (a *App) Stop(reason domain.Text) {
 	a.stopOnce.Do(func() {
 		a.mu.Lock()
 		a.accepting = false
 		a.stopping = true
-		stopLoops := a.stopLoops
+		stopLoops, stopDetection := a.stopLoops, a.stopDetection
 		var cancels []context.CancelFunc
 		var dones []chan struct{}
 		for _, h := range a.running {
@@ -262,7 +273,13 @@ func (a *App) Stop(reason domain.Text) {
 			dones = append(dones, h.done)
 		}
 		a.mu.Unlock()
+		if stopDetection != nil {
+			stopDetection()
+		}
+		a.detection.Wait()
+		a.announceMu.Lock()
 		a.emit(domain.Event{Type: domain.EventDaemonStopping}.Says(reason))
+		a.announceMu.Unlock()
 		if stopLoops != nil {
 			stopLoops()
 		}
