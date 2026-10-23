@@ -96,6 +96,9 @@ type Deps struct {
 	OS string
 	// TickInterval is how often the scheduler looks for due firings.
 	TickInterval time.Duration
+	// TimeoutUnit is what a task's timeoutMinutes counts, a minute when zero; tests shorten it, since a timeout is at
+	// least one minute.
+	TimeoutUnit time.Duration
 	// MisfireAfter is how late a firing may be before it counts as missed though no unavailability was seen: the clock
 	// jumped, or the daemon could not run.
 	MisfireAfter time.Duration
@@ -181,6 +184,9 @@ func New(d Deps) (*App, error) {
 	}
 	if d.TickInterval == 0 {
 		d.TickInterval = 5 * time.Second
+	}
+	if d.TimeoutUnit == 0 {
+		d.TimeoutUnit = time.Minute
 	}
 	if d.MisfireAfter == 0 {
 		d.MisfireAfter = 2 * time.Minute

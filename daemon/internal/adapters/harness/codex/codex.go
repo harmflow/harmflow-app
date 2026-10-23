@@ -481,6 +481,7 @@ type parser struct {
 	modelSource string
 	reported    bool // a turn reported its usage
 	tokens      domain.Tokens
+	prices      domain.PriceTable // what prices the usage; Prices when it holds none
 }
 
 var _ ports.OutputParser = (*parser)(nil)
@@ -633,7 +634,7 @@ func (p *parser) usage(ended bool) *domain.Usage {
 	u := &domain.Usage{Status: domain.UsageReported, ModelSource: p.modelSource,
 		Models: []domain.ModelUsage{{Model: p.model, Tokens: p.tokens}}}
 	if ended {
-		u.ApplyPrices(Prices)
+		u.ApplyPrices(p.priceTable())
 	}
 	return u
 }

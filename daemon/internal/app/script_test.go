@@ -191,7 +191,7 @@ func TestInlineScriptEnvironmentAndWorkingDirectory(t *testing.T) {
 	if data, err := os.ReadFile(script); err != nil || !strings.Contains(string(data), "greeting=$GREETING") {
 		t.Errorf("the script file: %v %q", err, data)
 	}
-	if x.TimeoutAt == nil || x.StartedAt == nil || x.TimeoutAt.Sub(*x.StartedAt) != 60*timeoutUnit {
+	if x.TimeoutAt == nil || x.StartedAt == nil || x.TimeoutAt.Sub(*x.StartedAt) != 60*time.Minute {
 		t.Errorf("timeout %v from %v", x.TimeoutAt, x.StartedAt)
 	}
 	if x.Script.Environment["GREETING"] != "hello" || x.Script.WorkingDirectory != wd || x.Script.ScriptPath != script {
@@ -247,8 +247,8 @@ func TestScriptStopEndsItsProcesses(t *testing.T) {
 		t.Errorf("attempt %+v", x.Attempts[0])
 	}
 
-	defer func(unit time.Duration) { timeoutUnit = unit }(timeoutUnit)
-	timeoutUnit = 3 * time.Second // long enough on a loaded host for the shell to start its child first
+	// Set before the run starts, on this App alone: long enough on a loaded host for the shell to start its child first.
+	e.app.d.TimeoutUnit = 3 * time.Second
 	_ = os.Remove(filepath.Join(dir, "child"))
 	e.createScript("slow", strings.Replace(body, "cancelGraceSeconds: 1", "cancelGraceSeconds: 1\n    timeoutMinutes: 1", 1))
 	res, _ = e.app.RunTask("slow")

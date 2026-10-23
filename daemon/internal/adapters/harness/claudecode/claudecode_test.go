@@ -298,10 +298,9 @@ func TestUsageOfACancelledAttempt(t *testing.T) {
 // modelUsage keys each model by its full id; their cache writes are split by the result line's lifetimes, and a model
 // the table has no price for keeps the cost the CLI reported for it.
 func TestUsageAcrossModels(t *testing.T) {
-	defer func(old domain.PriceTable) { Prices = old }(Prices)
-	Prices = domain.PriceTable{AsOf: "2026-01-02", Prices: map[string]domain.Price{
+	prices := domain.PriceTable{AsOf: "2026-01-02", Prices: map[string]domain.Price{
 		"claude-main-1": {Input: 3, CacheWriteShort: 3.75, CacheWriteLong: 6, CacheRead: 0.3, Output: 15}}}
-	p := &parser{tools: map[string]toolUse{}}
+	p := &parser{tools: map[string]toolUse{}, prices: prices}
 	for _, l := range []string{
 		`{"type":"system","subtype":"init","session_id":"s","model":"claude-main-1-20260101"}`,
 		`{"type":"result","subtype":"success","is_error":false,"result":"ok","total_cost_usd":0.5,

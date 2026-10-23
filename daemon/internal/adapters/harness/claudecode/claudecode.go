@@ -410,6 +410,7 @@ type parser struct {
 	resetsAt   int64
 	lastText   string
 	messages   map[string]messageUsage // the latest usage of each assistant message, by message id
+	prices     domain.PriceTable       // what prices the usage; Prices when it holds none
 	order      []string
 }
 
@@ -658,7 +659,7 @@ func (p *parser) usage() *domain.Usage {
 	if r.TotalCostUSD != nil {
 		u.CostSource, u.CostUSD = domain.CostReported, r.TotalCostUSD
 	}
-	u.ApplyPrices(Prices)
+	u.ApplyPrices(p.priceTable())
 	return u
 }
 

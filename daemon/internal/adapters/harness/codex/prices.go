@@ -25,3 +25,11 @@ var Prices = domain.PriceTable{AsOf: "2026-10-22", Prices: map[string]domain.Pri
 	"gpt-5-codex":        {Input: 1.25, CacheWriteShort: 1.25, CacheWriteLong: 1.25, CacheRead: 0.125, Output: 10},
 	"codex-mini-latest":  {Input: 1.50, CacheWriteShort: 1.50, CacheWriteLong: 1.50, CacheRead: 0.375, Output: 6},
 }}
+
+// priceTable is the table that prices the parser's usage: its own when a test sets one, Prices otherwise.
+func (p *parser) priceTable() domain.PriceTable {
+	if p.prices.Prices == nil {
+		return Prices
+	}
+	return p.prices
+}
