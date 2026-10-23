@@ -113,6 +113,9 @@ make dev-daemon    # the daemon, on .harmflow-dev/home
 make dev-ui        # in a second terminal: the interface at http://localhost:1420
 ```
 
+Dependabot proposes monthly updates to the Go, pnpm, and Cargo dependencies and to the CI actions; a major update comes
+in its own pull request and is reviewed on its own.
+
 ## Commands
 
 | Command | What it does |
