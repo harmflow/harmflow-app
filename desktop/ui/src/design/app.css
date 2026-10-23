@@ -3296,6 +3296,27 @@ button.queue-item:hover,
   border-radius: var(--hf-radius-md);
 }
 
+.installations {
+  display: flex;
+  flex-direction: column;
+  gap: var(--hf-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.installations__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--hf-space-2);
+}
+
+.installations__item .mono {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .simple-list {
   display: flex;
   flex-direction: column;

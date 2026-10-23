@@ -151,3 +151,41 @@ func TestKnownLocationsDefault(t *testing.T) {
 		t.Errorf("an empty list searches %q", got)
 	}
 }
+
+// FS-004 FR-001, AC-002 (harmflow-app#70): a path set by hand is offered with the installations detection found, once,
+// and it is the one in use: installation names it as it was set, and path is where it resolves to.
+func TestDetectOffersThePathSetByHand(t *testing.T) {
+	pathDir, knownDir := tempDir(t), tempDir(t)
+	onPath, atKnown := standInAt(t, pathDir, "2.1.239"), standInAt(t, knownDir, "2.1.200")
+	byHand := standInAt(t, tempDir(t), "2.1.100")
+	target := standInAt(t, tempDir(t), "2.1.150")
+	link := filepath.Join(tempDir(t), "claude")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	gone := filepath.Join(tempDir(t), "claude")
+	cases := []struct {
+		name, manual                           string
+		wantInstallation, wantPath, wantSource string
+		wantVersion, wantReadiness             string
+		want                                   []string
+	}{
+		{"none set", "", onPath, onPath, "path", "2.1.239", "ready", []string{onPath, atKnown}},
+		{"one detection did not find", byHand, byHand, byHand, "manual", "2.1.100", "ready", []string{onPath, atKnown, byHand}},
+		{"one detection found", atKnown, atKnown, atKnown, "manual", "2.1.200", "ready", []string{onPath, atKnown}},
+		{"a symlink", link, link, target, "manual", "2.1.150", "ready", []string{onPath, atKnown, link}},
+		{"a file that is gone", gone, gone, gone, "manual", "", "not_installed", []string{onPath, atKnown, gone}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			a := &Adapter{Home: tempDir(t), PathEnv: pathDir, KnownLocations: []string{atKnown}}
+			info := a.Detect(context.Background(), c.manual)
+			if !slices.Equal(info.Installations, c.want) || info.Installation != c.wantInstallation || info.Path != c.wantPath ||
+				info.PathSource != c.wantSource || info.Version != c.wantVersion || info.Readiness != c.wantReadiness {
+				t.Errorf("installations %q, installation %q, path %q (%s), version %q, readiness %s; want %q, %q, %q (%s), "+
+					"%q, %s", info.Installations, info.Installation, info.Path, info.PathSource, info.Version, info.Readiness,
+					c.want, c.wantInstallation, c.wantPath, c.wantSource, c.wantVersion, c.wantReadiness)
+			}
+		})
+	}
+}

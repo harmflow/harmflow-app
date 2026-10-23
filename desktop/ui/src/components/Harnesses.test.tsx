@@ -1,12 +1,52 @@
+// @vitest-environment happy-dom
 // The installed-agents inventory shows every field a check found (FS-004 FR-007; harmflow-app#68). A ready harness
 // whose version or sign-in detection could not establish is shown in a warning tone, with what is unknown (FS-004
-// FR-006, FR-008; harmflow-app#71).
+// FR-006, FR-008; harmflow-app#71). Each installation is offered as a choice, driven in a DOM against a stand-in for
+// the daemon's local API (FS-004 FR-001, AC-002; harmflow-app#70).
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Harness } from "../api/types";
 import i18n from "../i18n";
 import { formatRelative } from "../lib/format";
+import { patchStateForTests, useStore } from "../state/store";
 import { HarnessInventory, HarnessRow, readinessTone } from "./Harnesses";
+
+// The daemon as the client sees it: Codex's installations, and every request it received. A path PUT is in use and
+// offered with the ones found; a null one returns to the first found, as the daemon does.
+const daemon = vi.hoisted(() => ({
+  found: [] as string[],
+  codex: undefined as unknown as Harness,
+  requests: [] as Array<{ method: string; path: string; body?: unknown }>,
+}));
+vi.mock("../api/transport", () => ({
+  isTauri: () => false,
+  EVENT_TYPES: [],
+  transport: {
+    mode: "http",
+    request: async (method: string, path: string, body?: unknown) => {
+      daemon.requests.push({ method, path, body });
+      if (method === "PUT" && path === "/harnesses/codex") {
+        const chosen = (body as { path: string | null }).path;
+        const installation = chosen ?? daemon.found[0];
+        daemon.codex = {
+          ...daemon.codex,
+          installation,
+          path: installation,
+          pathSource: chosen ? "manual" : "path",
+          installations: daemon.found.includes(installation) ? daemon.found : [...daemon.found, installation],
+        };
+        return { status: 200, body: daemon.codex };
+      }
+      if (method === "GET" && path === "/harnesses") return { status: 200, body: [daemon.codex] };
+      if (method === "GET" && path === "/tools") return { status: 200, body: [] };
+      return { status: 404, body: null };
+    },
+    requestText: async () => ({ status: 404, text: "" }),
+    stream: () => () => {},
+  },
+}));
 
 const ready: Harness = {
   id: "claude-code",
@@ -109,5 +149,115 @@ describe("HarnessInventory", () => {
     const html = renderToString(<HarnessInventory harness={signInUnknown} locale="en-US" />);
     expect(html).not.toContain("chip--success");
     expect(html).toContain(`<span class="chip chip--warning">${i18n.t("harness.authentication.unknown")}</span>`);
+  });
+});
+
+describe("choosing an installation", () => {
+  const onPath = "/usr/local/bin/codex";
+  const inApp = "/Applications/Codex.app/Contents/Resources/codex-cli/bin/codex";
+  const byHand = "/opt/tools/codex-next/codex";
+  let root: Root | undefined;
+  let host: HTMLElement | undefined;
+
+  beforeAll(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    host?.remove();
+    root = host = undefined;
+    daemon.requests.length = 0;
+  });
+
+  /** Lets the stand-in daemon's answers arrive and React render them. */
+  const settle = () => act(() => new Promise<void>((resolve) => setImmediate(resolve)));
+
+  // The inventory as Settings shows it: from the store, so a refresh is seen.
+  function Inventory() {
+    const codex = useStore((s) => s.harnesses.find((h) => h.id === "codex"));
+    return codex ? <HarnessInventory harness={codex} locale="en-US" /> : null;
+  }
+
+  async function open(installation: string, installations: string[]) {
+    daemon.found = [onPath, inApp];
+    daemon.codex = {
+      ...ready,
+      id: "codex",
+      name: "Codex",
+      installation,
+      path: installation,
+      pathSource: installation === byHand ? "manual" : "path",
+      installations,
+    };
+    patchStateForTests({ harnesses: [daemon.codex] });
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(<Inventory />));
+  }
+
+  // Each installation as listed: its path, and "In use" or the control that chooses it.
+  const offered = () =>
+    [...host!.querySelectorAll(".installations__item")].map((li) => [li.querySelector(".mono")!.textContent, li.querySelector(".chip, button")!.textContent]);
+
+  const button = (label: string) => {
+    const found = [...host!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === label || b.getAttribute("aria-label") === label);
+    expect(found, label).toBeDefined();
+    return found!;
+  };
+
+  const writes = () => daemon.requests.filter((r) => r.method === "PUT");
+
+  it("lists each installation with a control to use it, the one in use marked, and uses the one chosen", async () => {
+    await open(byHand, [onPath, inApp, byHand]);
+    const use = i18n.t("harness.use");
+    const inUse = i18n.t("harness.inUse");
+    expect(offered()).toEqual([
+      [onPath, use],
+      [inApp, use],
+      [byHand, inUse],
+    ]);
+
+    await act(async () => button(i18n.t("harness.useInstallation", { path: inApp })).click());
+    await settle();
+    expect(writes()).toEqual([{ method: "PUT", path: "/harnesses/codex", body: { path: inApp } }]);
+    expect(daemon.requests.map((r) => `${r.method} ${r.path}`)).toContain("GET /harnesses");
+    // The refreshed inventory: the chosen one in use, and the path set by hand no longer offered, since it was replaced.
+    expect(offered()).toEqual([
+      [onPath, use],
+      [inApp, inUse],
+    ]);
+  });
+
+  it("keeps Set path and Detect automatically working", async () => {
+    await open(onPath, [onPath, inApp]);
+    expect(host!.textContent).not.toContain(i18n.t("harness.autoDetect"));
+
+    await act(async () => button(i18n.t("harness.setPath")).click());
+    const input = host!.querySelector<HTMLInputElement>(".inline-form input")!;
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => {
+      setValue.call(input, ` ${byHand} `);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => button(i18n.t("common.save")).click());
+    await settle();
+    expect(writes()).toEqual([{ method: "PUT", path: "/harnesses/codex", body: { path: byHand } }]);
+    expect(offered()).toEqual([
+      [onPath, i18n.t("harness.use")],
+      [inApp, i18n.t("harness.use")],
+      [byHand, i18n.t("harness.inUse")],
+    ]);
+
+    await act(async () => button(i18n.t("harness.autoDetect")).click());
+    await settle();
+    expect(writes()).toEqual([
+      { method: "PUT", path: "/harnesses/codex", body: { path: byHand } },
+      { method: "PUT", path: "/harnesses/codex", body: { path: null } },
+    ]);
+    expect(offered()).toEqual([
+      [onPath, i18n.t("harness.inUse")],
+      [inApp, i18n.t("harness.use")],
+    ]);
   });
 });

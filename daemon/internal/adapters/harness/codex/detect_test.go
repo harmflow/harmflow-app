@@ -134,3 +134,38 @@ func TestKnownLocationsDefault(t *testing.T) {
 		t.Errorf("an empty list searches %q", got)
 	}
 }
+
+// FS-004 FR-001, AC-002 (harmflow-app#70): a path set by hand is offered with the installations detection found, once,
+// and it is the one in use.
+func TestDetectOffersThePathSetByHand(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	pathDir, knownDir := tempDir(t), tempDir(t)
+	onPath := standInAt(t, pathDir, `echo "codex-cli 0.163.0"`, signedIn)
+	atKnown := standInAt(t, knownDir, `echo "codex-cli 0.150.0"`, signedIn)
+	byHand := standInAt(t, tempDir(t), `echo "codex-cli 0.140.0"`, signedIn)
+	gone := filepath.Join(tempDir(t), "codex")
+	cases := []struct {
+		name, manual                 string
+		wantInstallation, wantSource string
+		wantVersion, wantReadiness   string
+		want                         []string
+	}{
+		{"none set", "", onPath, "path", "0.163.0", "ready", []string{onPath, atKnown}},
+		{"one detection did not find", byHand, byHand, "manual", "0.140.0", "ready", []string{onPath, atKnown, byHand}},
+		{"one detection found", atKnown, atKnown, "manual", "0.150.0", "ready", []string{onPath, atKnown}},
+		{"a file that is gone", gone, gone, "manual", "", "not_installed", []string{onPath, atKnown, gone}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			a := &Adapter{Home: tempDir(t), PathEnv: pathDir, KnownLocations: []string{atKnown}}
+			info := a.Detect(context.Background(), c.manual)
+			if !slices.Equal(info.Installations, c.want) || info.Installation != c.wantInstallation ||
+				info.Path != c.wantInstallation || info.PathSource != c.wantSource || info.Version != c.wantVersion ||
+				info.Readiness != c.wantReadiness {
+				t.Errorf("installations %q, installation %q, path %q (%s), version %q, readiness %s; want %q, %q (%s), %q, %s",
+					info.Installations, info.Installation, info.Path, info.PathSource, info.Version, info.Readiness, c.want,
+					c.wantInstallation, c.wantSource, c.wantVersion, c.wantReadiness)
+			}
+		})
+	}
+}
