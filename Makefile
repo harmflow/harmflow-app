@@ -14,6 +14,16 @@ DEV_HOME := $(CURDIR)/.harmflow-dev/home
 SIDECAR := desktop/src-tauri/binaries/harmflowd-$(TRIPLE)
 LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuiltAt=$(BUILT_AT)
 COVERAGE := $(CURDIR)/build/coverage
+# The shell's coverage floors, in percent (ADR-015); COVERAGE.md holds the reading they come from.
+RUST_FLOOR_LINES := 27.49
+RUST_FLOOR_FUNCTIONS := 25.00
+# cargo llvm-cov fails below a floor without saying which, so its summary is read again to name the counter that fell,
+# its floor, and its ratio, truncated to two decimals as the floors are.
+RUST_FLOOR_VIOLATIONS := def pct: "\(. / 100 | floor).\(. % 100 | tostring | if length < 2 then "0" + . else . end)"; \
+	.data[0].totals | {lines, functions} | to_entries[] | .key as $$counter | .value as $$v \
+	| ($$v.covered * 10000 / $$v.count | floor) as $$ratio | ({$$lines, $$functions}[$$counter] * 100 | round) as $$floor \
+	| select($$ratio < $$floor) \
+	| "coverage: desktop/src-tauri: \($$counter) \($$ratio | pct)% (\($$v.covered) of \($$v.count)) is below its floor of \($$floor | pct)%"
 
 .PHONY: help
 help: ## List the targets
@@ -64,23 +74,26 @@ test-desktop: ## Type check and unit tests of the desktop
 test-integration: daemon ## Tests across the daemon's process boundary, with fake harnesses
 	go -C tests test -count=1 ./...
 
-# Coverage is read, never targeted (ADR-015); COVERAGE.md holds the reading. Nothing here fails on a figure.
+# Coverage is held by a ratchet, never by a target (ADR-015): each target fails when a part reads below its floor.
+# COVERAGE.md holds the reading the floors come from.
 .PHONY: coverage
 coverage: coverage-daemon coverage-desktop ## Read the tests' coverage of the daemon, the interface, and the shell
 
 .PHONY: coverage-daemon
-coverage-daemon: ## Statements per package of the daemon, its unit and integration data merged
+coverage-daemon: ## Statements per package of the daemon, unit and integration data merged, held at their floors
 	rm -rf $(COVERAGE)/daemon $(COVERAGE)/daemon.out
 	mkdir -p $(COVERAGE)/daemon/unit $(COVERAGE)/daemon/integration
 	go -C daemon test -count=1 -covermode=atomic -coverpkg=./... ./... -args -test.gocoverdir=$(COVERAGE)/daemon/unit
 	GOCOVERDIR=$(COVERAGE)/daemon/integration go -C tests test -count=1 ./...
 	go tool covdata textfmt -i=$(COVERAGE)/daemon/unit,$(COVERAGE)/daemon/integration -o $(COVERAGE)/daemon.out
-	go -C tests run ./coverage $(COVERAGE)/daemon.out
+	go -C tests run ./coverage -floors $(CURDIR)/daemon/coverage-floors.txt $(COVERAGE)/daemon.out
 
 .PHONY: coverage-desktop
-coverage-desktop: ## Coverage of the interface and of the shell by their unit tests (needs cargo-llvm-cov)
+coverage-desktop: ## Unit tests of the interface and the shell, held at their floors (needs cargo-llvm-cov)
 	pnpm -C desktop test:coverage
-	cd desktop/src-tauri && cargo llvm-cov
+	cd desktop/src-tauri && { cargo llvm-cov --fail-under-lines $(RUST_FLOOR_LINES) --fail-under-functions $(RUST_FLOOR_FUNCTIONS) \
+		|| { cargo llvm-cov report --summary-only --json | jq -r --argjson lines $(RUST_FLOOR_LINES) \
+			--argjson functions $(RUST_FLOOR_FUNCTIONS) '$(RUST_FLOOR_VIOLATIONS)' >&2; exit 1; }; }
 
 .PHONY: dev-daemon
 dev-daemon: daemon ## Run the daemon on a development data directory

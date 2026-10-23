@@ -103,7 +103,7 @@
 | Claude Code or Codex | signed in | running tasks |
 | Git and the GitHub CLI (`gh`) | signed in | the GitHub issue type |
 | `rsvg-convert` (`brew install librsvg`) | any | `make icons` only — the rendered icons are committed |
-| `cargo-llvm-cov`, with Rust's `llvm-tools-preview` | any | `make coverage` only |
+| `cargo-llvm-cov`, with Rust's `llvm-tools-preview`, and `jq` | any | `make coverage` only |
 
 HarmFlow never installs, updates, or signs in to any of them. With those in place:
 
@@ -123,7 +123,7 @@ in its own pull request and is reviewed on its own.
 | `make help` | List every target |
 | `make deps` | Install the desktop's JavaScript dependencies |
 | `make test` | Run the daemon, desktop, and integration tests |
-| `make coverage` | Read the tests' coverage of the daemon, the interface, and the shell; the last reading is in [`COVERAGE.md`](COVERAGE.md) |
+| `make coverage` | Read the tests' coverage of the daemon, the interface, and the shell, and fail below a floor; the floors and their reading are in [`COVERAGE.md`](COVERAGE.md) |
 | `make dev-daemon` | Run the daemon on `.harmflow-dev/home` |
 | `make dev-ui` | Serve the interface in a browser, proxied to that daemon (`http://localhost:1420`) |
 | `make dev-desktop` | Run the desktop shell against that daemon |

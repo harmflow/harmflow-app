@@ -121,13 +121,21 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
-    // Read only with --coverage (`pnpm test:coverage`, ADR-015). The include is explicit so that a source file no test
-    // imports still counts; code nobody writes by hand does not.
+    // Read and held only with --coverage (`pnpm test:coverage`, ADR-015). The include is explicit so that a source file
+    // no test imports still counts; code nobody writes by hand does not.
     coverage: {
       provider: "v8",
       reporter: ["text", "html", "json-summary"],
       include: ["src/**/*.{ts,tsx}"],
       exclude: ["src/**/*.test.{ts,tsx}", "src/api/generated.ts", "src/main.tsx"],
+      // The floors: the reading in COVERAGE.md, truncated to two decimals. Never autoUpdate: a floor moves by hand,
+      // with its row in COVERAGE.md, in one commit.
+      thresholds: {
+        statements: 65.33,
+        branches: 61.34,
+        functions: 59.31,
+        lines: 67.65,
+      },
     },
   },
 });

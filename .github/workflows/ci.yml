@@ -105,7 +105,9 @@ jobs:
         with:
           go-version-file: daemon/go.mod
           cache-dependency-path: daemon/go.sum
-      - run: make test-integration
+      # The integration tests, and the daemon's coverage held against daemon/coverage-floors.txt (ADR-015). This is
+      # the only job where the unit and integration data can both exist; the daemon job keeps -race.
+      - run: make coverage-daemon
 
   desktop:
     name: Desktop (macOS)
@@ -131,6 +133,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
+        with:
+          tool: cargo-llvm-cov
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: desktop/src-tauri
@@ -138,4 +144,6 @@ jobs:
       # The bundle's sidecar must exist for tauri-build, and the interface for the shell.
       - run: make sidecar
       - run: pnpm -C desktop build
-      - run: make test-desktop
+      - run: pnpm -C desktop typecheck
+      # The unit tests of the interface and the shell, their coverage held against its floors (ADR-015).
+      - run: make coverage-desktop
