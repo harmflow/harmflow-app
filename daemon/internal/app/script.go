@@ -263,7 +263,7 @@ func (r *run) runScript(ctx context.Context, deadline time.Time) (domain.Executi
 		ExecutionID: r.x.ID}, raw, output("stdout"), output("stderr"))
 	if err != nil {
 		if raw != nil {
-			raw.Close()
+			r.closeRaw(raw)
 		}
 		reason := domain.T("script_start_failed", "starting {{program}}: {{detail}}", "program", name,
 			"detail", err.Error())
@@ -284,7 +284,7 @@ func (r *run) runScript(ctx context.Context, deadline time.Time) (domain.Executi
 	proc.Wait(ctx, grace)
 	r.logEnded(proc.Ended())
 	if raw != nil {
-		raw.Close()
+		r.closeRaw(raw)
 	}
 	exit, signal := proc.ExitCode(), proc.Signal()
 	ended := domain.T("script_exit_code", "the program exited with code {{code}}", "code", strconv.Itoa(exit))

@@ -1,6 +1,11 @@
 package app
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+
+	"github.com/harmflow/harmflow-app/daemon/internal/domain"
+)
 
 // fakeAutostart stands in for the launchd agent: it keeps whether autostart is on, and never reaches launchctl or the
 // user's LaunchAgents folder. It records each Enable, with what it was asked to start, and counts each Disable.
@@ -34,7 +39,7 @@ func (f *fakeAutostart) Location() string  { return "/LaunchAgents/com.harmflow.
 // then reads too.
 func TestAutostartPatchAnswersTheNewState(t *testing.T) {
 	e := newEnv(t)
-	e.app.d.Service = &fakeAutostart{}
+	e.app.d.Service, e.app.d.DaemonExecutable = &fakeAutostart{}, "/Applications/HarmFlow.app/Contents/MacOS/harmflowd"
 	for _, on := range []bool{true, false} {
 		v, err := e.app.UpdateSettings(SettingsPatch{Autostart: &on})
 		if err != nil {
@@ -46,5 +51,28 @@ func TestAutostartPatchAnswersTheNewState(t *testing.T) {
 		if got := e.app.GetSettings().Autostart.Enabled; got != on {
 			t.Errorf("autostart %v: GET /settings reads %v", on, got)
 		}
+	}
+}
+
+// A daemon that could not find its own path refuses to enable autostart, rather than write an agent with no program.
+func TestAutostartNeedsTheDaemonsExecutable(t *testing.T) {
+	e := newEnv(t)
+	service := &fakeAutostart{}
+	e.app.d.Service, e.app.d.DaemonExecutable = service, ""
+	on := true
+	if _, err := e.app.UpdateSettings(SettingsPatch{Autostart: &on}); err == nil {
+		t.Error("UpdateSettings(autostart: true) = nil error with no executable, want an error")
+	}
+	if len(service.enables) != 0 {
+		t.Errorf("Enable calls = %+v, want none", service.enables)
+	}
+}
+
+// A use-case error keeps its text through any wrapping, as the firing history records it.
+func TestErrorTextFindsAWrappedError(t *testing.T) {
+	want := domain.T("task_not_found", "no task {{task}}", "task", "nightly")
+	err := fmt.Errorf("firing: %w", newError(CodeNotFound, want))
+	if got := errorText(err); got.Key != want.Key || got.Message != want.Message {
+		t.Errorf("errorText(%v) = %+v, want %+v", err, got, want)
 	}
 }

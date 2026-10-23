@@ -1,7 +1,11 @@
 package main
 
 import (
+	"errors"
+	"path/filepath"
 	"runtime/debug"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -47,5 +51,36 @@ func TestBuildTime(t *testing.T) {
 		if got := buildTime(stamp); !got.IsZero() {
 			t.Errorf("%q: got %v, want none", stamp, got)
 		}
+	}
+}
+
+// A lock another holder has means a daemon is running on the data directory.
+func TestAcquireLockSeesARunningDaemon(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "daemon.lock")
+	held, err := acquireLock(path, syscall.Flock)
+	if err != nil {
+		t.Fatalf("acquireLock(%s) = %v, want the lock", path, err)
+	}
+	defer held.Close()
+	if f, err := acquireLock(path, syscall.Flock); err == nil {
+		f.Close()
+		t.Fatalf("acquireLock(%s) took a lock already held", path)
+	} else if !strings.Contains(err.Error(), "already running") {
+		t.Errorf("acquireLock(%s) = %v, want that another daemon is running", path, err)
+	}
+}
+
+// Any other lock failure, such as a file system without locks, names the lock file and keeps its cause, rather than
+// send the user looking for a daemon that is not there.
+func TestAcquireLockReportsOtherFailures(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "daemon.lock")
+	noLocks := func(int, int) error { return syscall.ENOTSUP }
+	f, err := acquireLock(path, noLocks)
+	if err == nil {
+		f.Close()
+		t.Fatalf("acquireLock(%s) took a lock the file system refused", path)
+	}
+	if !errors.Is(err, syscall.ENOTSUP) || !strings.Contains(err.Error(), path) || strings.Contains(err.Error(), "already running") {
+		t.Errorf("acquireLock(%s) = %v, want an error naming the file and wrapping %v", path, err, syscall.ENOTSUP)
 	}
 }

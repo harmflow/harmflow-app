@@ -59,7 +59,7 @@ func (a *Agent) Disable() error {
 
 func esc(s string) string {
 	var b strings.Builder
-	_ = xml.EscapeText(&b, []byte(s))
+	_ = xml.EscapeText(&b, []byte(s)) // a strings.Builder never fails a write
 	return b.String()
 }
 

@@ -96,6 +96,7 @@ func syntaxIssue(err error) Issue {
 	msg := strings.TrimPrefix(err.Error(), "yaml: ")
 	is := Issue{Text: domain.T("yaml_syntax", "YAML syntax error: {{detail}}", "detail", msg), Code: "syntax"}
 	if m := yamlLine.FindStringSubmatch(msg); m != nil {
+		// yamlLine matched digits, so these conversions succeed.
 		is.Line, _ = strconv.Atoi(m[1])
 		if m[2] != "" {
 			is.Column, _ = strconv.Atoi(m[2])

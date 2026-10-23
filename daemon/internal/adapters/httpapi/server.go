@@ -73,11 +73,13 @@ func (s *Server) Serve() error {
 }
 
 // Shutdown stops serving, then records the rejected requests no entry has counted yet.
-func (s *Server) Shutdown(ctx context.Context) {
+func (s *Server) Shutdown(ctx context.Context) error {
+	var err error
 	if s.srv != nil {
-		_ = s.srv.Shutdown(ctx)
+		err = s.srv.Shutdown(ctx)
 	}
 	s.flushRejections()
+	return err
 }
 
 func (s *Server) Handler() http.Handler {
@@ -175,6 +177,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.WriteHeader(status)
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
+	// The status is already sent, so a body that fails to encode or write has no one left to be told.
 	_ = enc.Encode(v)
 }
 
@@ -386,7 +389,7 @@ func (s *Server) exportTask(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/yaml")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.yaml"`, r.PathValue("taskId")))
-	_, _ = w.Write(data)
+	_, _ = w.Write(data) // the status is sent; a client gone mid-body has no one left to be told
 }
 
 func (s *Server) previewSchedule(w http.ResponseWriter, r *http.Request) {
@@ -409,7 +412,7 @@ func (s *Server) listExecutions(w http.ResponseWriter, r *http.Request) {
 		f.Active = &b
 	}
 	if v := q.Get("limit"); v != "" {
-		f.Limit, _ = strconv.Atoi(v)
+		f.Limit, _ = strconv.Atoi(v) // a limit that is not a number is 0, the default
 	}
 	if v := q.Get("before"); v != "" {
 		if t, err := time.Parse(time.RFC3339Nano, v); err == nil {
@@ -437,6 +440,7 @@ func (s *Server) cancelExecution(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) executionEvents(w http.ResponseWriter, r *http.Request) {
+	// A missing or malformed number reads as 0: from the start, and the default limit.
 	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit <= 0 || limit > 5000 {
@@ -451,7 +455,7 @@ func (s *Server) executionEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) executionOutput(w http.ResponseWriter, r *http.Request) {
-	limit, _ := strconv.ParseInt(r.URL.Query().Get("limit"), 10, 64)
+	limit, _ := strconv.ParseInt(r.URL.Query().Get("limit"), 10, 64) // a malformed limit is 0, the default
 	if limit <= 0 || limit > 8<<20 {
 		limit = 1 << 20
 	}
@@ -470,6 +474,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "internal", domain.Text{Message: "streaming is not supported"})
 		return
 	}
+	// A missing or malformed id reads as 0, every buffered event.
 	after, _ := strconv.ParseInt(r.Header.Get("Last-Event-ID"), 10, 64)
 	if v := r.URL.Query().Get("after"); v != "" {
 		after, _ = strconv.ParseInt(v, 10, 64)
@@ -481,6 +486,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(200)
+	// A write to a client that left fails silently; the request's context then ends the stream.
 	fmt.Fprintf(w, "retry: 2000\n\n")
 	if gap {
 		fmt.Fprintf(w, "event: replay_gap\ndata: {\"after\":%d}\n\n", after)

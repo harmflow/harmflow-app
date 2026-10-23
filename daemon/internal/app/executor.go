@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -68,7 +69,9 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 			l.Close(x.ID)
 		}
 		if deletePending {
-			_ = a.removeTask(x.TaskID)
+			if err := a.removeTask(x.TaskID); err != nil {
+				a.log.Printf("deleting task %s once its execution ended: %v", x.TaskID, err)
+			}
 		}
 		a.startQueued()
 	}()
@@ -284,6 +287,7 @@ func (r *run) prepare() error {
 		r.x.Repository = repos[0].Name
 	}
 	a.mu.Unlock()
+	// The schema only lets the session check its report before it writes it; the daemon validates the report itself.
 	_ = os.WriteFile(filepath.Join(r.dir, "execution-report.schema.json"), contracts.ExecutionReportSchema, 0o600)
 	return r.writeContext(nil)
 }
@@ -622,7 +626,7 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 	})
 	if err != nil {
 		if raw != nil {
-			raw.Close()
+			r.closeRaw(raw)
 		}
 		end := domain.AttemptEnd{Class: domain.ClassHarnessUnavailable, Error: domain.T("harness_start_failed",
 			"starting {{harness}}: {{detail}}", "harness", ad.Name(), "detail", err.Error())}
@@ -657,7 +661,7 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 	close(stopProgress)
 	<-progressDone
 	if raw != nil {
-		raw.Close()
+		r.closeRaw(raw)
 	}
 	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded) && !r.cancelRequested()
 	end := parser.Finish(proc.ExitCode(), proc.StderrTail(), timedOut, r.cancelRequested())
@@ -665,6 +669,14 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 	eventlog.RedactFields(&end)
 	r.endAttempt(end, proc.ExitCode())
 	return end
+}
+
+// closeRaw closes an attempt's raw output. A close that fails loses only the end of that copy, whose lines the events
+// already carry, so it is logged.
+func (r *run) closeRaw(raw io.Closer) {
+	if err := raw.Close(); err != nil {
+		r.a.log.Printf("closing the raw output of execution %s: %v", r.x.ID, err)
+	}
 }
 
 func (r *run) endAttempt(end domain.AttemptEnd, exit int) {
@@ -939,7 +951,7 @@ func (r *run) readProgress() {
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	defer f.Close() // read only: closing cannot lose data
 	if _, err := f.Seek(r.progressOffset, 0); err != nil {
 		return
 	}

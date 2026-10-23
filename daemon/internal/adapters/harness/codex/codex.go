@@ -112,6 +112,7 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 		info.Version = m[1]
 		info.Readiness = "version_identified"
 	}
+	// Help that cannot be read lists no flags, so each feature reads as missing.
 	help, _, _ := procutil.Output(ctx, 15*time.Second, a.Env, info.Path, "exec", "--help")
 	for _, f := range append(requiredFlags, "--add-dir", "--ephemeral", "--model", "--color") {
 		info.Features[f] = strings.Contains(help, f)
@@ -682,12 +683,12 @@ func firstNonEmpty(s ...string) string {
 func compareVersions(a, b string) int {
 	pa, pb := strings.Split(a, "."), strings.Split(b, ".")
 	for i := 0; i < len(pa) || i < len(pb); i++ {
-		var x, y int
+		var x, y int // a part that is not a number counts as 0
 		if i < len(pa) {
-			fmt.Sscanf(pa[i], "%d", &x)
+			_, _ = fmt.Sscanf(pa[i], "%d", &x)
 		}
 		if i < len(pb) {
-			fmt.Sscanf(pb[i], "%d", &y)
+			_, _ = fmt.Sscanf(pb[i], "%d", &y)
 		}
 		if x != y {
 			if x < y {

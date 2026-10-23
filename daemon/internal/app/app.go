@@ -233,7 +233,9 @@ func (a *App) Start(ctx context.Context) error {
 	}
 	a.loadNotifications()
 	a.loadLedger()
-	_, _ = a.d.State.Load("harnesses", &a.manualPaths)
+	if _, err := a.d.State.Load("harnesses", &a.manualPaths); err != nil {
+		a.log.Printf("loading the harness paths set by hand; detection finds them instead: %v", err)
+	}
 	if err := a.loadTasks(ctx); err != nil {
 		return err
 	}

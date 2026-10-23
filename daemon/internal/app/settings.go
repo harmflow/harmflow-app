@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 
@@ -114,9 +115,13 @@ func (a *App) UpdateSettings(p SettingsPatch) (SettingsView, error) {
 	}
 	if p.Autostart != nil && a.d.Service != nil {
 		var err error
-		if *p.Autostart {
+		switch {
+		case *p.Autostart && a.d.DaemonExecutable == "":
+			// The daemon could not find its own path at start; an agent with no program would never start it.
+			err = errors.New("the daemon's executable is unknown")
+		case *p.Autostart:
 			err = a.d.Service.Enable(a.d.DaemonExecutable, a.d.DaemonArgs, a.d.DaemonEnv)
-		} else {
+		default:
 			err = a.d.Service.Disable()
 		}
 		if err != nil {

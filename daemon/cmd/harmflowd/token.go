@@ -49,8 +49,8 @@ func startupToken(store ports.SecretStore, leftover string, logger *log.Logger, 
 		}
 	}
 	if err != nil {
-		logger.Printf("credential store %s unavailable (%v); exiting so launchd starts the daemon again", store.Kind(), err)
-		return "", fmt.Errorf("token: %w", err)
+		return "", fmt.Errorf("token: credential store %s unavailable; exiting so launchd starts the daemon again: %w",
+			store.Kind(), err)
 	}
 	if leftover != "" {
 		if err := os.Remove(leftover); err == nil {

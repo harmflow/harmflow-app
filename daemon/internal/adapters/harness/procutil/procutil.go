@@ -117,18 +117,18 @@ func StartLines(inv ports.Invocation, raw io.Writer, onStdout, onStderr func([]b
 		defer close(recorded)
 		for l := range lines {
 			if raw != nil {
-				_, _ = raw.Write(l.text)
+				_, _ = raw.Write(l.text) // the raw capture is a copy; the line still reaches on below
 			}
 			on := onStdout
 			if l.stderr {
-				_, _ = p.stderr.Write(l.text)
+				_, _ = p.stderr.Write(l.text) // a tail in memory never fails a write
 				on = onStderr
 			}
 			on(bytes.TrimRight(l.text, "\r\n"))
 		}
 	}()
 	go func() {
-		_ = cmd.Wait()
+		_ = cmd.Wait() // how the process ended is read from cmd.ProcessState below
 		select {
 		case <-drained:
 		case <-time.After(outputDelay):
@@ -151,6 +151,8 @@ type streamLine struct {
 	stderr bool
 }
 
+// closeAll closes the daemon's ends of the pipes once their output is read; nothing is written to them, so a failed
+// close loses nothing.
 func closeAll(files []*os.File) {
 	for _, f := range files {
 		_ = f.Close()
@@ -195,7 +197,9 @@ func (r *pipeReader) Read(b []byte) (int, error) {
 	n, rerr := 0, error(nil)
 	// Control ignores the deadline, and the pipe does not block, so a read of an empty pipe returns EAGAIN at once.
 	if err := rc.Control(func(fd uintptr) {
-		_ = syscall.SetNonblock(int(fd), true)
+		if rerr = syscall.SetNonblock(int(fd), true); rerr != nil {
+			return // a read that could block would hold up the end of the output
+		}
 		for {
 			if n, rerr = syscall.Read(int(fd), b); rerr != syscall.EINTR {
 				return
@@ -212,7 +216,7 @@ func (r *pipeReader) Read(b []byte) (int, error) {
 func (r *pipeReader) stop() {
 	r.stopped.Store(true)
 	if err := r.f.SetReadDeadline(time.Now()); err != nil {
-		_ = r.f.Close()
+		_ = r.f.Close() // closing wakes the read as the deadline would; the stream ends either way
 	}
 }
 

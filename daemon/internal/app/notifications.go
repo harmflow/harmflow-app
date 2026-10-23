@@ -181,7 +181,11 @@ func englishNotice(kind, task string, p map[string]string) (string, string) {
 
 func (a *App) loadNotifications() {
 	var list []Notification
-	if ok, _ := a.d.State.Load("notifications", &list); ok {
+	ok, err := a.d.State.Load("notifications", &list)
+	if err != nil {
+		a.log.Printf("loading notifications: %v", err)
+	}
+	if ok {
 		a.mu.Lock()
 		a.notifications = list
 		a.mu.Unlock()

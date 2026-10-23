@@ -313,7 +313,9 @@ func marshalYAML(doc domain.TaskDocument) ([]byte, error) {
 	if err := enc.Encode(doc); err != nil {
 		return nil, err
 	}
-	_ = enc.Close()
+	if err := enc.Close(); err != nil {
+		return nil, err
+	}
 	return buf.Bytes(), nil
 }
 
@@ -358,7 +360,9 @@ func encodeNode(n *yaml.Node) ([]byte, error) {
 	if err := enc.Encode(n); err != nil {
 		return nil, err
 	}
-	_ = enc.Close()
+	if err := enc.Close(); err != nil {
+		return nil, err
+	}
 	return buf.Bytes(), nil
 }
 
@@ -369,6 +373,6 @@ func toMap(v any) any {
 		return nil
 	}
 	var out any
-	_ = json.Unmarshal(data, &out)
+	_ = json.Unmarshal(data, &out) // data is what json.Marshal just wrote
 	return out
 }

@@ -80,6 +80,7 @@ func endGroup(group int, grace time.Duration) {
 	if group <= 1 {
 		return
 	}
+	// A group that is already gone cannot be signaled, which is what was wanted; so for SIGKILL below.
 	_ = syscall.Kill(-group, syscall.SIGTERM)
 	for deadline := time.Now().Add(grace); time.Now().Before(deadline); time.Sleep(pollInterval) {
 		if errors.Is(syscall.Kill(-group, 0), syscall.ESRCH) {

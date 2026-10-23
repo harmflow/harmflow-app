@@ -71,6 +71,7 @@ func EndLeftovers(ctx context.Context, id Identity) (int, error) {
 	if len(members) == 0 {
 		return 0, nil
 	}
+	// A process that ended meanwhile cannot be killed, which is what was wanted.
 	_ = syscall.Kill(-id.Group, syscall.SIGKILL)
 	for _, pid := range members {
 		_ = syscall.Kill(pid, syscall.SIGKILL)

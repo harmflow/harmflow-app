@@ -35,6 +35,7 @@ func Parse(content []byte) (FrontMatter, string) {
 	if end < 0 {
 		return fm, text
 	}
+	// A front matter that does not parse leaves fm empty: the item is still listed, with no description or tools.
 	_ = yaml.Unmarshal([]byte(rest[:end]), &fm)
 	body := strings.TrimPrefix(rest[end+4:], "\n")
 	return fm, body
@@ -93,14 +94,14 @@ func (d Dir) Items(kind string) []ports.ResolvedItem {
 	var names []string
 	switch kind {
 	case "agent":
-		entries, _ := os.ReadDir(filepath.Join(d.Root, "agents"))
+		entries, _ := os.ReadDir(filepath.Join(d.Root, "agents")) // a missing or unreadable directory has no items
 		for _, e := range entries {
 			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
 				names = append(names, strings.TrimSuffix(e.Name(), ".md"))
 			}
 		}
 	case "skill":
-		entries, _ := os.ReadDir(filepath.Join(d.Root, "skills"))
+		entries, _ := os.ReadDir(filepath.Join(d.Root, "skills")) // a missing or unreadable directory has no items
 		for _, e := range entries {
 			if e.IsDir() || e.Type()&os.ModeSymlink != 0 {
 				names = append(names, e.Name())
@@ -139,7 +140,7 @@ func CopyTree(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		rel, _ := filepath.Rel(src, p)
+		rel, _ := filepath.Rel(src, p) // the walk gives only paths under src, which Rel always relates
 		target := filepath.Join(dst, rel)
 		if fi.IsDir() {
 			return os.MkdirAll(target, 0o700)

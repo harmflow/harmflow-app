@@ -130,7 +130,9 @@ func (a *App) SetHarnessPath(ctx context.Context, id string, path *string) (port
 		paths[k] = v
 	}
 	a.mu.Unlock()
-	_ = a.d.State.Save("harnesses", paths)
+	if err := a.d.State.Save("harnesses", paths); err != nil {
+		a.log.Printf("saving the harness paths set by hand; they hold until the daemon stops: %v", err)
+	}
 	return a.detect(ctx, id), nil
 }
 

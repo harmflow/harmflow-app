@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"time"
 
@@ -273,7 +274,8 @@ func (a *App) recordFiringLocked(taskID string, r firingRecord) {
 }
 
 func errorText(err error) domain.Text {
-	if e, ok := err.(*Error); ok {
+	var e *Error
+	if errors.As(err, &e) {
 		return e.Text
 	}
 	return domain.TextOf(err)

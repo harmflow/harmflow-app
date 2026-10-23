@@ -131,6 +131,8 @@ func (a *App) GetExecution(id string) (ExecutionView, error) {
 		return ExecutionView{}, newError(CodeNotFound,
 			domain.T("execution_not_found", "no execution {{execution}}", "execution", id))
 	}
+	// A copy through JSON, as persistExecution takes: a record that marshals for the file marshals here, and data is what
+	// json.Marshal just wrote.
 	data, _ := json.Marshal(x)
 	a.mu.Unlock()
 	var c domain.Execution
