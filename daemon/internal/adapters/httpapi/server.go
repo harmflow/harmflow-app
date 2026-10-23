@@ -31,6 +31,8 @@ type Server struct {
 	Logger *log.Logger
 	// Clock defaults to the system clock.
 	Clock ports.Clock
+	// RejectionWindow is the least time between two log entries for the same reason of rejection, a minute when zero.
+	RejectionWindow time.Duration
 
 	mu       sync.RWMutex
 	token    string

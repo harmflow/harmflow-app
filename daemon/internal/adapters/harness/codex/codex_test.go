@@ -271,12 +271,11 @@ func TestPrepareDeliversBuiltins(t *testing.T) {
 // The Costs tab (harmflow-app#39), on a real Codex 0.163.0 run: one turn.completed carries the attempt's usage, its
 // input_tokens include the cached ones, and the cost is estimated from the table when the attempt ends.
 func TestUsageFromTurnCompleted(t *testing.T) {
-	defer func(old domain.PriceTable) { Prices = old }(Prices)
 	price := domain.Price{Input: 1.25, CacheRead: 0.125, Output: 10}
-	Prices = domain.PriceTable{AsOf: "2026-01-02", Prices: map[string]domain.Price{"gpt-test": price}}
+	prices := domain.PriceTable{AsOf: "2026-01-02", Prices: map[string]domain.Price{"gpt-test": price}}
 
 	p, events := replay(t, "usage.jsonl")
-	p.model, p.modelSource = "gpt-test", domain.ModelFromConfig
+	p.model, p.modelSource, p.prices = "gpt-test", domain.ModelFromConfig, prices
 	var live []*domain.Usage
 	for _, e := range events {
 		if e.Kind == ports.HarnessUsage {

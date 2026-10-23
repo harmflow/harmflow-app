@@ -144,17 +144,17 @@ func holdMidSave() bool {
 	if point == "" {
 		return false
 	}
-	HoldAt = func(p WritePoint) {
-		if p != point {
-			return
-		}
-		fmt.Println(heldMarker + string(p))
-		// Held until killed. Should the parent die first, its end of stdin closes and the child exits.
-		_, _ = io.Copy(io.Discard, os.Stdin)
-		os.Exit(2)
-	}
 	repo, err := NewTasks(os.Getenv(crashDirEnv))
 	if err == nil {
+		repo.HoldAt = func(p WritePoint) {
+			if p != point {
+				return
+			}
+			fmt.Println(heldMarker + string(p))
+			// Held until killed. Should the parent die first, its end of stdin closes and the child exits.
+			_, _ = io.Copy(io.Discard, os.Stdin)
+			os.Exit(2)
+		}
 		_, err = repo.Save(os.Getenv(crashIDEnv), []byte(os.Getenv(crashContentEnv)), "")
 	}
 	fmt.Fprintf(os.Stderr, "the save returned without holding at %s: %v\n", point, err)

@@ -45,9 +45,6 @@ type run struct {
 	hasContext     bool   // context.json holds parameters or history the session can use, not only the task's identity
 }
 
-// timeoutUnit is what a task's timeoutMinutes counts; tests shorten it, since a timeout is at least one minute.
-var timeoutUnit = time.Minute
-
 func (a *App) launch(x *domain.Execution, h *runHandle) {
 	a.wg.Add(1)
 	go func() {
@@ -89,7 +86,7 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 
 	eff := def.Effective()
 	now := a.now()
-	timeout := time.Duration(*eff.Spec.Execution.TimeoutMinutes) * timeoutUnit
+	timeout := time.Duration(*eff.Spec.Execution.TimeoutMinutes) * a.d.TimeoutUnit
 	deadline := now.Add(timeout)
 	// The timeout runs on real time; the record shows it on the daemon's clock. An execution outlives whatever fired it
 	// (an API request, a tick of the scheduler), so its context starts from none of theirs: it ends by its timeout, or by

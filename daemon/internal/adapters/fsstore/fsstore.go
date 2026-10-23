@@ -28,18 +28,18 @@ const (
 	AfterRename WritePoint = "after_rename"
 )
 
-// HoldAt, when set, is called at each WritePoint. Only a crash test sets it, in a child process that it then kills;
-// nothing in the daemon does, so it stays nil.
-var HoldAt func(WritePoint)
-
-func hold(p WritePoint) {
-	if HoldAt != nil {
-		HoldAt(p)
-	}
-}
-
 // WriteAtomic replaces path with data so a crash leaves either the complete old file or the complete new one.
 func WriteAtomic(path string, data []byte, perm os.FileMode) error {
+	return writeAtomic(path, data, perm, nil)
+}
+
+// writeAtomic is WriteAtomic, calling holdAt at each WritePoint when it is set.
+func writeAtomic(path string, data []byte, perm os.FileMode, holdAt func(WritePoint)) error {
+	hold := func(p WritePoint) {
+		if holdAt != nil {
+			holdAt(p)
+		}
+	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -95,6 +95,9 @@ func Revision(content []byte) string {
 type Tasks struct {
 	dir string
 	mu  sync.Mutex
+	// HoldAt, when set, is called at each WritePoint of a save. Only a crash test sets it, in a child process that it then
+	// kills; the daemon leaves it nil.
+	HoldAt func(WritePoint)
 }
 
 var _ ports.TaskRepository = (*Tasks)(nil)
@@ -172,7 +175,7 @@ func (t *Tasks) Save(id string, content []byte, expectedRevision string) (ports.
 	} else if expectedRevision != "" && errors.Is(err, ports.ErrNotFound) {
 		return ports.TaskFile{}, ports.ErrNotFound
 	}
-	if err := WriteAtomic(path, content, 0o600); err != nil {
+	if err := writeAtomic(path, content, 0o600, t.HoldAt); err != nil {
 		return ports.TaskFile{}, err
 	}
 	return t.read(path, id)

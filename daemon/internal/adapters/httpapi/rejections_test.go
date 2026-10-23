@@ -185,11 +185,8 @@ func TestAFloodOfRejectionsIsBounded(t *testing.T) {
 
 // The requests a minute's entry has not counted yet are written when the minute ends, and when the daemon stops.
 func TestPendingRejectionsAreWritten(t *testing.T) {
-	saved := rejectionWindow
-	rejectionWindow = 100 * time.Millisecond
-	t.Cleanup(func() { rejectionWindow = saved })
 	var out syncBuffer
-	s := &Server{Logger: log.New(&out, "", 0)}
+	s := &Server{Logger: log.New(&out, "", 0), RejectionWindow: 100 * time.Millisecond}
 	h := guarded(s)
 
 	first := time.Now()
@@ -204,7 +201,7 @@ func TestPendingRejectionsAreWritten(t *testing.T) {
 	if len(got) != 2 || got[0].count != 1 || got[1].count != 49 {
 		t.Fatalf("entries %+v, want the first request and then the other 49:\n%s", got, out.String())
 	}
-	if elapsed := time.Since(first); elapsed < rejectionWindow {
+	if elapsed := time.Since(first); elapsed < s.RejectionWindow {
 		t.Errorf("the second entry came %v after the first, within the window", elapsed)
 	}
 

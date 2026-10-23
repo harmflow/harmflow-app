@@ -340,6 +340,8 @@ type env struct {
 	service ports.HostServiceManager
 	// startCtx is the context the App starts under, when a test sets one; the test's own otherwise.
 	startCtx context.Context
+	// timeoutUnit is what a task's timeoutMinutes counts, when a test sets it; a minute otherwise.
+	timeoutUnit time.Duration
 }
 
 // newEnv starts an App on fake harnesses; configure sets up the env, its fakes included, before the App starts.
@@ -380,7 +382,7 @@ func (e *env) start(t *testing.T, configure ...func(*env)) {
 	}
 	a, err := New(Deps{Paths: e.paths, Version: "test", Clock: e.clock, Wake: e.wake, Location: time.UTC, Tasks: tasks,
 		State: state, Executions: execs, Events: e.events, Validator: v, Harnesses: []ports.HarnessAdapter{e.claude, e.codex},
-		Service: e.service, TickInterval: time.Hour, Logger: log.New(io.Discard, "", 0)})
+		Service: e.service, TickInterval: time.Hour, TimeoutUnit: e.timeoutUnit, Logger: log.New(io.Discard, "", 0)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3026,17 +3028,17 @@ func taskFileCrashChild() bool {
 	if dir == "" {
 		return false
 	}
-	fsstore.HoldAt = func(p fsstore.WritePoint) {
-		if p != fsstore.BeforeRename {
-			return
-		}
-		fmt.Println(taskFileCrashHeld)
-		// Held until killed. Should the parent die first, its end of stdin closes and the child exits.
-		_, _ = io.Copy(io.Discard, os.Stdin)
-		os.Exit(2)
-	}
 	tasks, err := fsstore.NewTasks(dir)
 	if err == nil {
+		tasks.HoldAt = func(p fsstore.WritePoint) {
+			if p != fsstore.BeforeRename {
+				return
+			}
+			fmt.Println(taskFileCrashHeld)
+			// Held until killed. Should the parent die first, its end of stdin closes and the child exits.
+			_, _ = io.Copy(io.Discard, os.Stdin)
+			os.Exit(2)
+		}
 		_, err = tasks.Save("crash-save", []byte(os.Getenv(taskFileCrashContentEnv)), "")
 	}
 	fmt.Fprintf(os.Stderr, "the save returned without holding: %v\n", err)
