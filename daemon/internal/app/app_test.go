@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -199,11 +200,29 @@ func (p *fakeParser) Finish(exit int, _ string, timedOut, cancelled bool) domain
 	return domain.AttemptEnd{Class: domain.ClassTaskError, Error: domain.Text{Message: fmt.Sprintf("exit %d", exit)}}
 }
 
-// hookedEvents runs the test's hook on each event before it is appended, on the goroutine that emits it.
+// hookedEvents runs the test's hook on each event before it is appended, on the goroutine that emits it. It then checks
+// the event as the log wrote it against event.schema.json, so every test's events follow the event model (FS-008
+// FR-007); the problems are reported when the test ends, since an event may come from another goroutine.
 type hookedEvents struct {
 	*eventlog.Log
-	mu   sync.Mutex
-	hook func(domain.Event)
+	schema  *schema.Validator
+	mu      sync.Mutex
+	hook    func(domain.Event)
+	checked map[string]int // events checked, by type
+	invalid []string
+}
+
+func newHookedEvents(t *testing.T, log *eventlog.Log, v *schema.Validator) *hookedEvents {
+	h := &hookedEvents{Log: log, schema: v, checked: map[string]int{}}
+	// Registered before the App's own cleanup, this runs after it, and so sees daemon.stopping too.
+	t.Cleanup(func() {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		for _, problem := range h.invalid {
+			t.Errorf("an event does not fit event.schema.json: %s", problem)
+		}
+	})
+	return h
 }
 
 func (h *hookedEvents) Append(ev domain.Event) domain.Event {
@@ -213,7 +232,41 @@ func (h *hookedEvents) Append(ev domain.Event) domain.Event {
 	if hook != nil {
 		hook(ev)
 	}
-	return h.Log.Append(ev)
+	stored := h.Log.Append(ev)
+	h.check(stored)
+	return stored
+}
+
+// check validates the JSON the log writes for the event, as a line of its execution's JSONL and as its SSE data.
+func (h *hookedEvents) check(ev domain.Event) {
+	data, err := json.Marshal(ev)
+	var issues []schema.Issue
+	if err == nil {
+		var doc any
+		if doc, err = schema.FromJSON(data); err == nil {
+			issues = h.schema.ValidateEvent(doc)
+		}
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.checked[ev.Type]++
+	switch {
+	case err != nil:
+		h.invalid = append(h.invalid, fmt.Sprintf("%s: %v", ev.Type, err))
+	case len(issues) > 0:
+		problems := make([]string, len(issues))
+		for i, is := range issues {
+			problems[i] = is.Path + " " + trimTo(is.Message, 120)
+		}
+		h.invalid = append(h.invalid, fmt.Sprintf("%s in %s", strings.Join(problems, "; "), data))
+	}
+}
+
+// checkedTypes is how many events of each type were checked so far.
+func (h *hookedEvents) checkedTypes() map[string]int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return maps.Clone(h.checked)
 }
 
 func (h *hookedEvents) setHook(hook func(domain.Event)) {
@@ -255,7 +308,7 @@ func openEnv(t *testing.T, home string, configure ...func(*env)) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := &env{t: t, clock: clock, home: home, events: &hookedEvents{Log: events},
+	e := &env{t: t, clock: clock, home: home, events: newHookedEvents(t, events, v),
 		claude: &fakeHarness{id: domain.HarnessClaudeCode}, codex: &fakeHarness{id: domain.HarnessCodex}}
 	for _, c := range configure {
 		c(e)
@@ -288,7 +341,7 @@ func (e *env) restart(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	n := &env{t: t, clock: e.clock, home: e.home, events: &hookedEvents{Log: events}, claude: e.claude, codex: e.codex}
+	n := &env{t: t, clock: e.clock, home: e.home, events: newHookedEvents(t, events, v), claude: e.claude, codex: e.codex}
 	a, err := New(Deps{Paths: paths, Version: "test", Clock: e.clock, Location: time.UTC, Tasks: tasks, State: state,
 		Executions: execs, Events: n.events, Validator: v, Harnesses: []ports.HarnessAdapter{n.claude, n.codex},
 		TickInterval: time.Hour, Logger: log.New(io.Discard, "", 0)})
@@ -475,6 +528,63 @@ func TestConflictingActivityIsLogged(t *testing.T) {
 	if err := json.Unmarshal(contracts.EventSchema, &contract); err != nil ||
 		!slices.Contains(contract.Defs.EventType.Enum, domain.EventWorkItemConflicting) {
 		t.Errorf("%s is not an event type of the contract (%v)", domain.EventWorkItemConflicting, err)
+	}
+}
+
+// FS-008 FR-007: every event the use cases append follows event.schema.json. hookedEvents checks each one in every
+// test; this one runs a success, a failover, a cancellation, and a no_work outcome, and makes sure each was checked.
+func TestEventsFitTheirSchema(t *testing.T) {
+	e := newEnv(t)
+	e.create("succeeds", "")
+	e.create("fails-over", "    fallback:\n      candidates:\n        - provider: codex\n")
+	e.create("cancelled", "")
+	e.create("finds-nothing", "")
+	e.claude.setScript(func(req ports.RunRequest) string {
+		switch {
+		case strings.Contains(req.Prompt, "fails-over"):
+			return "echo 'END quota'"
+		case strings.Contains(req.Prompt, "cancelled"):
+			return slow
+		case strings.Contains(req.Prompt, "finds-nothing"):
+			return fmt.Sprintf(`printf '{"outcome":"no_work"}' > %s/report.json; echo 'END ok'`, req.ExecutionDir)
+		}
+		return "echo 'Working on it'; echo 'END ok'"
+	})
+	e.codex.setScript(func(ports.RunRequest) string { return "echo 'END ok'" })
+	ids := map[string]string{}
+	for _, task := range []string{"succeeds", "fails-over", "cancelled", "finds-nothing"} {
+		r, err := e.app.RunTask(task)
+		if err != nil || r.Outcome != "started" {
+			t.Fatalf("run %s: %v %+v", task, err, r)
+		}
+		ids[task] = r.ExecutionID
+	}
+	e.wait(ids["cancelled"], domain.StatusRunning)
+	if err := e.app.CancelExecution(ids["cancelled"]); err != nil {
+		t.Fatal(err)
+	}
+	e.wait(ids["succeeds"], domain.StatusCompleted)
+	if x := e.wait(ids["fails-over"], domain.StatusCompleted); x.HarnessSwitches != 1 {
+		t.Errorf("the failover switched %d times", x.HarnessSwitches)
+	}
+	e.wait(ids["cancelled"], domain.StatusCancelled)
+	e.wait(ids["finds-nothing"], domain.StatusNoWork)
+	// A record reads its final status before its terminal event is appended.
+	want := map[string]int{domain.EventExecutionCreated: 4, domain.EventHarnessMessage: 1,
+		domain.EventHarnessQuotaExhausted: 1, domain.EventHarnessSwitched: 1, domain.EventExecutionCompleted: 2,
+		domain.EventExecutionCancelled: 1, domain.EventExecutionNoWork: 1}
+	var checked map[string]int
+	enough := e.poll(10*time.Second, func() bool {
+		checked = e.events.checkedTypes()
+		for typ, n := range want {
+			if checked[typ] < n {
+				return false
+			}
+		}
+		return true
+	})
+	if !enough {
+		t.Errorf("events checked against the schema, by type: %v; want at least %v", checked, want)
 	}
 }
 
