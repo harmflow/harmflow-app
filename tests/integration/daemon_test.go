@@ -1490,6 +1490,14 @@ func TestScheduledRunWithDashboardClosed(t *testing.T) {
 	if x["taskId"] != "every-minute" || x["trigger"] != "schedule" || x["status"] != "completed" {
 		t.Errorf("execution %s: task %v, trigger %v, status %v", id, x["taskId"], x["trigger"], x["status"])
 	}
+	// FS-002 FR-001, AC-001 (FS-002-F01): the scheduler fired the occurrence the save announced, on a minute boundary.
+	// Only the execution's own view carries scheduledFor; the list does not.
+	scheduledFor, err := time.Parse(time.RFC3339Nano, fmt.Sprint(x["scheduledFor"]))
+	announced, _ := time.Parse(time.RFC3339Nano, fmt.Sprint(scheduled["nextFireAt"]))
+	if err != nil || !scheduledFor.Equal(scheduledFor.Truncate(time.Minute)) || !scheduledFor.Equal(announced) {
+		t.Errorf("execution %s: scheduledFor %v (%v), want %v, the minute boundary the save announced", id,
+			x["scheduledFor"], err, scheduled["nextFireAt"])
+	}
 
 	// A client that connects only now finds the execution, with its task, trigger, status, and times.
 	list := d.list("/executions")
