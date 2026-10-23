@@ -419,6 +419,7 @@ export const ptBR: Resources = {
     gh_not_found: "a CLI do GitHub (gh) não foi encontrada; o tipo de issue do GitHub precisa dela",
     command_failed: "{{command}} falhou: {{detail}}",
     harness_feature_missing: "esta versão do {{harness}} não tem {{feature}}, de que o HarmFlow precisa",
+    harness_version_below_minimum: "o {{harness}} {{version}} é anterior à {{minimum}}, a linha de versões mais antiga que o HarmFlow suporta",
     claude_not_signed_in: "o Claude Code não está conectado; execute `claude` em um terminal e entre na conta",
     not_signed_in: "{{name}} não está conectado; execute `{{command}}` em um terminal",
     authentication_unverified: "não foi possível verificar a autenticação",
