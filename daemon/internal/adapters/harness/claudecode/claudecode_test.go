@@ -348,6 +348,35 @@ esac
 	return path
 }
 
+// The supported range is written in release lines: 2.0 is the minimum, 2.1 the newest tested line, and every patch
+// inside a line counts as the same line.
+func TestDetectSupportedRangeByMinor(t *testing.T) {
+	signedIn := `echo '{"loggedIn": true}'`
+	cases := []struct {
+		version, wantSupport, wantReadiness, wantKey string
+	}{
+		{"1.9.9", "below_minimum", "not_ready", "harness_version_below_minimum"},
+		{"2.0.0", "supported", "ready", ""},
+		{"2.1.0", "supported", "ready", ""},
+		{"2.1.239", "supported", "ready", ""},
+		{"2.1.240", "supported", "ready", ""},
+		{"2.2.0", "untested_newer", "ready", ""},
+		{"2.10.0", "untested_newer", "ready", ""},
+		{"3.0.0", "untested_newer", "ready", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.version, func(t *testing.T) {
+			info := (&Adapter{Home: t.TempDir()}).Detect(context.Background(),
+				standIn(t, `echo "`+c.version+` (Claude Code)"`, signedIn))
+			if info.VersionSupport != c.wantSupport || info.Readiness != c.wantReadiness ||
+				info.DiagnosticKey != c.wantKey {
+				t.Errorf("version %s: support %s, readiness %s, diagnostic %q; want %s, %s, %q", c.version,
+					info.VersionSupport, info.Readiness, info.DiagnosticKey, c.wantSupport, c.wantReadiness, c.wantKey)
+			}
+		})
+	}
+}
+
 // FS-004 FR-006, FR-008 (harmflow-app#71): what the probes could not establish reads unknown, never a known state. A
 // sign-in is invalid only when the CLI says it is signed out; a probe that is killed, as one is at its timeout, or that
 // fails otherwise leaves the harness ready with a diagnostic, and the first execution proves the sign-in.

@@ -27,8 +27,11 @@ import (
 const (
 	ID   = domain.HarnessClaudeCode
 	Name = "Claude Code"
-	// TestedUpTo is the newest version this adapter was tested with; newer versions run with a warning (D-078).
-	TestedUpTo = "2.1.239"
+	// MinVersion is the oldest release line HarmFlow supports; an older CLI is not ready. TestedMinor is the newest
+	// release line it was tested with: every patch in it runs as supported, and a newer line runs with a warning
+	// (D-078, D-115).
+	MinVersion  = "2.0"
+	TestedMinor = "2.1"
 )
 
 // Features the adapter needs from the CLI; a version without them is not ready (D-078).
@@ -132,7 +135,12 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 		case info.Version == "":
 			// No number to check against the tested range; the help text passed, so it runs with a warning.
 			info.VersionSupport = "unknown"
-		case compareVersions(info.Version, TestedUpTo) > 0:
+		case compareVersions(releaseLine(info.Version), MinVersion) < 0:
+			info.VersionSupport = "below_minimum"
+			info.Readiness = "not_ready"
+			info.SetDiagnostic(domain.T("harness_version_below_minimum", "{{harness}} {{version}} is older than {{minimum}}, the oldest version line HarmFlow supports",
+				"harness", Name, "version", info.Version, "minimum", MinVersion))
+		case compareVersions(releaseLine(info.Version), TestedMinor) > 0:
 			info.VersionSupport = "untested_newer"
 		}
 	}
@@ -780,6 +788,15 @@ func firstNonEmpty(s ...string) string {
 		}
 	}
 	return ""
+}
+
+// releaseLine keeps the major and minor of a dotted version, the level that the supported range is written in.
+func releaseLine(v string) string {
+	parts := strings.Split(v, ".")
+	if len(parts) > 2 {
+		parts = parts[:2]
+	}
+	return strings.Join(parts, ".")
 }
 
 // compareVersions compares dotted numeric versions.

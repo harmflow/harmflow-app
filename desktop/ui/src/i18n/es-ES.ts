@@ -421,6 +421,7 @@ export const esES: Resources = {
     gh_not_found: "no se encontró la CLI de GitHub (gh); el tipo de issue de GitHub la necesita",
     command_failed: "{{command}} falló: {{detail}}",
     harness_feature_missing: "esta versión de {{harness}} no tiene {{feature}}, que HarmFlow necesita",
+    harness_version_below_minimum: "{{harness}} {{version}} es anterior a la {{minimum}}, la línea de versiones más antigua que admite HarmFlow",
     claude_not_signed_in: "Claude Code no tiene la sesión iniciada; ejecuta `claude` en una terminal e inicia sesión",
     not_signed_in: "{{name}} no tiene la sesión iniciada; ejecuta `{{command}}` en una terminal",
     authentication_unverified: "no se pudo verificar la autenticación",

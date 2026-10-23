@@ -836,6 +836,7 @@ components:
         - gh_not_found
         - command_failed
         - harness_feature_missing
+        - harness_version_below_minimum
         - claude_not_signed_in
         - not_signed_in
         - authentication_unverified

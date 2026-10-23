@@ -4,7 +4,7 @@ import "github.com/harmflow/harmflow-app/daemon/internal/domain"
 
 // Prices are Anthropic's API list prices for the Claude models, in USD per million tokens at the standard tier, as read
 // on AsOf from https://platform.claude.com/docs/en/about-claude/pricing. CacheWriteShort is the 5-minute write,
-// CacheWriteLong the 1-hour one. Update them with TestedUpTo, in the same release step.
+// CacheWriteLong the 1-hour one. Update them with TestedMinor, in the same release step.
 //
 // The cost of a Claude Code attempt is the one the CLI reports; these give its split by token class, which differs
 // from it when a request was billed apart from the standard tier (fast mode, US-only inference). Haiku 5.5 is left

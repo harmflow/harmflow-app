@@ -410,6 +410,7 @@ export const enUS = {
     gh_not_found: "the GitHub CLI (gh) was not found; the GitHub issue type needs it",
     command_failed: "{{command}} failed: {{detail}}",
     harness_feature_missing: "this {{harness}} version lacks {{feature}}, which HarmFlow needs",
+    harness_version_below_minimum: "{{harness}} {{version}} is older than {{minimum}}, the oldest version line HarmFlow supports",
     claude_not_signed_in: "Claude Code is not signed in; run `claude` in a terminal and sign in",
     not_signed_in: "{{name}} is not signed in; run `{{command}}` in a terminal",
     authentication_unverified: "authentication could not be verified",
