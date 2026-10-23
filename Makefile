@@ -100,6 +100,12 @@ app: sidecar ## Build HarmFlow.app and the DMG (unsigned until the Developer ID 
 	cd desktop && pnpm tauri build
 	@echo "Bundles in desktop/src-tauri/target/release/bundle/"
 
+# No prerequisite and no $(MAKE) here: the script pulls, then builds in a make of its own, whose COMMIT is read after
+# the pull. A $(MAKE) in the recipe would also run it under make -n.
+.PHONY: update-app
+update-app: ## Bring the local app to the latest main and restart the daemon and window that were running
+	@packaging/macos/update-app.sh
+
 .PHONY: clean
 clean: ## Remove build output
 	rm -rf build desktop/ui/dist
