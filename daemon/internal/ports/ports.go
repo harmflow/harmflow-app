@@ -229,6 +229,12 @@ type HarnessAdapter interface {
 	UserItems(kind string) []ResolvedItem
 }
 
+// HarnessIdentifier is a HarnessAdapter that tells whether a file is its harness: an executable file whose --version
+// output names it (D-113, FS-004 FR-001).
+type HarnessIdentifier interface {
+	Identify(ctx context.Context, path string) error
+}
+
 // ProfileWarner is a HarnessAdapter whose capabilities cannot always check a model and effort: ProfileWarning says so,
 // and the save keeps them with that warning (FS-004 FR-005).
 type ProfileWarner interface {

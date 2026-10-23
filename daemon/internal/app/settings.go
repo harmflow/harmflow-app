@@ -9,14 +9,17 @@ import (
 
 // Settings are the preferences the dashboard changes (FS-010 FR-009, FS-011 FR-006, FS-012).
 type Settings struct {
-	SchemaVersion       string            `json:"schemaVersion"`
-	Language            string            `json:"language"`
-	TrayEnabled         bool              `json:"trayEnabled"`
-	NotificationLevel   string            `json:"notificationLevel"`
-	LogRetentionDays    int               `json:"logRetentionDays"`
-	Theme               string            `json:"theme"`
-	PathVariables       map[string]string `json:"pathVariables"`
-	OnboardingCompleted bool              `json:"onboardingCompleted"`
+	SchemaVersion     string            `json:"schemaVersion"`
+	Language          string            `json:"language"`
+	TrayEnabled       bool              `json:"trayEnabled"`
+	NotificationLevel string            `json:"notificationLevel"`
+	LogRetentionDays  int               `json:"logRetentionDays"`
+	Theme             string            `json:"theme"`
+	PathVariables     map[string]string `json:"pathVariables"`
+	// AllowedFolders are where, beside the home folder and the mounted volumes, a path that lets a harness write may
+	// lead (D-113, FS-009 FR-014).
+	AllowedFolders      []string `json:"allowedFolders"`
+	OnboardingCompleted bool     `json:"onboardingCompleted"`
 }
 
 type AutostartView struct {
@@ -37,12 +40,13 @@ type SettingsPatch struct {
 	LogRetentionDays    *int              `json:"logRetentionDays"`
 	Autostart           *bool             `json:"autostart"`
 	PathVariables       map[string]string `json:"pathVariables"`
+	AllowedFolders      []string          `json:"allowedFolders"`
 	OnboardingCompleted *bool             `json:"onboardingCompleted"`
 }
 
 func defaultSettings() Settings {
 	return Settings{SchemaVersion: "1", Language: "system", TrayEnabled: true, NotificationLevel: "all",
-		LogRetentionDays: 30, Theme: "harmflow-dark", PathVariables: map[string]string{}}
+		LogRetentionDays: 30, Theme: "harmflow-dark", PathVariables: map[string]string{}, AllowedFolders: []string{}}
 }
 
 func (a *App) loadSettings() error {
@@ -52,6 +56,9 @@ func (a *App) loadSettings() error {
 	}
 	if s.PathVariables == nil {
 		s.PathVariables = map[string]string{}
+	}
+	if s.AllowedFolders == nil {
+		s.AllowedFolders = []string{}
 	}
 	if s.LogRetentionDays <= 0 {
 		s.LogRetentionDays = 30
@@ -70,6 +77,7 @@ func (a *App) GetSettings() SettingsView {
 		vars[k] = v
 	}
 	s.PathVariables = vars
+	s.AllowedFolders = append([]string{}, s.AllowedFolders...)
 	a.mu.Unlock()
 	v := SettingsView{Settings: s, Autostart: AutostartView{Mechanism: "none"}}
 	if a.d.Service != nil {
@@ -100,6 +108,9 @@ func (a *App) UpdateSettings(p SettingsPatch) (SettingsView, error) {
 			return SettingsView{}, newError(CodeValidationFailed, domain.T("settings_path_variable_invalid",
 				`path variable "{{name}}" must be uppercase letters, digits, and _`, "name", k))
 		}
+	}
+	if err := a.checkPathSettings(p); err != nil {
+		return SettingsView{}, err
 	}
 	if p.Autostart != nil && a.d.Service != nil {
 		var err error
@@ -132,6 +143,9 @@ func (a *App) UpdateSettings(p SettingsPatch) (SettingsView, error) {
 			s.PathVariables[k] = v
 		}
 	}
+	if p.AllowedFolders != nil {
+		s.AllowedFolders = append([]string{}, p.AllowedFolders...)
+	}
 	if p.OnboardingCompleted != nil {
 		s.OnboardingCompleted = *p.OnboardingCompleted
 	}
@@ -141,4 +155,56 @@ func (a *App) UpdateSettings(p SettingsPatch) (SettingsView, error) {
 		return SettingsView{}, err
 	}
 	return a.GetSettings(), nil
+}
+
+// checkPathSettings refuses an allowed folder in a place no harness may write, and a change to the path variables or the
+// allowed folders that would put a saved task's path outside the rule, naming the task (D-113, FS-009 FR-014).
+func (a *App) checkPathSettings(p SettingsPatch) error {
+	if p.PathVariables == nil && p.AllowedFolders == nil {
+		return nil
+	}
+	for i, f := range p.AllowedFolders {
+		real, err := a.allowedFolder(f)
+		if err == nil {
+			err = a.pathEnvFor(Settings{}).rule.Forbidden(real)
+		}
+		if err != nil {
+			return &Error{Code: CodeValidationFailed, Text: domain.T("settings_allowed_folder_invalid",
+				"allowed folder {{folder}} is refused: {{detail}}", "folder", f).Nest("detail", domain.TextOf(err)),
+				Validation: fieldIssue(fmt.Sprintf("/allowedFolders/%d", i), domain.TextOf(err))}
+		}
+	}
+	a.mu.Lock()
+	current := a.settings
+	after := current
+	if p.PathVariables != nil {
+		after.PathVariables = p.PathVariables
+	}
+	if p.AllowedFolders != nil {
+		after.AllowedFolders = p.AllowedFolders
+	}
+	docs := map[string]domain.TaskDocument{}
+	for id, e := range a.tasks {
+		if e.invalid == nil && !e.deletePending {
+			docs[id] = e.doc
+		}
+	}
+	a.mu.Unlock()
+	before, then := a.pathEnvFor(current), a.pathEnvFor(after)
+	for _, id := range sortedKeys(docs) {
+		broken := newPathIssues(a.taskPathIssues(docs[id], before), a.taskPathIssues(docs[id], then))
+		if len(broken) == 0 {
+			continue
+		}
+		is := broken[0]
+		return &Error{Code: CodeValidationFailed, Text: domain.T("settings_change_breaks_task",
+			"this change would put {{field}} of task {{task}} outside the allowed paths: {{detail}}",
+			"field", is.path, "task", id).Nest("detail", is.text), Validation: fieldIssue(is.path, is.text)}
+	}
+	return nil
+}
+
+// fieldIssue is a ValidationResult with the one error at path, for a refusal that is not a task's.
+func fieldIssue(path string, text domain.Text) *ValidationResult {
+	return &ValidationResult{Errors: []schemaIssue{{Path: path, Text: text, Code: "semantic"}}, Warnings: []schemaIssue{}}
 }

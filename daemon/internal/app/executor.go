@@ -33,6 +33,7 @@ type run struct {
 	dir      string
 	work     string
 	extra    []string
+	writable []string // a custom profile's writable paths, resolved
 	saveMu   sync.Mutex
 	lastSave time.Time
 
@@ -218,6 +219,17 @@ func (r *run) setStatus(s domain.ExecutionStatus, step domain.Text) bool {
 	return true
 }
 
+// permissions are the task's, with a custom profile's writable paths as prepare resolved them.
+func (r *run) permissions() domain.Permissions {
+	p := *r.eff.Spec.Permissions
+	if p.Custom != nil && len(p.Custom.WritablePaths) > 0 {
+		c := *p.Custom
+		c.WritablePaths = append([]string{}, r.writable...)
+		p.Custom = &c
+	}
+	return p
+}
+
 // prepare creates the execution directory and the workspace, and writes context.json for the session.
 func (r *run) prepare() error {
 	a := r.a
@@ -225,21 +237,36 @@ func (r *run) prepare() error {
 	if err := os.MkdirAll(r.dir, 0o700); err != nil {
 		return domain.TextErr("execution_dir_failed", "creating the execution directory: {{detail}}", "detail", err.Error())
 	}
+	// The paths are checked again as the execution starts, and the harness gets them resolved, so a symlink retargeted
+	// after saving neither leads out nor differs from what was checked (FS-009 FR-014).
+	pe := a.currentPathEnv()
+	if issues := a.taskPathIssues(r.def, pe); len(issues) > 0 {
+		return &domain.TextError{Text: refusedPath(issues[0])}
+	}
 	work := filepath.Join(a.d.Paths.Workspace, r.x.TaskID)
 	if p := r.eff.Spec.Workspace.Path; p != "" {
-		expanded, err := a.expand(p)
+		resolved, err := pe.writablePath(a, p)
 		if err != nil {
 			return err
 		}
-		work = expanded
+		work = resolved
 	}
 	if err := os.MkdirAll(work, 0o700); err != nil {
 		return domain.TextErr("workspace_create_failed", "creating the workspace {{path}}: {{detail}}", "path", work,
 			"detail", err.Error())
 	}
 	r.work = work
+	if c := r.eff.Spec.Permissions.Custom; c != nil {
+		for _, w := range c.WritablePaths {
+			resolved, err := pe.writablePath(a, w)
+			if err != nil {
+				return err
+			}
+			r.writable = append(r.writable, resolved)
+		}
+	}
 	for _, repo := range r.eff.Repositories() {
-		p, err := a.expand(repo.LocalPath)
+		p, err := pe.writablePath(a, repo.LocalPath)
 		if err != nil {
 			return err
 		}
@@ -546,7 +573,7 @@ func (r *run) runAttempt(ad ports.HarnessAdapter, info ports.HarnessInfo, p doma
 	req := ports.RunRequest{
 		ExecutionID: r.x.ID, TaskID: r.x.TaskID, Attempt: n, Prompt: r.eff.Spec.Prompt,
 		Context: r.harmflowContext(n, prev), Agents: agents, Skills: skills, Model: p.Model, Effort: p.Effort,
-		WorkDir: r.work, AdditionalDirs: r.extra, Permissions: *r.eff.Spec.Permissions, ExecutionDir: r.dir,
+		WorkDir: r.work, AdditionalDirs: r.extra, Permissions: r.permissions(), ExecutionDir: r.dir,
 		Env: r.env(),
 	}
 	// Recorded before Prepare, so a running attempt, and one whose harness never started, shows its input (FS-008 FR-010).

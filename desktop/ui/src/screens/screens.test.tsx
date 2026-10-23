@@ -137,6 +137,7 @@ const settings: Settings = {
   theme: "harmflow-dark",
   autostart: { enabled: false, mechanism: "launchd" },
   pathVariables: { PROJECTS_ROOT: "/Users/me/Projects" },
+  allowedFolders: ["/srv/repos"],
   onboardingCompleted: true,
 };
 
@@ -208,6 +209,13 @@ describe("screens", () => {
     expect(renderToString(<HistoryScreen openId={null} onOpen={() => {}} />)).toContain("Estado");
     expect(renderToString(<SettingsScreen />)).toContain("Agentes instalados");
     expect(renderToString(<OnboardingScreen onFinish={() => {}} onCreateTask={() => {}} onImport={() => {}} />)).toContain("Boas-vindas");
+  });
+
+  it("lists the allowed folders of Settings beside the path variables (D-113, FS-009 FR-014)", () => {
+    const html = renderToString(<SettingsScreen />);
+    expect(html).toContain("Pastas permitidas");
+    expect(html).toContain('value="/srv/repos"');
+    expect(html).toContain("Adicionar pasta");
   });
 
   it("names in About the commit each build comes from, and shows the version alone without one", () => {

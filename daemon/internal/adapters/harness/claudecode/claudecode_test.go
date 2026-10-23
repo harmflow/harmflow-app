@@ -428,3 +428,46 @@ func TestValidateProfile(t *testing.T) {
 		t.Error("an unsupported effort was accepted silently")
 	}
 }
+
+// D-113, FS-004 FR-001: a harness is a file whose --version names it. Discovery skips one that does not and takes the
+// next location; a path set by hand that does not is installed but not ready, saying why; Identify refuses both it and
+// a file that cannot be executed.
+func TestDetectSkipsAFileThatIsNotClaudeCode(t *testing.T) {
+	impostor := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(impostor, []byte("#!/bin/bash\necho \"GNU bash, version 5.2.0\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Both on PATH, the impostor first, so no installation of this machine's comes before them.
+	real := filepath.Join(t.TempDir(), "claude")
+	data, err := os.ReadFile(standIn(t, `echo "2.1.239 (Claude Code)"`, `echo '{"loggedIn": true}'`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(real, data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a := &Adapter{Home: t.TempDir(), PathEnv: filepath.Dir(impostor) + ":" + filepath.Dir(real)}
+	info := a.Detect(context.Background(), "")
+	if want, _ := filepath.EvalSymlinks(real); (info.Path != real && info.Path != want) || info.Readiness != "ready" {
+		t.Errorf("discovery took %s (%s, %s), want %s", info.Path, info.Readiness, info.Diagnostic, real)
+	}
+	info = a.Detect(context.Background(), impostor)
+	if info.Readiness != "installed" || info.DiagnosticKey != "harness_not_identified" || !info.Detected {
+		t.Errorf("a path set by hand that is not ClaudeCode: %s, %s (%s)", info.Readiness, info.DiagnosticKey,
+			info.Diagnostic)
+	}
+	plain := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(plain, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for path, key := range map[string]string{"/bin/sh": "harness_not_identified", impostor: "harness_not_identified",
+		plain: "harness_path_not_executable", real: ""} {
+		got := ""
+		if err := a.Identify(context.Background(), path); err != nil {
+			got = domain.TextOf(err).Key
+		}
+		if got != key {
+			t.Errorf("Identify(%s) = %q, want %q", path, got, key)
+		}
+	}
+}

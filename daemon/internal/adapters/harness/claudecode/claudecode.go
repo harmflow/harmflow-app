@@ -80,6 +80,7 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 		LastCheckedAt: time.Now(), Features: map[string]bool{}}
 	found := procutil.LookPath("claude", a.PathEnv, a.knownLocations())
 	info.Installations = append(info.Installations, found...)
+	candidates := found
 	switch {
 	case manualPath != "":
 		// A path set by hand is offered with the installations found, once (FS-004 FR-001).
@@ -87,29 +88,31 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 			info.Installations = append(info.Installations, manualPath)
 		}
 		info.Installation, info.Path, info.PathSource = manualPath, manualPath, "manual"
-		if st, err := os.Stat(manualPath); err != nil || st.IsDir() {
+		if !procutil.Executable(manualPath) {
 			info.SetDiagnostic(domain.T("harness_manual_path_invalid", "the path set by hand does not exist or is not a file"))
 			return info
 		}
-	case len(found) > 0:
-		info.Installation, info.Path = found[0], found[0]
-		info.PathSource = "known_location"
-		if inPath(found[0], a.PathEnv) {
-			info.PathSource = "path"
-		}
-	default:
+		candidates = []string{manualPath}
+	case len(found) == 0:
 		info.SetDiagnostic(domain.T("claude_not_found", "claude was not found on PATH or in the usual install locations"))
 		return info
+	}
+	// Discovery takes the first file that names Claude Code, skipping one that does not (D-113, FS-004 FR-001).
+	out, chosen, err := a.firstIdentified(ctx, candidates)
+	info.Installation, info.Path = chosen, chosen
+	if manualPath == "" {
+		info.PathSource = "known_location"
+		if inPath(chosen, a.PathEnv) {
+			info.PathSource = "path"
+		}
 	}
 	if real, err := filepath.EvalSymlinks(info.Path); err == nil {
 		info.Path = real
 	}
 	info.Detected = true
 	info.Readiness = "installed"
-	out, _, err := procutil.Output(ctx, 15*time.Second, a.Env, info.Path, "--version")
 	if err != nil {
-		info.SetDiagnostic(domain.T("command_failed", "{{command}} failed: {{detail}}", "command", "claude --version",
-			"detail", err.Error()))
+		info.SetDiagnostic(domain.TextOf(err))
 		return info
 	}
 	if m := versionRe.FindStringSubmatch(out); m != nil {
@@ -818,4 +821,29 @@ func compareVersions(a, b string) int {
 		}
 	}
 	return 0
+}
+
+// identifies reports whether the output of --version names Claude Code, as "2.1.239 (Claude Code)" does.
+func identifies(out string) bool { return strings.Contains(out, "Claude Code") }
+
+// Identify checks that path is an executable file whose --version output names Claude Code (D-113, FS-004 FR-001).
+func (a *Adapter) Identify(ctx context.Context, path string) error {
+	_, err := procutil.IdentifyHarness(ctx, a.Env, path, Name, "claude", identifies)
+	return err
+}
+
+// firstIdentified returns the first candidate that names Claude Code, with its --version output, or the first
+// candidate and why it failed when none does.
+func (a *Adapter) firstIdentified(ctx context.Context, candidates []string) (string, string, error) {
+	var first error
+	for _, c := range candidates {
+		out, err := procutil.IdentifyHarness(ctx, a.Env, c, Name, "claude", identifies)
+		if err == nil {
+			return out, c, nil
+		}
+		if first == nil {
+			first = err
+		}
+	}
+	return "", candidates[0], first
 }
