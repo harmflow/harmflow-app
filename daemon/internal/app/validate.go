@@ -193,11 +193,21 @@ func (a *App) semanticChecks(r *ValidationResult, doc domain.TaskDocument, mode 
 			}
 		}
 	}
+	// The paths that let a harness write, and a script's program, are errors in every mode: a task file written outside
+	// the dashboard is checked too, and loads as invalid (D-113, FS-009 FR-014).
+	refused := map[string]bool{}
+	for _, is := range a.taskPathIssues(doc, a.currentPathEnv()) {
+		r.addError(is.path, is.text)
+		refused[is.path] = true
+	}
 	for i, repo := range doc.Repositories() {
 		path := fmt.Sprintf("/spec/githubIssueImplementation/repositories/%d/localPath", i)
 		p, err := a.expand(repo.LocalPath)
 		if err != nil {
 			r.addWarning(path, domain.WarningOther, domain.TextOf(err))
+			continue
+		}
+		if refused[path] {
 			continue
 		}
 		if st, err := os.Stat(p); err != nil || !st.IsDir() {

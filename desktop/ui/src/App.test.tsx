@@ -65,6 +65,7 @@ const settings: Settings = {
   theme: "harmflow-dark",
   autostart: { enabled: false, mechanism: "launchd" },
   pathVariables: {},
+  allowedFolders: [],
   onboardingCompleted: true,
 };
 

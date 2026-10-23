@@ -946,6 +946,8 @@ func TestFormDocumentIsTheFile(t *testing.T) {
 	}
 	d := startDaemon(t, home)
 	repo := t.TempDir()
+	// Outside the home folder, so an allowed folder (FS-009 FR-014).
+	d.call("PATCH", "/settings", map[string]any{"allowedFolders": []any{repo}}, 200)
 	complete := completeTask("complete", repo)
 	// An empty list of failover triggers or notified events is a choice the file keeps (harmflow/harmflow-app#83).
 	empty := completeTask("empty-lists", repo)
@@ -2339,6 +2341,8 @@ func pushRepository(t *testing.T) (remote, repo string) {
 func (d *daemon) runUntilPushed(taskID, repo, push string) (id, pushed string) {
 	t := d.t
 	t.Helper()
+	// The repository is outside the home folder, so an allowed folder (FS-009 FR-014).
+	d.call("PATCH", "/settings", map[string]any{"allowedFolders": []any{repo}}, 200)
 	d.call("POST", "/tasks", map[string]any{"yaml": task(taskID, "ITEM=o/r#7 SCENARIO=push",
 		"  workspace:\n    path: "+strconv.Quote(repo)+"\n")}, 201)
 	id = d.call("POST", "/tasks/"+taskID+"/run", nil, 202)["executionId"].(string)

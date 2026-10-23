@@ -230,6 +230,8 @@ export function SettingsScreen() {
 
         <Panel title={t("settings.sections.variables")} icon="key">
           <PathVariables value={settings?.pathVariables ?? {}} onSave={(v) => void patch({ pathVariables: v })} />
+          <h3 className="subhead">{t("settings.allowedFolders")}</h3>
+          <AllowedFolders value={settings?.allowedFolders ?? []} onSave={(v) => void patch({ allowedFolders: v })} />
         </Panel>
 
         <Panel title={t("settings.sections.security")} icon="shield">
@@ -327,6 +329,41 @@ function PathVariables({ value, onSave }: { value: Record<string, string>; onSav
           {t("settings.addVariable")}
         </Button>
         <Button size="sm" variant="primary" disabled={!changed} onClick={() => onSave(Object.fromEntries(rows.filter(([k]) => k.trim())))}>
+          {t("common.save")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// The folders, beside the home folder and the mounted volumes, where a task's paths may lead (D-113, FS-009 FR-014).
+// The daemon refuses one where no harness may write, and a change that would leave a saved task outside them.
+function AllowedFolders({ value, onSave }: { value: string[]; onSave: (v: string[]) => void }) {
+  const { t } = useTranslation();
+  const [rows, setRows] = useState<string[]>(value);
+  useEffect(() => setRows(value), [JSON.stringify(value)]);
+  const kept = rows.map((r) => r.trim()).filter(Boolean);
+  const changed = JSON.stringify(kept) !== JSON.stringify(value);
+  return (
+    <div className="row-list">
+      <p className="field__hint">{t("settings.allowedFoldersHint")}</p>
+      {rows.map((f, i) => (
+        <div className="grid-folder" key={i}>
+          <TextInput
+            className="mono"
+            aria-label={t("settings.allowedFolder")}
+            placeholder={t("settings.allowedFolderPlaceholder")}
+            value={f}
+            onChange={(e) => setRows(rows.map((r, j) => (j === i ? e.target.value : r)))}
+          />
+          <IconButton icon="trash" label={t("common.remove")} onClick={() => setRows(rows.filter((_, j) => j !== i))} />
+        </div>
+      ))}
+      <div className="inline-actions">
+        <Button size="sm" icon="plus" onClick={() => setRows([...rows, ""])}>
+          {t("settings.addAllowedFolder")}
+        </Button>
+        <Button size="sm" variant="primary" disabled={!changed} onClick={() => onSave(kept)}>
           {t("common.save")}
         </Button>
       </div>

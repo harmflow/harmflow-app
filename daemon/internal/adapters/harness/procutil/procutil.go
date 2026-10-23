@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
@@ -337,7 +338,7 @@ func LookPath(name string, pathEnv string, known []string) []string {
 		if p == "" || seen[p] {
 			return
 		}
-		if info, err := os.Stat(p); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+		if Executable(p) {
 			seen[p] = true
 			out = append(out, p)
 		}
@@ -349,6 +350,31 @@ func LookPath(name string, pathEnv string, known []string) []string {
 		add(k)
 	}
 	return out
+}
+
+// Executable reports whether path names a regular file with an execute bit, a symlink to one included.
+func Executable(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular() && info.Mode()&0o111 != 0
+}
+
+// IdentifyHarness checks that path is the harness named harness: an executable file whose --version output, which it
+// returns, names it as names says, where cli is the command's own name (D-113, FS-004 FR-001). A file that prints a
+// harness's name passes: this catches a wrong file, not an impostor.
+func IdentifyHarness(ctx context.Context, env []string, path, harness, cli string, names func(string) bool) (string, error) {
+	if !Executable(path) {
+		return "", domain.TextErr("harness_path_not_executable", "no executable file at {{path}}", "path", path)
+	}
+	out, _, err := Output(ctx, 15*time.Second, env, path, "--version")
+	if err != nil {
+		return "", domain.TextErr("command_failed", "{{command}} failed: {{detail}}", "command", cli+" --version",
+			"detail", err.Error())
+	}
+	if !names(out) {
+		return out, domain.TextErr("harness_not_identified",
+			"{{path}} is not {{harness}}: its --version output does not name it", "path", path, "harness", harness)
+	}
+	return out, nil
 }
 
 func filepathSplitList(p string) []string {

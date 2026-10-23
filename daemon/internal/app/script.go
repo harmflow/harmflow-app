@@ -193,6 +193,9 @@ func (r *run) runScript(deadline time.Time) (domain.ExecutionStatus, domain.Text
 	if !r.def.RunsOn(a.d.OS) {
 		return domain.StatusFailed, a.systemsText(r.def)
 	}
+	if issues := a.taskPathIssues(r.def, a.currentPathEnv()); len(issues) > 0 {
+		return domain.StatusFailed, refusedPath(issues[0])
+	}
 	r.dir = filepath.Join(a.d.Paths.Runs, r.x.ID)
 	if err := os.MkdirAll(r.dir, 0o700); err != nil {
 		return domain.StatusFailed, domain.T("execution_dir_failed", "creating the execution directory: {{detail}}",

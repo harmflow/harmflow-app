@@ -73,6 +73,7 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 		LastCheckedAt: time.Now(), Features: map[string]bool{}}
 	found := procutil.LookPath("codex", a.PathEnv, a.knownLocations())
 	info.Installations = append(info.Installations, found...)
+	candidates := found
 	switch {
 	case manualPath != "":
 		// A path set by hand is offered with the installations found, once (FS-004 FR-001).
@@ -80,28 +81,31 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 			info.Installations = append(info.Installations, manualPath)
 		}
 		info.Installation, info.Path, info.PathSource = manualPath, manualPath, "manual"
-		if st, err := os.Stat(manualPath); err != nil || st.IsDir() {
+		if !procutil.Executable(manualPath) {
 			info.SetDiagnostic(domain.T("harness_manual_path_invalid", "the path set by hand does not exist or is not a file"))
 			return info
 		}
-	case len(found) > 0:
-		info.Installation, info.Path, info.PathSource = found[0], found[0], "known_location"
-		for _, d := range strings.Split(a.PathEnv, ":") {
-			if d == filepath.Dir(found[0]) {
-				info.PathSource = "path"
-			}
-		}
-	default:
+		candidates = []string{manualPath}
+	case len(found) == 0:
 		info.SetDiagnostic(domain.T("codex_not_found",
 			"codex was not found on PATH, in Codex.app, or in the usual install locations"))
 		return info
 	}
+	// Discovery takes the first file that names Codex, skipping one that does not (D-113, FS-004 FR-001).
+	out, chosen, err := a.firstIdentified(ctx, candidates)
+	info.Installation, info.Path = chosen, chosen
+	if manualPath == "" {
+		info.PathSource = "known_location"
+		for _, d := range strings.Split(a.PathEnv, ":") {
+			if d == filepath.Dir(chosen) {
+				info.PathSource = "path"
+			}
+		}
+	}
 	info.Detected = true
 	info.Readiness = "installed"
-	out, _, err := procutil.Output(ctx, 15*time.Second, a.Env, info.Path, "--version")
 	if err != nil {
-		info.SetDiagnostic(domain.T("command_failed", "{{command}} failed: {{detail}}", "command", "codex --version",
-			"detail", err.Error()))
+		info.SetDiagnostic(domain.TextOf(err))
 		return info
 	}
 	if m := versionRe.FindStringSubmatch(out); m != nil {
@@ -158,6 +162,31 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 		info.SetDiagnostic(domain.T("authentication_unverified", "authentication could not be verified"))
 	}
 	return info
+}
+
+// identifies reports whether the output of --version names Codex, as "codex-cli 0.163.0" does.
+func identifies(out string) bool { return strings.Contains(strings.ToLower(out), "codex") }
+
+// Identify checks that path is an executable file whose --version output names Codex (D-113, FS-004 FR-001).
+func (a *Adapter) Identify(ctx context.Context, path string) error {
+	_, err := procutil.IdentifyHarness(ctx, a.Env, path, Name, "codex", identifies)
+	return err
+}
+
+// firstIdentified returns the first candidate that names Codex, with its --version output, or the first candidate and
+// why it failed when none does.
+func (a *Adapter) firstIdentified(ctx context.Context, candidates []string) (string, string, error) {
+	var first error
+	for _, c := range candidates {
+		out, err := procutil.IdentifyHarness(ctx, a.Env, c, Name, "codex", identifies)
+		if err == nil {
+			return out, c, nil
+		}
+		if first == nil {
+			first = err
+		}
+	}
+	return "", candidates[0], first
 }
 
 // models reads the model list the CLI itself caches, with the efforts each accepts.

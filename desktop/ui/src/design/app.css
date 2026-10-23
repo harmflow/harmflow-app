@@ -2730,6 +2730,12 @@ button.queue-item:hover,
   gap: var(--hf-space-2);
 }
 
+.grid-folder {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  gap: var(--hf-space-2);
+}
+
 .row-list {
   display: flex;
   flex-direction: column;

@@ -132,7 +132,9 @@ paths:
               type: object
               properties:
                 path:
-                  description: Absolute path of the CLI; null returns to automatic detection.
+                  description: >-
+                    Absolute path of the CLI, an executable file whose --version output names the harness
+                    (D-113); null returns to automatic detection.
                   type: [string, "null"]
       responses:
         "200":
@@ -693,6 +695,9 @@ components:
         - settings_notification_level_invalid
         - settings_log_retention_invalid
         - settings_path_variable_invalid
+        - settings_allowed_folder_invalid
+        - settings_change_breaks_task
+        - harness_not_identified
         # Task syntax
         - yaml_syntax
         - document_empty
@@ -748,6 +753,12 @@ components:
         - fallback_repeats_preferred
         - path_variable_unterminated
         - path_variable_undefined
+        - path_not_absolute
+        - path_forbidden_home
+        - path_forbidden_place
+        - path_outside_allowed_area
+        - script_program_relative
+        - script_working_directory_relative
         - local_path_missing
         - script_system_not_declared
         - script_program_not_found
@@ -827,6 +838,7 @@ components:
         - script_start_failed
         - script_write_failed
         - process_ended
+        - task_path_refused
         # Harness and tool diagnostics
         - detection_running
         - harness_manual_path_invalid
@@ -1444,7 +1456,8 @@ components:
 
     Settings:
       type: object
-      required: [language, trayEnabled, notificationLevel, logRetentionDays, autostart, pathVariables, onboardingCompleted]
+      required: [language, trayEnabled, notificationLevel, logRetentionDays, autostart, pathVariables, allowedFolders,
+        onboardingCompleted]
       properties:
         language: { type: string, enum: [pt-BR, en-US, es-ES, system] }
         trayEnabled: { type: boolean, default: true }
@@ -1462,6 +1475,14 @@ components:
           description: Values for ${NAME} references in task paths, such as PROJECTS_ROOT.
           type: object
           additionalProperties: { type: string }
+        allowedFolders:
+          description: >-
+            Folders, beside the user's home folder and the mounted volumes, where a task's workspace, its repositories'
+            local paths, and a custom profile's writable paths may lead (D-113, FS-009 FR-014). Absolute, or starting
+            with ~; none may be the home folder or contain it, nor lie inside HarmFlow's data directory, ~/Library, or a
+            hidden folder at the top of the home folder.
+          type: array
+          items: { type: string }
         onboardingCompleted: { type: boolean }
 
     SettingsPatch:
@@ -1475,6 +1496,10 @@ components:
         pathVariables:
           type: object
           additionalProperties: { type: string }
+        allowedFolders:
+          description: Replaces the whole list. Refused when it would put a saved task's path outside the rule.
+          type: array
+          items: { type: string }
         onboardingCompleted: { type: boolean }
 
     CleanResult:

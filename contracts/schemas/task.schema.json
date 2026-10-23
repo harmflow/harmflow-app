@@ -389,6 +389,7 @@
               "uniqueItems": true
             },
             "writablePaths": {
+              "description": "Each takes ~ and ${VARIABLE}, and must lead inside the home folder, a mounted volume, or an allowed folder of Settings, and into no place a harness may not write (D-113, FS-009 FR-014).",
               "type": "array",
               "items": {
                 "type": "string",
@@ -590,7 +591,7 @@
       }
     },
     "argumentList": {
-      "description": "A program and its arguments, passed as they are: nothing is expanded or split. A program without a slash is looked up on the daemon's PATH.",
+      "description": "A program and its arguments, started with no shell, so no argument is expanded or split. The program, first, is a name looked up on the PATH of its environment or an absolute path, never a relative one, and alone takes ~ and ${VARIABLE} (D-113).",
       "type": "array",
       "prefixItems": [
         {

@@ -2,11 +2,11 @@ package app
 
 import (
 	"context"
-	"os"
 	"sort"
 	"strings"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/catalog"
+	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/procutil"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/schema"
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
@@ -86,25 +86,33 @@ func (a *App) harnessInfo(id string) ports.HarnessInfo {
 	return a.detect(context.Background(), id)
 }
 
-// SetHarnessPath chooses an installation or a path set by hand; an empty path returns to detection (FS-004 FR-001).
+// SetHarnessPath chooses an installation or a path set by hand; an empty path returns to detection (FS-004 FR-001). A
+// path set by hand must be an executable file whose --version output names the harness, or nothing is saved (D-113).
 func (a *App) SetHarnessPath(ctx context.Context, id string, path *string) (ports.HarnessInfo, error) {
-	if _, ok := a.adapters[id]; !ok {
+	ad, ok := a.adapters[id]
+	if !ok {
 		return ports.HarnessInfo{}, newError(CodeNotFound, domain.T("harness_not_found", "no harness {{harness}}", "harness", id))
+	}
+	if path != nil && *path != "" {
+		if !strings.HasPrefix(*path, "/") {
+			return ports.HarnessInfo{}, newError(CodeValidationFailed,
+				domain.T("harness_path_not_absolute", "the path must be absolute"))
+		}
+		var err error
+		if identifier, ok := ad.(ports.HarnessIdentifier); ok {
+			err = identifier.Identify(ctx, *path)
+		} else if !procutil.Executable(*path) {
+			err = domain.TextErr("harness_path_not_executable", "no executable file at {{path}}", "path", *path)
+		}
+		if err != nil {
+			return ports.HarnessInfo{}, &Error{Code: CodeValidationFailed, Text: domain.TextOf(err),
+				Validation: fieldIssue("/path", domain.TextOf(err))}
+		}
 	}
 	a.mu.Lock()
 	if path == nil || *path == "" {
 		delete(a.manualPaths, id)
 	} else {
-		if !strings.HasPrefix(*path, "/") {
-			a.mu.Unlock()
-			return ports.HarnessInfo{}, newError(CodeValidationFailed,
-				domain.T("harness_path_not_absolute", "the path must be absolute"))
-		}
-		if st, err := os.Stat(*path); err != nil || st.IsDir() {
-			a.mu.Unlock()
-			return ports.HarnessInfo{}, newError(CodeValidationFailed,
-				domain.T("harness_path_not_executable", "no executable file at {{path}}", "path", *path))
-		}
 		a.manualPaths[id] = *path
 	}
 	paths := map[string]string{}

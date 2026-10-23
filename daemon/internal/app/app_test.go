@@ -1076,7 +1076,7 @@ func TestFailoverContextRedacted(t *testing.T) {
 func TestContextRedactedInTheRecord(t *testing.T) {
 	e := newEnv(t)
 	token := "ghp_" + strings.Repeat("d", 36)
-	work := filepath.Join(t.TempDir(), token)
+	work := filepath.Join(e.app.Paths().UserHome, token)
 	e.create("odd-path", "  workspace:\n    path: "+work+"\n")
 	var mu sync.Mutex
 	var sent string
@@ -1092,7 +1092,9 @@ func TestContextRedactedInTheRecord(t *testing.T) {
 	x := e.wait(r.ExecutionID, domain.StatusCompleted)
 	mu.Lock()
 	defer mu.Unlock()
-	if !strings.Contains(sent, "Workspace: "+work) {
+	// As is, once resolved: the harness gets the path the rule checked (FS-009 FR-014).
+	resolved, _ := domain.ResolvePath(work)
+	if !strings.Contains(sent, "Workspace: "+resolved) {
 		t.Fatalf("the harness did not get its workspace path as is:\n%s", sent)
 	}
 	if got, want := x.Attempts[0].SessionContext, strings.ReplaceAll(sent, token, "[REDACTED]"); got != want {
@@ -2740,6 +2742,8 @@ func TestDefaultsAndOverridesFromYAML(t *testing.T) {
 		{"harness.fallback.maxSwitches", 1, 0},
 		{"execution.cancelGraceSeconds", 30, 5},
 	}
+	repo := filepath.Join(e.app.Paths().UserHome, "repo")
+	_ = os.MkdirAll(repo, 0o700)
 	task := func(id, fallback, execution, queue string) string {
 		return fmt.Sprintf(`apiVersion: harmflow/v1alpha1
 kind: Task
@@ -2756,7 +2760,7 @@ spec:
     repositories:
       - name: octo/repo
         localPath: %s
-%s`, id, id, fallback, execution, e.home, queue)
+%s`, id, id, fallback, execution, repo, queue)
 	}
 	effective := func(id, yamlText string) any {
 		t.Helper()
@@ -3153,7 +3157,8 @@ func TestRecoveryMarksInterrupted(t *testing.T) {
 	// where the default of three would leave the item failed after its second interruption.
 	e.idle("crash")
 	issues := strings.Replace(taskYAML("issues", fmt.Sprintf("  githubIssueImplementation:\n    repositories:\n"+
-		"      - name: o/r\n        localPath: %q\n    queue:\n      maxFailedRetries: 1\n", t.TempDir())),
+		"      - name: o/r\n        localPath: %q\n    queue:\n      maxFailedRetries: 1\n",
+		mkdir(t, filepath.Join(e.app.Paths().UserHome, "repo")))),
 		"type: general", "type: github-issue-implementation", 1)
 	if _, err := e.app.CreateTask(TaskInput{YAML: issues}); err != nil {
 		t.Fatal(err)
