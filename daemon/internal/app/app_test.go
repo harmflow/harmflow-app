@@ -1449,6 +1449,248 @@ func TestDisableStopsNewFiringsUntilEnabled(t *testing.T) {
 	}
 }
 
+// endedRun runs the task to the status it wants and returns the execution once the task is free again: from then on
+// nothing writes to the execution's log, so its age stays what the test sets.
+func (e *env) endedRun(task string, want domain.ExecutionStatus) ExecutionView {
+	e.t.Helper()
+	r, err := e.app.RunTask(task)
+	if err != nil || r.Outcome != "started" {
+		e.t.Fatalf("run %s: %v %+v", task, err, r)
+	}
+	e.wait(r.ExecutionID, want)
+	e.idle(task)
+	x, _ := e.app.GetExecution(r.ExecutionID)
+	return x
+}
+
+// backdateLog sets the modification time of the execution's log to age before the app's clock. Retention reads a
+// log's age from that time, and its cutoff from the clock, which these tests never advance.
+func (e *env) backdateLog(id string, age time.Duration) time.Time {
+	e.t.Helper()
+	at := e.clock.Now().Add(-age)
+	if err := os.Chtimes(filepath.Join(e.app.Paths().Logs, id+".jsonl"), at, at); err != nil {
+		e.t.Fatal(err)
+	}
+	return at
+}
+
+// retentionFiles are the files retention deletes with an execution's log: the log, its raw captures under
+// logs/<execution>/, and runs/<execution>/, directories included.
+func (e *env) retentionFiles(id string) []string {
+	p := e.app.Paths()
+	files := []string{filepath.Join(p.Logs, id+".jsonl")}
+	for _, dir := range []string{filepath.Join(p.Logs, id), filepath.Join(p.Runs, id)} {
+		_ = filepath.WalkDir(dir, func(path string, _ os.DirEntry, err error) error {
+			if err == nil {
+				files = append(files, path)
+			}
+			return nil
+		})
+	}
+	return files
+}
+
+// presentFiles are the files that still exist.
+func presentFiles(files []string) []string {
+	var out []string
+	for _, f := range files {
+		if _, err := os.Stat(f); err == nil {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// FS-008 FR-011, AC-011 (D-073): with logRetentionDays at 7, retention deletes the log, the raw captures, and the
+// execution directory of an ended execution whose log is 8 days old, and keeps every file of one whose log is 6 days
+// old. FR-010, AC-010: the expired execution's record is still listed and read whole; only its log reads as expired.
+func TestRetentionDeletesOnlyExpiredLogs(t *testing.T) {
+	const day = 24 * time.Hour
+	e := newEnv(t)
+	week := 7
+	if _, err := e.app.UpdateSettings(SettingsPatch{LogRetentionDays: &week}); err != nil {
+		t.Fatal(err)
+	}
+	e.create("aged", "    fallback:\n      candidates:\n        - provider: codex\n")
+	// The execution that expires fails over, so its record keeps two attempts; the second reports a pull request.
+	e.claude.setScript(func(ports.RunRequest) string { return "echo 'END quota'" })
+	e.codex.setScript(func(req ports.RunRequest) string {
+		report := `{"outcome":"completed","summary":"opened a draft","workItems":[{"key":"o/r#7","outcome":"completed",` +
+			`"pullRequest":{"url":"https://github.com/o/r/pull/9","created":true}}]}`
+		return fmt.Sprintf(`printf '%%s' '%s' > %s/report.json; echo 'END ok'`, report, req.ExecutionDir)
+	})
+	old := e.endedRun("aged", domain.StatusCompleted)
+	e.claude.setScript(func(ports.RunRequest) string { return "echo 'END ok'" })
+	recent := e.endedRun("aged", domain.StatusCompleted)
+
+	p := e.app.Paths()
+	for _, f := range []string{filepath.Join(p.Logs, old.ID, "attempt-1.raw"), filepath.Join(p.Logs, old.ID, "attempt-2.raw"),
+		filepath.Join(p.Runs, old.ID), filepath.Join(p.Logs, recent.ID, "attempt-1.raw"), filepath.Join(p.Runs, recent.ID)} {
+		if _, err := os.Stat(f); err != nil {
+			t.Fatalf("before retention: %v", err)
+		}
+	}
+	oldFiles, recentFiles := e.retentionFiles(old.ID), e.retentionFiles(recent.ID)
+	e.backdateLog(old.ID, 8*day)
+	e.backdateLog(recent.ID, 6*day)
+	e.app.ApplyRetention()
+	if left := presentFiles(oldFiles); len(left) != 0 {
+		t.Errorf("retention left files of the execution whose log is 8 days old: %v", left)
+	}
+	if left := presentFiles(recentFiles); len(left) != len(recentFiles) {
+		t.Errorf("retention deleted files of the execution whose log is 6 days old: %d of %d left, %v", len(left),
+			len(recentFiles), left)
+	}
+
+	listed := false
+	for _, s := range e.executions("aged") {
+		if s.ID == old.ID {
+			listed = s.Status == domain.StatusCompleted
+		}
+	}
+	if !listed {
+		t.Errorf("the execution whose log expired is not listed for its task as completed: %+v", e.executions("aged"))
+	}
+	x, err := e.app.GetExecution(old.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !x.LogExpired || x.Status != domain.StatusCompleted || x.WorkItem != "o/r#7" || len(x.WorkItems) != 1 ||
+		x.WorkItems[0].Key != "o/r#7" || x.PullRequestURL != "https://github.com/o/r/pull/9" {
+		t.Errorf("the record lost what FR-010 keeps: log expired %v, %+v, work items %+v", x.LogExpired,
+			x.ExecutionSummary, x.WorkItems)
+	}
+	if len(x.Attempts) != 2 || x.Attempts[0].Harness != domain.HarnessClaudeCode ||
+		x.Attempts[0].Outcome != domain.AttemptQuotaExhausted || x.Attempts[1].Harness != domain.HarnessCodex ||
+		x.Attempts[1].Outcome != domain.AttemptSucceeded {
+		t.Errorf("the record lost its attempts: %+v", x.Attempts)
+	}
+	// The events read as expired because the log is gone, the output because the record says so.
+	if events, expired, err := e.app.ExecutionEvents(old.ID, 0, 0); err != nil || !expired || len(events) != 0 {
+		t.Errorf("the expired execution's events: %d, expired %v, %v", len(events), expired, err)
+	}
+	out, err := e.app.ExecutionOutput(old.ID, 0)
+	if err != nil || !out.LogExpired {
+		t.Errorf("the expired execution's output: logExpired %v, %v", out.LogExpired, err)
+	}
+	for _, at := range out.Attempts {
+		if at.Text != "" {
+			t.Errorf("attempt %d still serves its raw capture: %q", at.Attempt, at.Text)
+		}
+	}
+	if x, _ := e.app.GetExecution(recent.ID); x.LogExpired {
+		t.Error("the execution whose log is 6 days old reads as expired")
+	}
+	if events, expired, _ := e.app.ExecutionEvents(recent.ID, 0, 0); expired || len(events) == 0 {
+		t.Errorf("the execution whose log is 6 days old: %d events, expired %v", len(events), expired)
+	}
+	// The record was saved as expired, so the next start reads it the same way.
+	e = e.restart(t)
+	if x, _ := e.app.GetExecution(old.ID); !x.LogExpired || x.PullRequestURL == "" || len(x.Attempts) != 2 {
+		t.Errorf("after a restart, the expired record: log expired %v, %+v", x.LogExpired, x.ExecutionSummary)
+	}
+}
+
+// FS-008 FR-011 (D-073): logRetentionDays is 30 on a fresh install, so a 29-day-old log is kept and a 31-day-old one
+// deleted; it accepts 1 to 3650 and rejects 0 and 3651; and a saved value is still in force after a restart.
+func TestLogRetentionSetting(t *testing.T) {
+	const day = 24 * time.Hour
+	e := newEnv(t)
+	if got := e.app.GetSettings().LogRetentionDays; got != 30 {
+		t.Fatalf("a fresh app reads logRetentionDays %d, want 30", got)
+	}
+	e.create("aged", "")
+	ids := map[int]string{}
+	for _, age := range []int{27, 29, 31} {
+		ids[age] = e.endedRun("aged", domain.StatusCompleted).ID
+	}
+	for age, id := range ids {
+		e.backdateLog(id, time.Duration(age)*day)
+	}
+	expiredOver := func(e *env, retention int) {
+		t.Helper()
+		for age, id := range ids {
+			x, _ := e.app.GetExecution(id)
+			_, err := os.Stat(filepath.Join(e.app.Paths().Logs, id+".jsonl"))
+			if want := age > retention; x.LogExpired != want || os.IsNotExist(err) != want {
+				t.Errorf("at %d days, the %d-day-old log: expired %v, file %v; want expired %v", retention, age,
+					x.LogExpired, err, want)
+			}
+		}
+	}
+	e.app.ApplyRetention()
+	expiredOver(e, 30)
+
+	for _, bad := range []int{0, 3651} {
+		if _, err := e.app.UpdateSettings(SettingsPatch{LogRetentionDays: &bad}); err == nil {
+			t.Errorf("logRetentionDays %d was accepted", bad)
+		} else if ae, ok := err.(*Error); !ok || ae.Code != CodeValidationFailed {
+			t.Errorf("logRetentionDays %d: %v, want %s", bad, err, CodeValidationFailed)
+		}
+	}
+	if got := e.app.GetSettings().LogRetentionDays; got != 30 {
+		t.Errorf("a rejected value changed logRetentionDays to %d", got)
+	}
+	for _, good := range []int{1, 3650, 28} {
+		if v, err := e.app.UpdateSettings(SettingsPatch{LogRetentionDays: &good}); err != nil || v.LogRetentionDays != good {
+			t.Errorf("logRetentionDays %d: %v, reads %d", good, err, v.LogRetentionDays)
+		}
+	}
+	// 28 days, saved, is what the next start applies: the 29-day-old log, which 30 days kept, expires.
+	e = e.restart(t)
+	if got := e.app.GetSettings().LogRetentionDays; got != 28 {
+		t.Fatalf("after a restart, logRetentionDays is %d, want 28", got)
+	}
+	e.app.ApplyRetention()
+	expiredOver(e, 28)
+}
+
+// FS-008 FR-011: retention never deletes the log of an execution still running or queued, however old its file is.
+func TestRetentionKeepsTheLogsOfActiveExecutions(t *testing.T) {
+	const day = 24 * time.Hour
+	e := newEnv(t)
+	one := 1
+	if _, err := e.app.UpdateSettings(SettingsPatch{LogRetentionDays: &one}); err != nil {
+		t.Fatal(err)
+	}
+	e.create("busy", "")
+	e.claude.setScript(func(ports.RunRequest) string { return slow })
+	running, _ := e.app.RunTask("busy")
+	e.wait(running.ExecutionID, domain.StatusRunning)
+	queued, _ := e.app.RunTask("busy")
+	if queued.Outcome != "queued" {
+		t.Fatalf("second run: %+v", queued)
+	}
+	// The harness prints one line and sleeps: from then on nothing writes to either log.
+	if !e.poll(10*time.Second, func() bool {
+		events, _, _ := e.app.ExecutionEvents(running.ExecutionID, 0, 0)
+		return slices.ContainsFunc(events, func(ev domain.Event) bool {
+			return ev.Type == domain.EventHarnessMessage && ev.Message == "working"
+		})
+	}) {
+		t.Fatal("the harness printed nothing")
+	}
+	aged := map[string]time.Time{}
+	for _, id := range []string{running.ExecutionID, queued.ExecutionID} {
+		aged[id] = e.backdateLog(id, 3650*day)
+	}
+	e.app.ApplyRetention()
+	for id, at := range aged {
+		x, _ := e.app.GetExecution(id)
+		switch mod, ok := e.events.LogModTime(id); {
+		case !ok || x.LogExpired:
+			t.Errorf("retention deleted the log of the %s execution: file %v, expired %v", x.Status, ok, x.LogExpired)
+		case !mod.Equal(at):
+			t.Errorf("the %s execution's log was written during retention, so its age was not tested", x.Status)
+		}
+	}
+	e.claude.setScript(func(ports.RunRequest) string { return "echo 'END ok'" })
+	_ = e.app.CancelExecution(queued.ExecutionID)
+	_ = e.app.CancelExecution(running.ExecutionID)
+	e.wait(running.ExecutionID, domain.StatusCancelled)
+	e.idle("busy")
+}
+
 // FS-001 FR-015, D-083: a running task disabled or deleted by a change of its file drops its waiting firing, as one
 // disabled or deleted through the API does, and the firing never starts.
 func TestExternalChangeDropsTheWaitingFiring(t *testing.T) {

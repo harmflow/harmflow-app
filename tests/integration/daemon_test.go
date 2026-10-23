@@ -766,6 +766,58 @@ func TestRawOutputRedacted(t *testing.T) {
 	}
 }
 
+// FS-008 FR-011, AC-011 (D-073): the daemon applies log retention on its own when it starts, and deletes a log older
+// than the default 30 days. FR-010, AC-010: the execution is still served with its pull request and its attempt, and
+// its events read as expired.
+func TestRetentionExpiresTheLogAtStart(t *testing.T) {
+	home := t.TempDir()
+	d := startDaemon(t, home)
+	d.call("POST", "/tasks", map[string]any{"yaml": task("aged", "SCENARIO=report", "")}, 201)
+	id := d.call("POST", "/tasks/aged/run", nil, 202)["executionId"].(string)
+	d.waitStatus(id, "completed")
+	// A stopped daemon writes nothing more to the log, so it keeps the age set here.
+	d.stop()
+	logFile := filepath.Join(home, "logs", id+".jsonl")
+	files := []string{logFile, filepath.Join(home, "logs", id, "attempt-1.raw"), filepath.Join(home, "runs", id)}
+	for _, f := range files {
+		if _, err := os.Stat(f); err != nil {
+			t.Fatalf("before retention: %v", err)
+		}
+	}
+	aged := time.Now().Add(-31 * 24 * time.Hour)
+	if err := os.Chtimes(logFile, aged, aged); err != nil {
+		t.Fatal(err)
+	}
+	d2 := startDaemon(t, home)
+	// Retention runs in a goroutine at start, so the expiry shows up a little later.
+	var x map[string]any
+	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		if x = d2.call("GET", "/executions/"+id, nil, 200); x["logExpired"] == true {
+			break
+		}
+	}
+	if x["logExpired"] != true {
+		t.Fatalf("the daemon did not expire the 31-day-old log: logExpired %v", x["logExpired"])
+	}
+	for _, f := range files {
+		if _, err := os.Stat(f); !os.IsNotExist(err) {
+			t.Errorf("%s outlived retention: %v", f, err)
+		}
+	}
+	attempts, _ := x["attempts"].([]any)
+	if x["status"] != "completed" || x["workItem"] != "o/r#3" || x["pullRequestUrl"] != "https://github.com/o/r/pull/4" ||
+		len(attempts) != 1 {
+		t.Fatalf("the record lost what FR-010 keeps: %v", x)
+	}
+	if a, _ := attempts[0].(map[string]any); a["harness"] != "claude-code" || a["outcome"] != "succeeded" {
+		t.Errorf("the record lost its attempt: %v", a)
+	}
+	events := d2.call("GET", "/executions/"+id+"/events", nil, 200)
+	if list, ok := events["events"].([]any); !ok || len(list) != 0 || events["logExpired"] != true {
+		t.Errorf("the expired execution's events: %v", events)
+	}
+}
+
 // FS-005 §5.1: Claude Code exhausts its quota; Codex finishes the same execution.
 func TestFailoverAcrossHarnesses(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
