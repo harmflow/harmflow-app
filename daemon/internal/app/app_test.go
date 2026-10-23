@@ -1328,6 +1328,78 @@ func TestMisfiresAcrossRestart(t *testing.T) {
 	nextFires()
 }
 
+// FS-002 FR-010, AC-012 (D-083): a changed schedule takes effect at once, however it changes: an edit through the
+// API, an edit of the task file, or a change of the time zone alone. The next firing follows the new schedule, and the
+// old one never fires.
+func TestChangedScheduleTakesEffect(t *testing.T) {
+	bangkok, err := time.LoadLocation("Asia/Bangkok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	day := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name     string
+		from, to string // the schedule block, before and after the change
+		external bool   // the task file is edited, and the scan picks it up
+		next     time.Time
+	}{
+		{"cron through the API", `cron: "0 18 * * *"`, `cron: "30 10 * * *"`, false, day.Add(10*time.Hour + 30*time.Minute)},
+		{"cron in the task file", `cron: "0 18 * * *"`, `cron: "30 10 * * *"`, true, day.Add(10*time.Hour + 30*time.Minute)},
+		// 18:00 in Bangkok, UTC+7 all year, is 11:00 UTC.
+		{"time zone alone", "timezone: UTC", "timezone: Asia/Bangkok", false, time.Date(2026, 10, 20, 18, 0, 0, 0, bangkok)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.clock.Advance(2 * time.Hour) // 10:00 UTC
+			e.create("moved", "  schedule:\n    cron: \"0 18 * * *\"\n    timezone: UTC\n")
+			view, _ := e.app.GetTask("moved")
+			if want := day.Add(18 * time.Hour); view.NextFireAt == nil || !view.NextFireAt.Equal(want) {
+				t.Fatalf("next firing before the change %v, want %v", view.NextFireAt, want)
+			}
+
+			changed := strings.Replace(view.YAML, tc.from, tc.to, 1)
+			if changed == view.YAML {
+				t.Fatalf("the task file has no %q:\n%s", tc.from, view.YAML)
+			}
+			if tc.external {
+				if err := os.WriteFile(view.Path, []byte(changed), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				e.app.scanTaskFiles()
+			} else if _, err := e.app.UpdateTask("moved", TaskInput{YAML: changed, BaseRevision: view.Revision}); err != nil {
+				t.Fatal(err)
+			}
+			view, _ = e.app.GetTask("moved")
+			if view.NextFireAt == nil || !view.NextFireAt.Equal(tc.next) {
+				t.Fatalf("next firing after the change %v, want %v", view.NextFireAt, tc.next)
+			}
+
+			// Within MisfireAfter of the new time, so the firing is on time, not a catch-up.
+			e.clock.Advance(tc.next.Sub(e.clock.Now()) + 30*time.Second)
+			e.app.Tick()
+			runs := e.executions("moved")
+			if len(runs) != 1 {
+				t.Fatalf("%d executions after the new time, want 1: %+v", len(runs), runs)
+			}
+			x, err := e.app.GetExecution(runs[0].ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if x.Trigger != domain.TriggerSchedule || x.ScheduledFor == nil || !x.ScheduledFor.Equal(tc.next) {
+				t.Errorf("execution trigger %s, scheduled for %v; want schedule at %v", x.Trigger, x.ScheduledFor, tc.next)
+			}
+			e.wait(x.ID, domain.StatusCompleted)
+			e.idle("moved")
+
+			// The old 18:00 UTC never comes again: the next firing is the new schedule's, a day later.
+			view, _ = e.app.GetTask("moved")
+			if want := tc.next.AddDate(0, 0, 1); view.NextFireAt == nil || !view.NextFireAt.Equal(want) {
+				t.Errorf("next firing after it ran %v, want %v", view.NextFireAt, want)
+			}
+		})
+	}
+}
+
 // FS-001 AC-015, AC-016: a running execution keeps its definition; the waiting firing picks up the edit.
 func TestEditWhileRunning(t *testing.T) {
 	e := newEnv(t)
