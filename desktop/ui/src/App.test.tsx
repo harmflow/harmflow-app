@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 // Drives the dashboard's shell in a DOM: ⌘B and the sidebar's own control collapse the sidebar to its icons and expand
-// it again, the choice outlives a restart, and the daemon's connection state is the topbar's alone. A render error
+// it again, the choice outlives a restart, and the daemon's connection state is the topbar's alone. ⌘N opens the
+// template picker as the topbar's New task does (harmflow-app#169). A render error
 // never leaves the window empty, and the interface tells the shell when it has painted (harmflow-app#96).
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -253,6 +254,105 @@ describe("sidebar", () => {
     } finally {
       await act(async () => patchStateForTests({ connection: "connected" }));
     }
+  });
+});
+
+describe("new task", () => {
+  const cmdN = { key: "n" };
+  const pickers = () => host!.querySelectorAll('[role="dialog"]').length;
+  const title = () => host!.querySelector(".topbar__title")!.textContent;
+  const newTaskButton = () => host!.querySelector<HTMLButtonElement>('.topbar__actions button[aria-keyshortcuts="Meta+N"]')!;
+  const pick = (label: string) =>
+    act(async () => [...host!.querySelectorAll<HTMLButtonElement>(".template")].find((b) => b.textContent?.includes(label))!.click());
+
+  it("opens the template picker with ⌘N on every screen, from a text field too", async () => {
+    await launch();
+    for (const screen of ["Overview", "Executions", "Tasks", "History", "Settings"]) {
+      await act(async () => navButton(screen).click());
+      expect(await press(undefined, cmdN)).toBe(true);
+      expect(pickers()).toBe(1);
+      expect(host!.querySelector('[role="dialog"] h2')!.textContent).toBe("New task");
+      await act(async () => void window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
+      expect(pickers()).toBe(0);
+    }
+
+    await act(async () => navButton("History").click());
+    const search = host!.querySelector<HTMLInputElement>(".app__content input")!;
+    search.focus();
+    expect(await press(search, cmdN)).toBe(true);
+    expect(pickers()).toBe(1);
+  });
+
+  it("opens the new task's editor when a template is picked, as the topbar's button does", async () => {
+    await launch();
+    await press(undefined, cmdN);
+    await pick("General task");
+    expect(pickers()).toBe(0);
+    expect(title()).toBe("Tasks");
+    expect([...host!.querySelectorAll<HTMLInputElement>("input")].some((i) => i.value === "General task")).toBe(true);
+  });
+
+  it("takes ⌘N from the YAML editor, whose keymap lets it through", async () => {
+    await launch();
+    const editorHost = host!.querySelector(".app__content")!.appendChild(document.createElement("div"));
+    const editorRoot = createRoot(editorHost);
+    await act(async () => editorRoot.render(<YamlEditor value={"name: Core\n"} onChange={() => {}} />));
+    try {
+      const content = editorHost.querySelector<HTMLElement>(".cm-content")!;
+      content.focus();
+      expect(await press(content, cmdN)).toBe(true);
+      expect(pickers()).toBe(1);
+    } finally {
+      act(() => editorRoot.unmount());
+    }
+  });
+
+  it("leaves ⌘N alone while a modal dialog is open, the picker included, and on the onboarding screen", async () => {
+    await launch();
+    await act(async () => newTaskButton().click());
+    expect(pickers()).toBe(1);
+    expect(await press(undefined, cmdN)).toBe(false);
+    expect(pickers()).toBe(1);
+    quit();
+
+    patchStateForTests({ settings: { ...settings, onboardingCompleted: false } });
+    await launch();
+    expect(host!.querySelector(".sidebar")).toBeNull();
+    expect(await press(undefined, cmdN)).toBe(false);
+    expect(pickers()).toBe(0);
+    await act(async () => patchStateForTests({ settings }));
+    expect(pickers()).toBe(0);
+  });
+
+  it("takes ⌘N alone, not with another modifier or as a held key", async () => {
+    await launch();
+    expect(await press(undefined, { ...cmdN, shiftKey: true })).toBe(false);
+    expect(await press(undefined, { ...cmdN, altKey: true })).toBe(false);
+    expect(await press(undefined, { ...cmdN, ctrlKey: true })).toBe(false);
+    expect(await press(undefined, { ...cmdN, repeat: true })).toBe(false);
+    expect(await press(undefined, { ...cmdN, metaKey: false })).toBe(false);
+    expect(pickers()).toBe(0);
+  });
+
+  it("names ⌘N in the topbar button's tooltip, in each language", async () => {
+    await launch();
+    for (const [language, label] of [
+      ["en-US", "New task"],
+      ["pt-BR", "Nova tarefa"],
+      ["es-ES", "Nueva tarea"],
+    ]) {
+      await act(async () => void i18n.changeLanguage(language));
+      await act(async () => void newTaskButton().dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
+      expect(tooltip()).toBe(`${label}⌘N`);
+      await act(async () => void newTaskButton().dispatchEvent(new MouseEvent("mouseout", { bubbles: true })));
+      expect(tooltip()).toBeNull();
+    }
+    await act(async () => void i18n.changeLanguage("en-US"));
+
+    await act(async () => newTaskButton().focus());
+    expect(tooltip()).toBe("New task⌘N");
+    await act(async () => newTaskButton().click());
+    expect(tooltip()).toBeNull(); // the picker covers the button
   });
 });
 

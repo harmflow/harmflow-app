@@ -331,6 +331,16 @@ ol {
   transform: translateY(-50%);
 }
 
+/* Below a topbar control, centred on it */
+.tooltip--below {
+  transform: translateX(-50%);
+}
+
+/* A dialog opened from the keyboard (⌘N) covers the hovered control, which gets no mouseleave until the pointer moves */
+body:has([aria-modal="true"]) .tooltip {
+  display: none;
+}
+
 .tooltip__keys {
   padding: 0 5px;
   border: 1px solid var(--hf-color-border);
