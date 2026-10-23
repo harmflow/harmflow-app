@@ -1,5 +1,7 @@
-# Keeps the SHA-pinned actions in .github/workflows current. A month's updates arrive as one pull request, and
-# Dependabot rewrites each version comment with its SHA. Application dependencies (gomod, npm, cargo) are out of scope.
+# Dependabot proposes version updates for the SHA-pinned actions and for the application's dependencies, monthly. In
+# every application ecosystem, minor and patch updates arrive in one pull request, and each major update arrives alone,
+# because a major can break an API and needs its own review. A dependency matches the first group that lists it, so the
+# Tauri group comes before the minor-and-patch group.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -10,6 +12,66 @@ updates:
       github-actions:
         patterns:
           - "*"
+    commit-message:
+      prefix: chore
+      include: scope
+
+  # `/daemon` and `/tests` share jsonschema, yaml.v3, and golang.org/x/text: one pull request bumps them in both.
+  - package-ecosystem: gomod
+    directories:
+      - "/daemon"
+      - "/tests"
+    schedule:
+      interval: monthly
+    groups:
+      go-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    commit-message:
+      prefix: chore
+      include: scope
+
+  # Dependabot reads the pnpm workspace (`ui` included) through `pnpm-lock.yaml`.
+  - package-ecosystem: npm
+    directory: "/desktop"
+    schedule:
+      interval: monthly
+    groups:
+      # Dependabot cannot group across ecosystems, so the `tauri*` crates (cargo entry below) and these packages come
+      # in two pull requests that are merged together: Tauri 2's build checks that the `tauri` crate and
+      # `@tauri-apps/api` share a major and minor, so a half-merged pair fails `make app`. Any update type, a major
+      # included, stays in this group so the pair is never split.
+      tauri-js:
+        patterns:
+          - "@tauri-apps/*"
+      npm-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    commit-message:
+      prefix: chore
+      include: scope
+
+  - package-ecosystem: cargo
+    directory: "/desktop/src-tauri"
+    schedule:
+      interval: monthly
+    groups:
+      # Merged together with the `@tauri-apps/*` pull request of the npm entry above; see the comment there.
+      tauri-crates:
+        patterns:
+          - "tauri*"
+      cargo-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
     commit-message:
       prefix: chore
       include: scope
