@@ -1214,6 +1214,51 @@ func TestMisfiresCoalesce(t *testing.T) {
 	}
 }
 
+// FS-002 AC-004, AC-005, AC-008: firings missed while the daemon was down follow the task's missed-run policy once,
+// after the restart: one catch-up for the first missed firing, or none. The next firing is the next occurrence, and
+// another restart runs nothing.
+func TestMisfiresAcrossRestart(t *testing.T) {
+	e := newEnv(t)
+	e.create("daily", "  schedule:\n    cron: \"0 9 * * *\"\n    timezone: UTC\n")
+	e.create("daily-skip", "  schedule:\n    cron: \"0 9 * * *\"\n    timezone: UTC\n    missedRun:\n      policy: skip\n")
+	e.app.Stop(domain.Text{Message: "test restart"}) // at 08:00, before the first firing
+	e.clock.Advance(3 * 24 * time.Hour)              // the daemon was down for three days
+	e = e.restart(t)
+	e.app.Tick()
+	// The start's own tick may have taken the firing and still be starting it.
+	var runs []ExecutionSummary
+	e.poll(10*time.Second, func() bool { runs = e.executions("daily"); return len(runs) > 0 })
+	if len(runs) != 1 || runs[0].Trigger != domain.TriggerCatchUp {
+		t.Fatalf("daily: %+v", runs)
+	}
+	x := e.wait(runs[0].ID, domain.StatusCompleted)
+	if first := time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC); x.ScheduledFor == nil || !x.ScheduledFor.Equal(first) {
+		t.Errorf("catch-up scheduled for %v, want %v", x.ScheduledFor, first)
+	}
+	if n := len(e.executions("daily-skip")); n != 0 {
+		t.Errorf("skip policy ran %d executions", n)
+	}
+	next := time.Date(2026, 10, 23, 9, 0, 0, 0, time.UTC)
+	nextFires := func() {
+		t.Helper()
+		for _, id := range []string{"daily", "daily-skip"} {
+			if view, _ := e.app.GetTask(id); view.NextFireAt == nil || !view.NextFireAt.Equal(next) {
+				t.Errorf("%s's next firing is %v, want %v", id, view.NextFireAt, next)
+			}
+		}
+	}
+	nextFires()
+	e = e.restart(t)
+	e.app.Tick()
+	if n := len(e.executions("daily")); n != 1 {
+		t.Errorf("the second restart ran daily again: %d executions", n)
+	}
+	if n := len(e.executions("daily-skip")); n != 0 {
+		t.Errorf("the second restart ran daily-skip: %d executions", n)
+	}
+	nextFires()
+}
+
 // FS-001 AC-015, AC-016: a running execution keeps its definition; the waiting firing picks up the edit.
 func TestEditWhileRunning(t *testing.T) {
 	e := newEnv(t)
