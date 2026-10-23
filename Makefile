@@ -24,6 +24,12 @@ RUST_FLOOR_VIOLATIONS := def pct: "\(. / 100 | floor).\(. % 100 | tostring | if 
 	| ($$v.covered * 10000 / $$v.count | floor) as $$ratio | ({$$lines, $$functions}[$$counter] * 100 | round) as $$floor \
 	| select($$ratio < $$floor) \
 	| "coverage: desktop/src-tauri: \($$counter) \($$ratio | pct)% (\($$v.covered) of \($$v.count)) is below its floor of \($$floor | pct)%"
+# HOLD_FLOORS= (empty) reads the coverage beside its floors without holding it: a figure below one fails nothing, a
+# failing test still does. The nightly Coverage workflow reads main that way; CI holds the floors.
+HOLD_FLOORS ?= 1
+RUST_FLOOR_FLAGS := $(if $(HOLD_FLOORS),--fail-under-lines $(RUST_FLOOR_LINES) --fail-under-functions $(RUST_FLOOR_FUNCTIONS))
+VITEST_FLOOR_FLAGS := $(if $(HOLD_FLOORS),,--coverage.thresholds.statements=0 --coverage.thresholds.branches=0 \
+	--coverage.thresholds.functions=0 --coverage.thresholds.lines=0)
 
 .PHONY: help
 help: ## List the targets
@@ -86,12 +92,13 @@ coverage-daemon: ## Statements per package of the daemon, unit and integration d
 	go -C daemon test -count=1 -covermode=atomic -coverpkg=./... ./... -args -test.gocoverdir=$(COVERAGE)/daemon/unit
 	GOCOVERDIR=$(COVERAGE)/daemon/integration go -C tests test -count=1 ./...
 	go tool covdata textfmt -i=$(COVERAGE)/daemon/unit,$(COVERAGE)/daemon/integration -o $(COVERAGE)/daemon.out
-	go -C tests run ./coverage -floors $(CURDIR)/daemon/coverage-floors.txt $(COVERAGE)/daemon.out
+	go -C tests run ./coverage -floors $(CURDIR)/daemon/coverage-floors.txt -hold=$(if $(HOLD_FLOORS),true,false) \
+		$(COVERAGE)/daemon.out
 
 .PHONY: coverage-desktop
 coverage-desktop: ## Unit tests of the interface and the shell, held at their floors (needs cargo-llvm-cov)
-	pnpm -C desktop test:coverage
-	cd desktop/src-tauri && { cargo llvm-cov --fail-under-lines $(RUST_FLOOR_LINES) --fail-under-functions $(RUST_FLOOR_FUNCTIONS) \
+	pnpm -C desktop test:coverage $(VITEST_FLOOR_FLAGS)
+	cd desktop/src-tauri && { cargo llvm-cov $(RUST_FLOOR_FLAGS) \
 		|| { cargo llvm-cov report --summary-only --json | jq -r --argjson lines $(RUST_FLOOR_LINES) \
 			--argjson functions $(RUST_FLOOR_FUNCTIONS) '$(RUST_FLOOR_VIOLATIONS)' >&2; exit 1; }; }
 

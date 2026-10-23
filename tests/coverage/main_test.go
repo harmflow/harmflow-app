@@ -69,3 +69,38 @@ func TestCheckNamesThePackageTheCounterTheFloorAndTheRatio(t *testing.T) {
 		t.Fatalf("check = %q, want %q", got, want)
 	}
 }
+
+func TestHoldFalseNamesAPackageBelowItsFloorAndFailsOnNoFigure(t *testing.T) {
+	dir := t.TempDir()
+	profile, floors := filepath.Join(dir, "daemon.out"), filepath.Join(dir, "floors.txt")
+	if err := os.WriteFile(profile, []byte("mode: atomic\ngithub.com/harmflow/harmflow-app/daemon/internal/app/a.go:1.1,2.2 3 0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(floors, []byte("internal/app 50\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const violation = "coverage: internal/app: statements 0.00% (0 of 3) is below its floor of 50.00%\n"
+	for _, tc := range []struct {
+		args []string
+		want int
+	}{
+		{[]string{"-floors", floors, profile}, 1},
+		{[]string{"-floors", floors, "-hold=false", profile}, 0},
+	} {
+		var stdout, stderr strings.Builder
+		if got := run(tc.args, &stdout, &stderr); got != tc.want {
+			t.Errorf("run(%q) = %d, want %d", tc.args, got, tc.want)
+		}
+		if !strings.Contains(stdout.String(), "| `internal/app` | 0 | 3 | 0.00% | 50.00% |") {
+			t.Errorf("run(%q) printed no row beside the floor:\n%s", tc.args, stdout.String())
+		}
+		if stderr.String() != violation {
+			t.Errorf("run(%q) wrote %q to stderr, want %q", tc.args, stderr.String(), violation)
+		}
+	}
+	// A profile it cannot read still fails.
+	var discard strings.Builder
+	if got := run([]string{"-hold=false", filepath.Join(dir, "missing.out")}, &discard, &discard); got != 1 {
+		t.Errorf("run with a missing profile = %d, want 1", got)
+	}
+}

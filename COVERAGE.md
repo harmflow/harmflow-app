@@ -27,6 +27,10 @@ ERROR: Coverage for lines (67.7%) does not meet global threshold (99%)
 coverage: desktop/src-tauri: lines 27.49% (218 of 793) is below its floor of 99.00%
 ```
 
+The nightly [Coverage workflow](.github/workflows/coverage.yml) reads `main` and shows each reading beside its floor,
+with the headroom above it, in its run's summary. It is a view, not the check: it runs with `HOLD_FLOORS=` empty, so it
+fails only when a test does, and the floors stay held by CI.
+
 ### Moving a floor
 
 A floor moves by hand, never by itself: Vitest's `autoUpdate` is not used.
