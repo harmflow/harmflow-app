@@ -127,7 +127,28 @@ export function HarnessInventory({ harness, locale }: { harness: Harness; locale
               </span>
             ) : null,
           ],
-          [t("harness.installations"), harness.installations.length ? <span className="mono">{harness.installations.join("\n")}</span> : null],
+          [
+            t("harness.installations"),
+            // Each installation is a choice, the one in use marked; one chosen is saved as a path set by hand (FS-004 FR-001).
+            harness.installations.length ? (
+              <ul className="installations">
+                {harness.installations.map((entry) => (
+                  <li key={entry} className="installations__item">
+                    <span className="mono">{entry}</span>
+                    {entry === harness.installation ? (
+                      <Chip tone="success" icon="check">
+                        {t("harness.inUse")}
+                      </Chip>
+                    ) : (
+                      <Button size="sm" variant="ghost" disabled={busy} aria-label={t("harness.useInstallation", { path: entry })} onClick={() => void save(entry)}>
+                        {t("harness.use")}
+                      </Button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : null,
+          ],
           [
             t("harness.version"),
             harness.version || harness.versionSupport ? (

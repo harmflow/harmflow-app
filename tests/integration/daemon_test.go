@@ -78,12 +78,13 @@ type daemon struct {
 	token string
 }
 
-func startDaemon(t *testing.T, home string) *daemon {
+// startDaemon starts harmflowd on the home, with env added to the test's own environment, a later entry winning.
+func startDaemon(t *testing.T, home string, env ...string) *daemon {
 	t.Helper()
 	_ = os.Remove(filepath.Join(home, "run", "daemon.json"))
 	cmd := exec.Command(binary, "--home", home, "--builtins", repoRoot())
 	// Codex's configuration is the test's own, never the user's.
-	cmd.Env = append(os.Environ(), "HARMFLOW_TOKEN_STORE=file", "CODEX_HOME="+filepath.Join(home, "codex"))
+	cmd.Env = append(append(os.Environ(), "HARMFLOW_TOKEN_STORE=file", "CODEX_HOME="+filepath.Join(home, "codex")), env...)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := cmd.Start(); err != nil {

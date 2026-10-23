@@ -945,8 +945,16 @@ components:
         path: { type: string, description: The resolved absolute path. }
         pathSource: { type: string, enum: [path, known_location, manual] }
         installations:
+          description: >-
+            The installations offered: every one detection found, on PATH and then in the known locations, and the path
+            set by hand when detection did not find it.
           type: array
           items: { type: string }
+        installation:
+          type: string
+          description: >-
+            The entry of installations in use, as found or set by hand. path is where it resolves to, a symlink's
+            target included.
         version: { type: string }
         versionSupport: { type: string, enum: [supported, untested_newer, below_minimum, unknown] }
         authentication: { type: string, enum: [valid, invalid, unknown] }

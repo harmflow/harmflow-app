@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -74,13 +75,17 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 	info.Installations = append(info.Installations, found...)
 	switch {
 	case manualPath != "":
-		info.Path, info.PathSource = manualPath, "manual"
+		// A path set by hand is offered with the installations found, once (FS-004 FR-001).
+		if !slices.Contains(found, manualPath) {
+			info.Installations = append(info.Installations, manualPath)
+		}
+		info.Installation, info.Path, info.PathSource = manualPath, manualPath, "manual"
 		if st, err := os.Stat(manualPath); err != nil || st.IsDir() {
 			info.SetDiagnostic(domain.T("harness_manual_path_invalid", "the path set by hand does not exist or is not a file"))
 			return info
 		}
 	case len(found) > 0:
-		info.Path, info.PathSource = found[0], "known_location"
+		info.Installation, info.Path, info.PathSource = found[0], found[0], "known_location"
 		for _, d := range strings.Split(a.PathEnv, ":") {
 			if d == filepath.Dir(found[0]) {
 				info.PathSource = "path"

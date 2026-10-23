@@ -96,6 +96,7 @@ type HarnessInfo struct {
 	Path                string            `json:"path,omitempty"`
 	PathSource          string            `json:"pathSource,omitempty"`
 	Installations       []string          `json:"installations"`
+	Installation        string            `json:"installation,omitempty"` // the entry of Installations in use
 	Version             string            `json:"version,omitempty"`
 	VersionSupport      string            `json:"versionSupport,omitempty"`
 	Authentication      string            `json:"authentication"`

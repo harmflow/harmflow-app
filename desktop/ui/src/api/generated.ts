@@ -670,7 +670,10 @@ export interface components {
             path?: string;
             /** @enum {string} */
             pathSource?: "path" | "known_location" | "manual";
+            /** @description The installations offered: every one detection found, on PATH and then in the known locations, and the path set by hand when detection did not find it. */
             installations: string[];
+            /** @description The entry of installations in use, as found or set by hand. path is where it resolves to, a symlink's target included. */
+            installation?: string;
             version?: string;
             /** @enum {string} */
             versionSupport?: "supported" | "untested_newer" | "below_minimum" | "unknown";
