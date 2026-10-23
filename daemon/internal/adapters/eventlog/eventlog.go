@@ -42,6 +42,8 @@ type Log struct {
 	files   map[string]*os.File
 }
 
+var _ ports.EventLog = (*Log)(nil)
+
 func New(dir string, clock func() time.Time) (*Log, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err

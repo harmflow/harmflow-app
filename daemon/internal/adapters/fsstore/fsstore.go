@@ -97,6 +97,8 @@ type Tasks struct {
 	mu  sync.Mutex
 }
 
+var _ ports.TaskRepository = (*Tasks)(nil)
+
 func NewTasks(dir string) (*Tasks, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
@@ -192,6 +194,8 @@ type State struct {
 	mu  sync.Mutex
 }
 
+var _ ports.StateStore = (*State)(nil)
+
 func NewState(dir string) (*State, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
@@ -227,6 +231,8 @@ func (s *State) Save(name string, v any) error {
 type Executions struct {
 	dir string
 }
+
+var _ ports.ExecutionRepository = (*Executions)(nil)
 
 func NewExecutions(dir string) (*Executions, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {

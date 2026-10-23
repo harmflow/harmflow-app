@@ -19,6 +19,8 @@ type Prober struct {
 	Env     []string
 }
 
+var _ ports.ToolProber = (*Prober)(nil)
+
 var versionRe = regexp.MustCompile(`(\d+\.\d+(\.\d+)?)`)
 
 func (p *Prober) Probe(ctx context.Context) []ports.ToolInfo {

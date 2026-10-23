@@ -7,6 +7,8 @@ package wake
 import (
 	"sync"
 	"time"
+
+	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
 // Threshold is the smallest gap that is a suspension: far above what clock slewing opens between two checks, and
@@ -22,6 +24,8 @@ type Monitor struct {
 	mono     time.Duration
 	lastWake time.Time
 }
+
+var _ ports.WakeMonitor = (*Monitor)(nil)
 
 // NewMonitor watches this machine's clocks from now on.
 func NewMonitor() *Monitor {

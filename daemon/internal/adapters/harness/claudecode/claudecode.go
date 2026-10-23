@@ -47,6 +47,11 @@ type Adapter struct {
 	KnownLocations []string
 }
 
+var (
+	_ ports.HarnessAdapter    = (*Adapter)(nil)
+	_ ports.HarnessIdentifier = (*Adapter)(nil)
+)
+
 func (a *Adapter) ID() string   { return ID }
 func (a *Adapter) Name() string { return Name }
 
@@ -407,6 +412,8 @@ type parser struct {
 	messages   map[string]messageUsage // the latest usage of each assistant message, by message id
 	order      []string
 }
+
+var _ ports.OutputParser = (*parser)(nil)
 
 type resultLine struct {
 	IsError      bool
