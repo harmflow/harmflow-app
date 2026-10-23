@@ -467,6 +467,15 @@ func (e *env) wait(id string, want ...domain.ExecutionStatus) ExecutionView {
 	return x
 }
 
+// prepared waits until the harness has prepared a run. An execution is running before its harness prepares the script,
+// so a test that changes the script while a run goes on waits for this first, or the run may take the new script.
+func (e *env) prepared(h *fakeHarness) {
+	e.t.Helper()
+	if !e.poll(10*time.Second, h.running) {
+		e.t.Fatalf("%s never prepared a run", h.id)
+	}
+}
+
 func (e *env) executions(task string) []ExecutionSummary {
 	return e.app.ListExecutions(ExecutionFilter{TaskID: task})
 }
@@ -647,6 +656,7 @@ func TestOverlapQueueCoalesces(t *testing.T) {
 	e.claude.setScript(func(ports.RunRequest) string { return slow })
 	first, _ := e.app.RunTask("busy")
 	e.wait(first.ExecutionID, domain.StatusRunning)
+	e.prepared(e.claude)
 	second, _ := e.app.RunTask("busy")
 	third, _ := e.app.RunTask("busy")
 	fourth, _ := e.app.RunTask("busy")
@@ -1663,6 +1673,7 @@ func TestHeldBackFiringsRecorded(t *testing.T) {
 	e.claude.setScript(func(ports.RunRequest) string { return slow })
 	r, _ := e.app.RunTask("going")
 	e.wait(r.ExecutionID, domain.StatusRunning)
+	e.prepared(e.claude)
 	if pending, err := e.app.DeleteTask("going"); err != nil || !pending {
 		t.Fatalf("delete: %v %v", pending, err)
 	}
@@ -2292,6 +2303,7 @@ func TestExternalChangeDropsTheWaitingFiring(t *testing.T) {
 			e.claude.setScript(func(ports.RunRequest) string { return slow })
 			first, _ := e.app.RunTask("changed")
 			e.wait(first.ExecutionID, domain.StatusRunning)
+			e.prepared(e.claude)
 			second, _ := e.app.RunTask("changed")
 			if second.Outcome != "queued" {
 				t.Fatalf("second run: %+v", second)
@@ -2357,6 +2369,7 @@ func TestWaitingFiringAcrossRestart(t *testing.T) {
 			e.claude.setScript(func(ports.RunRequest) string { return slow })
 			first, _ := e.app.RunTask("waits")
 			e.wait(first.ExecutionID, domain.StatusRunning)
+			e.prepared(e.claude)
 			second, _ := e.app.RunTask("waits")
 			if second.Outcome != "queued" {
 				t.Fatalf("second run: %+v", second)
