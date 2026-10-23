@@ -80,8 +80,12 @@ func TestStartupTokenKeychainErrorMakesNoTokenAndNoFile(t *testing.T) {
 	if _, err := os.Stat(leftover); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("%s: %v, want no file", leftover, err)
 	}
-	if !strings.Contains(logged, "User interaction is not allowed") || !strings.Contains(logged, "launchd") {
-		t.Errorf("log %q does not say why the daemon stops", logged)
+	if !strings.Contains(logged, "User interaction is not allowed") {
+		t.Errorf("log %q does not say why the reads failed", logged)
+	}
+	// The error main prints, and the log does not repeat, says why the daemon stops.
+	if !strings.Contains(err.Error(), "launchd") {
+		t.Errorf("error %q does not say why the daemon stops", err)
 	}
 }
 

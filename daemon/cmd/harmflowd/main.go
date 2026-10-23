@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -74,18 +75,18 @@ func run(homeFlag, builtinsFlag string, port int) error {
 	if err != nil {
 		return err
 	}
-	defer logFile.Close()
+	defer logFile.Close() // every line was written with O_APPEND; a failed close at exit loses nothing
 	var logOut io.Writer = logFile
 	if isTerminal(os.Stderr) {
 		logOut = io.MultiWriter(logFile, os.Stderr)
 	}
 	logger := log.New(logOut, "", log.LstdFlags)
 
-	lock, err := acquireLock(filepath.Join(paths.Run, "daemon.lock"))
+	lock, err := acquireLock(filepath.Join(paths.Run, "daemon.lock"), syscall.Flock)
 	if err != nil {
 		return err
 	}
-	defer lock.Close()
+	defer lock.Close() // closing releases the flock; the process is exiting either way
 
 	pathEnv := userPath(userHome)
 	harnessEnv := withPath(os.Environ(), pathEnv)
@@ -116,7 +117,11 @@ func run(homeFlag, builtinsFlag string, port int) error {
 	if err != nil {
 		return err
 	}
-	exe, _ := os.Executable()
+	// Without its own path the daemon still runs; enabling autostart then fails rather than write an empty program.
+	exe, err := os.Executable()
+	if err != nil {
+		logger.Printf("autostart is unavailable: finding the daemon's executable: %v", err)
+	}
 	daemonArgs := []string{}
 	daemonEnv := map[string]string{"PATH": pathEnv}
 	if homeFlag != "" || os.Getenv("HARMFLOW_HOME") != "" {
@@ -161,7 +166,7 @@ func run(homeFlag, builtinsFlag string, port int) error {
 	if err := writeRuntime(paths.RuntimeFile, srv, secrets.Kind()); err != nil {
 		return err
 	}
-	defer os.Remove(paths.RuntimeFile)
+	defer os.Remove(paths.RuntimeFile) // a file left behind is replaced at the next start
 	logger.Printf("HarmFlow daemon %s listening on %s (home %s, builtins %s)", Version, srv.Address(), home, paths.Builtins)
 
 	sig := make(chan os.Signal, 1)
@@ -181,13 +186,16 @@ func run(homeFlag, builtinsFlag string, port int) error {
 	stop()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	srv.Shutdown(shutdownCtx)
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		logger.Printf("stopping the local API: %v", err)
+	}
 	logger.Printf("stopped")
 	return nil
 }
 
 // writeRuntime publishes the address in a file only the user can read (D-090).
 func writeRuntime(path string, srv *httpapi.Server, store string) error {
+	// A map of strings and ints always marshals.
 	data, _ := json.MarshalIndent(map[string]any{
 		"address": srv.Address(), "port": srv.Port(), "pid": os.Getpid(), "version": Version,
 		"startedAt": time.Now().Format(time.RFC3339), "tokenStore": store,
@@ -240,18 +248,25 @@ func buildTime(stamp string) time.Time {
 	return t
 }
 
-// acquireLock keeps a second daemon from running on the same data directory.
-func acquireLock(path string) (*os.File, error) {
+// acquireLock keeps a second daemon from running on the same data directory, with flock, which is syscall.Flock
+// outside tests. Only a lock another process holds means that a daemon is running; any other failure is returned as
+// it is, naming the lock file.
+func acquireLock(path string, flock func(fd, how int) error) (*os.File, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		f.Close()
-		return nil, fmt.Errorf("another HarmFlow daemon is already running on this data directory")
+	if err := flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close() // the file was only opened, and held nothing yet
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, errors.New("another HarmFlow daemon is already running on this data directory")
+		}
+		return nil, fmt.Errorf("locking %s: %w", path, err)
 	}
+	// The pid in the file only tells a person which daemon holds the lock; the lock itself is the flock, so a pid that
+	// cannot be written does not keep the daemon from running.
 	_ = f.Truncate(0)
-	_, _ = f.WriteString(fmt.Sprintf("%d\n", os.Getpid()))
+	_, _ = fmt.Fprintf(f, "%d\n", os.Getpid())
 	return f, nil
 }
 
@@ -278,7 +293,10 @@ func findBuiltins(flagValue string) string {
 	for _, c := range candidates {
 		if st, err := os.Stat(filepath.Join(c, "skills")); err == nil && st.IsDir() {
 			if _, err := os.Stat(filepath.Join(c, "agents")); err == nil {
-				abs, _ := filepath.Abs(c)
+				abs, err := filepath.Abs(c)
+				if err != nil {
+					return c
+				}
 				return abs
 			}
 		}

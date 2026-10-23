@@ -52,8 +52,12 @@ func (a *App) ApplyRetention() {
 		if mod.After(cutoff) {
 			continue
 		}
-		_ = a.d.Events.DeleteLog(x.ID)
-		_ = os.RemoveAll(filepath.Join(a.d.Paths.Runs, x.ID))
+		if err := a.d.Events.DeleteLog(x.ID); err != nil {
+			a.log.Printf("deleting the log of execution %s: %v", x.ID, err)
+		}
+		if err := os.RemoveAll(filepath.Join(a.d.Paths.Runs, x.ID)); err != nil {
+			a.log.Printf("deleting the directory of execution %s: %v", x.ID, err)
+		}
 		a.mu.Lock()
 		x.LogExpired = true
 		a.mu.Unlock()
@@ -103,7 +107,7 @@ func (a *App) CleanWorkspaces() CleanResult {
 			res.Kept = append(res.Kept, KeptPath{taskDir, "the task is running"})
 			continue
 		}
-		entries, _ := os.ReadDir(taskDir)
+		entries, _ := os.ReadDir(taskDir) // a directory that cannot be read has nothing this pass can clean
 		for _, en := range entries {
 			if !en.IsDir() {
 				continue
@@ -244,6 +248,7 @@ func removeWorktree(p string) {
 	gitdir := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(data)), "gitdir:"))
 	// <repo>/.git/worktrees/<name> → <repo>
 	repo := filepath.Dir(filepath.Dir(filepath.Dir(gitdir)))
+	// git's answer changes nothing: the caller removes the directory itself, and prune drops a record left stale.
 	_ = exec.Command("git", "-C", repo, "worktree", "remove", "--force", p).Run()
 	_ = exec.Command("git", "-C", repo, "worktree", "prune").Run()
 }

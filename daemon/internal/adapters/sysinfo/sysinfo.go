@@ -111,6 +111,7 @@ func (r *Reader) dirSize(dir string) int64 {
 		return r.dirBytes
 	}
 	var total int64
+	// The walk skips what it cannot read and its callback returns no error, so it returns none.
 	_ = filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil

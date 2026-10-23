@@ -119,6 +119,7 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 		info.Version = m[1]
 		info.Readiness = "version_identified"
 	}
+	// Help that cannot be read lists no flags, so each feature reads as missing.
 	help, _, _ := procutil.Output(ctx, 15*time.Second, a.Env, info.Path, "--help")
 	for _, f := range append(requiredFlags, "--plugin-dir", "--effort", "--agents", "--agent", "--add-dir", "--tools",
 		"--disallowedTools", "--no-session-persistence", "--model") {
@@ -282,7 +283,7 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 		defs[ag.Name] = def
 	}
 	if len(defs) > 0 {
-		js, _ := json.Marshal(defs)
+		js, _ := json.Marshal(defs) // maps of strings and string slices always marshal
 		args = append(args, "--agents", string(js))
 	}
 	if len(req.Agents) > 0 && info.Features["--agent"] {
@@ -505,6 +506,7 @@ func (p *parser) Line(line []byte) []ports.HarnessEvent {
 			Usage   *apiUsage      `json:"usage"`
 			Content []contentBlock `json:"content"`
 		}
+		// A message of another shape leaves msg empty, and the line yields no event.
 		_ = json.Unmarshal(sl.Message, &msg)
 		var out []ports.HarnessEvent
 		if p.countMessage(msg.ID, msg.Model, msg.Usage) {
@@ -527,7 +529,7 @@ func (p *parser) Line(line []byte) []ports.HarnessEvent {
 					Skill       string `json:"skill"`
 					Prompt      string `json:"prompt"`
 				}
-				_ = json.Unmarshal(c.Input, &in)
+				_ = json.Unmarshal(c.Input, &in) // an input of another shape leaves the fields empty
 				path := in.FilePath
 				if path == "" {
 					path = in.NotebookP
@@ -546,7 +548,7 @@ func (p *parser) Line(line []byte) []ports.HarnessEvent {
 		var msg struct {
 			Content []contentBlock `json:"content"`
 		}
-		_ = json.Unmarshal(sl.Message, &msg)
+		_ = json.Unmarshal(sl.Message, &msg) // as above: another shape yields no event
 		var out []ports.HarnessEvent
 		for _, c := range msg.Content {
 			if c.Type != "tool_result" {
@@ -806,12 +808,12 @@ func releaseLine(v string) string {
 func compareVersions(a, b string) int {
 	pa, pb := strings.Split(a, "."), strings.Split(b, ".")
 	for i := 0; i < len(pa) || i < len(pb); i++ {
-		var x, y int
+		var x, y int // a part that is not a number counts as 0
 		if i < len(pa) {
-			fmt.Sscanf(pa[i], "%d", &x)
+			_, _ = fmt.Sscanf(pa[i], "%d", &x)
 		}
 		if i < len(pb) {
-			fmt.Sscanf(pb[i], "%d", &y)
+			_, _ = fmt.Sscanf(pb[i], "%d", &y)
 		}
 		if x != y {
 			if x < y {

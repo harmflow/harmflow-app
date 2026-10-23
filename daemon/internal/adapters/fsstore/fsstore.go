@@ -49,14 +49,16 @@ func WriteAtomic(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	name := tmp.Name()
+	// On failure the temporary file is closed and removed as far as that goes: the error returned is the one that
+	// matters, and a temporary file left behind is never read.
 	cleanup := func() { _ = os.Remove(name) }
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		cleanup()
 		return err
 	}
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		cleanup()
 		return err
 	}
@@ -74,9 +76,11 @@ func WriteAtomic(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	hold(AfterRename)
+	// Syncing the directory makes the rename durable where the file system supports it; the file is in place whatever
+	// the directory sync says.
 	if d, err := os.Open(dir); err == nil {
 		_ = d.Sync()
-		d.Close()
+		_ = d.Close()
 	}
 	return nil
 }

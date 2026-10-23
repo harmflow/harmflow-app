@@ -67,8 +67,13 @@ func keychainError(err error) error {
 	if ee.ExitCode() == 44 {
 		return ErrNoToken
 	}
-	if msg := strings.TrimSpace(string(ee.Stderr)); msg != "" {
-		return fmt.Errorf("keychain: %w: %s", err, msg)
+	return securityFailure(err, ee.Stderr)
+}
+
+// securityFailure is a failed security command's error: what it wrote to stderr, when anything, then its cause.
+func securityFailure(err error, stderr []byte) error {
+	if msg := strings.TrimSuffix(strings.TrimSpace(string(stderr)), "."); msg != "" {
+		return fmt.Errorf("keychain: %s: %w", msg, err)
 	}
 	return fmt.Errorf("keychain: %w", err)
 }
@@ -101,7 +106,7 @@ func (k Keychain) Set(token string) error {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("keychain: %v %s", err, strings.TrimSpace(stderr.String()))
+		return securityFailure(err, stderr.Bytes())
 	}
 	got, err := k.Get()
 	if err != nil {

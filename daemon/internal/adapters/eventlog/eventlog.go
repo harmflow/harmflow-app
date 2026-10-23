@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"strconv"
 	"sync"
 	"time"
 
@@ -101,6 +102,8 @@ func (l *Log) write(e domain.Event) {
 	if err != nil {
 		return
 	}
+	// The event is in the ring and reaches its subscribers whatever the file does, and Append has no caller that could
+	// act on a failed write: the line is lost from the replay only.
 	_, _ = f.Write(append(data, '\n'))
 	if isTerminal(e.Type) {
 		_ = f.Sync()
@@ -112,6 +115,7 @@ func (l *Log) Close(executionID string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if f, ok := l.files[executionID]; ok {
+		// As in write: a failure loses lines from the replay only, and the execution has ended.
 		_ = f.Sync()
 		_ = f.Close()
 		delete(l.files, executionID)
@@ -134,7 +138,7 @@ func (l *Log) path(executionID string) string { return filepath.Join(l.dir, exec
 func (l *Log) Replay(executionID string, after int64, limit int) ([]domain.Event, bool, error) {
 	l.mu.Lock()
 	if f, ok := l.files[executionID]; ok {
-		_ = f.Sync()
+		_ = f.Sync() // a failed sync only leaves the latest lines out of this replay
 	}
 	l.mu.Unlock()
 	f, err := os.Open(l.path(executionID))
@@ -144,7 +148,7 @@ func (l *Log) Replay(executionID string, after int64, limit int) ([]domain.Event
 	if err != nil {
 		return nil, false, err
 	}
-	defer f.Close()
+	defer f.Close() // read only: closing cannot lose data
 	out := []domain.Event{}
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 64*1024), 8*1024*1024)
@@ -195,7 +199,7 @@ func (l *Log) Subscribe(after int64) (<-chan domain.Event, bool, func()) {
 }
 
 func (l *Log) rawPath(executionID string, attempt int) string {
-	return filepath.Join(l.dir, executionID, "attempt-"+itoa(attempt)+".raw")
+	return filepath.Join(l.dir, executionID, "attempt-"+strconv.Itoa(attempt)+".raw")
 }
 
 // RawWriter captures an attempt's raw output for diagnosis, redacted line by line.
@@ -221,7 +225,7 @@ func (l *Log) ReadRaw(executionID string, attempt int, limit int64) (ports.RawCa
 	if err != nil {
 		return ports.RawCapture{}, err
 	}
-	defer f.Close()
+	defer f.Close() // read only: closing cannot lose data
 	info, err := f.Stat()
 	if err != nil {
 		return ports.RawCapture{}, err
@@ -290,10 +294,11 @@ func (w *redactingWriter) Write(p []byte) (int, error) {
 func (w *redactingWriter) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	var err error
 	if len(w.buf) > 0 {
-		_, _ = w.f.WriteString(Redact(string(w.buf)))
+		_, err = w.f.WriteString(Redact(string(w.buf)))
 	}
-	return w.f.Close()
+	return errors.Join(err, w.f.Close())
 }
 
 var secretPatterns = []*regexp.Regexp{
@@ -433,9 +438,4 @@ func redactReflect(v reflect.Value) bool {
 		}
 	}
 	return changed
-}
-
-func itoa(n int) string {
-	b, _ := json.Marshal(n)
-	return string(b)
 }

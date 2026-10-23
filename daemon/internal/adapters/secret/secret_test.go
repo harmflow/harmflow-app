@@ -19,7 +19,7 @@ func TestKeychainError(t *testing.T) {
 	}{
 		{"item not found", "echo 'The specified item could not be found in the keychain.' >&2; exit 44", true, ""},
 		{"locked keychain", "echo 'User interaction is not allowed.' >&2; exit 36", false,
-			"keychain: exit status 36: User interaction is not allowed."},
+			"keychain: User interaction is not allowed: exit status 36"},
 		{"no message", "exit 51", false, "keychain: exit status 51"},
 	}
 	for _, c := range cases {

@@ -285,7 +285,7 @@ func (a *App) createTask(ctx context.Context, in TaskInput, mode catalogMode, ov
 		return TaskView{}, err
 	}
 	a.afterWrite(f, domain.EventTaskCreated, r)
-	v, _ := a.GetTask(id)
+	v, _ := a.GetTask(id) // fails only for a task that is not there, and this one was just written
 	v.Validation = r
 	return v, nil
 }
@@ -319,7 +319,7 @@ func (a *App) UpdateTask(ctx context.Context, id string, in TaskInput) (TaskView
 	}
 	_ = e
 	a.afterWrite(f, domain.EventTaskUpdated, r)
-	v, _ := a.GetTask(id)
+	v, _ := a.GetTask(id) // fails only for a task that is not there, and this one was just written
 	v.Validation = r
 	return v, nil
 }
