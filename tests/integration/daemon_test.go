@@ -15,6 +15,7 @@ import (
 	"reflect"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -29,7 +30,14 @@ var binary string
 // builtAt is the build time the binary is stamped with, as make stamps it.
 const builtAt = "2026-10-22T20:30:05Z"
 
+// starterEnv names the daemon binary when the test binary runs as the short-lived parent of
+// TestDaemonOutlivesItsStarter rather than as the tests; starterEnv+"_PID" names the file it writes the daemon's PID to.
+const starterEnv = "HARMFLOW_TEST_STARTER"
+
 func TestMain(m *testing.M) {
+	if bin := os.Getenv(starterEnv); bin != "" {
+		os.Exit(runStarter(bin, os.Args[1:]))
+	}
 	dir, err := os.MkdirTemp("", "harmflowd-bin")
 	if err != nil {
 		panic(err)
@@ -77,31 +85,38 @@ func startDaemon(t *testing.T, home string) *daemon {
 		t.Fatal(err)
 	}
 	d := &daemon{t: t, home: home, cmd: cmd}
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		data, err := os.ReadFile(filepath.Join(home, "run", "daemon.json"))
-		if err == nil {
-			var rt struct {
-				Address string `json:"address"`
-			}
-			if json.Unmarshal(data, &rt) == nil && rt.Address != "" {
-				tok, _ := os.ReadFile(filepath.Join(home, "run", "token"))
-				d.base = "http://" + rt.Address + "/api/v1"
-				d.token = strings.TrimSpace(string(tok))
-				break
-			}
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	d.base, d.token = awaitRuntime(home, 20*time.Second)
 	if d.base == "" {
 		_ = cmd.Process.Kill()
 		t.Fatalf("the daemon did not start:\n%s", out.String())
 	}
 	t.Cleanup(func() { d.stop() })
+	d.useFakeHarnesses()
+	return d
+}
+
+// awaitRuntime waits until the daemon at home has written its address and token, and returns its API's base URL and
+// the token: empty when it has not within the timeout.
+func awaitRuntime(home string, timeout time.Duration) (base, token string) {
+	for deadline := time.Now().Add(timeout); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		data, err := os.ReadFile(filepath.Join(home, "run", "daemon.json"))
+		var rt struct {
+			Address string `json:"address"`
+		}
+		if err == nil && json.Unmarshal(data, &rt) == nil && rt.Address != "" {
+			tok, _ := os.ReadFile(filepath.Join(home, "run", "token"))
+			return "http://" + rt.Address + "/api/v1", strings.TrimSpace(string(tok))
+		}
+	}
+	return "", ""
+}
+
+// useFakeHarnesses points the daemon at the stand-in CLIs of testdata/.
+func (d *daemon) useFakeHarnesses() {
+	d.t.Helper()
 	fakes := filepath.Join(repoRoot(), "tests", "integration", "testdata")
 	d.call("PUT", "/harnesses/claude-code", map[string]any{"path": filepath.Join(fakes, "fake-claude")}, 200)
 	d.call("PUT", "/harnesses/codex", map[string]any{"path": filepath.Join(fakes, "fake-codex")}, 200)
-	return d
 }
 
 func (d *daemon) stop() {
@@ -1395,4 +1410,342 @@ func TestFiringsSurviveAKill(t *testing.T) {
 	if runs := d.list("/executions?taskId=waits"); len(runs) != 2 {
 		t.Errorf("the second restart created an execution: %v", runs)
 	}
+}
+
+// FS-010 FR-004, §5.2 (FS-010-F04): a scheduled task runs from its firing to completed while no client is connected.
+// FS-008 FR-003, AC-003 (FS-008-F03), the daemon's side: a client that connects only afterwards lists the execution,
+// recovers its whole history, and resumes the stream after it.
+func TestScheduledRunWithDashboardClosed(t *testing.T) {
+	d := startDaemon(t, t.TempDir())
+	// The task the late client runs to cause a new event; with no schedule, it never fires.
+	d.call("POST", "/tasks", map[string]any{"yaml": task("late", "SCENARIO=ok", "")}, 201)
+	// Its notices are off, so no notification.created follows the completion in the log.
+	scheduled := d.call("POST", "/tasks", map[string]any{"yaml": task("every-minute", "SCENARIO=ok",
+		"  schedule:\n    cron: \"* * * * *\"\n    timezone: UTC\n  notifications:\n    native:\n      enabled: false\n")}, 201)
+	if scheduled["nextFireAt"] == nil {
+		t.Fatal("no next firing")
+	}
+
+	// From here until the execution ends, the test calls nothing and opens no stream: it reads logs/ only. Schedules
+	// have no seconds field (D-071), so the firing comes at the next minute boundary, then within a scheduler tick.
+	id, logged := waitLogEnd(t, d.home, "", 90*time.Second, nil)
+	d.call("POST", "/tasks/every-minute/disable", nil, 200)
+	if first, last := logged[0], logged[len(logged)-1]; first.Type != "execution.created" ||
+		last.Type != "execution.completed" {
+		t.Fatalf("the log runs from %s to %s, want execution.created to execution.completed", first.Type, last.Type)
+	}
+	x := d.call("GET", "/executions/"+id, nil, 200)
+	if x["taskId"] != "every-minute" || x["trigger"] != "schedule" || x["status"] != "completed" {
+		t.Errorf("execution %s: task %v, trigger %v, status %v", id, x["taskId"], x["trigger"], x["status"])
+	}
+
+	// A client that connects only now finds the execution, with its task, trigger, status, and times.
+	list := d.list("/executions")
+	if len(list) != 1 || list[0]["id"] != id {
+		t.Fatalf("GET /executions lists %v, want only %s", list, id)
+	}
+	row := list[0]
+	if row["taskId"] != "every-minute" || row["trigger"] != "schedule" || row["status"] != "completed" {
+		t.Errorf("the listed execution: task %v, trigger %v, status %v", row["taskId"], row["trigger"], row["status"])
+	}
+	var times [3]time.Time
+	for i, key := range []string{"createdAt", "startedAt", "endedAt"} {
+		s, _ := row[key].(string)
+		var err error
+		if times[i], err = time.Parse(time.RFC3339Nano, s); err != nil {
+			t.Fatalf("the listed execution's %s is %v: %v", key, row[key], err)
+		}
+	}
+	if times[1].Before(times[0]) || times[2].Before(times[1]) {
+		t.Errorf("created %v, started %v, ended %v are out of order", times[0], times[1], times[2])
+	}
+
+	// It gets the whole history, identical by id, type, and order to the lines of the JSONL file.
+	status, body := d.request("GET", "/executions/"+id+"/events", nil, nil)
+	var replay struct {
+		Events     []logLine `json:"events"`
+		LogExpired bool      `json:"logExpired"`
+	}
+	if status != 200 || json.Unmarshal(body, &replay) != nil || replay.LogExpired {
+		t.Fatalf("GET /executions/%s/events: %d %s", id, status, body)
+	}
+	logged = readLog(t, filepath.Join(d.home, "logs", id+".jsonl"))
+	if !slices.Equal(replay.Events, logged) {
+		t.Fatalf("the replay differs from the log:\n%v\n%v", replay.Events, logged)
+	}
+	replayed := map[int64]bool{}
+	for _, e := range replay.Events {
+		replayed[e.ID] = true
+	}
+	lastID := replay.Events[len(replay.Events)-1].ID
+
+	// It resumes the stream after the last replayed event, then runs another task. Since that event the daemon logged
+	// only the disabling, so the stream brings that first, then the new execution, and no replayed event again.
+	events, closeStream := d.stream(t, lastID)
+	defer closeStream()
+	lateID := d.call("POST", "/tasks/late/run", nil, 202)["executionId"].(string)
+	var before []string
+	timeout := time.After(20 * time.Second)
+	for prev, found := lastID, false; !found; {
+		select {
+		case e, ok := <-events:
+			if !ok {
+				t.Fatal("the stream ended")
+			}
+			if e.ID <= prev || replayed[e.ID] || e.Type == "replay_gap" {
+				t.Fatalf("the stream brought %s %d after %d, the last replayed being %d", e.Type, e.ID, prev, lastID)
+			}
+			prev = e.ID
+			if found = e.Type == "execution.created" && e.Data["executionId"] == lateID; !found {
+				before = append(before, e.Type+" "+fmt.Sprint(e.Data["taskId"]))
+			}
+		case <-timeout:
+			t.Fatalf("no execution.created for %s; the stream brought %v", lateID, before)
+		}
+	}
+	if !slices.Equal(before, []string{"task.updated every-minute"}) {
+		t.Errorf("before the new execution, the stream brought %v, want only the disabling", before)
+	}
+	d.waitStatus(lateID, "completed")
+}
+
+// FS-010 AC-006 (FS-010-F04): a client that closes its stream during an execution stops nothing. The execution goes on
+// to completed with no client connected, and GET /health answers throughout from the same daemon.
+func TestClosingTheStreamStopsNothing(t *testing.T) {
+	d := startDaemon(t, t.TempDir())
+	d.call("POST", "/tasks", map[string]any{"yaml": task("ticks", "SCENARIO=ticks", "")}, 201)
+	health := d.call("GET", "/health", nil, 200)
+	events, closeStream := d.stream(t, 0)
+	id := d.call("POST", "/tasks/ticks/run", nil, 202)["executionId"].(string)
+	var received int64
+	timeout := time.After(20 * time.Second)
+	for received == 0 {
+		select {
+		case e := <-events:
+			if e.Data["executionId"] != id {
+				continue
+			}
+			if terminalTypes[e.Type] {
+				t.Fatalf("the execution ended (%s) before the client closed", e.Type)
+			}
+			if e.Type == "harness.message" {
+				received = e.ID
+			}
+		case <-timeout:
+			t.Fatal("no harness.message within 20 s")
+		}
+	}
+	closeStream()
+	logPath := filepath.Join(d.home, "logs", id+".jsonl")
+	for _, l := range readLog(t, logPath) {
+		if terminalTypes[l.Type] {
+			t.Fatalf("the execution had ended (%s) when the client closed", l.Type)
+		}
+	}
+
+	_, logged := waitLogEnd(t, d.home, id, 30*time.Second, func() {
+		if h := d.call("GET", "/health", nil, 200); h["pid"] != health["pid"] || h["startedAt"] != health["startedAt"] {
+			t.Fatalf("GET /health answered for another daemon: %v, then %v", health, h)
+		}
+	})
+	var messages int
+	for _, l := range logged {
+		switch l.Type {
+		case "execution.interrupted", "execution.cancelled", "daemon.stopping":
+			t.Errorf("the log holds %s", l.Type)
+		case "harness.message":
+			if l.ID > received {
+				messages++
+			}
+		}
+	}
+	if messages == 0 {
+		t.Error("the harness logged no message after the client closed")
+	}
+	if x := d.call("GET", "/executions/"+id, nil, 200); x["status"] != "completed" {
+		t.Errorf("the execution is %v, want completed", x["status"])
+	}
+}
+
+// FS-010 FR-004 (FS-010-F04): the daemon outlives the process that started it. A short-lived parent starts harmflowd as
+// the desktop does, in a new process group with its standard streams closed. The test ends the parent's whole process
+// group during an execution; the daemon keeps answering and completes the execution.
+func TestDaemonOutlivesItsStarter(t *testing.T) {
+	d, pid, endParent := startDetachedDaemon(t, t.TempDir())
+	if pgid, err := syscall.Getpgid(pid); err != nil || pgid != pid || pgid == syscall.Getpgrp() {
+		t.Fatalf("the daemon %d is in process group %d (%v), want its own", pid, pgid, err)
+	}
+	health := d.call("GET", "/health", nil, 200)
+	if health["pid"] != float64(pid) {
+		t.Fatalf("GET /health answers for %v, the parent started %d", health["pid"], pid)
+	}
+	d.call("POST", "/tasks", map[string]any{"yaml": task("outlives", "SCENARIO=ticks", "")}, 201)
+	id := d.call("POST", "/tasks/outlives/run", nil, 202)["executionId"].(string)
+	d.waitStatus(id, "running")
+	endParent()
+	if x := d.call("GET", "/executions/"+id, nil, 200); x["status"] != "running" {
+		t.Fatalf("the execution is %v once the parent ended, want running", x["status"])
+	}
+	if h := d.call("GET", "/health", nil, 200); h["pid"] != health["pid"] || h["startedAt"] != health["startedAt"] {
+		t.Fatalf("GET /health answered for another daemon: %v, then %v", health, h)
+	}
+	if x := d.waitStatus(id, "completed", "failed", "cancelled", "interrupted"); x["status"] != "completed" {
+		t.Errorf("the execution is %v, want completed", x["status"])
+	}
+}
+
+// runStarter is the test binary run as the short-lived parent of TestDaemonOutlivesItsStarter. It starts the daemon as
+// the desktop's start command does (desktop/src-tauri/src/daemon.rs): in a process group of its own, with its standard
+// streams on /dev/null, never waited for. It writes the daemon's PID, then stays until it is ended or its standard
+// input closes.
+func runStarter(bin string, args []string) int {
+	pidFile := os.Getenv(starterEnv + "_PID")
+	_ = os.Unsetenv(starterEnv)
+	_ = os.Unsetenv(starterEnv + "_PID")
+	cmd := exec.Command(bin, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if err := os.WriteFile(pidFile+".tmp", []byte(strconv.Itoa(cmd.Process.Pid)), 0o600); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if err := os.Rename(pidFile+".tmp", pidFile); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	_, _ = io.Copy(io.Discard, os.Stdin)
+	return 0
+}
+
+// startDetachedDaemon starts harmflowd through runStarter, and returns the daemon, its PID, and a function that ends
+// the parent with its whole process group. The daemon is no child of the test, so its cleanup stops it by its PID.
+func startDetachedDaemon(t *testing.T, home string) (*daemon, int, func()) {
+	t.Helper()
+	_ = os.Remove(filepath.Join(home, "run", "daemon.json"))
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pidFile := filepath.Join(t.TempDir(), "daemon.pid")
+	parent := exec.Command(self, "--home", home, "--builtins", repoRoot())
+	parent.Env = append(os.Environ(), "HARMFLOW_TOKEN_STORE=file", "CODEX_HOME="+filepath.Join(home, "codex"),
+		starterEnv+"="+binary, starterEnv+"_PID="+pidFile)
+	// A process group of its own, as an app has, so ending it with its group leaves the test running.
+	parent.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	var out bytes.Buffer
+	parent.Stdout, parent.Stderr = &out, &out
+	// The parent stays until this pipe closes, at the latest when the test process exits.
+	if _, err := parent.StdinPipe(); err != nil {
+		t.Fatal(err)
+	}
+	if err := parent.Start(); err != nil {
+		t.Fatal(err)
+	}
+	endParent := func() {
+		if parent.ProcessState == nil {
+			_ = syscall.Kill(-parent.Process.Pid, syscall.SIGKILL)
+			_ = parent.Wait()
+		}
+	}
+	t.Cleanup(endParent)
+	var pid int
+	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline) && pid == 0; time.Sleep(50 * time.Millisecond) {
+		data, _ := os.ReadFile(pidFile)
+		pid, _ = strconv.Atoi(string(data))
+	}
+	if pid == 0 {
+		t.Fatalf("the parent started no daemon:\n%s", out.String())
+	}
+	// The parent ends first, so that the daemon, once stopped, is reaped rather than left a zombie of the parent.
+	t.Cleanup(func() {
+		endParent()
+		_ = syscall.Kill(pid, syscall.SIGTERM)
+		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+			if syscall.Kill(pid, 0) != nil {
+				return
+			}
+		}
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+	})
+	d := &daemon{t: t, home: home}
+	if d.base, d.token = awaitRuntime(home, 20*time.Second); d.base == "" {
+		t.Fatalf("the daemon %d wrote no runtime file:\n%s", pid, out.String())
+	}
+	d.useFakeHarnesses()
+	return d, pid, endParent
+}
+
+// logLine is a line of an execution's JSONL log, or an event of its replay, as these tests compare them.
+type logLine struct {
+	ID          int64  `json:"id"`
+	Type        string `json:"type"`
+	ExecutionID string `json:"executionId"`
+}
+
+var terminalTypes = map[string]bool{"execution.completed": true, "execution.no_work": true, "execution.failed": true,
+	"execution.cancelled": true, "execution.interrupted": true, "execution.needs_attention": true}
+
+// readLog returns the complete lines of a JSONL log, in order; a last line still being written is left out.
+func readLog(t *testing.T, path string) []logLine {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	var lines []logLine
+	for {
+		i := bytes.IndexByte(data, '\n')
+		if i < 0 {
+			return lines
+		}
+		var l logLine
+		if err := json.Unmarshal(data[:i], &l); err != nil {
+			t.Fatalf("%s: %v: %s", path, err, data[:i])
+		}
+		lines = append(lines, l)
+		data = data[i+1:]
+	}
+}
+
+// waitLogEnd reads logs/ under home, and calls nothing on the daemon, until an execution's JSONL log holds a terminal
+// event; it returns the execution's id and the log's lines. An empty id waits for the only execution's log. each, when
+// set, runs between two reads.
+func waitLogEnd(t *testing.T, home, id string, timeout time.Duration, each func()) (string, []logLine) {
+	t.Helper()
+	dir := filepath.Join(home, "logs")
+	pattern := "*.jsonl"
+	if id != "" {
+		pattern = id + ".jsonl"
+	}
+	for deadline := time.Now().Add(timeout); time.Now().Before(deadline); time.Sleep(250 * time.Millisecond) {
+		files, _ := filepath.Glob(filepath.Join(dir, pattern))
+		if len(files) > 1 {
+			t.Fatalf("logs/ holds %d execution logs, want one: %v", len(files), files)
+		}
+		for _, f := range files {
+			lines := readLog(t, f)
+			for _, l := range lines {
+				if terminalTypes[l.Type] {
+					return strings.TrimSuffix(filepath.Base(f), ".jsonl"), lines
+				}
+			}
+		}
+		if each != nil {
+			each()
+		}
+	}
+	var names []string
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	daemonLog, _ := os.ReadFile(filepath.Join(dir, "daemon.log"))
+	if len(daemonLog) > 4000 {
+		daemonLog = daemonLog[len(daemonLog)-4000:]
+	}
+	t.Fatalf("no execution log in logs/ ended within %v; logs/ holds %v; daemon.log ends:\n%s", timeout, names, daemonLog)
+	return "", nil
 }

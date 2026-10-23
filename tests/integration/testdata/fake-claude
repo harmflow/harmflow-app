@@ -1,8 +1,9 @@
 #!/bin/bash
 # A stand-in for the Claude Code CLI that speaks its stream-json format. The task's prompt picks the scenario:
 # SCENARIO=ok (default), SCENARIO=quota, SCENARIO=quotausage (a quota after the result line reported usage and cost),
-# SCENARIO=slow, SCENARIO=report, SCENARIO=secret. With PARTIAL=1 in the prompt, it first leaves partial work, in any
-# scenario: a file in its workspace and a step in progress.jsonl.
+# SCENARIO=slow, SCENARIO=report, SCENARIO=secret, SCENARIO=ticks (a message every half second for five seconds, then
+# success). With PARTIAL=1 in the prompt, it first leaves partial work, in any scenario: a file in its workspace and a
+# step in progress.jsonl.
 case "$1" in
   --version) echo "2.1.239 (Claude Code)"; exit 0 ;;
   --help) cat <<'HELP'
@@ -56,6 +57,13 @@ case "$SCENARIO" in
     echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"git push https://x-access-token:'"$TOKEN"'@github.com/o/r","description":"Push"}}]}}'
     echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t2","content":"pushed","is_error":false}]}}'
     echo '{"type":"result","subtype":"success","is_error":false,"result":"Pushed with '"$TOKEN"'","session_id":"fake-session"}'
+    exit 0 ;;
+  ticks)
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+      echo '{"type":"assistant","message":{"content":[{"type":"text","text":"Tick '"$i"'"}]}}'
+      sleep 0.5
+    done
+    echo '{"type":"result","subtype":"success","is_error":false,"result":"Ticked ten times.","session_id":"fake-session"}'
     exit 0 ;;
 esac
 echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"echo hi","description":"Say hi"}}]}}'
