@@ -56,6 +56,32 @@ func TestSyntaxErrorLine(t *testing.T) {
 	}
 }
 
+// versionSecond is the valid task with kind first, so apiVersion sits on line 2 and a location that fell back to the
+// document's start would show.
+var versionSecond = strings.Replace(valid, "apiVersion: harmflow/v1alpha1\nkind: Task\n",
+	"kind: Task\napiVersion: harmflow/v1alpha1\n", 1)
+
+// FS-001 FR-007: a task file names its schema version, and one with no version or another version is refused.
+func TestSchemaVersionIsRequired(t *testing.T) {
+	v, _ := New()
+	doc, node, _ := ParseYAML([]byte(versionSecond))
+	if issues := v.ValidateTask(doc, node); len(issues) > 0 {
+		t.Fatalf("the versioned task was rejected: %+v", issues)
+	}
+	doc, node, _ = ParseYAML([]byte(strings.Replace(versionSecond, "apiVersion: harmflow/v1alpha1\n", "", 1)))
+	issues := v.ValidateTask(doc, node)
+	if len(issues) != 1 || issues[0].Key != "schema_required" || issues[0].Params["properties"] != `"apiVersion"` ||
+		issues[0].Path != "" {
+		t.Errorf("a task with no apiVersion: got %+v, want apiVersion required at the root", issues)
+	}
+	doc, node, _ = ParseYAML([]byte(strings.Replace(versionSecond, "harmflow/v1alpha1", "harmflow/v1", 1)))
+	issues = v.ValidateTask(doc, node)
+	if len(issues) != 1 || issues[0].Key != "schema_const" || issues[0].Path != "/apiVersion" || issues[0].Line != 2 ||
+		issues[0].Params["value"] != `"harmflow/v1alpha1"` {
+		t.Errorf("apiVersion harmflow/v1: got %+v, want it to be harmflow/v1alpha1 at /apiVersion on line 2", issues)
+	}
+}
+
 // FS-001 AC-010, AC-013: a general task takes no repository; a GitHub task needs them; a schema error is located.
 func TestTypeParametersAndLocation(t *testing.T) {
 	v, _ := New()
