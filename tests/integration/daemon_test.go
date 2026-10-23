@@ -674,6 +674,58 @@ func TestRestartNamesTheBrokenFile(t *testing.T) {
 	}
 }
 
+// FS-002 FR-009, AC-011: a save accepts a 5-field cron or a simple interval, and rejects a cron with a seconds field
+// without writing a task file.
+func TestScheduleFormatsOnSave(t *testing.T) {
+	d := startDaemon(t, t.TempDir())
+	before := time.Now().Truncate(time.Minute)
+	every := d.call("POST", "/tasks", map[string]any{"yaml": task("every-30m", "Check the inbox.",
+		"  schedule:\n    interval: 30m\n    timezone: UTC\n")}, 201)
+	after := time.Now().Truncate(time.Minute)
+	// An interval counts from the minute the task was saved.
+	next, err := time.Parse(time.RFC3339, fmt.Sprint(every["nextFireAt"]))
+	if err != nil || next.Before(before.Add(30*time.Minute)) || next.After(after.Add(30*time.Minute)) {
+		t.Errorf("interval: next firing %v (%v), want 30 minutes after the save", every["nextFireAt"], err)
+	}
+
+	weekdays := d.call("POST", "/tasks", map[string]any{"yaml": task("weekdays", "Write the standup notes.",
+		"  schedule:\n    cron: \"0 9 * * 1-5\"\n    timezone: UTC\n")}, 201)
+	next, err = time.Parse(time.RFC3339, fmt.Sprint(weekdays["nextFireAt"]))
+	if day := next.UTC().Weekday(); err != nil || next.UTC().Hour() != 9 || next.Minute() != 0 ||
+		day == time.Saturday || day == time.Sunday {
+		t.Errorf("5-field cron: next firing %v (%v), want 09:00 UTC on a weekday", weekdays["nextFireAt"], err)
+	}
+
+	status, body := d.request("POST", "/tasks", map[string]any{"yaml": task("with-seconds", "Write the standup notes.",
+		"  schedule:\n    cron: \"0 0 9 * * 1-5\"\n    timezone: UTC\n")}, nil)
+	if status != 422 {
+		t.Fatalf("6-field cron: status %d, want 422: %s", status, body)
+	}
+	var rejected struct {
+		Error struct {
+			Validation struct {
+				Errors []struct {
+					Path string `json:"path"`
+				} `json:"errors"`
+			} `json:"validation"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(body, &rejected)
+	var paths []string
+	for _, e := range rejected.Error.Validation.Errors {
+		paths = append(paths, e.Path)
+	}
+	if !slices.Contains(paths, "/spec/schedule/cron") {
+		t.Errorf("6-field cron: errors at %v, want one at /spec/schedule/cron: %s", paths, body)
+	}
+	if _, err := os.Stat(filepath.Join(d.home, "tasks", "with-seconds.yaml")); !os.IsNotExist(err) {
+		t.Errorf("a rejected save wrote the task file: %v", err)
+	}
+	if s, _ := d.request("GET", "/tasks/with-seconds", nil, nil); s != 404 {
+		t.Errorf("a rejected save left a task: GET status %d, want 404", s)
+	}
+}
+
 type sseEvent struct {
 	ID   int64
 	Type string
