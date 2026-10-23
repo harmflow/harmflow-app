@@ -231,6 +231,7 @@ type hookedEvents struct {
 	schema  *schema.Validator
 	mu      sync.Mutex
 	hook    func(domain.Event)
+	deleted func(executionID string)
 	checked map[string]int // events checked, by type
 	invalid []string
 }
@@ -295,6 +296,24 @@ func (h *hookedEvents) checkedTypes() map[string]int {
 func (h *hookedEvents) setHook(hook func(domain.Event)) {
 	h.mu.Lock()
 	h.hook = hook
+	h.mu.Unlock()
+}
+
+// DeleteLog runs the test's delete hook, if any, once the log is deleted and before its caller goes on.
+func (h *hookedEvents) DeleteLog(executionID string) error {
+	err := h.Log.DeleteLog(executionID)
+	h.mu.Lock()
+	hook := h.deleted
+	h.mu.Unlock()
+	if hook != nil {
+		hook(executionID)
+	}
+	return err
+}
+
+func (h *hookedEvents) setDeleteHook(hook func(executionID string)) {
+	h.mu.Lock()
+	h.deleted = hook
 	h.mu.Unlock()
 }
 
@@ -2156,6 +2175,56 @@ func TestLogRetentionSetting(t *testing.T) {
 	}
 	e.app.ApplyRetention()
 	expiredOver(e, 28)
+}
+
+// FS-008 FR-011: a retention pass that finds another one deleting waits for it, so once ApplyRetention returns, every
+// log past the cutoff is deleted and its record says so. A pass that went on beside the other would skip the log the
+// other had just deleted, since a missing log is aged by its execution's end, and return before that log's record
+// read expired. That is what the start's pass and TestLogRetentionSetting's own call after its restart could do.
+func TestRetentionPassesRunOneAtATime(t *testing.T) {
+	e := newEnv(t)
+	e.create("aged", "")
+	id := e.endedRun("aged", domain.StatusCompleted).ID
+	e.backdateLog(id, 31*24*time.Hour)
+	deleted, release := make(chan struct{}), make(chan struct{})
+	var hold sync.Once
+	e.events.setDeleteHook(func(string) {
+		hold.Do(func() {
+			close(deleted)
+			<-release
+		})
+	})
+	first := make(chan struct{})
+	go func() {
+		defer close(first)
+		e.app.ApplyRetention()
+	}()
+	select {
+	case <-deleted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the first retention pass deleted no log")
+	}
+	// The first pass is held right after it deleted the log, before its record says so.
+	second := make(chan bool)
+	go func() {
+		e.app.ApplyRetention()
+		x, _ := e.app.GetExecution(id)
+		second <- x.LogExpired
+	}()
+	// A second pass that does not wait returns at once. One that waits is still waiting when the first is let go; the
+	// wait only bounds how long a pass that did not wait has to show it.
+	select {
+	case expired := <-second:
+		t.Errorf("a second retention pass returned while the first was still deleting; the log's record read expired %v",
+			expired)
+		close(release)
+	case <-time.After(200 * time.Millisecond):
+		close(release)
+		if expired := <-second; !expired {
+			t.Error("once a second retention pass returned, the deleted log's record did not read expired")
+		}
+	}
+	<-first
 }
 
 // FS-008 FR-011: retention never deletes the log of an execution still running or queued, however old its file is.

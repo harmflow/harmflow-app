@@ -147,6 +147,8 @@ type App struct {
 
 	// tickMu runs one Tick at a time, whole.
 	tickMu sync.Mutex
+	// retentionMu runs one retention pass at a time, whole.
+	retentionMu sync.Mutex
 	// saveMu orders the saves of execution records, so the last copy taken is the last written.
 	saveMu sync.Mutex
 
