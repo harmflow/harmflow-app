@@ -281,7 +281,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	v, err := s.App.CreateTask(in)
+	v, err := s.App.CreateTask(r.Context(), in)
 	if err != nil {
 		fail(w, err)
 		return
@@ -295,7 +295,7 @@ func (s *Server) validateTask(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	writeJSON(w, 200, s.App.Validate(in))
+	writeJSON(w, 200, s.App.Validate(r.Context(), in))
 }
 
 func (s *Server) importTask(w http.ResponseWriter, r *http.Request) {
@@ -307,7 +307,7 @@ func (s *Server) importTask(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	v, err := s.App.ImportTask(body.YAML, body.Overwrite)
+	v, err := s.App.ImportTask(r.Context(), body.YAML, body.Overwrite)
 	if err != nil {
 		fail(w, err)
 		return
@@ -330,7 +330,7 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	v, err := s.App.UpdateTask(r.PathValue("taskId"), in)
+	v, err := s.App.UpdateTask(r.Context(), r.PathValue("taskId"), in)
 	if err != nil {
 		fail(w, err)
 		return
@@ -361,7 +361,7 @@ func (s *Server) runTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) duplicateTask(w http.ResponseWriter, r *http.Request) {
-	v, err := s.App.DuplicateTask(r.PathValue("taskId"))
+	v, err := s.App.DuplicateTask(r.Context(), r.PathValue("taskId"))
 	if err != nil {
 		fail(w, err)
 		return
@@ -370,7 +370,7 @@ func (s *Server) duplicateTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) setEnabled(w http.ResponseWriter, r *http.Request, enabled bool) {
-	v, err := s.App.SetEnabled(r.PathValue("taskId"), enabled)
+	v, err := s.App.SetEnabled(r.Context(), r.PathValue("taskId"), enabled)
 	if err != nil {
 		fail(w, err)
 		return

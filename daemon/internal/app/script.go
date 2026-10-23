@@ -187,7 +187,7 @@ func scriptFileName(interpreter string) string {
 }
 
 // runScript carries a script execution from preparing to its outcome. It returns the terminal status and why.
-func (r *run) runScript(deadline time.Time) (domain.ExecutionStatus, domain.Text) {
+func (r *run) runScript(ctx context.Context, deadline time.Time) (domain.ExecutionStatus, domain.Text) {
 	a := r.a
 	spec := r.eff.Spec.Script
 	if !r.def.RunsOn(a.d.OS) {
@@ -270,7 +270,7 @@ func (r *run) runScript(deadline time.Time) (domain.ExecutionStatus, domain.Text
 		r.endScript(domain.AttemptFailed, reason, -1, "")
 		return domain.StatusFailed, reason
 	}
-	if id, err := procutil.Identify(proc.Pid()); err == nil {
+	if id, err := procutil.Identify(ctx, proc.Pid()); err == nil {
 		a.mu.Lock()
 		rec.Process = &domain.ProcessIdentity{Group: id.Group, LeaderStart: id.LeaderStart, Boot: id.Boot}
 		a.mu.Unlock()
@@ -281,7 +281,7 @@ func (r *run) runScript(deadline time.Time) (domain.ExecutionStatus, domain.Text
 		domain.T("script_started", "{{program}} started", "program", name)))
 
 	grace := time.Duration(*r.eff.Spec.Execution.CancelGraceSeconds) * time.Second
-	proc.Wait(r.ctx, grace)
+	proc.Wait(ctx, grace)
 	r.logEnded(proc.Ended())
 	if raw != nil {
 		raw.Close()
@@ -299,7 +299,7 @@ func (r *run) runScript(deadline time.Time) (domain.ExecutionStatus, domain.Text
 		status, reason, outcome = domain.StatusCancelled, domain.T("execution_cancelled", "cancelled"), domain.AttemptCancelled
 	case r.daemonStopping():
 		status, reason, outcome = domain.StatusInterrupted, daemonStopped(), domain.AttemptInterrupted
-	case errors.Is(r.ctx.Err(), context.DeadlineExceeded):
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		status, reason = domain.StatusFailed, domain.T("execution_timed_out", "the execution timeout elapsed")
 		outcome = domain.AttemptTimedOut
 	case signal == "" && exit == 0:
@@ -349,12 +349,12 @@ func (r *run) endScript(outcome domain.AttemptOutcome, reason domain.Text, exit 
 
 // endLeftovers ends what an interrupted script execution's program left running, and says so on the execution
 // (FS-013 FR-010). It runs when the daemon starts, before the record is saved.
-func (a *App) endLeftovers(x *domain.Execution) {
+func (a *App) endLeftovers(ctx context.Context, x *domain.Execution) {
 	if x.Script == nil || x.Script.Process == nil {
 		return
 	}
 	p := x.Script.Process
-	n, err := procutil.EndLeftovers(procutil.Identity{Group: p.Group, LeaderStart: p.LeaderStart, Boot: p.Boot})
+	n, err := procutil.EndLeftovers(ctx, procutil.Identity{Group: p.Group, LeaderStart: p.LeaderStart, Boot: p.Boot})
 	if err != nil {
 		a.log.Printf("ending what execution %s left running: %v", x.ID, err)
 	}

@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -44,11 +45,11 @@ const (
 )
 
 // Validate checks a task without writing anything.
-func (a *App) Validate(in TaskInput) *ValidationResult {
-	return a.validate(in, catalogStrict)
+func (a *App) Validate(ctx context.Context, in TaskInput) *ValidationResult {
+	return a.validate(ctx, in, catalogStrict)
 }
 
-func (a *App) validate(in TaskInput, mode catalogMode) *ValidationResult {
+func (a *App) validate(ctx context.Context, in TaskInput, mode catalogMode) *ValidationResult {
 	r := &ValidationResult{Errors: []schema.Issue{}, Warnings: []schema.Issue{}}
 	var value any
 	switch {
@@ -105,7 +106,7 @@ func (a *App) validate(in TaskInput, mode catalogMode) *ValidationResult {
 		_, r.node, _ = schema.ParseYAML(out)
 	}
 	r.doc = &doc
-	a.semanticChecks(r, doc, mode)
+	a.semanticChecks(ctx, r, doc, mode)
 	r.Effective = doc.Effective()
 	r.Valid = len(r.Errors) == 0
 	return r
@@ -125,7 +126,7 @@ func (r *ValidationResult) addWarning(path, code string, text domain.Text) {
 
 // semanticChecks are the rules a JSON Schema cannot express: schedules, the harness's capabilities, and the agents
 // and skills each harness of the chain can load.
-func (a *App) semanticChecks(r *ValidationResult, doc domain.TaskDocument, mode catalogMode) {
+func (a *App) semanticChecks(ctx context.Context, r *ValidationResult, doc domain.TaskDocument, mode catalogMode) {
 	if s := doc.Spec.Schedule; s != nil {
 		if s.Cron == "" && s.Interval == "" {
 			r.addError("/spec/schedule", domain.T("schedule_missing",
@@ -152,7 +153,7 @@ func (a *App) semanticChecks(r *ValidationResult, doc domain.TaskDocument, mode 
 			r.addError(path+"/provider", domain.T("harness_unknown", `unknown harness "{{harness}}"`, "harness", p.Provider))
 			continue
 		}
-		info := a.harnessInfo(p.Provider)
+		info := a.harnessInfo(ctx, p.Provider)
 		if err := ad.ValidateProfile(info, p.Model, p.Effort); err != nil {
 			r.addError(path, domain.TextOf(err))
 		} else if w, ok := ad.(ports.ProfileWarner); ok {
@@ -221,7 +222,7 @@ func (a *App) semanticChecks(r *ValidationResult, doc domain.TaskDocument, mode 
 		}
 	}
 	a.scriptChecks(r, doc)
-	for _, w := range a.policyWarnings(doc) {
+	for _, w := range a.policyWarnings(ctx, doc) {
 		r.addWarning("/spec/permissions", w.Code, w.Text)
 	}
 }
@@ -282,7 +283,7 @@ func (a *App) missingItems(doc domain.TaskDocument, harness string) []missingIte
 
 // policyWarnings names each declared restriction the primary harness, or nothing at all for a script task's program,
 // can enforce (D-068, FS-009 FR-010, FS-013 SEC-002).
-func (a *App) policyWarnings(doc domain.TaskDocument) []domain.Warning {
+func (a *App) policyWarnings(ctx context.Context, doc domain.TaskDocument) []domain.Warning {
 	eff := doc.Effective()
 	if doc.IsScript() {
 		return scriptRestrictions(*eff.Spec.Permissions)
@@ -291,7 +292,7 @@ func (a *App) policyWarnings(doc domain.TaskDocument) []domain.Warning {
 	if !ok {
 		return nil
 	}
-	info := a.harnessInfo(ad.ID())
+	info := a.harnessInfo(ctx, ad.ID())
 	inv, _, err := ad.Prepare(info, ports.RunRequest{WorkDir: os.TempDir(), Permissions: *eff.Spec.Permissions})
 	if err != nil {
 		return nil

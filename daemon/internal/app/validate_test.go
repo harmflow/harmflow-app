@@ -79,14 +79,14 @@ func uncheckedAt(warnings []domain.Warning, path string) bool {
 // with no such warning. With the cache, an unknown model or effort is refused as before.
 func TestUncheckedCodexProfileSavesWithAWarning(t *testing.T) {
 	a, codexHome := newCodexApp(t)
-	saved, err := a.CreateTask(TaskInput{YAML: codexTaskYAML("pick", "      model: no-such-model\n      effort: ultra\n")})
+	saved, err := a.CreateTask(t.Context(), TaskInput{YAML: codexTaskYAML("pick", "      model: no-such-model\n      effort: ultra\n")})
 	if err != nil {
 		t.Fatalf("an unchecked model was refused: %v", err)
 	}
 	if !uncheckedAt(saved.Warnings, "/spec/harness/preferred") {
 		t.Errorf("the preferred profile saved with no warning: %+v", saved.Warnings)
 	}
-	fallback, err := a.CreateTask(TaskInput{YAML: taskYAML("fallback",
+	fallback, err := a.CreateTask(t.Context(), TaskInput{YAML: taskYAML("fallback",
 		"    fallback:\n      candidates:\n        - provider: codex\n          effort: ultra\n")})
 	if err != nil {
 		t.Fatalf("an unchecked fallback was refused: %v", err)
@@ -94,7 +94,7 @@ func TestUncheckedCodexProfileSavesWithAWarning(t *testing.T) {
 	if !uncheckedAt(fallback.Warnings, "/spec/harness/fallback/candidates/0") {
 		t.Errorf("the fallback saved with no warning: %+v", fallback.Warnings)
 	}
-	plain, err := a.CreateTask(TaskInput{YAML: codexTaskYAML("plain", "      model: default\n")})
+	plain, err := a.CreateTask(t.Context(), TaskInput{YAML: codexTaskYAML("plain", "      model: default\n")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestUncheckedCodexProfileSavesWithAWarning(t *testing.T) {
 		{"      model: no-such-model\n", "codex_model_unknown"},
 		{"      model: gpt-test\n      effort: ultra\n", "codex_effort_invalid"},
 	} {
-		_, err := a.UpdateTask("pick", TaskInput{YAML: codexTaskYAML("pick", c.profile), BaseRevision: saved.Revision})
+		_, err := a.UpdateTask(t.Context(), "pick", TaskInput{YAML: codexTaskYAML("pick", c.profile), BaseRevision: saved.Revision})
 		var refused *Error
 		if !errors.As(err, &refused) || refused.Key != c.key {
 			t.Errorf("%q with the cache: %v, want %s", c.profile, err, c.key)
@@ -125,7 +125,7 @@ func TestUncheckedCodexProfileSavesWithAWarning(t *testing.T) {
 			t.Errorf("%q: errors %+v", c.profile, r.Errors)
 		}
 	}
-	checked, err := a.UpdateTask("pick", TaskInput{YAML: codexTaskYAML("pick", "      model: gpt-test\n      effort: high\n"),
+	checked, err := a.UpdateTask(t.Context(), "pick", TaskInput{YAML: codexTaskYAML("pick", "      model: gpt-test\n      effort: high\n"),
 		BaseRevision: saved.Revision})
 	if err != nil {
 		t.Fatal(err)

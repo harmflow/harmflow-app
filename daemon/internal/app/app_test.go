@@ -329,6 +329,8 @@ type env struct {
 	paths  Paths
 	// service stands in for the launchd agent, when a test sets one; the App has none otherwise.
 	service ports.HostServiceManager
+	// startCtx is the context the App starts under, when a test sets one; the test's own otherwise.
+	startCtx context.Context
 }
 
 // newEnv starts an App on fake harnesses; configure sets up the env, its fakes included, before the App starts.
@@ -374,7 +376,11 @@ func (e *env) start(t *testing.T, configure ...func(*env)) {
 		t.Fatal(err)
 	}
 	e.app = a
-	if err := a.Start(context.Background()); err != nil {
+	ctx := e.startCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := a.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { a.Stop(domain.Text{Message: "test done"}) })
@@ -425,7 +431,7 @@ spec:
 
 func (e *env) create(id, extra string) {
 	e.t.Helper()
-	if _, err := e.app.CreateTask(TaskInput{YAML: taskYAML(id, extra)}); err != nil {
+	if _, err := e.app.CreateTask(e.t.Context(), TaskInput{YAML: taskYAML(id, extra)}); err != nil {
 		e.t.Fatalf("create %s: %v", id, err)
 	}
 }
@@ -808,7 +814,7 @@ func TestCancelBeforeItStarts(t *testing.T) {
 		cancel func(e *env, id string) error
 	}{
 		{"cancelled", func(e *env, id string) error { return e.app.CancelExecution(id) }},
-		{"disabled", func(e *env, _ string) error { _, err := e.app.SetEnabled("early", false); return err }},
+		{"disabled", func(e *env, _ string) error { _, err := e.app.SetEnabled(t.Context(), "early", false); return err }},
 		{"deleted", func(e *env, _ string) error { _, err := e.app.DeleteTask("early"); return err }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -944,7 +950,7 @@ func TestAttemptKeepsItsInput(t *testing.T) {
 	prompt := "Push with " + token + ", then report."
 	e.create("input", "    fallback:\n      candidates:\n        - provider: codex\n")
 	view, _ := e.app.GetTask("input")
-	if _, err := e.app.UpdateTask("input", TaskInput{YAML: strings.Replace(view.YAML, "Do the work of input.", prompt, 1),
+	if _, err := e.app.UpdateTask(t.Context(), "input", TaskInput{YAML: strings.Replace(view.YAML, "Do the work of input.", prompt, 1),
 		BaseRevision: view.Revision}); err != nil {
 		t.Fatal(err)
 	}
@@ -1001,7 +1007,7 @@ func TestAttemptKeepsItsInput(t *testing.T) {
 	}
 
 	view, _ = e.app.GetTask("input")
-	if _, err := e.app.UpdateTask("input", TaskInput{YAML: strings.Replace(view.YAML, "then report.", "then stop.", 1),
+	if _, err := e.app.UpdateTask(t.Context(), "input", TaskInput{YAML: strings.Replace(view.YAML, "then report.", "then stop.", 1),
 		BaseRevision: view.Revision}); err != nil {
 		t.Fatal(err)
 	}
@@ -1188,7 +1194,7 @@ func TestAgentTextRedactedEverywhere(t *testing.T) {
 // points at context.json only once the file holds a previous attempt, work items, or parameters.
 func TestContextNeverNamesTheTask(t *testing.T) {
 	e := newEnv(t)
-	if _, err := e.app.CreateTask(TaskInput{YAML: `apiVersion: harmflow/v1alpha1
+	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: `apiVersion: harmflow/v1alpha1
 kind: Task
 metadata:
   id: napoleon
@@ -1539,8 +1545,8 @@ func TestChangedScheduleTakesEffect(t *testing.T) {
 				if err := os.WriteFile(view.Path, []byte(changed), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				e.app.scanTaskFiles()
-			} else if _, err := e.app.UpdateTask("moved", TaskInput{YAML: changed, BaseRevision: view.Revision}); err != nil {
+				e.app.scanTaskFiles(t.Context())
+			} else if _, err := e.app.UpdateTask(t.Context(), "moved", TaskInput{YAML: changed, BaseRevision: view.Revision}); err != nil {
 				t.Fatal(err)
 			}
 			view, _ = e.app.GetTask("moved")
@@ -1667,7 +1673,7 @@ func TestHeldBackFiringsRecorded(t *testing.T) {
 	for _, id := range []string{"off", "going", "broken", "on"} {
 		e.create(id, schedule)
 	}
-	if _, err := e.app.SetEnabled("off", false); err != nil {
+	if _, err := e.app.SetEnabled(t.Context(), "off", false); err != nil {
 		t.Fatal(err)
 	}
 	e.claude.setScript(func(ports.RunRequest) string { return slow })
@@ -1682,7 +1688,7 @@ func TestHeldBackFiringsRecorded(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(e.paths.Tasks, "broken.yaml"), []byte(invalid), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	e.app.scanTaskFiles()
+	e.app.scanTaskFiles(t.Context())
 	e.claude.setScript(nil)
 	e.clock.Advance(61 * time.Minute)
 	e.app.Tick()
@@ -1756,7 +1762,7 @@ func TestEditWhileRunning(t *testing.T) {
 	second, _ := e.app.RunTask("edited")
 	view, _ := e.app.GetTask("edited")
 	edited := strings.Replace(view.YAML, "Do the work of edited.", "Do the edited work.", 1)
-	if _, err := e.app.UpdateTask("edited", TaskInput{YAML: edited, BaseRevision: view.Revision}); err != nil {
+	if _, err := e.app.UpdateTask(t.Context(), "edited", TaskInput{YAML: edited, BaseRevision: view.Revision}); err != nil {
 		t.Fatal(err)
 	}
 	e.wait(second.ExecutionID, domain.StatusCompleted)
@@ -1767,7 +1773,7 @@ func TestEditWhileRunning(t *testing.T) {
 		t.Errorf("prompts %q", prompts)
 	}
 	// An edit from a stale revision is a conflict, never a silent overwrite (FS-001 AC-006).
-	if _, err := e.app.UpdateTask("edited", TaskInput{YAML: edited, BaseRevision: view.Revision}); err == nil ||
+	if _, err := e.app.UpdateTask(t.Context(), "edited", TaskInput{YAML: edited, BaseRevision: view.Revision}); err == nil ||
 		err.(*Error).Code != CodeConflict {
 		t.Errorf("stale revision: %v", err)
 	}
@@ -1788,7 +1794,7 @@ func TestEditWhileRunningKeepsTheStartingDefinition(t *testing.T) {
 	e.wait(first.ExecutionID, domain.StatusRunning)
 	view, _ := e.app.GetTask("late")
 	edited := strings.Replace(taskYAML("late", ""), "Do the work of late.", "Do the edited work of late.", 1)
-	after, err := e.app.UpdateTask("late", TaskInput{YAML: edited, BaseRevision: view.Revision})
+	after, err := e.app.UpdateTask(t.Context(), "late", TaskInput{YAML: edited, BaseRevision: view.Revision})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1849,7 +1855,7 @@ func TestInvalidEditWhileRunning(t *testing.T) {
 	// The edit would change the prompt too, so a partial save would show in what the executions read.
 	invalid := strings.NewReplacer("Do the work of kept.", "Do the edited work of kept.", "type: general", "type: nope").
 		Replace(view.YAML)
-	_, err := e.app.UpdateTask("kept", TaskInput{YAML: invalid, BaseRevision: view.Revision})
+	_, err := e.app.UpdateTask(t.Context(), "kept", TaskInput{YAML: invalid, BaseRevision: view.Revision})
 	if appErr, ok := err.(*Error); !ok || appErr.Code != CodeValidationFailed {
 		t.Fatalf("invalid edit: %v, want %s", err, CodeValidationFailed)
 	}
@@ -1885,7 +1891,7 @@ func TestDisableAndDeleteWhileRunning(t *testing.T) {
 	e.claude.setScript(func(ports.RunRequest) string { return "sleep 1; echo 'END ok'" })
 	r, _ := e.app.RunTask("going")
 	e.wait(r.ExecutionID, domain.StatusRunning)
-	if _, err := e.app.SetEnabled("going", false); err != nil {
+	if _, err := e.app.SetEnabled(t.Context(), "going", false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.app.RunTask("going"); err == nil {
@@ -1947,7 +1953,7 @@ func TestDisableStopsNewFiringsUntilEnabled(t *testing.T) {
 	view, _ = e.app.GetTask("paused")
 	due := *view.NextFireAt // the view shows no next firing once the task is disabled
 
-	if _, err := e.app.SetEnabled("paused", false); err != nil {
+	if _, err := e.app.SetEnabled(t.Context(), "paused", false); err != nil {
 		t.Fatal(err)
 	}
 	if x, _ := e.app.GetExecution(waiting); x.Status != domain.StatusCancelled || x.ErrorKey != "task_was_disabled" {
@@ -1974,7 +1980,7 @@ func TestDisableStopsNewFiringsUntilEnabled(t *testing.T) {
 		t.Fatalf("a disabled task fired: %+v", runs)
 	}
 
-	if _, err := e.app.SetEnabled("paused", true); err != nil {
+	if _, err := e.app.SetEnabled(t.Context(), "paused", true); err != nil {
 		t.Fatal(err)
 	}
 	view, _ = e.app.GetTask("paused")
@@ -2310,7 +2316,7 @@ func TestExternalChangeDropsTheWaitingFiring(t *testing.T) {
 			}
 			view, _ := e.app.GetTask("changed")
 			tc.change(t, view.Path)
-			e.app.scanTaskFiles()
+			e.app.scanTaskFiles(t.Context())
 			if x, _ := e.app.GetExecution(second.ExecutionID); x.Status != domain.StatusCancelled || x.ErrorKey != tc.reason {
 				t.Errorf("the waiting execution is %s (%q), want cancelled (%s)", x.Status, x.ErrorKey, tc.reason)
 			}
@@ -2456,7 +2462,7 @@ func TestValidationAndImport(t *testing.T) {
 	e := newEnv(t)
 	e.create("valid", "")
 	view, _ := e.app.GetTask("valid")
-	_, err := e.app.UpdateTask("valid", TaskInput{YAML: strings.Replace(view.YAML, "type: general", "type: nope", 1),
+	_, err := e.app.UpdateTask(t.Context(), "valid", TaskInput{YAML: strings.Replace(view.YAML, "type: general", "type: nope", 1),
 		BaseRevision: view.Revision})
 	if err == nil || err.(*Error).Code != CodeValidationFailed {
 		t.Fatalf("invalid edit: %v", err)
@@ -2466,11 +2472,11 @@ func TestValidationAndImport(t *testing.T) {
 		t.Error("the valid definition was replaced")
 	}
 	skills := "  skills: [harmflow-github-draft-pr, user-skill, nowhere-skill]\n"
-	_, err = e.app.CreateTask(TaskInput{YAML: taskYAML("skilled", skills)})
+	_, err = e.app.CreateTask(t.Context(), TaskInput{YAML: taskYAML("skilled", skills)})
 	if err == nil || !strings.Contains(err.Error(), "nowhere-skill") {
 		t.Fatalf("missing skill on save: %v", err)
 	}
-	imported, err := e.app.ImportTask(taskYAML("skilled", skills), false)
+	imported, err := e.app.ImportTask(t.Context(), taskYAML("skilled", skills), false)
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -2493,13 +2499,13 @@ func TestValidationAndImport(t *testing.T) {
 func TestMessagesCarryKeys(t *testing.T) {
 	e := newEnv(t)
 	skills := "  skills: [nowhere-skill]\n"
-	_, err := e.app.CreateTask(TaskInput{YAML: taskYAML("skilled", skills)})
+	_, err := e.app.CreateTask(t.Context(), TaskInput{YAML: taskYAML("skilled", skills)})
 	ae, ok := err.(*Error)
 	if !ok || ae.Key != "skill_not_found" || ae.Params["name"] != "nowhere-skill" || ae.Params["source"] != "harness" ||
 		ae.Validation == nil || ae.Validation.Errors[0].Key != "skill_not_found" {
 		t.Fatalf("missing skill on save: %#v", err)
 	}
-	imported, err := e.app.ImportTask(taskYAML("skilled", skills), false)
+	imported, err := e.app.ImportTask(t.Context(), taskYAML("skilled", skills), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2604,7 +2610,7 @@ func (e *env) eventKeys(id, last string) map[string]string {
 func TestDuplicate(t *testing.T) {
 	e := newEnv(t)
 	e.create("orig", "")
-	cp, err := e.app.DuplicateTask("orig")
+	cp, err := e.app.DuplicateTask(t.Context(), "orig")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2634,7 +2640,7 @@ spec:
     preferred:
       provider: claude-code
 `
-	if _, err := e.app.CreateTask(TaskInput{YAML: task}); err != nil {
+	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: task}); err != nil {
 		t.Fatal(err)
 	}
 	data, err := e.app.ExportTask("sign-in")
@@ -2654,7 +2660,7 @@ spec:
 			t.Errorf("the export lacks %q", kept)
 		}
 	}
-	if r := e.app.Validate(TaskInput{YAML: exported}); !r.Valid {
+	if r := e.app.Validate(t.Context(), TaskInput{YAML: exported}); !r.Valid {
 		t.Errorf("the exported file does not validate: %+v", r.Errors)
 	}
 	if t.Failed() {
@@ -2673,14 +2679,14 @@ func TestEmptyListsAreKept(t *testing.T) {
 			"harness": map[string]any{"preferred": map[string]any{"provider": "claude-code"},
 				"fallback": map[string]any{"on": []any{}, "candidates": []any{map[string]any{"provider": "codex"}}}},
 			"notifications": map[string]any{"native": map[string]any{"events": []any{}}}}})
-	if _, err := e.app.CreateTask(TaskInput{Document: doc}); err != nil {
+	if _, err := e.app.CreateTask(t.Context(), TaskInput{Document: doc}); err != nil {
 		t.Fatalf("create from a document: %v", err)
 	}
 	e.create("yaml-empty", "    fallback:\n      on: []\n      candidates:\n        - provider: codex\n"+
 		"  notifications:\n    native:\n      events: []\n")
 	ids := []string{"form-empty", "yaml-empty"}
 	for _, id := range []string{"form-empty", "yaml-empty"} {
-		cp, err := e.app.DuplicateTask(id)
+		cp, err := e.app.DuplicateTask(t.Context(), id)
 		if err != nil {
 			t.Fatalf("duplicate %s: %v", id, err)
 		}
@@ -2777,7 +2783,7 @@ spec:
 	}
 	effective := func(id, yamlText string) any {
 		t.Helper()
-		v, err := e.app.CreateTask(TaskInput{YAML: yamlText})
+		v, err := e.app.CreateTask(t.Context(), TaskInput{YAML: yamlText})
 		if err != nil {
 			t.Fatalf("create %s: %v", id, err)
 		}
@@ -2824,12 +2830,12 @@ func TestExternalEdits(t *testing.T) {
 	defer cancel()
 	changed := strings.Replace(view.YAML, "Task ext", "Renamed", 1)
 	_ = os.WriteFile(view.Path, []byte(changed), 0o600)
-	e.app.scanTaskFiles()
+	e.app.scanTaskFiles(t.Context())
 	if v, _ := e.app.GetTask("ext"); v.Name != "Renamed" {
 		t.Errorf("name %q", v.Name)
 	}
 	_ = os.WriteFile(view.Path, []byte("apiVersion: [broken"), 0o600)
-	e.app.scanTaskFiles()
+	e.app.scanTaskFiles(t.Context())
 	v, _ := e.app.GetTask("ext")
 	if v.Name != "Renamed" || !v.Invalid {
 		t.Errorf("after an invalid edit: name %q invalid %v", v.Name, v.Invalid)
@@ -2931,7 +2937,7 @@ func TestBrokenFileFromTheWatcherIsNamed(t *testing.T) {
 		{"a schema rule", strings.Replace(view.YAML, "kind: Task", "kind: Job", 1), "schema_const", "/kind", 2},
 	} {
 		_ = os.WriteFile(view.Path, []byte(c.yaml), 0o600)
-		e.app.scanTaskFiles()
+		e.app.scanTaskFiles(t.Context())
 		got, _ := e.app.GetTask("ext")
 		if !got.Invalid || len(got.Warnings) != 1 || got.Validation == nil || len(got.Validation.Errors) == 0 {
 			t.Fatalf("%s: %+v", c.name, got)
@@ -3107,7 +3113,7 @@ func TestRedactsWhatWasKeptBefore(t *testing.T) {
 		"old": {"o/r#1": {TaskID: "old", Key: "o/r#1", Title: "Fix " + token, Status: domain.WorkItemInProgress}}}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.app.recover(); err != nil {
+	if err := e.app.recover(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	e.app.loadLedger()
@@ -3141,7 +3147,7 @@ func TestRecoveryMarksInterrupted(t *testing.T) {
 	x.WorkItem = "o/r#1"
 	x.LastOperation = "git push -u origin harmflow/1-x"
 	_ = e.app.d.Executions.Save(x)
-	if err := e.app.recover(); err != nil {
+	if err := e.app.recover(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := e.app.GetExecution(x.ID)
@@ -3173,7 +3179,7 @@ func TestRecoveryMarksInterrupted(t *testing.T) {
 		"      - name: o/r\n        localPath: %q\n    queue:\n      maxFailedRetries: 1\n",
 		mkdir(t, filepath.Join(e.app.Paths().UserHome, "repo")))),
 		"type: general", "type: github-issue-implementation", 1)
-	if _, err := e.app.CreateTask(TaskInput{YAML: issues}); err != nil {
+	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: issues}); err != nil {
 		t.Fatal(err)
 	}
 	for i, want := range []domain.WorkItemStatus{domain.WorkItemFailed, domain.WorkItemNeedsAttention} {
@@ -3184,7 +3190,7 @@ func TestRecoveryMarksInterrupted(t *testing.T) {
 		if err := e.app.d.Executions.Save(x); err != nil {
 			t.Fatal(err)
 		}
-		if err := e.app.recover(); err != nil {
+		if err := e.app.recover(t.Context()); err != nil {
 			t.Fatal(err)
 		}
 		var item *domain.WorkItem
@@ -3375,7 +3381,7 @@ func TestNoticesFollowTheStartingDefinition(t *testing.T) {
 		e.wait(first.ExecutionID, domain.StatusRunning)
 		view, _ := e.app.GetTask(c.id)
 		edited := strings.Replace(taskYAML(c.id, events(c.after)), "name: Task "+c.id, "name: Renamed "+c.id, 1)
-		if _, err := e.app.UpdateTask(c.id, TaskInput{YAML: edited, BaseRevision: view.Revision}); err != nil {
+		if _, err := e.app.UpdateTask(t.Context(), c.id, TaskInput{YAML: edited, BaseRevision: view.Revision}); err != nil {
 			t.Fatal(err)
 		}
 		if view, _ := e.app.GetTask(c.id); view.Name != "Renamed "+c.id {
@@ -3540,5 +3546,22 @@ func TestPolicyWarningIsShown(t *testing.T) {
 	e.create("policy", "")
 	if v, _ := e.app.GetTask("policy"); len(v.Warnings) != 0 {
 		t.Errorf("the fake enforces everything, got %+v", v.Warnings)
+	}
+}
+
+// Cancelling the context Start received ends the scheduler, watcher, and maintenance loops, as Stop does.
+func TestCancellingStartContextEndsTheLoops(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	e := newEnv(t, func(e *env) { e.startCtx = ctx })
+	cancel()
+	ended := make(chan struct{})
+	go func() {
+		e.app.wg.Wait()
+		close(ended)
+	}()
+	select {
+	case <-ended:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the loops still run 5s after Start's context was cancelled")
 	}
 }

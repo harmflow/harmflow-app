@@ -50,9 +50,9 @@ func (a *App) RefreshHarnesses(ctx context.Context) []ports.HarnessInfo {
 	return a.Harnesses()
 }
 
-func (a *App) refreshHarnessesAsync() {
+func (a *App) refreshHarnessesAsync(ctx context.Context) {
 	for _, id := range sortedKeys(a.adapters) {
-		go a.detect(context.Background(), id)
+		go a.detect(ctx, id)
 	}
 }
 
@@ -73,7 +73,7 @@ func (a *App) detect(ctx context.Context, id string) ports.HarnessInfo {
 	return info
 }
 
-func (a *App) harnessInfo(id string) ports.HarnessInfo {
+func (a *App) harnessInfo(ctx context.Context, id string) ports.HarnessInfo {
 	a.mu.Lock()
 	info, ok := a.inventory[id]
 	a.mu.Unlock()
@@ -83,7 +83,7 @@ func (a *App) harnessInfo(id string) ports.HarnessInfo {
 	if _, known := a.adapters[id]; !known {
 		return ports.HarnessInfo{ID: id}
 	}
-	return a.detect(context.Background(), id)
+	return a.detect(ctx, id)
 }
 
 // SetHarnessPath chooses an installation or a path set by hand; an empty path returns to detection (FS-004 FR-001). A

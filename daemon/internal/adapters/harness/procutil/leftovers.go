@@ -24,12 +24,12 @@ type listedProcess struct {
 }
 
 // Identify records the identity of the process group pid leads; the process must still be running.
-func Identify(pid int) (Identity, error) {
-	procs, err := listProcesses()
+func Identify(ctx context.Context, pid int) (Identity, error) {
+	procs, err := listProcesses(ctx)
 	if err != nil {
 		return Identity{}, err
 	}
-	boot, err := bootTime()
+	boot, err := bootTime(ctx)
 	if err != nil {
 		return Identity{}, err
 	}
@@ -46,15 +46,15 @@ func Identify(pid int) (Identity, error) {
 // still runs, started at the recorded time. A group whose leader is gone is ended when the boot matches: an id is not
 // handed out again while a group of that id exists, so it is the program's own unless every one of its processes
 // ended and the id came back within the same boot.
-func EndLeftovers(id Identity) (int, error) {
+func EndLeftovers(ctx context.Context, id Identity) (int, error) {
 	if id.Group <= 1 || id.LeaderStart == "" || id.Boot == "" {
 		return 0, nil
 	}
-	boot, err := bootTime()
+	boot, err := bootTime(ctx)
 	if err != nil || boot != id.Boot {
 		return 0, err
 	}
-	procs, err := listProcesses()
+	procs, err := listProcesses(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -80,8 +80,8 @@ func EndLeftovers(id Identity) (int, error) {
 
 // listProcesses asks ps for every process with its group and start time, in a fixed locale and time zone, so the start
 // time reads the same however the daemon is configured.
-func listProcesses() ([]listedProcess, error) {
-	out, _, err := Output(context.Background(), 10*time.Second, append(os.Environ(), "LC_ALL=C", "TZ=UTC"),
+func listProcesses(ctx context.Context) ([]listedProcess, error) {
+	out, _, err := Output(ctx, 10*time.Second, append(os.Environ(), "LC_ALL=C", "TZ=UTC"),
 		systemTool("ps", "/bin/ps"), "-A", "-o", "pid=,pgid=,lstart=")
 	if err != nil {
 		return nil, err
@@ -105,7 +105,7 @@ func listProcesses() ([]listedProcess, error) {
 var bootSeconds = regexp.MustCompile(`sec = (\d+)`)
 
 // bootTime identifies the current boot: kern.boottime on macOS, btime in /proc/stat on Linux.
-func bootTime() (string, error) {
+func bootTime(ctx context.Context) (string, error) {
 	if data, err := os.ReadFile("/proc/stat"); err == nil {
 		for _, line := range strings.Split(string(data), "\n") {
 			if rest, ok := strings.CutPrefix(line, "btime "); ok {
@@ -113,7 +113,7 @@ func bootTime() (string, error) {
 			}
 		}
 	}
-	out, _, err := Output(context.Background(), 10*time.Second, nil, systemTool("sysctl", "/usr/sbin/sysctl", "/sbin/sysctl"),
+	out, _, err := Output(ctx, 10*time.Second, nil, systemTool("sysctl", "/usr/sbin/sysctl", "/sbin/sysctl"),
 		"-n", "kern.boottime")
 	if err != nil {
 		return "", err

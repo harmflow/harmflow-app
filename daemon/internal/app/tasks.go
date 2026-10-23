@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -51,13 +52,13 @@ type ExecutionRef struct {
 
 // loadTasks reads every task file; a file that fails validation is listed as invalid and never fires, and is reported
 // as one the watcher finds.
-func (a *App) loadTasks() error {
+func (a *App) loadTasks(ctx context.Context) error {
 	files, err := a.d.Tasks.List()
 	if err != nil {
 		return err
 	}
 	for _, f := range files {
-		e := a.loadTaskFile(f)
+		e := a.loadTaskFile(ctx, f)
 		a.mu.Lock()
 		invalid := e.invalid
 		a.mu.Unlock()
@@ -83,8 +84,8 @@ func invalidEvent(f ports.TaskFile, r *ValidationResult, text domain.Text) domai
 		Payload: map[string]any{"file": taskFileName(f), "errors": r.Errors, "revision": f.Revision}}.Says(text)
 }
 
-func (a *App) loadTaskFile(f ports.TaskFile) *taskEntry {
-	r := a.validate(TaskInput{YAML: string(f.Content)}, catalogLenient)
+func (a *App) loadTaskFile(ctx context.Context, f ports.TaskFile) *taskEntry {
+	r := a.validate(ctx, TaskInput{YAML: string(f.Content)}, catalogLenient)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	e := a.tasks[f.ID]
@@ -245,19 +246,19 @@ func (a *App) invalidError(r *ValidationResult) *Error {
 }
 
 // CreateTask validates and writes a new task file; the daemon is its only writer (FS-001 FR-004).
-func (a *App) CreateTask(in TaskInput) (TaskView, error) {
-	return a.createTask(in, catalogStrict, false, false)
+func (a *App) CreateTask(ctx context.Context, in TaskInput) (TaskView, error) {
+	return a.createTask(ctx, in, catalogStrict, false, false)
 }
 
 // ImportTask accepts a portable task, warning about agents and skills this machine lacks (FS-001 FR-018). An imported
 // script task is saved disabled, whatever its file says: it runs a program with the user's rights, and runs only once
 // the user has seen it and enabled it (FS-013 SEC-001).
-func (a *App) ImportTask(yamlText string, overwrite bool) (TaskView, error) {
-	return a.createTask(TaskInput{YAML: yamlText}, catalogLenient, overwrite, true)
+func (a *App) ImportTask(ctx context.Context, yamlText string, overwrite bool) (TaskView, error) {
+	return a.createTask(ctx, TaskInput{YAML: yamlText}, catalogLenient, overwrite, true)
 }
 
-func (a *App) createTask(in TaskInput, mode catalogMode, overwrite, imported bool) (TaskView, error) {
-	r := a.validate(in, mode)
+func (a *App) createTask(ctx context.Context, in TaskInput, mode catalogMode, overwrite, imported bool) (TaskView, error) {
+	r := a.validate(ctx, in, mode)
 	if !r.Valid {
 		return TaskView{}, a.invalidError(r)
 	}
@@ -291,7 +292,7 @@ func (a *App) createTask(in TaskInput, mode catalogMode, overwrite, imported boo
 
 // UpdateTask writes an edit that started from baseRevision; a file changed meanwhile is a conflict, never a silent
 // overwrite (FS-001 FR-005). A running execution keeps the definition it started with (D-083).
-func (a *App) UpdateTask(id string, in TaskInput) (TaskView, error) {
+func (a *App) UpdateTask(ctx context.Context, id string, in TaskInput) (TaskView, error) {
 	e, err := a.entry(id)
 	if err != nil {
 		return TaskView{}, err
@@ -300,7 +301,7 @@ func (a *App) UpdateTask(id string, in TaskInput) (TaskView, error) {
 		return TaskView{}, newError(CodeBadRequest,
 			domain.T("base_revision_required", "baseRevision is required to update a task"))
 	}
-	r := a.validate(in, catalogStrict)
+	r := a.validate(ctx, in, catalogStrict)
 	if !r.Valid {
 		return TaskView{}, a.invalidError(r)
 	}
@@ -386,7 +387,7 @@ func (a *App) removeTask(id string) error {
 }
 
 // DuplicateTask copies a task under a new identifier, disabled (FS-001 AC-002).
-func (a *App) DuplicateTask(id string) (TaskView, error) {
+func (a *App) DuplicateTask(ctx context.Context, id string) (TaskView, error) {
 	e, err := a.entry(id)
 	if err != nil {
 		return TaskView{}, err
@@ -409,7 +410,7 @@ func (a *App) DuplicateTask(id string) (TaskView, error) {
 	if err != nil {
 		return TaskView{}, err
 	}
-	return a.createTask(TaskInput{YAML: string(out)}, catalogLenient, false, false)
+	return a.createTask(ctx, TaskInput{YAML: string(out)}, catalogLenient, false, false)
 }
 
 // disableImported sets spec.enabled to false in an imported script task's YAML, keeping the rest of the file, and says
@@ -429,7 +430,7 @@ func disableImported(r *ValidationResult) error {
 
 // SetEnabled toggles spec.enabled in place, keeping the file's comments. Disabling lets a running execution finish
 // and drops a waiting firing (D-083).
-func (a *App) SetEnabled(id string, enabled bool) (TaskView, error) {
+func (a *App) SetEnabled(ctx context.Context, id string, enabled bool) (TaskView, error) {
 	e, err := a.entry(id)
 	if err != nil {
 		return TaskView{}, err
@@ -445,7 +446,7 @@ func (a *App) SetEnabled(id string, enabled bool) (TaskView, error) {
 	if err != nil {
 		return TaskView{}, err
 	}
-	return a.UpdateTask(id, TaskInput{YAML: string(out), BaseRevision: rev})
+	return a.UpdateTask(ctx, id, TaskInput{YAML: string(out), BaseRevision: rev})
 }
 
 // ExportTask returns the portable YAML: the definition only, with no state, logs, or credentials (FS-001 FR-006).
@@ -461,21 +462,21 @@ func (a *App) ExportTask(id string) ([]byte, error) {
 }
 
 // watchLoop detects external edits of task files (FS-001 FR-005).
-func (a *App) watchLoop() {
+func (a *App) watchLoop(ctx context.Context) {
 	defer a.wg.Done()
 	t := time.NewTicker(2 * time.Second)
 	defer t.Stop()
 	for {
 		select {
-		case <-a.stopCh:
+		case <-ctx.Done():
 			return
 		case <-t.C:
-			a.scanTaskFiles()
+			a.scanTaskFiles(ctx)
 		}
 	}
 }
 
-func (a *App) scanTaskFiles() {
+func (a *App) scanTaskFiles(ctx context.Context) {
 	files, err := a.d.Tasks.List()
 	if err != nil {
 		return
@@ -491,7 +492,7 @@ func (a *App) scanTaskFiles() {
 		if !changed || self {
 			continue
 		}
-		ne := a.loadTaskFile(f)
+		ne := a.loadTaskFile(ctx, f)
 		a.rescheduleTask(f.ID)
 		a.mu.Lock()
 		invalid := ne.invalid

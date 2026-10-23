@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"sort"
 	"time"
 
@@ -101,7 +102,7 @@ func (a *App) failWorkItem(taskID, key, executionID, lastOperation string, limit
 // recover marks every execution a crash or restart left active as interrupted: it is never continued, and its work
 // item is resumed in a later cycle (FS-003 FR-010). Waiting firings stay queued; startQueued then drops each one whose
 // task was disabled or deleted while the daemon was down.
-func (a *App) recover() error {
+func (a *App) recover(ctx context.Context) error {
 	all, err := a.d.Executions.LoadAll()
 	if err != nil {
 		return err
@@ -148,7 +149,7 @@ func (a *App) recover() error {
 		a.persistExecution(x)
 	}
 	for _, x := range interrupted {
-		a.endLeftovers(x)
+		a.endLeftovers(ctx, x)
 		a.persistExecution(x)
 		if x.WorkItem != "" {
 			limits := a.taskLimits(x.TaskID)

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,14 +12,14 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 )
 
-func (a *App) maintenanceLoop() {
+func (a *App) maintenanceLoop(ctx context.Context) {
 	defer a.wg.Done()
 	a.ApplyRetention()
 	t := time.NewTicker(time.Hour)
 	defer t.Stop()
 	for {
 		select {
-		case <-a.stopCh:
+		case <-ctx.Done():
 			return
 		case <-t.C:
 			a.ApplyRetention()

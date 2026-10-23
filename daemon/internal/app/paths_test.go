@@ -90,7 +90,7 @@ func TestTaskPathsAreChecked(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			r := e.app.Validate(TaskInput{YAML: c.yaml})
+			r := e.app.Validate(t.Context(), TaskInput{YAML: c.yaml})
 			if got := errorAt(r, c.path); got != c.key {
 				t.Errorf("error at %s = %q, want %q (errors %+v)", c.path, got, c.key, r.Errors)
 			}
@@ -100,7 +100,7 @@ func TestTaskPathsAreChecked(t *testing.T) {
 	if _, err := e.app.UpdateSettings(SettingsPatch{AllowedFolders: []string{outside}}); err != nil {
 		t.Fatal(err)
 	}
-	if r := e.app.Validate(TaskInput{YAML: issueTask("t", outside, "")}); errorAt(r, lp) != "" {
+	if r := e.app.Validate(t.Context(), TaskInput{YAML: issueTask("t", outside, "")}); errorAt(r, lp) != "" {
 		t.Errorf("a local path inside an allowed folder: %+v", r.Errors)
 	}
 }
@@ -126,7 +126,7 @@ func TestScriptProgramAndWorkingDirectoryForm(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			r := e.app.Validate(TaskInput{YAML: scriptYAML("s", c.body)})
+			r := e.app.Validate(t.Context(), TaskInput{YAML: scriptYAML("s", c.body)})
 			if got := errorAt(r, c.path); got != c.key {
 				t.Errorf("error at %s = %q, want %q (errors %+v)", c.path, got, c.key, r.Errors)
 			}
@@ -154,7 +154,7 @@ func TestSettingsChangeThatBreaksATaskIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.create("uses-var", "  workspace:\n    path: ${REPOS}/app\n")
-	if _, err := e.app.CreateTask(TaskInput{YAML: issueTask("uses-folder", outside, "")}); err != nil {
+	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: issueTask("uses-folder", outside, "")}); err != nil {
 		t.Fatal(err)
 	}
 	before := e.app.GetSettings()
@@ -207,7 +207,7 @@ func TestSavedTaskOutsideTheRuleDoesNotRun(t *testing.T) {
 	if err := os.WriteFile(file, []byte(taskYAML("rooted", "  workspace:\n    path: /\n")), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	e.app.scanTaskFiles()
+	e.app.scanTaskFiles(t.Context())
 	v, err := e.app.GetTask("rooted")
 	if err != nil || !v.Invalid || v.Validation == nil || errorAt(v.Validation, "/spec/workspace/path") != "path_forbidden_home" {
 		t.Errorf("a task file with workspace /: invalid %v, validation %+v, %v", v.Invalid, v.Validation, err)

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"strconv"
 	"time"
 
@@ -129,14 +130,14 @@ func (a *App) rescheduleTask(id string) {
 	a.saveSchedule()
 }
 
-func (a *App) schedulerLoop() {
+func (a *App) schedulerLoop(ctx context.Context) {
 	defer a.wg.Done()
 	t := time.NewTicker(a.d.TickInterval)
 	defer t.Stop()
 	a.Tick()
 	for {
 		select {
-		case <-a.stopCh:
+		case <-ctx.Done():
 			return
 		case <-t.C:
 			a.Tick()

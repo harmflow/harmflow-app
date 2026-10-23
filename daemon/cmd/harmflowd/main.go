@@ -150,7 +150,10 @@ func run(homeFlag, builtinsFlag string, port int) error {
 	if err := srv.Listen(port); err != nil {
 		return err
 	}
-	if err := a.Start(context.Background()); err != nil {
+	// The daemon's own context: what Start runs under ends when run returns, after Stop.
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	if err := a.Start(ctx); err != nil {
 		return err
 	}
 	serveErr := make(chan error, 1)
@@ -175,9 +178,10 @@ func run(homeFlag, builtinsFlag string, port int) error {
 		a.Stop(domain.T("local_api_stopped", "the local API stopped"))
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	stop()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	srv.Shutdown(ctx)
+	srv.Shutdown(shutdownCtx)
 	logger.Printf("stopped")
 	return nil
 }
