@@ -134,15 +134,19 @@ export function App() {
   const daemonDown = !onboarding && native.available && daemonRunning === false;
   const shell = !onboarding && !daemonDown;
 
-  // ⌘B collapses and expands the sidebar from any focus, a text field or the YAML editor included. The onboarding and
-  // daemon-down screens have no sidebar, and a modal dialog keeps the keyboard. Linux and Windows would check ctrlKey.
+  // ⌘B collapses and expands the sidebar, and ⌘N opens the template picker as the topbar's New task does (D-120), from
+  // any focus, a text field or the YAML editor included. The onboarding and daemon-down screens have no shell, and a
+  // modal dialog, the picker included, keeps the keyboard. Linux and Windows would check ctrlKey.
   useEffect(() => {
     if (!shell) return;
     const onKey = (e: KeyboardEvent) => {
-      if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat || e.key.toLowerCase() !== "b") return;
+      if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat) return;
+      const key = e.key.toLowerCase();
+      if (key !== "b" && key !== "n") return;
       if (document.querySelector('[aria-modal="true"]')) return;
       e.preventDefault();
-      setSidebarCollapsed((collapsed) => !collapsed);
+      if (key === "b") setSidebarCollapsed((collapsed) => !collapsed);
+      else setPicker(true);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

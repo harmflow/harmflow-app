@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
@@ -22,19 +22,54 @@ const NAV: Array<{ key: Screen; icon: IconName }> = [
 ];
 
 const TOGGLE_SHORTCUT = "⌘B";
+const NEW_TASK_SHORTCUT = "⌘N";
 
 interface Tip {
   text: string;
   keys?: string;
   top: number;
   left: number;
+  below?: boolean;
 }
 
+type Place = (target: HTMLElement, text: string, keys?: string) => Tip;
+
 /** A tooltip just past the sidebar's edge, level with its target. */
-function tipBeside(target: HTMLElement, text: string, keys?: string): Tip {
+const tipBeside: Place = (target, text, keys) => {
   const box = target.getBoundingClientRect();
   const edge = target.closest(".sidebar")?.getBoundingClientRect().right ?? box.right;
   return { text, keys, top: box.top + box.height / 2, left: edge + 8 };
+};
+
+/** A tooltip just below its target, centred on it: the topbar's. */
+const tipBelow: Place = (target, text, keys) => {
+  const box = target.getBoundingClientRect();
+  return { text, keys, top: box.bottom + 8, left: box.left + box.width / 2, below: true };
+};
+
+/**
+ * A tooltip placed by `place`, shown at once on hover and on keyboard focus: `title` appears late and never on focus.
+ * `tipped` gives a target its handlers; `tooltip` is the element to render; `hide` clears it.
+ */
+function useTooltip(place: Place) {
+  const [tip, setTip] = useState<Tip | null>(null);
+  const hide = useCallback(() => setTip(null), []);
+  const tipped = (text: string, keys?: string) => ({
+    onMouseEnter: (e: { currentTarget: HTMLElement }) => setTip(place(e.currentTarget, text, keys)),
+    onFocus: (e: { currentTarget: HTMLElement }) => setTip(place(e.currentTarget, text, keys)),
+    onMouseLeave: hide,
+    onBlur: hide,
+  });
+  const tooltip = tip
+    ? createPortal(
+        <span className={cx("tooltip", tip.below && "tooltip--below")} aria-hidden="true" style={{ top: tip.top, left: tip.left }}>
+          {tip.text}
+          {tip.keys ? <kbd className="tooltip__keys">{tip.keys}</kbd> : null}
+        </span>,
+        document.body,
+      )
+    : null;
+  return { tipped, tooltip, hide };
 }
 
 /**
@@ -57,18 +92,11 @@ export function Sidebar({
   const version = useStore((s) => s.appVersion);
   const running = useStore((s) => s.stats?.running ?? 0);
   const locale = i18n.language;
-  const [tip, setTip] = useState<Tip | null>(null);
+  const { tipped, tooltip, hide } = useTooltip(tipBeside);
 
   // The layout moves under a shown tooltip; the next hover or focus places it again.
-  useEffect(() => setTip(null), [collapsed]);
+  useEffect(hide, [collapsed, hide]);
 
-  // Shown at once on hover and on keyboard focus: `title` appears late and never on focus.
-  const tipped = (text: string, keys?: string) => ({
-    onMouseEnter: (e: { currentTarget: HTMLElement }) => setTip(tipBeside(e.currentTarget, text, keys)),
-    onFocus: (e: { currentTarget: HTMLElement }) => setTip(tipBeside(e.currentTarget, text, keys)),
-    onMouseLeave: () => setTip(null),
-    onBlur: () => setTip(null),
-  });
   const toggleLabel = collapsed ? t("sidebar.expand") : t("sidebar.collapse");
 
   return (
@@ -148,15 +176,7 @@ export function Sidebar({
         </div>
       </div>
 
-      {tip
-        ? createPortal(
-            <span className="tooltip" aria-hidden="true" style={{ top: tip.top, left: tip.left }}>
-              {tip.text}
-              {tip.keys ? <kbd className="tooltip__keys">{tip.keys}</kbd> : null}
-            </span>,
-            document.body,
-          )
-        : null}
+      {tooltip}
     </aside>
   );
 }
@@ -178,6 +198,7 @@ export function Header({
   const health = useStore((s) => s.health);
   const appVersion = useStore((s) => s.appVersion);
   const mismatch = health && health.version !== appVersion;
+  const { tipped, tooltip, hide } = useTooltip(tipBelow);
 
   return (
     <header className="topbar" data-tauri-drag-region>
@@ -199,7 +220,17 @@ export function Header({
         </span>
       </div>
       <div className="topbar__actions">
-        <Button variant="primary" size="lg" icon="plus" onClick={onNewTask}>
+        <Button
+          variant="primary"
+          size="lg"
+          icon="plus"
+          aria-keyshortcuts="Meta+N"
+          onClick={() => {
+            hide(); // the picker covers the button, which may get no mouseleave until the pointer moves
+            onNewTask();
+          }}
+          {...tipped(t("header.newTask"), NEW_TASK_SHORTCUT)}
+        >
           {t("header.newTask")}
         </Button>
         <NotificationBell onOpenExecution={onOpenExecution} />
@@ -219,6 +250,7 @@ export function Header({
           </Banner>
         </div>
       ) : null}
+      {tooltip}
     </header>
   );
 }
