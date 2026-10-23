@@ -1,8 +1,9 @@
 // Command coverage reads the daemon's coverage profile — the unit and integration data make coverage-daemon merges —
 // and prints, per Go package, the statements its tests reach beside the package's floor (ADR-015). It fails when a
-// package reads below its floor. It never adds packages up: each is read, and held, on its own.
+// package reads below its floor, unless -hold=false, which only names it: the nightly report reads main that way. It
+// never adds packages up: each is read, and held, on its own.
 //
-// Usage: go -C tests run ./coverage [-floors <file>] <profile>
+// Usage: go -C tests run ./coverage [-floors <file>] [-hold=false] <profile>
 package main
 
 import (
@@ -33,34 +34,45 @@ type tally struct{ covered, total int }
 // hundredths is the ratio as a whole number of hundredths of a percent, truncated, never rounded.
 func (t tally) hundredths() int { return t.covered * 10000 / t.total }
 
-func main() {
-	floorsFile := flag.String("floors", "", "file of per-package floors; without it nothing fails on a figure")
-	flag.Usage = func() { fmt.Fprintln(os.Stderr, "usage: coverage [-floors <file>] <profile>") }
-	flag.Parse()
-	if flag.NArg() != 1 {
-		flag.Usage()
-		os.Exit(2)
+func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
+
+// run returns the exit status: 2 for a wrong command line, 1 for a profile or floors file it cannot read, and 1 for a
+// package below its floor only while the floors hold.
+func run(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("coverage", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	floorsFile := flags.String("floors", "", "file of per-package floors; without it nothing fails on a figure")
+	hold := flags.Bool("hold", true, "fail when a package reads below its floor; false only names it")
+	flags.Usage = func() { fmt.Fprintln(stderr, "usage: coverage [-floors <file>] [-hold=false] <profile>") }
+	if err := flags.Parse(args); err != nil {
+		return 2
 	}
-	blocks, err := read(flag.Arg(0))
+	if flags.NArg() != 1 {
+		flags.Usage()
+		return 2
+	}
+	blocks, err := read(flags.Arg(0))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "coverage:", err)
-		os.Exit(1)
+		fmt.Fprintln(stderr, "coverage:", err)
+		return 1
 	}
 	floors := map[string]int{}
 	if *floorsFile != "" {
 		if floors, err = readFloorsFile(*floorsFile); err != nil {
-			fmt.Fprintln(os.Stderr, "coverage:", err)
-			os.Exit(1)
+			fmt.Fprintln(stderr, "coverage:", err)
+			return 1
 		}
 	}
 	packages := tallies(blocks)
-	printTable(os.Stdout, packages, floors)
-	if violations := check(packages, floors); len(violations) > 0 {
-		for _, v := range violations {
-			fmt.Fprintln(os.Stderr, "coverage:", v)
-		}
-		os.Exit(1)
+	printTable(stdout, packages, floors)
+	violations := check(packages, floors)
+	for _, v := range violations {
+		fmt.Fprintln(stderr, "coverage:", v)
 	}
+	if *hold && len(violations) > 0 {
+		return 1
+	}
+	return 0
 }
 
 // read returns the profile's blocks, keyed by file and range. A block listed more than once — by several test
