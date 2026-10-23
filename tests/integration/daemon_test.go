@@ -759,6 +759,66 @@ func TestHealthNamesTheBuildTime(t *testing.T) {
 	}
 }
 
+// FS-010 FR-002, AC-004 (D-008): a fresh install keeps autostart off and writes no user agent. FS-010 FR-003, AC-005: a
+// daemon started by hand, not by launchd, fires its scheduled task while autostart reads off, so "running now" and
+// "starts at login" are two states. HOME is a throwaway directory: the daemon's user agent would lie under it, never
+// in the developer's own LaunchAgents.
+func TestHandStartedDaemonFiresWithAutostartOff(t *testing.T) {
+	userHome := t.TempDir()
+	t.Setenv("HOME", userHome)
+	d := startDaemon(t, t.TempDir())
+	plist := filepath.Join(userHome, "Library", "LaunchAgents", "com.harmflow.daemon.plist")
+	autostartOff := func(step string) {
+		t.Helper()
+		a, _ := d.call("GET", "/settings", nil, 200)["autostart"].(map[string]any)
+		if a["enabled"] != false || a["mechanism"] != "launchd" || a["plistPath"] != plist {
+			t.Fatalf("%s: autostart reads %v, want off, through launchd, at %s", step, a, plist)
+		}
+		if _, err := os.Stat(plist); !os.IsNotExist(err) {
+			t.Fatalf("%s: a user agent exists: %v", step, err)
+		}
+	}
+	autostartOff("a fresh install")
+
+	created := d.call("POST", "/tasks", map[string]any{"yaml": task("minutely", "Say hi.",
+		"  schedule:\n    cron: \"* * * * *\"\n    timezone: UTC\n")}, 201)
+	next, err := time.Parse(time.RFC3339, fmt.Sprint(created["nextFireAt"]))
+	if err != nil {
+		t.Fatalf("next firing %v: %v", created["nextFireAt"], err)
+	}
+	// Schedules have no seconds field (D-071), so the firing comes at the next minute boundary, at most 60 s away; the
+	// run then has as long again to complete on a loaded host.
+	deadline := next.Add(60 * time.Second)
+	var x map[string]any
+	for x == nil || x["status"] != "completed" {
+		if time.Now().After(deadline) {
+			t.Fatalf("by %s the task due at %s has not completed a scheduled run: %v", deadline.Format(time.TimeOnly),
+				next.Format(time.TimeOnly), x)
+		}
+		time.Sleep(500 * time.Millisecond)
+		d.call("GET", "/health", nil, 200)
+		autostartOff("while the task fires")
+		for _, e := range d.list("/executions?taskId=minutely") {
+			if e["trigger"] == "schedule" && (x == nil || e["id"] == x["id"]) {
+				x = e
+			}
+		}
+		if x != nil {
+			switch x["status"] {
+			case "no_work", "failed", "cancelled", "interrupted", "needs_attention":
+				t.Fatalf("the scheduled run ended %v", x["status"])
+			}
+		}
+	}
+	// The next minute's firing must not run while the test checks.
+	d.call("POST", "/tasks/minutely/disable", nil, 200)
+	got := d.call("GET", "/executions/"+x["id"].(string), nil, 200)
+	if got["trigger"] != "schedule" || got["status"] != "completed" {
+		t.Errorf("the run reads trigger %v, status %v", got["trigger"], got["status"])
+	}
+	autostartOff("after the run")
+}
+
 // FS-001 AC-001, AC-003, AC-004, AC-005, AC-006, AC-007, AC-008: the daemon is the only writer; form and YAML go
 // through one validation; files and dashboard converge; conflicts are reported.
 func TestTaskLifecycle(t *testing.T) {

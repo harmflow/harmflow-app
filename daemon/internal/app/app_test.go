@@ -308,6 +308,8 @@ type env struct {
 	wake   *fakeWake
 	home   string
 	paths  Paths
+	// service stands in for the launchd agent, when a test sets one; the App has none otherwise.
+	service ports.HostServiceManager
 }
 
 // newEnv starts an App on fake harnesses; configure sets up the env, its fakes included, before the App starts.
@@ -348,7 +350,7 @@ func (e *env) start(t *testing.T, configure ...func(*env)) {
 	}
 	a, err := New(Deps{Paths: e.paths, Version: "test", Clock: e.clock, Wake: e.wake, Location: time.UTC, Tasks: tasks,
 		State: state, Executions: execs, Events: e.events, Validator: v, Harnesses: []ports.HarnessAdapter{e.claude, e.codex},
-		TickInterval: time.Hour, Logger: log.New(io.Discard, "", 0)})
+		Service: e.service, TickInterval: time.Hour, Logger: log.New(io.Discard, "", 0)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2309,6 +2311,59 @@ func TestWaitingFiringAcrossRestart(t *testing.T) {
 			}
 		})
 	}
+}
+
+// FS-010 FR-002, AC-004 (D-008): autostart is opt-in. Starting the app, a patch that leaves autostart out, and
+// completing onboarding neither turn it on nor off; only a patch that names it does, and turning it on starts this
+// daemon with its data directory.
+func TestAutostartChangesOnlyOnRequest(t *testing.T) {
+	service := &fakeAutostart{}
+	exe := "/Applications/HarmFlow.app/Contents/MacOS/harmflowd"
+	args := []string{"--home", "/data", "--builtins", "/builtins"}
+	daemonEnv := map[string]string{"PATH": "/usr/bin:/bin"}
+	e := newEnv(t, func(e *env) { e.service = service })
+	// What autostart launches is read only when it is turned on.
+	e.app.d.DaemonExecutable, e.app.d.DaemonArgs, e.app.d.DaemonEnv = exe, args, daemonEnv
+	calls := func(step string, enables, disables int) {
+		t.Helper()
+		if len(service.enables) != enables || service.disables != disables {
+			t.Errorf("%s: Enable called %d times and Disable %d, want %d and %d", step, len(service.enables),
+				service.disables, enables, disables)
+		}
+	}
+	patch := func(step string, p SettingsPatch, enabled bool) {
+		t.Helper()
+		v, err := e.app.UpdateSettings(p)
+		if err != nil {
+			t.Fatalf("%s: %v", step, err)
+		}
+		if v.Autostart.Enabled != enabled || v.Autostart.Mechanism != "launchd" {
+			t.Errorf("%s: autostart reads %+v, want enabled %v", step, v.Autostart, enabled)
+		}
+	}
+
+	calls("starting the app", 0, 0)
+	if v := e.app.GetSettings(); v.Autostart.Enabled || v.Autostart.Mechanism != "launchd" {
+		t.Errorf("a fresh install reads autostart %+v", v.Autostart)
+	}
+	language, level := "en-US", "none"
+	patch("a patch without autostart", SettingsPatch{Language: &language, NotificationLevel: &level}, false)
+	calls("a patch without autostart", 0, 0)
+	completed := true
+	patch("completing onboarding", SettingsPatch{OnboardingCompleted: &completed}, false)
+	calls("completing onboarding", 0, 0)
+
+	on, off := true, false
+	patch("autostart: true", SettingsPatch{Autostart: &on}, true)
+	calls("autostart: true", 1, 0)
+	for _, got := range service.enables {
+		if got.executable != exe || !slices.Equal(got.args, args) || fmt.Sprint(got.env) != fmt.Sprint(daemonEnv) {
+			t.Errorf("Enable starts %s %q with %v, want %s %q with %v", got.executable, got.args, got.env, exe, args,
+				daemonEnv)
+		}
+	}
+	patch("autostart: false", SettingsPatch{Autostart: &off}, false)
+	calls("autostart: false", 1, 1)
 }
 
 // FS-001 AC-004, AC-012, AC-021: an invalid change keeps the valid file; a missing skill is an error on save and a
