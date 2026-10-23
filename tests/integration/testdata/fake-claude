@@ -1,7 +1,8 @@
 #!/bin/bash
 # A stand-in for the Claude Code CLI that speaks its stream-json format. The task's prompt picks the scenario:
 # SCENARIO=ok (default), SCENARIO=quota, SCENARIO=quotausage (a quota after the result line reported usage and cost),
-# SCENARIO=slow, SCENARIO=report, SCENARIO=secret.
+# SCENARIO=slow, SCENARIO=report, SCENARIO=secret. With PARTIAL=1 in the prompt, it first leaves partial work, in any
+# scenario: a file in its workspace and a step in progress.jsonl.
 case "$1" in
   --version) echo "2.1.239 (Claude Code)"; exit 0 ;;
   --help) cat <<'HELP'
@@ -17,6 +18,10 @@ esac
 PROMPT=$(cat)
 SCENARIO=ok
 [[ "$PROMPT" =~ SCENARIO=([a-z]+) ]] && SCENARIO=${BASH_REMATCH[1]}
+if [[ "$PROMPT" == *"PARTIAL=1"* ]]; then
+  echo "half done" > "$HARMFLOW_WORKSPACE/partial.txt"
+  echo '{"type":"step.started","phase":"running","message":"Halfway"}' >> "$HARMFLOW_EXECUTION_DIR/progress.jsonl"
+fi
 echo '{"type":"system","subtype":"init","session_id":"fake-session","model":"claude-haiku-4-5-20251001","permissionMode":"acceptEdits"}'
 case "$SCENARIO" in
   quota)
