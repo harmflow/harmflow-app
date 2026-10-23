@@ -193,6 +193,24 @@ func TestTokenStoreDefaultsToKeychain(t *testing.T) {
 	}
 }
 
+// HARMFLOW_KEYCHAIN points the Keychain store at a keychain file, and only when set: unset, security searches the
+// user's keychains as before. The file store ignores it (#79).
+func TestTokenStoreKeychainFile(t *testing.T) {
+	paths := app.NewPaths(t.TempDir(), t.TempDir(), "")
+	t.Setenv("HARMFLOW_TOKEN_STORE", "")
+	for _, keychain := range []string{"", "/tmp/throwaway.keychain-db"} {
+		t.Setenv("HARMFLOW_KEYCHAIN", keychain)
+		if store, _ := tokenStore(paths); store != (secret.Keychain{Service: secret.KeychainService,
+			Account: secret.KeychainAccount, Path: keychain}) {
+			t.Errorf("HARMFLOW_KEYCHAIN=%q: got %#v", keychain, store)
+		}
+	}
+	t.Setenv("HARMFLOW_TOKEN_STORE", "file")
+	if store, _ := tokenStore(paths); store != (secret.File{Path: filepath.Join(paths.Run, "token")}) {
+		t.Errorf("HARMFLOW_TOKEN_STORE=file: got %#v", store)
+	}
+}
+
 func writeFile(t *testing.T, path, text string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

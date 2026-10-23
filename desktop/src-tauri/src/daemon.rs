@@ -64,8 +64,14 @@ fn read_token(home: &Path, store: Option<&str>) -> Result<String, String> {
             .map_err(|e| format!("{}: {e}", path.display()));
     }
     // The security CLI created the item, so reading it through the same CLI shows no Keychain prompt.
-    let out = Command::new("/usr/bin/security")
-        .args(["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", KEYCHAIN_ACCOUNT, "-w"])
+    let mut security = Command::new("/usr/bin/security");
+    security.args(["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", KEYCHAIN_ACCOUNT, "-w"]);
+    // `$HARMFLOW_KEYCHAIN`, when set, is the keychain file the daemon keeps the token in, as a test points both at a
+    // throwaway keychain (#79); unset, security searches the user's keychains.
+    if let Some(keychain) = std::env::var_os("HARMFLOW_KEYCHAIN").filter(|v| !v.is_empty()) {
+        security.arg(keychain);
+    }
+    let out = security
         .stdin(Stdio::null())
         .output()
         .map_err(|e| format!("security: {e}"))?;
@@ -360,5 +366,60 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(group, Some(child.id()), "the child's process group is not its own");
         assert!(own.is_some() && own != group, "the child shares the test's process group {own:?}");
+    }
+
+    /// A keychain file made for one test, unlocked, and named by `$HARMFLOW_KEYCHAIN` once `point_here` runs. Dropping
+    /// it, also after a failed assertion, deletes it with `security delete-keychain`, which also takes it off the search
+    /// list, and unsets the variable.
+    #[cfg(target_os = "macos")]
+    struct ThrowawayKeychain {
+        dir: PathBuf,
+        path: PathBuf,
+    }
+
+    #[cfg(target_os = "macos")]
+    impl ThrowawayKeychain {
+        fn new() -> Self {
+            let dir = std::env::temp_dir().join(format!("harmflow-keychain-test-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let keychain = ThrowawayKeychain { path: dir.join("throwaway.keychain-db"), dir };
+            let path = keychain.path.to_str().unwrap();
+            security(&["create-keychain", "-p", "harmflow-test", path]);
+            security(&["unlock-keychain", "-p", "harmflow-test", path]);
+            keychain
+        }
+
+        fn point_here(&self) {
+            std::env::set_var("HARMFLOW_KEYCHAIN", &self.path);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    impl Drop for ThrowawayKeychain {
+        fn drop(&mut self) {
+            std::env::remove_var("HARMFLOW_KEYCHAIN");
+            let _ = Command::new("/usr/bin/security").arg("delete-keychain").arg(&self.path).status();
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn security(args: &[&str]) {
+        let out = Command::new("/usr/bin/security").args(args).output().unwrap();
+        assert!(out.status.success(), "security {}: {}", args[0], String::from_utf8_lossy(&out.stderr));
+    }
+
+    /// FS-009 FR-011: the desktop reads the token the daemon keeps in the Keychain, the item of service
+    /// com.harmflow.local-api and account token, written by the same security CLI. A throwaway keychain holds it, never
+    /// the login keychain (#79).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn token_is_read_from_the_keychain() {
+        let keychain = ThrowawayKeychain::new();
+        let path = keychain.path.to_str().unwrap();
+        // The literal service and account the daemon writes, not this file's constants, so both sides must agree.
+        security(&["add-generic-password", "-s", "com.harmflow.local-api", "-a", "token", "-w", "kc-token", path]);
+        keychain.point_here();
+        assert_eq!(read_token(&keychain.dir, Some("keychain")).unwrap(), "kc-token");
     }
 }

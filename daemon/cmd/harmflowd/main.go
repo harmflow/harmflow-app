@@ -125,8 +125,10 @@ func run(homeFlag, builtinsFlag string, port int) error {
 	if paths.Builtins != "" {
 		daemonArgs = append(daemonArgs, "--builtins", paths.Builtins)
 	}
-	if os.Getenv("HARMFLOW_TOKEN_STORE") != "" {
-		daemonEnv["HARMFLOW_TOKEN_STORE"] = os.Getenv("HARMFLOW_TOKEN_STORE")
+	for _, name := range []string{"HARMFLOW_TOKEN_STORE", "HARMFLOW_KEYCHAIN"} {
+		if v := os.Getenv(name); v != "" {
+			daemonEnv[name] = v
+		}
 	}
 	a, err := app.New(app.Deps{
 		Paths: paths, Version: Version, Commit: buildCommit(), BuiltAt: buildTime(BuiltAt), Wake: wake.NewMonitor(),

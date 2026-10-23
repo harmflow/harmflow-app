@@ -2,7 +2,9 @@ package secret
 
 import (
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -32,5 +34,31 @@ func TestKeychainError(t *testing.T) {
 	}
 	if got := keychainError(exec.ErrNotFound); errors.Is(got, ErrNoToken) || !strings.HasPrefix(got.Error(), "keychain: ") {
 		t.Errorf("security missing: got %v", got)
+	}
+}
+
+// A keychain file that is missing, or whose path security's interactive mode cannot read quoted, is refused before
+// security runs: given a keychain it cannot open, add-generic-password writes to the default keychain instead (#79).
+func TestKeychainPathChecked(t *testing.T) {
+	dir := t.TempDir()
+	keychain := func(name string) Keychain {
+		path := filepath.Join(dir, name)
+		if !strings.Contains(name, "missing") {
+			if err := os.WriteFile(path, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return Keychain{Service: KeychainService, Account: KeychainAccount, Path: path}
+	}
+	if err := keychain("throwaway keychain.keychain-db").checkPath(); err != nil {
+		t.Errorf("a keychain file whose path has a space: %v", err)
+	}
+	if err := keychain("missing.keychain-db").checkPath(); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a missing keychain file: got %v", err)
+	}
+	for _, name := range []string{`quote".keychain-db`, `back\slash.keychain-db`, "new\nline.keychain-db"} {
+		if err := keychain(name).checkPath(); err == nil || !strings.HasPrefix(err.Error(), "keychain: ") {
+			t.Errorf("%q: got %v", name, err)
+		}
 	}
 }

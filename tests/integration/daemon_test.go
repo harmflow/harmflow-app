@@ -81,17 +81,33 @@ type daemon struct {
 // startDaemon starts harmflowd on the home, with env added to the test's own environment, a later entry winning.
 func startDaemon(t *testing.T, home string, env ...string) *daemon {
 	t.Helper()
+	return startDaemonOn(t, home, "", env...)
+}
+
+// startDaemonOn is startDaemon with the default token store pointed at keychain, a throwaway keychain file, or with the
+// file store, run/token, when keychain is empty. No test reaches the user's login keychain.
+func startDaemonOn(t *testing.T, home, keychain string, env ...string) *daemon {
+	t.Helper()
+	store := []string{"HARMFLOW_TOKEN_STORE=file"}
+	if keychain != "" {
+		if _, err := os.Stat(keychain); err != nil || !strings.HasPrefix(keychain, os.TempDir()) {
+			t.Fatalf("%s is not a throwaway keychain a test made (%v)", keychain, err)
+		}
+		store = []string{"HARMFLOW_TOKEN_STORE=", "HARMFLOW_KEYCHAIN=" + keychain}
+	}
 	_ = os.Remove(filepath.Join(home, "run", "daemon.json"))
 	cmd := exec.Command(binary, "--home", home, "--builtins", repoRoot())
 	// Codex's configuration is the test's own, never the user's.
-	cmd.Env = append(append(os.Environ(), "HARMFLOW_TOKEN_STORE=file", "CODEX_HOME="+filepath.Join(home, "codex")), env...)
+	cmd.Env = append(append(append(os.Environ(), "CODEX_HOME="+filepath.Join(home, "codex")), store...), env...)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
 	d := &daemon{t: t, home: home, cmd: cmd}
-	d.base, d.token = awaitRuntime(home, 20*time.Second)
+	if d.base, d.token = awaitRuntime(home, 20*time.Second); d.base != "" && keychain != "" {
+		d.token = strings.TrimSpace(string(keychainToken(t, keychain))) // read as a client reads it
+	}
 	if d.base == "" {
 		_ = cmd.Process.Kill()
 		t.Fatalf("the daemon did not start:\n%s", out.String())
@@ -3103,4 +3119,134 @@ func TestSkippedMisfireSurvivesAKill(t *testing.T) {
 	if runs := d.list("/executions?taskId=daily-skip"); len(runs) != 0 {
 		t.Errorf("the skip policy ran %v", runs)
 	}
+}
+
+// throwawayKeychain creates an unlocked keychain file for one test, with no lock timeout, and deletes it at cleanup with
+// security delete-keychain, which also takes it off the search list. Its directory's name has a space, as the daemon
+// passes the path quoted to security's interactive mode.
+func throwawayKeychain(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS != "darwin" {
+		t.Skip("the Keychain is macOS's")
+	}
+	dir := filepath.Join(t.TempDir(), "throwaway keychain")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "harmflow-test.keychain-db")
+	runSecurity(t, "create-keychain", "-p", "harmflow-test", path)
+	// Registered after t.TempDir, so it runs before the directory is removed, and after the daemons stop.
+	t.Cleanup(func() {
+		if out, err := exec.Command("/usr/bin/security", "delete-keychain", path).CombinedOutput(); err != nil {
+			t.Errorf("security delete-keychain %s: %v %s", path, err, out)
+		}
+	})
+	runSecurity(t, "unlock-keychain", "-p", "harmflow-test", path)
+	runSecurity(t, "set-keychain-settings", path) // no lock after a timeout or on sleep
+	return path
+}
+
+func runSecurity(t *testing.T, args ...string) []byte {
+	t.Helper()
+	out, err := exec.Command("/usr/bin/security", args...).Output()
+	if err != nil {
+		var stderr []byte
+		if ee, ok := err.(*exec.ExitError); ok {
+			stderr = ee.Stderr
+		}
+		t.Fatalf("security %s: %v %s", args[0], err, stderr)
+	}
+	return out
+}
+
+// keychainToken is what a client reads from keychain with security find-generic-password -s com.harmflow.local-api -a
+// token -w, byte for byte.
+func keychainToken(t *testing.T, keychain string) []byte {
+	t.Helper()
+	return runSecurity(t, "find-generic-password", "-s", "com.harmflow.local-api", "-a", "token", "-w", keychain)
+}
+
+// checkKeychainStore checks that run/daemon.json names the Keychain as the token store, and that no run/token exists.
+func checkKeychainStore(t *testing.T, home string) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(home, "run", "daemon.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rt struct {
+		TokenStore string `json:"tokenStore"`
+	}
+	if err := json.Unmarshal(data, &rt); err != nil || rt.TokenStore != "keychain" {
+		t.Errorf("run/daemon.json names the token store %q (%v), want keychain", rt.TokenStore, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "run", "token")); !os.IsNotExist(err) {
+		t.Errorf("run/token: %v, want no file", err)
+	}
+}
+
+// FS-009 FR-011, AC-011 on the Keychain: with the default store pointed at a throwaway keychain, the daemon keeps the
+// token it makes on its first start in that keychain and writes no run/token. The token security reads from the
+// keychain opens the API; a request without it, or with another, gets the guard's 401 (#79).
+func TestKeychainTokenOpensTheAPI(t *testing.T) {
+	keychain := throwawayKeychain(t)
+	home := t.TempDir()
+	d := startDaemonOn(t, home, keychain)
+	checkKeychainStore(t, home)
+	token := strings.TrimSpace(string(keychainToken(t, keychain)))
+	if token == "" {
+		t.Fatal("the keychain holds an empty token")
+	}
+	if status, kind, body := d.requestAs(token, "GET", "/health", nil); status != 200 {
+		t.Fatalf("GET /health with the keychain's token: %d %s %s", status, kind, body)
+	}
+	for _, c := range []struct{ name, token string }{{"no Authorization header", ""}, {"another token", token + "x"}} {
+		if status, kind, body := d.requestAs(c.token, "GET", "/health", nil); !unauthorized(status, kind, body) {
+			t.Errorf("GET /health with %s: %d %s %s", c.name, status, kind, body)
+		}
+	}
+}
+
+// FS-009 FR-013, AC-013 on the Keychain: a restart on the same home and keychain keeps the token byte for byte. A
+// rotation replaces it in the keychain: the new token works and the old one gets 401, also after another restart (#79).
+func TestKeychainTokenAcrossRestartAndRotation(t *testing.T) {
+	keychain := throwawayKeychain(t)
+	home := t.TempDir()
+	d := startDaemonOn(t, home, keychain)
+	stored := keychainToken(t, keychain)
+	old := strings.TrimSpace(string(stored))
+	// health sends GET /health with a token the client holds, not the one startDaemonOn read again.
+	health := func(name, token string, want int) {
+		t.Helper()
+		status, kind, body := d.requestAs(token, "GET", "/health", nil)
+		if want == 401 && !unauthorized(status, kind, body) || want != 401 && status != want {
+			t.Errorf("GET /health with the %s token: %d %s %s, want %d", name, status, kind, body, want)
+		}
+	}
+	d.stop()
+	d = startDaemonOn(t, home, keychain)
+	if again := keychainToken(t, keychain); !bytes.Equal(again, stored) {
+		t.Fatalf("the restart changed the keychain's token from %q to %q", stored, again)
+	}
+	checkKeychainStore(t, home)
+	health("first", old, 200)
+
+	if status, kind, body := d.requestAs(old, "POST", "/settings/token/rotate", nil); status != 200 {
+		t.Fatalf("POST /settings/token/rotate: %d %s %s", status, kind, body)
+	}
+	rotated := keychainToken(t, keychain)
+	fresh := strings.TrimSpace(string(rotated))
+	if fresh == "" || fresh == old {
+		t.Fatalf("the keychain holds %q after the rotation, was %q", fresh, old)
+	}
+	checkKeychainStore(t, home)
+	health("rotated", old, 401)
+	health("new", fresh, 200)
+
+	d.stop()
+	d = startDaemonOn(t, home, keychain)
+	if again := keychainToken(t, keychain); !bytes.Equal(again, rotated) {
+		t.Fatalf("the restart after the rotation changed the keychain's token from %q to %q", rotated, again)
+	}
+	health("new", fresh, 200)
+	health("rotated", old, 401)
 }
