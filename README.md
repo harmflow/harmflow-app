@@ -129,6 +129,7 @@ in its own pull request and is reviewed on its own.
 | `make dev-desktop` | Run the desktop shell against that daemon |
 | `make generate` | Refresh the copies generated from `contracts/`; `make check-generated` fails when one is stale |
 | `make app` | Build `HarmFlow.app` and the DMG, unsigned |
+| `make update-app` | On `main`, fast-forward and run `make app`, then restart on the new build the daemon and the window that were running; refused while executions run (see [`packaging/`](packaging/README.md#updating-the-local-app)) |
 | `make icons` | Render every app and tray icon from the SVGs in `desktop/src-tauri/icons/source` |
 
 Three environment variables change where the daemon keeps its data and its token:

@@ -11,6 +11,21 @@ Only what Tauri's own bundle settings (`desktop/src-tauri/tauri.conf.json`) do n
 | The tray starting with the session | `tauri-plugin-autostart`, a launch agent that opens the app with `--hidden` |
 | Signing with a Developer ID and notarization | Not done yet: the certificate does not exist. Until then builds are unsigned and Gatekeeper asks for confirmation on first open |
 
+## Updating the local app
+
+`make update-app` (`packaging/macos/update-app.sh`) runs `main` as the local app in one command:
+
+1. It refuses, with nothing changed, off `main`, with uncommitted changes, or when `git pull --ff-only origin main`
+   cannot fast-forward. Then it runs `make app`; a failed build leaves the window and the daemon as they were.
+2. It finds the daemon of `$HARMFLOW_HOME`, or of `~/Library/Application Support/HarmFlow`, through that directory's
+   `run/daemon.json`, never by process name, so the daemons of other data directories (the e2e one, a worktree's
+   development one) are never touched.
+3. It stops that daemon through `POST /api/v1/daemon/stop`, without `force`. While executions run, the daemon refuses
+   and so does the update: the window and the daemon stay as they were, and the new bundle is built but not running.
+4. It quits the window of this checkout's bundle, then restores what it found. A daemon that was running starts from
+   the new bundle, through `launchctl kickstart` when the launch agent `com.harmflow.daemon` serves that data directory,
+   and must answer with the new commit. A window that was open reopens. What was stopped stays stopped.
+
 ## Linux and Windows
 
 Not started; the MVP's first target is macOS.
