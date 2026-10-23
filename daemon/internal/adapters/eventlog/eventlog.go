@@ -22,6 +22,12 @@ import (
 
 const ringSize = 20000
 
+// subscriberBuffer is how many live events a subscriber's channel holds beyond its backlog: room for a burst, such as a
+// harness's output lines, while an SSE client is between reads. Append never waits for a subscriber. One whose buffer is
+// full is dropped, its channel closed, and it reconnects with Last-Event-ID to replay what it missed from the ring, so a
+// client that falls behind never holds up the log or the daemon.
+const subscriberBuffer = 4096
+
 type Log struct {
 	dir   string
 	clock func() time.Time
@@ -180,7 +186,7 @@ func (l *Log) Subscribe(after int64) (<-chan domain.Event, bool, func()) {
 			}
 		}
 	}
-	ch := make(chan domain.Event, len(backlog)+4096)
+	ch := make(chan domain.Event, len(backlog)+subscriberBuffer) // see subscriberBuffer
 	for _, e := range backlog {
 		ch <- e
 	}
