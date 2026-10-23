@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -19,6 +20,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 var binary string
@@ -394,6 +397,229 @@ func TestTaskLifecycle(t *testing.T) {
 	if len(occ) != 3 || !strings.Contains(occ[0].(string), "T09:00:00-03:00") {
 		t.Errorf("preview %v", preview)
 	}
+}
+
+// FS-001 AC-001, AC-005 (FR-004, ADR-005): a form document that sets every section is written as a file equal to it,
+// which passes validation and is listed; after an edit outside the daemon, the task the API returns is the file.
+func TestFormDocumentIsTheFile(t *testing.T) {
+	home := t.TempDir()
+	// Codex's models cache, read when the harness is detected, makes the candidate's model and effort ones the daemon
+	// checks rather than only declares.
+	codexHome := filepath.Join(home, "codex")
+	if err := os.MkdirAll(codexHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(codexHome, "models_cache.json"), []byte(`{"models":[
+		{"slug":"gpt-5.6-terra","supported_reasoning_levels":[{"effort":"low"},{"effort":"high"}]}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d := startDaemon(t, home)
+	repo := t.TempDir()
+	complete := completeTask("complete", repo)
+	// An empty list of failover triggers or notified events is a choice the file keeps (harmflow/harmflow-app#83).
+	empty := completeTask("empty-lists", repo)
+	spec := empty["spec"].(map[string]any)
+	spec["harness"].(map[string]any)["fallback"].(map[string]any)["on"] = []any{}
+	spec["notifications"].(map[string]any)["native"].(map[string]any)["events"] = []any{}
+	for _, doc := range []map[string]any{complete, empty} {
+		id := doc["metadata"].(map[string]any)["id"].(string)
+		created := d.call("POST", "/tasks", map[string]any{"document": doc}, 201)
+		data, err := os.ReadFile(filepath.Join(home, "tasks", id+".yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != created["yaml"] {
+			t.Errorf("%s: the file is not the yaml the API returned:\n%s", id, data)
+		}
+		if file, sent := yamlAsJSON(t, data), jsonShape(t, doc); !reflect.DeepEqual(file, sent) {
+			t.Errorf("%s: the file is not the document sent:\nfile     %s\ndocument %s", id, mustJSON(file), mustJSON(sent))
+		}
+		if v := d.call("POST", "/tasks/validate", map[string]any{"yaml": string(data)}, 200); v["valid"] != true {
+			t.Errorf("%s: the file fails validation: %v", id, v["errors"])
+		}
+	}
+	listed := map[string]bool{}
+	for _, x := range d.list("/tasks") {
+		listed[fmt.Sprint(x["id"])] = true
+	}
+	if !listed["complete"] || !listed["empty-lists"] {
+		t.Errorf("GET /tasks lists %v", listed)
+	}
+
+	// An editor adds a comment and moves apiVersion from the top of the file to its end.
+	file := filepath.Join(home, "tasks", "complete.yaml")
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const top = "apiVersion: harmflow/v1alpha1\n"
+	if !bytes.HasPrefix(data, []byte(top)) {
+		t.Fatalf("the file does not start with apiVersion:\n%s", data)
+	}
+	edited := "# Edited outside HarmFlow: this comment, and apiVersion moved to the end.\n" + string(data[len(top):]) + top
+	if err := os.WriteFile(file, []byte(edited), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
+		if got = d.call("GET", "/tasks/complete", nil, 200); got["yaml"] == edited {
+			break
+		}
+	}
+	if got["yaml"] != edited {
+		t.Fatalf("GET /tasks/complete did not converge on the edited file; its yaml:\n%v", got["yaml"])
+	}
+	if doc, file := jsonShape(t, got["document"]), yamlAsJSON(t, []byte(edited)); !reflect.DeepEqual(doc, file) {
+		t.Errorf("the document is not the edited file:\ndocument %s\nfile     %s", mustJSON(doc), mustJSON(file))
+	}
+}
+
+// completeTask is a form document that sets every section to a value other than its default, with a non-empty list
+// wherever the field is a list, and agents, skills, models, and efforts that resolve on the stand-in harnesses.
+func completeTask(id, repo string) map[string]any {
+	return map[string]any{"apiVersion": "harmflow/v1alpha1", "kind": "Task",
+		"metadata": map[string]any{"id": id, "name": "Complete " + id, "description": "Every section of the form, set."},
+		"spec": map[string]any{
+			"enabled": false,
+			"type":    "github-issue-implementation",
+			"githubIssueImplementation": map[string]any{
+				"repositories": []any{map[string]any{"name": "harmflow/example", "localPath": repo, "baseBranch": "develop"}},
+				"queue": map[string]any{"ordering": "newest_first", "maxDiscoveredPerCycle": 5, "maxItemsPerCycle": 2,
+					"resumeStrategy": "alternate", "maxResumeAttempts": 1, "maxFailedRetries": 0},
+				"delivery": map[string]any{"testRepairAttempts": 0},
+			},
+			"prompt":      "Implement the oldest issue labelled ready-for-agent.",
+			"agents":      []any{"harmflow-github-issue-implementer"},
+			"skills":      []any{"harmflow-github-issue-queue", "harmflow-github-draft-pr"},
+			"workspace":   map[string]any{"path": "~/harmflow-work"},
+			"schedule":    map[string]any{"cron": "30 6 * * 1-5", "timezone": "America/Sao_Paulo", "missedRun": map[string]any{"policy": "skip"}},
+			"concurrency": map[string]any{"overlappingRuns": "skip"},
+			"harness": map[string]any{
+				"preferred": map[string]any{"provider": "claude-code", "model": "sonnet", "effort": "high"},
+				"fallback": map[string]any{"on": []any{"harness_unavailable"},
+					"candidates":  []any{map[string]any{"provider": "codex", "model": "gpt-5.6-terra", "effort": "high"}},
+					"maxSwitches": 2},
+			},
+			"permissions": map[string]any{"profile": "custom", "restrictToWorkspace": false, "network": "deny",
+				"custom": map[string]any{"allowedTools": []any{"Read", "Grep"}, "deniedTools": []any{"WebFetch"},
+					"writablePaths": []any{repo}}},
+			"execution": map[string]any{"timeoutMinutes": 45, "cancelGraceSeconds": 10,
+				"rateLimit": map[string]any{"maxRetries": 2, "initialWaitSeconds": 30, "maxWaitSeconds": 600}},
+			"notifications": map[string]any{"native": map[string]any{"enabled": false,
+				"events": []any{"execution.failed", "test.failed"}}},
+		}}
+}
+
+// FS-001 AC-013 (FR-011, BR-001): one file that breaks a schema rule is refused the same way by the form, the YAML
+// editor's create and save, and import, and nothing is written; the file with the rule fixed is accepted by each.
+func TestOneSchemaForEveryEntryPoint(t *testing.T) {
+	home := t.TempDir()
+	d := startDaemon(t, home)
+	rev := d.call("POST", "/tasks", map[string]any{"yaml": task("shared", "p", "")}, 201)["revision"].(string)
+	invalid := task("shared", "Write notes.", "  execution:\n    timeoutMinutes: 0\n")
+	line := 1 + strings.Count(invalid[:strings.Index(invalid, "timeoutMinutes: 0")], "\n")
+	before := taskFiles(t, home)
+	var form map[string]any
+	if err := yaml.Unmarshal([]byte(invalid), &form); err != nil {
+		t.Fatal(err)
+	}
+	var want map[string]any
+	for _, tc := range []struct {
+		name, method, path string
+		body               map[string]any
+	}{
+		{"form", "POST", "/tasks", map[string]any{"document": form}},
+		{"editor create", "POST", "/tasks", map[string]any{"yaml": invalid}},
+		{"editor save", "PUT", "/tasks/shared", map[string]any{"yaml": invalid, "baseRevision": rev}},
+		{"import", "POST", "/tasks/import", map[string]any{"yaml": invalid}},
+	} {
+		e, _ := d.call(tc.method, tc.path, tc.body, 422)["error"].(map[string]any)
+		validation, _ := e["validation"].(map[string]any)
+		errs, _ := validation["errors"].([]any)
+		if e["code"] != "validation_failed" || len(errs) == 0 {
+			t.Errorf("%s: error %v", tc.name, e)
+			continue
+		}
+		first := errs[0].(map[string]any)
+		if first["path"] != "/spec/execution/timeoutMinutes" || first["messageKey"] != "schema_minimum" || first["message"] == "" {
+			t.Errorf("%s: first error %v", tc.name, first)
+		}
+		if want == nil {
+			want = first
+		} else if first["path"] != want["path"] || first["messageKey"] != want["messageKey"] || first["message"] != want["message"] {
+			t.Errorf("%s disagrees with the form: %v / %v", tc.name, first, want)
+		}
+		if _, fromYAML := tc.body["yaml"]; fromYAML && first["line"] != float64(line) {
+			t.Errorf("%s: line %v, want %d", tc.name, first["line"], line)
+		}
+	}
+	if after := taskFiles(t, home); !reflect.DeepEqual(after, before) {
+		t.Errorf("a refused task changed the task files: %v, was %v", after, before)
+	}
+
+	valid := strings.Replace(invalid, "timeoutMinutes: 0", "timeoutMinutes: 45", 1)
+	withID := func(id string) string { return strings.Replace(valid, "id: shared", "id: "+id, 1) }
+	var fixed map[string]any
+	if err := yaml.Unmarshal([]byte(withID("form")), &fixed); err != nil {
+		t.Fatal(err)
+	}
+	d.call("POST", "/tasks", map[string]any{"document": fixed}, 201)
+	d.call("POST", "/tasks", map[string]any{"yaml": withID("editor")}, 201)
+	d.call("PUT", "/tasks/shared", map[string]any{"yaml": valid, "baseRevision": rev}, 200)
+	d.call("POST", "/tasks/import", map[string]any{"yaml": withID("imported")}, 201)
+	for _, id := range []string{"form", "editor", "shared", "imported"} {
+		eff, _ := d.call("GET", "/tasks/"+id, nil, 200)["effective"].(map[string]any)
+		spec, _ := eff["spec"].(map[string]any)
+		if x, _ := spec["execution"].(map[string]any); x["timeoutMinutes"] != float64(45) {
+			t.Errorf("%s: the saved task's execution is %v", id, x)
+		}
+	}
+}
+
+// yamlAsJSON is a task file parsed as YAML, in the shape JSON gives it, so it compares with a document.
+func yamlAsJSON(t *testing.T, data []byte) any {
+	t.Helper()
+	var v any
+	if err := yaml.Unmarshal(data, &v); err != nil {
+		t.Fatalf("parsing %s: %v", data, err)
+	}
+	return jsonShape(t, v)
+}
+
+// jsonShape is the value as it reads after a round trip through JSON: numbers are float64, objects map[string]any.
+func jsonShape(t *testing.T, v any) any {
+	t.Helper()
+	var out any
+	if err := json.Unmarshal([]byte(mustJSON(v)), &out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func mustJSON(v any) string {
+	data, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return string(data)
+}
+
+// taskFiles maps each file of the tasks directory to its content.
+func taskFiles(t *testing.T, home string) map[string]string {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(home, "tasks"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]string{}
+	for _, e := range entries {
+		data, err := os.ReadFile(filepath.Join(home, "tasks", e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[e.Name()] = string(data)
+	}
+	return out
 }
 
 type sseEvent struct {
