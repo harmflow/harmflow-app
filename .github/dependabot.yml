@@ -1,0 +1,15 @@
+# Keeps the SHA-pinned actions in .github/workflows current. A month's updates arrive as one pull request, and
+# Dependabot rewrites each version comment with its SHA. Application dependencies (gomod, npm, cargo) are out of scope.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: chore
+      include: scope
