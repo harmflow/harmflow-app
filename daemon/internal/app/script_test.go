@@ -30,7 +30,7 @@ spec:
 
 func (e *env) createScript(id, body string) TaskView {
 	e.t.Helper()
-	v, err := e.app.CreateTask(TaskInput{YAML: scriptYAML(id, body)})
+	v, err := e.app.CreateTask(e.t.Context(), TaskInput{YAML: scriptYAML(id, body)})
 	if err != nil {
 		e.t.Fatalf("create %s: %v", id, err)
 	}
@@ -102,27 +102,27 @@ func issueAt(issues []schemaIssue, path string) *schemaIssue {
 // error naming it; command and inline are one or the other.
 func TestScriptTaskValidates(t *testing.T) {
 	e := newEnv(t)
-	r := e.app.Validate(TaskInput{YAML: scriptYAML("plain", "  script:\n    command: [/bin/echo, hi]\n")})
+	r := e.app.Validate(t.Context(), TaskInput{YAML: scriptYAML("plain", "  script:\n    command: [/bin/echo, hi]\n")})
 	if !r.Valid {
 		t.Fatalf("a script task with no prompt or harness: %+v", r.Errors)
 	}
-	r = e.app.Validate(TaskInput{YAML: scriptYAML("prompted", "  prompt: do it\n  script:\n    command: [/bin/echo]\n")})
+	r = e.app.Validate(t.Context(), TaskInput{YAML: scriptYAML("prompted", "  prompt: do it\n  script:\n    command: [/bin/echo]\n")})
 	if is := issueAt(r.Errors, "/spec/prompt"); r.Valid || is == nil || is.Key != "schema_false" {
 		t.Errorf("a script task with a prompt: %+v", r.Errors)
 	}
 	both := "  script:\n    command: [/bin/echo]\n    inline:\n      interpreter: [/bin/sh]\n      source: echo hi\n"
-	if r = e.app.Validate(TaskInput{YAML: scriptYAML("both", both)}); r.Valid {
+	if r = e.app.Validate(t.Context(), TaskInput{YAML: scriptYAML("both", both)}); r.Valid {
 		t.Error("a script task with both command and inline validated")
 	}
-	if r = e.app.Validate(TaskInput{YAML: scriptYAML("neither", "  script:\n    workingDirectory: /tmp\n")}); r.Valid {
+	if r = e.app.Validate(t.Context(), TaskInput{YAML: scriptYAML("neither", "  script:\n    workingDirectory: /tmp\n")}); r.Valid {
 		t.Error("a script task with neither command nor inline validated")
 	}
 	reserved := "  script:\n    command: [/bin/echo]\n    environment:\n      HARMFLOW_EXECUTION_ID: forged\n"
-	if r = e.app.Validate(TaskInput{YAML: scriptYAML("forged", reserved)}); r.Valid {
+	if r = e.app.Validate(t.Context(), TaskInput{YAML: scriptYAML("forged", reserved)}); r.Valid {
 		t.Error("a script task replaced one of HarmFlow's own variables")
 	}
 	// Every other type still needs its prompt and harness, and takes no script block.
-	if r = e.app.Validate(TaskInput{YAML: taskYAML("general", "  script:\n    command: [/bin/echo]\n")}); r.Valid {
+	if r = e.app.Validate(t.Context(), TaskInput{YAML: taskYAML("general", "  script:\n    command: [/bin/echo]\n")}); r.Valid {
 		t.Error("a general task with a script block validated")
 	}
 }
@@ -293,7 +293,7 @@ func TestRecoveryEndsWhatTheProgramLeft(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { p.Stop(0) })
-		id, err := procutil.Identify(p.Pid())
+		id, err := procutil.Identify(t.Context(), p.Pid())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -312,7 +312,7 @@ func TestRecoveryEndsWhatTheProgramLeft(t *testing.T) {
 	theirs, theirsID := start()
 	theirsID.LeaderStart = "Thu Jan  1 00:00:00 1970" // the id now names a group another program leads
 	x, other := record(oursID), record(theirsID)
-	if err := e.app.recover(); err != nil {
+	if err := e.app.recover(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -341,7 +341,7 @@ func TestScriptRecordKeepsWhatRan(t *testing.T) {
 	e.createScript("edited", body)
 	x := e.runScript("edited", domain.StatusCompleted)
 	view, _ := e.app.GetTask("edited")
-	if _, err := e.app.UpdateTask("edited", TaskInput{YAML: strings.Replace(view.YAML, "echo first", "echo second", 1),
+	if _, err := e.app.UpdateTask(t.Context(), "edited", TaskInput{YAML: strings.Replace(view.YAML, "echo first", "echo second", 1),
 		BaseRevision: view.Revision}); err != nil {
 		t.Fatal(err)
 	}
@@ -395,7 +395,7 @@ func TestImportedScriptTaskIsDisabled(t *testing.T) {
 	e := newEnv(t)
 	yaml := scriptYAML("imported", "  enabled: true\n  script:\n    command: [/bin/echo, hi]\n")
 	for _, overwrite := range []bool{false, true} {
-		v, err := e.app.ImportTask(yaml, overwrite)
+		v, err := e.app.ImportTask(t.Context(), yaml, overwrite)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -408,7 +408,7 @@ func TestImportedScriptTaskIsDisabled(t *testing.T) {
 		}
 	}
 	// Any other type keeps its enabled state on import.
-	if v, _ := e.app.ImportTask(taskYAML("general", ""), false); !v.Enabled {
+	if v, _ := e.app.ImportTask(t.Context(), taskYAML("general", ""), false); !v.Enabled {
 		t.Error("a general task was imported disabled")
 	}
 }
@@ -478,30 +478,30 @@ func TestScriptTaskThroughEveryUseCase(t *testing.T) {
 	if err != nil || strings.Contains(v.YAML, "harness") || strings.Contains(v.YAML, "prompt") {
 		t.Fatalf("get: %v %q", err, v.YAML)
 	}
-	if _, err := e.app.UpdateTask("full", TaskInput{YAML: strings.Replace(v.YAML, "hi", "there", 1),
+	if _, err := e.app.UpdateTask(t.Context(), "full", TaskInput{YAML: strings.Replace(v.YAML, "hi", "there", 1),
 		BaseRevision: v.Revision}); err != nil {
 		t.Errorf("update: %v", err)
 	}
-	if _, err := e.app.SetEnabled("full", false); err != nil {
+	if _, err := e.app.SetEnabled(t.Context(), "full", false); err != nil {
 		t.Errorf("disable: %v", err)
 	}
-	if _, err := e.app.SetEnabled("full", true); err != nil {
+	if _, err := e.app.SetEnabled(t.Context(), "full", true); err != nil {
 		t.Errorf("enable: %v", err)
 	}
-	if cp, err := e.app.DuplicateTask("full"); err != nil || cp.Enabled {
+	if cp, err := e.app.DuplicateTask(t.Context(), "full"); err != nil || cp.Enabled {
 		t.Errorf("duplicate: %v %+v", err, cp)
 	}
 	exported, err := e.app.ExportTask("full")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r := e.app.Validate(TaskInput{YAML: string(exported)}); !r.Valid {
+	if r := e.app.Validate(t.Context(), TaskInput{YAML: string(exported)}); !r.Valid {
 		t.Errorf("the exported file does not validate: %+v", r.Errors)
 	}
 	// The form sends a document as JSON, and the daemon writes YAML with no harness or prompt for it.
 	doc := `{"apiVersion":"harmflow/v1alpha1","kind":"Task","metadata":{"id":"formed","name":"Formed"},` +
 		`"spec":{"type":"script","script":{"command":["/bin/echo"]}}}`
-	created, err := e.app.CreateTask(TaskInput{Document: []byte(doc)})
+	created, err := e.app.CreateTask(t.Context(), TaskInput{Document: []byte(doc)})
 	if err != nil || strings.Contains(created.YAML, "harness") || strings.Contains(created.YAML, "prompt") {
 		t.Errorf("created from the form: %v %q", err, created.YAML)
 	}

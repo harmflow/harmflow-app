@@ -153,8 +153,9 @@ type App struct {
 	saveMu sync.Mutex
 
 	stopOnce sync.Once
-	stopCh   chan struct{}
-	wg       sync.WaitGroup
+	// stopLoops cancels the context Start runs the loops under; nil until Start.
+	stopLoops context.CancelFunc
+	wg        sync.WaitGroup
 	// ShutdownRequested is closed when the API asks the daemon to stop.
 	ShutdownRequested chan struct{}
 	shutdownOnce      sync.Once
@@ -192,7 +193,7 @@ func New(d Deps) (*App, error) {
 		tasks: map[string]*taskEntry{}, executions: map[string]*domain.Execution{}, running: map[string]*runHandle{},
 		inventory: map[string]ports.HarnessInfo{}, manualPaths: map[string]string{}, sched: map[string]*scheduleState{},
 		firings: map[string][]firingRecord{}, ledger: map[string]map[string]*domain.WorkItem{}, accepting: true,
-		adapters: map[string]ports.HarnessAdapter{}, stopCh: make(chan struct{}), ShutdownRequested: make(chan struct{}),
+		adapters: map[string]ports.HarnessAdapter{}, ShutdownRequested: make(chan struct{}),
 	}
 	for _, h := range d.Harnesses {
 		a.adapters[h.ID()] = h
@@ -212,31 +213,35 @@ func (noWake) LastWake() time.Time { return time.Time{} }
 func (a *App) now() time.Time { return a.d.Clock.Now() }
 
 // Start loads state, recovers interrupted executions, detects harnesses, and starts the scheduler, the task-file
-// watcher, and maintenance.
+// watcher, and maintenance. The loops run until ctx ends or Stop is called, whichever comes first.
 func (a *App) Start(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	a.mu.Lock()
+	a.stopLoops = cancel
+	a.mu.Unlock()
 	if err := a.loadSettings(); err != nil {
 		return err
 	}
 	a.loadNotifications()
 	a.loadLedger()
 	_, _ = a.d.State.Load("harnesses", &a.manualPaths)
-	if err := a.loadTasks(); err != nil {
+	if err := a.loadTasks(ctx); err != nil {
 		return err
 	}
 	a.loadSchedule()
-	if err := a.recover(); err != nil {
+	if err := a.recover(ctx); err != nil {
 		return err
 	}
-	a.refreshHarnessesAsync()
+	a.refreshHarnessesAsync(ctx)
 	a.emit(domain.Event{Type: domain.EventDaemonStarted, Payload: map[string]any{"version": a.d.Version, "pid": os.Getpid()}}.Says(
 		domain.T("daemon_started", "HarmFlow daemon {{version}} started", "version", a.d.Version)))
 	a.mu.Lock()
 	a.unavailableUntil = a.now() // the daemon was down until now (D-080)
 	a.mu.Unlock()
 	a.wg.Add(3)
-	go a.schedulerLoop()
-	go a.watchLoop()
-	go a.maintenanceLoop()
+	go a.schedulerLoop(ctx)
+	go a.watchLoop(ctx)
+	go a.maintenanceLoop(ctx)
 	a.startQueued()
 	return nil
 }
@@ -247,6 +252,7 @@ func (a *App) Stop(reason domain.Text) {
 		a.mu.Lock()
 		a.accepting = false
 		a.stopping = true
+		stopLoops := a.stopLoops
 		var cancels []context.CancelFunc
 		var dones []chan struct{}
 		for _, h := range a.running {
@@ -257,7 +263,9 @@ func (a *App) Stop(reason domain.Text) {
 		}
 		a.mu.Unlock()
 		a.emit(domain.Event{Type: domain.EventDaemonStopping}.Says(reason))
-		close(a.stopCh)
+		if stopLoops != nil {
+			stopLoops()
+		}
 		for _, cancel := range cancels {
 			cancel()
 		}

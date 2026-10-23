@@ -27,7 +27,6 @@ type run struct {
 	a        *App
 	x        *domain.Execution
 	h        *runHandle
-	ctx      context.Context
 	def      domain.TaskDocument
 	eff      domain.TaskDocument
 	dir      string
@@ -89,7 +88,9 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 	now := a.now()
 	timeout := time.Duration(*eff.Spec.Execution.TimeoutMinutes) * timeoutUnit
 	deadline := now.Add(timeout)
-	// The timeout runs on real time; the record shows it on the daemon's clock.
+	// The timeout runs on real time; the record shows it on the daemon's clock. An execution outlives whatever fired it
+	// (an API request, a tick of the scheduler), so its context starts from none of theirs: it ends by its timeout, or by
+	// its handle's cancel, which cancellation and Stop call (D-089).
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	a.mu.Lock()
@@ -100,7 +101,7 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 	}
 	a.mu.Unlock()
 
-	r := &run{a: a, x: x, h: h, ctx: ctx, def: def, eff: eff, commandIndex: map[string]int{}}
+	r := &run{a: a, x: x, h: h, def: def, eff: eff, commandIndex: map[string]int{}}
 	a.mu.Lock()
 	x.DefinitionRevision = rev
 	x.TaskName = def.Metadata.Name
@@ -115,7 +116,7 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 		if !r.setStatus(domain.StatusPreparing, domain.T("step_preparing_program", "Preparing the program")) {
 			return
 		}
-		r.finish(r.runScript(deadline))
+		r.finish(r.runScript(ctx, deadline))
 		return
 	}
 	// Leave queued before the harness check: the scheduler and cancellation take a queued execution for a waiting firing.
@@ -123,7 +124,7 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 	if !r.setStatus(domain.StatusPreparing, domain.T("step_checking_harness", "Checking the harness")) {
 		return
 	}
-	status, reason := r.attempts(func(harness string) error {
+	status, reason := r.attempts(ctx, func(harness string) error {
 		started := a.now()
 		a.mu.Lock()
 		x.StartedAt = &started
@@ -375,7 +376,7 @@ func (r *run) repositoryPaths() map[string]string {
 // limit retries on the same one, and everything shares the execution's one timeout (D-067). start runs once, when the
 // first harness of the chain is found ready, and is given that harness, so an execution with none ready never starts
 // (FS-004 FR-003). It returns a terminal status when the attempts themselves decide it, or "" when the report decides.
-func (r *run) attempts(start func(harness string) error) (domain.ExecutionStatus, domain.Text) {
+func (r *run) attempts(ctx context.Context, start func(harness string) error) (domain.ExecutionStatus, domain.Text) {
 	a := r.a
 	chain, invalid := r.chain()
 	for _, w := range invalid {
@@ -390,12 +391,12 @@ func (r *run) attempts(start func(harness string) error) (domain.ExecutionStatus
 		if r.cancelRequested() {
 			return domain.StatusCancelled, domain.T("execution_cancelled", "cancelled")
 		}
-		if r.ctx.Err() != nil {
+		if ctx.Err() != nil {
 			return domain.StatusFailed, domain.T("execution_timed_out", "the execution timeout elapsed")
 		}
 		profile := chain[idx]
 		ad := a.adapters[profile.Provider]
-		info := a.detect(r.ctx, profile.Provider) // revalidate before every attempt (FS-004 FR-003)
+		info := a.detect(ctx, profile.Provider) // revalidate before every attempt (FS-004 FR-003)
 		var end domain.AttemptEnd
 		if !info.Ready() {
 			end = domain.AttemptEnd{Class: domain.ClassHarnessUnavailable, Error: unavailableText(ad, info)}
@@ -411,7 +412,7 @@ func (r *run) attempts(start func(harness string) error) (domain.ExecutionStatus
 			if err := r.writeContext(prev); err != nil {
 				return domain.StatusFailed, domain.T("context_write_failed", "writing context.json: {{detail}}", "detail", err.Error())
 			}
-			end = r.runAttempt(ad, info, profile, reason, prev)
+			end = r.runAttempt(ctx, ad, info, profile, reason, prev)
 			if end.Class == domain.ClassCancelled {
 				return domain.StatusCancelled, domain.T("execution_cancelled", "cancelled")
 			}
@@ -449,7 +450,7 @@ func (r *run) attempts(start func(harness string) error) (domain.ExecutionStatus
 			r.setStatus(domain.StatusRunning, domain.T("step_waiting_rate_limit", "Waiting for the rate limit"))
 			select {
 			case <-time.After(wait):
-			case <-r.ctx.Done():
+			case <-ctx.Done():
 			}
 			reason = domain.T("attempt_rate_limit_retry", "retry after a rate limit")
 		case domain.ActionSwitch:
@@ -549,7 +550,7 @@ func (r *run) warn(w domain.Warning, eventType string, emit bool) {
 }
 
 // runAttempt starts one harness process and follows it to its end.
-func (r *run) runAttempt(ad ports.HarnessAdapter, info ports.HarnessInfo, p domain.HarnessProfile, reason domain.Text,
+func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info ports.HarnessInfo, p domain.HarnessProfile, reason domain.Text,
 	prev []previousAttempt) domain.AttemptEnd {
 	a := r.a
 	agents, skills, err := r.resolve(ad)
@@ -651,14 +652,14 @@ func (r *run) runAttempt(ad ports.HarnessAdapter, info ports.HarnessInfo, p doma
 		}
 	}()
 	grace := time.Duration(*r.eff.Spec.Execution.CancelGraceSeconds) * time.Second
-	proc.Wait(r.ctx, grace)
+	proc.Wait(ctx, grace)
 	r.logEnded(proc.Ended())
 	close(stopProgress)
 	<-progressDone
 	if raw != nil {
 		raw.Close()
 	}
-	timedOut := errors.Is(r.ctx.Err(), context.DeadlineExceeded) && !r.cancelRequested()
+	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded) && !r.cancelRequested()
 	end := parser.Finish(proc.ExitCode(), proc.StderrTail(), timedOut, r.cancelRequested())
 	// Its final text and error quote the harness, and the next attempt's context and the summary quote them in turn.
 	eventlog.RedactFields(&end)
