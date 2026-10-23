@@ -559,6 +559,75 @@ func TestParallelTasksAndIsolatedCancel(t *testing.T) {
 	}
 }
 
+// FS-003 BR-003: three tasks run at once on the same harness; one fails when its harness exits with an error, and the
+// other two keep running, then complete, their records and attempts untouched by the failure.
+func TestFailureLeavesTheOthersRunning(t *testing.T) {
+	e := newEnv(t)
+	tasks := []string{"a", "b", "c"}
+	for _, id := range tasks {
+		e.create(id, "")
+	}
+	// Each attempt waits for its gate file, a minute at most; b's harness then exits with an error.
+	gates := t.TempDir()
+	e.claude.setScript(func(req ports.RunRequest) string {
+		gate, end := "done", "echo 'END ok'"
+		if req.Prompt == "Do the work of b." {
+			gate, end = "fail", "echo 'the harness crashed' >&2; exit 3"
+		}
+		return fmt.Sprintf("echo working; i=0; while [ ! -e %s ] && [ $i -lt 1200 ]; do sleep 0.05; i=$((i+1)); done; %s",
+			filepath.Join(gates, gate), end)
+	})
+	open := func(gate string) {
+		if err := os.WriteFile(filepath.Join(gates, gate), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ids := map[string]string{}
+	for _, id := range tasks {
+		r, err := e.app.RunTask(id)
+		if err != nil || r.Outcome != "started" {
+			t.Fatalf("run %s: %v %+v", id, err, r)
+		}
+		ids[id] = r.ExecutionID
+	}
+	for _, id := range tasks {
+		e.wait(ids[id], domain.StatusRunning)
+	}
+
+	open("fail")
+	failed := e.wait(ids["b"], domain.StatusFailed)
+	if len(failed.Attempts) != 1 || failed.Attempts[0].Outcome != domain.AttemptFailed {
+		t.Errorf("the failed execution's attempts: %+v", failed.Attempts)
+	}
+	for _, id := range []string{"a", "c"} {
+		if x, _ := e.app.GetExecution(ids[id]); x.Status != domain.StatusRunning {
+			t.Errorf("%s is %s after another task failed", id, x.Status)
+		}
+	}
+
+	open("done")
+	for _, id := range []string{"a", "c"} {
+		x := e.wait(ids[id], domain.StatusCompleted)
+		if x.ErrorMessage != "" || x.CancelRequestedAt != nil || x.HarnessSwitches != 0 || len(x.Attempts) != 1 ||
+			x.Attempts[0].Harness != domain.HarnessClaudeCode || x.Attempts[0].Outcome != domain.AttemptSucceeded ||
+			x.Attempts[0].ErrorMessage != "" {
+			t.Errorf("%s after another task failed: error %q, attempts %+v", id, x.ErrorMessage, x.Attempts)
+		}
+		events, _, err := e.app.ExecutionEvents(ids[id], 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, ev := range events {
+			if ev.Type == domain.EventExecutionFailed || ev.Severity == domain.SeverityError {
+				t.Errorf("%s's log holds %s: %s", id, ev.Type, ev.Message)
+			}
+		}
+		if n := len(e.executions(id)); n != 1 {
+			t.Errorf("%s has %d executions, want 1", id, n)
+		}
+	}
+}
+
 // FS-003 FR-005, D-083: an execution cancelled or dropped while it is still queued never runs, even when its task was
 // already claimed for it: fire and startQueued claim the task before the executor leaves queued.
 func TestCancelBeforeItStarts(t *testing.T) {

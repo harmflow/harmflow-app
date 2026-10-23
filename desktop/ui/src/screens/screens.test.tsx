@@ -1,7 +1,12 @@
-// Renders each screen from a known state, to catch rendering errors without a browser or a daemon.
+// @vitest-environment happy-dom
+// Renders each screen from a known state, to catch rendering errors without a browser or a daemon; the executions
+// screen's cards are also driven in a DOM, against a stand-in for the daemon's local API.
+import { act, type ReactNode } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Execution, ExecutionSummary, HarmflowEvent, Harness, Health, Notification, Settings, TaskSummary, WorkItem } from "../api/types";
+import { ExecutionCard } from "../components/ExecutionCard";
 import { RawCaptures } from "../components/ExecutionDetail";
 import { HarnessInventory } from "../components/Harnesses";
 import { Icon } from "../components/Icon";
@@ -17,6 +22,23 @@ import { OnboardingScreen } from "./OnboardingScreen";
 import { OverviewScreen } from "./OverviewScreen";
 import { SettingsScreen } from "./SettingsScreen";
 import { TasksScreen } from "./TasksScreen";
+
+// The daemon as the client sees it: an answer per route, and every request it received.
+const daemon = vi.hoisted(() => ({ answers: new Map<string, unknown>(), requests: [] as string[] }));
+vi.mock("../api/transport", () => ({
+  isTauri: () => false,
+  EVENT_TYPES: [],
+  transport: {
+    mode: "http",
+    request: async (method: string, path: string) => {
+      daemon.requests.push(`${method} ${path}`);
+      const route = path.split("?")[0];
+      return daemon.answers.has(route) ? { status: 200, body: daemon.answers.get(route) } : { status: 404, body: null };
+    },
+    requestText: async () => ({ status: 404, text: "" }),
+    stream: () => () => {},
+  },
+}));
 
 const running: ExecutionSummary = {
   id: "exec-8f3a2c",
@@ -370,5 +392,80 @@ describe("screens", () => {
     for (const hidden of ["O que a tarefa faz vive aqui", "Agentes", "Harness preferido", "Cadeia de fallback", "Novas tentativas por limite de taxa"]) {
       expect(html).not.toContain(hidden);
     }
+  });
+});
+
+// FS-003 FR-003, AC-005: the card's Cancel sends the same single cancel as the detail's, and a finished execution's
+// card cannot cancel it.
+describe("the executions screen's cards (FS-003 AC-005)", () => {
+  let root: Root | undefined;
+  let host: HTMLElement | undefined;
+
+  beforeAll(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    host?.remove();
+    root = host = undefined;
+    daemon.answers.clear();
+    daemon.requests.length = 0;
+    vi.unstubAllGlobals();
+  });
+
+  /** Lets the stand-in daemon's answers arrive and React render them. */
+  const settle = () => act(() => new Promise<void>((resolve) => setImmediate(resolve)));
+  const writes = () => daemon.requests.filter((r) => !r.startsWith("GET "));
+
+  async function render(node: ReactNode) {
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(node));
+    await settle();
+  }
+
+  it("sends one cancel from a running execution's card once confirmed, and drops the card once it ends", async () => {
+    daemon.answers.set(`/executions/${running.id}`, detail);
+    daemon.answers.set(`/executions/${running.id}/events`, { events: [], logExpired: false });
+    daemon.answers.set(`/executions/${running.id}/cancel`, { executionId: running.id });
+    // Outside the Tauri shell, the confirmation is the browser's.
+    const confirm = vi.fn((_message?: string) => true);
+    vi.stubGlobal("confirm", confirm);
+    const { active, details } = getState();
+    try {
+      await render(<ExecutionsScreen selectedId={null} onSelect={() => {}} onGoToTasks={() => {}} onSeeHistory={() => {}} />);
+      const cards = host!.querySelectorAll(".exec-card");
+      expect(cards).toHaveLength(1);
+      const cancel = cards[0].querySelector<HTMLButtonElement>(".exec-card__cancel")!;
+      expect(cancel.disabled).toBe(false);
+
+      await act(async () => cancel.click());
+      await settle();
+      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(writes()).toEqual([`POST /executions/${running.id}/cancel`]);
+      // Pending, the button takes no second click.
+      expect(cancel.disabled).toBe(true);
+      await act(async () => cancel.click());
+      await settle();
+      expect(writes()).toEqual([`POST /executions/${running.id}/cancel`]);
+
+      // Ended, the execution has no card, so no Cancel there.
+      const ended = { ...running, status: "cancelled" as const, endedAt: "2026-10-20T19:33:00-03:00" };
+      await act(async () => patchStateForTests({ active: [ended], details: { ...details, [running.id]: { ...detail, ...ended } } }));
+      expect(host!.querySelectorAll(".exec-card")).toHaveLength(0);
+    } finally {
+      patchStateForTests({ active, details });
+    }
+  });
+
+  it("disables the card's Cancel for a finished execution", async () => {
+    const onCancel = vi.fn();
+    await render(<ExecutionCard execution={finished} selected={false} onSelect={() => {}} now={Date.now()} onCancel={onCancel} cancelling={false} />);
+    const cancel = host!.querySelector<HTMLButtonElement>(".exec-card__cancel")!;
+    expect(cancel.disabled).toBe(true);
+    await act(async () => cancel.click());
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(writes()).toEqual([]);
   });
 });

@@ -572,6 +572,81 @@ describe("execution detail", () => {
   });
 });
 
+// FS-003 FR-003, AC-005: the detail offers Cancel on a running or queued execution, and nothing that writes to the
+// agent; across every tab, the one request that is not a read is that cancel.
+describe("observe and cancel, no conversation (FS-003 AC-005)", () => {
+  // Toggles that change only the view, such as the timeline's follow checkbox, are not text boxes.
+  const editable = () =>
+    [...host!.querySelectorAll<HTMLElement>("input, textarea, select, [contenteditable], [role='textbox']")]
+      .filter((el) => !(el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio")))
+      .filter((el) => el.getAttribute("contenteditable") !== "false")
+      .map((el) => el.outerHTML);
+
+  /** Opens every tab in turn, checking that none renders a text box or an editable region. */
+  async function everyTab() {
+    const tabs = [...host!.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    expect(tabs.length).toBeGreaterThan(1);
+    for (const tab of tabs) {
+      await act(async () => tab.click());
+      await settle();
+      expect(editable(), tab.textContent ?? "").toEqual([]);
+    }
+  }
+
+  const cancelButton = () =>
+    [...host!.querySelectorAll<HTMLButtonElement>(".detail__header button")].find((b) => b.textContent === "Cancel");
+  const writes = () => daemon.requests.filter((r) => !r.startsWith("GET "));
+
+  const running: Execution = { ...base, id: "exec-cancel-running" };
+  const queued: Execution = { ...base, id: "exec-cancel-queued", status: "queued", startedAt: undefined, attempts: [], commands: [] };
+
+  it.each([
+    { status: "running", x: running },
+    { status: "queued", x: queued },
+  ])("offers Cancel on a $status execution and sends one cancel once confirmed", async ({ x }) => {
+    // Outside the Tauri shell, the confirmation is the browser's.
+    const confirm = vi.fn((_message?: string) => false);
+    vi.stubGlobal("confirm", confirm);
+    try {
+      await open(x, [event(1, "execution.created", { executionId: x.id })], capture("working\n"));
+      daemon.answers.set(`/executions/${x.id}/cancel`, { executionId: x.id });
+      await everyTab();
+
+      // Declined, it sends nothing.
+      await act(async () => cancelButton()!.click());
+      await settle();
+      expect(writes()).toEqual([]);
+
+      confirm.mockReturnValue(true);
+      await act(async () => cancelButton()!.click());
+      await settle();
+      expect(confirm).toHaveBeenCalledTimes(2);
+      expect(writes()).toEqual([`POST /executions/${x.id}/cancel`]);
+      // Pending, the button takes no second click.
+      const pending = [...host!.querySelectorAll<HTMLButtonElement>(".detail__header button")].find((b) => b.textContent === "Cancelling…");
+      expect(pending?.disabled).toBe(true);
+
+      await everyTab();
+      expect(writes()).toEqual([`POST /executions/${x.id}/cancel`]);
+      expect(daemon.requests.every((r) => r.startsWith("GET ") || r === `POST /executions/${x.id}/cancel`)).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each(["completed", "no_work", "failed", "cancelled", "interrupted", "needs_attention"] as const)(
+    "shows no Cancel on a %s execution, and sends only reads",
+    async (status) => {
+      const id = `exec-ended-${status}`;
+      await open({ ...completed, id, status }, [event(1, "execution.started", { executionId: id })], capture("done\n"));
+      expect(cancelButton()).toBeUndefined();
+      await everyTab();
+      expect(cancelButton()).toBeUndefined();
+      expect(writes()).toEqual([]);
+    },
+  );
+});
+
 describe("a script task's execution (FS-013 FR-012, AC-012)", () => {
   const script: Execution = {
     ...completed,

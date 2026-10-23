@@ -963,35 +963,96 @@ func tokensOf(usage map[string]any) map[string]any {
 }
 
 // FS-003 AC-007, AC-006: cancelling ends the harness and its children; another task keeps running.
+// FS-003 FR-005: the execution ends cancelled, and its record, log, raw output, workspace, and execution directory are
+// kept.
 func TestCancelEndsTheTree(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
-	d.call("POST", "/tasks", map[string]any{"yaml": task("slow-a", "SCENARIO=slow", "  execution:\n    cancelGraceSeconds: 1\n")}, 201)
+	d.call("POST", "/tasks", map[string]any{"yaml": task("slow-a", "SCENARIO=slow PARTIAL=1", "  execution:\n    cancelGraceSeconds: 1\n")}, 201)
 	d.call("POST", "/tasks", map[string]any{"yaml": task("slow-b", "SCENARIO=slow", "")}, 201)
 	a := d.call("POST", "/tasks/slow-a/run", nil, 202)["executionId"].(string)
 	b := d.call("POST", "/tasks/slow-b/run", nil, 202)["executionId"].(string)
 	x := d.waitStatus(a, "running")
-	d.waitStatus(b, "running")
-	pidFile := filepath.Join(x["executionDir"].(string), "child.pid")
-	var child int
-	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline) && child == 0; time.Sleep(100 * time.Millisecond) {
-		data, _ := os.ReadFile(pidFile)
-		child, _ = strconv.Atoi(strings.TrimSpace(string(data)))
-	}
-	if child == 0 {
-		t.Fatal("the fake harness did not start its child")
-	}
+	y := d.waitStatus(b, "running")
+	// Whatever the cancellation leaves, no stand-in outlives the test.
+	killHarnessGroup(t, x["executionDir"].(string))
+	killHarnessGroup(t, y["executionDir"].(string))
+	// The stand-in writes child.pid after its partial work, so both are there before the cancel.
+	child := readPid(t, filepath.Join(x["executionDir"].(string), "child.pid"))
 	d.call("POST", "/executions/"+a+"/cancel", nil, 202)
-	x = d.waitStatus(a, "cancelled")
+	x = d.waitStatus(a, "cancelled", "failed")
+	if x["status"] != "cancelled" {
+		t.Fatalf("the cancelled execution is %v: %v", x["status"], x["errorMessage"])
+	}
 	if x["cancelRequestedAt"] == nil {
 		t.Error("the cancellation was not recorded")
 	}
-	time.Sleep(200 * time.Millisecond)
-	if err := syscall.Kill(child, 0); err == nil {
+	if !gone(child) {
 		t.Errorf("the harness's child %d survived the cancellation", child)
 	}
 	if got := d.call("GET", "/executions/"+b, nil, 200); got["status"] != "running" {
 		t.Errorf("the other task's execution is %v", got["status"])
 	}
+
+	if attempts, _ := x["attempts"].([]any); len(attempts) != 1 || attempts[0].(map[string]any)["outcome"] != "cancelled" {
+		t.Errorf("attempts %v, want one cancelled", attempts)
+	}
+	waitRecord(t, d.home, a, "cancelled")
+	var rec map[string]any
+	data, err := os.ReadFile(filepath.Join(d.home, "state", "executions", a+".json"))
+	if err == nil {
+		err = json.Unmarshal(data, &rec)
+	}
+	if err != nil || rec["cancelRequestedAt"] == nil {
+		t.Errorf("the record on disk lacks cancelRequestedAt (%v): %s", err, data)
+	}
+	log := d.waitEvent(a, "execution.cancelled")
+	events := log["events"].([]any)
+	types := map[string]bool{}
+	for _, e := range events {
+		types[e.(map[string]any)["type"].(string)] = true
+	}
+	if last := events[len(events)-1].(map[string]any)["type"]; last != "execution.cancelled" || log["logExpired"] != false {
+		t.Errorf("the log ends in %v, logExpired %v", last, log["logExpired"])
+	}
+	for _, want := range []string{"harness.started", "tool.started", "step.started", "execution.cancel_requested"} {
+		if !types[want] {
+			t.Errorf("the log lacks %s", want)
+		}
+	}
+	if types["execution.failed"] {
+		t.Error("the log reads the execution failed")
+	}
+	out := d.call("GET", "/executions/"+a+"/output", nil, 200)
+	captures, _ := out["attempts"].([]any)
+	if len(captures) != 1 || out["logExpired"] != false {
+		t.Fatalf("output %v", out)
+	}
+	if text, _ := captures[0].(map[string]any)["text"].(string); !strings.Contains(text, `"subtype":"init"`) ||
+		!strings.Contains(text, `"command":"sleep 300"`) {
+		t.Errorf("the raw capture lacks what the stand-in printed:\n%s", text)
+	}
+	for _, kept := range []string{filepath.Join(x["workspacePath"].(string), "partial.txt"),
+		filepath.Join(x["executionDir"].(string), "progress.jsonl")} {
+		if _, err := os.Stat(kept); err != nil {
+			t.Errorf("the cancellation lost %s: %v", kept, err)
+		}
+	}
+}
+
+// waitEvent returns the execution's stored log once it holds an event of the type: the status can read final before
+// the event that says so is appended.
+func (d *daemon) waitEvent(id, eventType string) map[string]any {
+	d.t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		log := d.call("GET", "/executions/"+id+"/events", nil, 200)
+		for _, e := range log["events"].([]any) {
+			if e.(map[string]any)["type"] == eventType {
+				return log
+			}
+		}
+	}
+	d.t.Fatalf("the log of %s has no %s", id, eventType)
+	return nil
 }
 
 // FS-003 AC-009: an execution running when the daemon is killed reads interrupted after the restart, with its log.
@@ -1018,6 +1079,51 @@ func TestRestartInterrupts(t *testing.T) {
 		t.Errorf("rerun %v", run)
 	}
 	d2.call("POST", "/executions/"+run["executionId"].(string)+"/cancel", nil, 202)
+}
+
+// FS-003 AC-003, AC-002: while Claude Code is busy in one task, a Codex task runs and completes; running the busy task
+// again queues its firing instead of starting a second execution, and the first one keeps running.
+func TestAnotherHarnessIsNotBlocked(t *testing.T) {
+	d := startDaemon(t, t.TempDir())
+	d.call("POST", "/tasks", map[string]any{"yaml": task("busy", "SCENARIO=slow", "")}, 201)
+	d.call("POST", "/tasks", map[string]any{"yaml": strings.Replace(task("other", "Say hello.", ""),
+		"provider: claude-code", "provider: codex", 1)}, 201)
+	busy := d.call("POST", "/tasks/busy/run", nil, 202)["executionId"].(string)
+	x := d.waitStatus(busy, "running")
+	killHarnessGroup(t, x["executionDir"].(string))
+
+	run := d.call("POST", "/tasks/other/run", nil, 202)
+	if run["outcome"] != "started" {
+		t.Fatalf("the Codex task's run: %v", run)
+	}
+	done := d.waitStatus(run["executionId"].(string), "completed", "failed")
+	attempts, _ := done["attempts"].([]any)
+	if done["status"] != "completed" || len(attempts) != 1 || attempts[0].(map[string]any)["harness"] != "codex" {
+		t.Errorf("the Codex task's execution: status %v, attempts %v, error %v", done["status"], attempts,
+			done["errorMessage"])
+	}
+
+	again := d.call("POST", "/tasks/busy/run", nil, 202)
+	if again["outcome"] != "queued" || again["executionId"] == busy {
+		t.Errorf("running the busy task again: %v", again)
+	}
+	var running []any
+	for _, e := range d.list("/executions?taskId=busy") {
+		if e["status"] == "running" {
+			running = append(running, e["id"])
+		}
+	}
+	if len(running) != 1 || running[0] != busy {
+		t.Errorf("the busy task's running executions: %v, want only %s", running, busy)
+	}
+	if got := d.call("GET", "/executions/"+busy, nil, 200); got["status"] != "running" {
+		t.Errorf("the Claude Code execution is %v", got["status"])
+	}
+	// The waiting firing goes first, so that ending the running one starts no other stand-in.
+	if id, _ := again["executionId"].(string); id != "" {
+		d.call("POST", "/executions/"+id+"/cancel", nil, 202)
+	}
+	d.call("POST", "/executions/"+busy+"/cancel", nil, 202)
 }
 
 // FS-003 FR-007, AC-009; FS-001 FR-015 (D-083): a firing waiting when the daemon is killed starts after the restart;
