@@ -40,8 +40,15 @@ const builtAt = "2026-10-22T20:30:05Z"
 const starterEnv = "HARMFLOW_TEST_STARTER"
 
 func TestMain(m *testing.M) {
+	if pid, err := strconv.Atoi(os.Getenv(watchdogEnv)); err == nil {
+		os.Exit(runWatchdog(pid, os.Getenv(watchdogEnv+"_GROUP") != ""))
+	}
 	if bin := os.Getenv(starterEnv); bin != "" {
 		os.Exit(runStarter(bin, os.Args[1:]))
+	}
+	if bin := os.Getenv(binaryEnv); bin != "" {
+		binary = bin
+		os.Exit(m.Run())
 	}
 	dir, err := os.MkdirTemp("", "harmflowd-bin")
 	if err != nil {
@@ -104,12 +111,14 @@ func startDaemonOn(t *testing.T, home, keychain string, env ...string) *daemon {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	watchDaemon(t, cmd.Process.Pid, false)
 	d := &daemon{t: t, home: home, cmd: cmd}
 	if d.base, d.token = awaitRuntime(home, 20*time.Second); d.base != "" && keychain != "" {
 		d.token = strings.TrimSpace(string(keychainToken(t, keychain))) // read as a client reads it
 	}
 	if d.base == "" {
 		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 		t.Fatalf("the daemon did not start:\n%s", out.String())
 	}
 	t.Cleanup(func() { d.stop() })
@@ -2964,6 +2973,7 @@ func startDetachedDaemon(t *testing.T, home string) (*daemon, int, func()) {
 	if pid == 0 {
 		t.Fatalf("the parent started no daemon:\n%s", out.String())
 	}
+	watchDaemon(t, pid, true)
 	// The parent ends first, so that the daemon, once stopped, is reaped rather than left a zombie of the parent.
 	t.Cleanup(func() {
 		endParent()
