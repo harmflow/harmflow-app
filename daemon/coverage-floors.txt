@@ -1,0 +1,23 @@
+# The daemon's statement coverage floors, one "<package> <ratio>" line per Go package (ADR-015). make coverage-daemon
+# fails when a package reads below its floor. A package with no line here is held at 0.
+#
+# Each floor is the reading recorded in COVERAGE.md, truncated to two decimals. Move one only with its row there, in
+# one commit; a lowering also writes its reason there.
+cmd/harmflowd 75.89
+internal/adapters/catalog 52.70
+internal/adapters/eventlog 87.55
+internal/adapters/fsstore 72.30
+internal/adapters/harness/classify 47.36
+internal/adapters/harness/claudecode 90.78
+internal/adapters/harness/codex 88.46
+internal/adapters/harness/procutil 86.29
+internal/adapters/httpapi 75.13
+internal/adapters/launchd 93.33
+internal/adapters/schema 81.04
+internal/adapters/secret 85.18
+internal/adapters/sysinfo 0.00
+internal/adapters/tools 0.00
+internal/adapters/wake 100.00
+internal/app 84.92
+internal/domain 92.41
+internal/ports 75.00
