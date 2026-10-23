@@ -1,5 +1,6 @@
 #!/bin/bash
-# A stand-in for the Codex CLI that speaks the JSONL of `codex exec --json`. CODEX=quota in the prompt fails the turn.
+# A stand-in for the Codex CLI that speaks the JSONL of `codex exec --json`. CODEX=quota in the prompt fails the turn;
+# CODEX=slow starts a command and waits until it is ended, with a child the test finds in child.pid.
 case "$1" in
   --version) echo "codex-cli 0.163.0"; exit 0 ;;
   login) echo "Logged in using ChatGPT"; exit 0 ;;
@@ -15,6 +16,13 @@ echo '{"type":"turn.started"}'
 if [[ "$PROMPT" == *"CODEX=quota"* ]]; then
   echo '{"type":"turn.failed","error":{"message":"You have hit your usage limit."}}'
   exit 1
+fi
+if [[ "$PROMPT" == *"CODEX=slow"* ]]; then
+  sleep 300 &
+  echo $! > "$HARMFLOW_EXECUTION_DIR/child.pid"
+  echo '{"type":"item.started","item":{"id":"i1","type":"command_execution","command":"/bin/zsh -lc '"'"'sleep 300'"'"'","status":"in_progress"}}'
+  wait
+  exit 0
 fi
 echo '{"type":"item.started","item":{"id":"i1","type":"command_execution","command":"/bin/zsh -lc '"'"'echo codex'"'"'","status":"in_progress"}}'
 echo '{"type":"item.completed","item":{"id":"i1","type":"command_execution","command":"/bin/zsh -lc '"'"'echo codex'"'"'","aggregated_output":"codex\n","exit_code":0,"status":"completed"}}'

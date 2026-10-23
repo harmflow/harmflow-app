@@ -2,8 +2,11 @@
 # A stand-in for the Claude Code CLI that speaks its stream-json format. The task's prompt picks the scenario:
 # SCENARIO=ok (default), SCENARIO=quota, SCENARIO=quotausage (a quota after the result line reported usage and cost),
 # SCENARIO=slow, SCENARIO=report, SCENARIO=secret, SCENARIO=ticks (a message every half second for five seconds, then
-# success). With PARTIAL=1 in the prompt, it first leaves partial work, in any scenario: a file in its workspace and a
-# step in progress.jsonl.
+# success), SCENARIO=push (commits on a branch of the workspace's repository, pushes it, reports the push, and waits),
+# SCENARIO=pullrequest (reports a pull request and waits). A session of push or pullrequest whose context.json lists an
+# interrupted execution repeats nothing and ends at once. With PARTIAL=1 in the prompt, it first leaves partial work,
+# in any scenario: a file in its workspace and a step in progress.jsonl. ITEM=<key> in the prompt makes any scenario
+# select that work item first, and go on once the daemon has logged the selection.
 case "$1" in
   --version) echo "2.1.239 (Claude Code)"; exit 0 ;;
   --help) cat <<'HELP'
@@ -23,7 +26,38 @@ if [[ "$PROMPT" == *"PARTIAL=1"* ]]; then
   echo "half done" > "$HARMFLOW_WORKSPACE/partial.txt"
   echo '{"type":"step.started","phase":"running","message":"Halfway"}' >> "$HARMFLOW_EXECUTION_DIR/progress.jsonl"
 fi
+PROGRESS="$HARMFLOW_EXECUTION_DIR/progress.jsonl"
+# The daemon keeps each execution's log in the logs directory beside the runs directory that holds the execution's.
+LOG="$(dirname "$(dirname "$HARMFLOW_EXECUTION_DIR")")/logs/$HARMFLOW_EXECUTION_ID.jsonl"
+# logged waits until the execution's log holds the text: the daemon reads progress.jsonl about once a second, and the
+# stdout lines that follow must not reach it first.
+logged() {
+  for _ in $(seq 1200); do
+    grep -qF "$1" "$LOG" 2>/dev/null && return 0
+    sleep 0.05
+  done
+  return 1
+}
+# hold waits until it is ended, with a child the test finds in child.pid.
+hold() {
+  sleep 300 &
+  echo $! > "$HARMFLOW_EXECUTION_DIR/child.pid"
+  wait
+  exit 0
+}
+# resume ends a session whose context lists an interrupted execution: the operations that one completed are not
+# repeated, and nothing it left is undone.
+resume() {
+  grep -q '"interruptedExecutions": \[' "$HARMFLOW_EXECUTION_DIR/context.json" || return 0
+  echo '{"type":"assistant","message":{"content":[{"type":"text","text":"The interrupted execution left nothing to repeat."}]}}'
+  echo '{"type":"result","subtype":"success","is_error":false,"result":"The interrupted execution left nothing to repeat.","session_id":"fake-session"}'
+  exit 0
+}
 echo '{"type":"system","subtype":"init","session_id":"fake-session","model":"claude-haiku-4-5-20251001","permissionMode":"acceptEdits"}'
+if [[ "$PROMPT" =~ ITEM=([^[:space:]]+) ]]; then
+  echo '{"type":"work_item.selected","workItem":"'"${BASH_REMATCH[1]}"'","message":"Selected '"${BASH_REMATCH[1]}"'"}' >> "$PROGRESS"
+  logged '"type":"work_item.selected"' || exit 1
+fi
 case "$SCENARIO" in
   quota)
     # A message's usage, repeated on each of its lines as the CLI does, and no result line to settle it.
@@ -65,6 +99,26 @@ case "$SCENARIO" in
     done
     echo '{"type":"result","subtype":"success","is_error":false,"result":"Ticked ten times.","session_id":"fake-session"}'
     exit 0 ;;
+  push)
+    resume
+    # The test's repository, never the user's Git configuration.
+    export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+    BRANCH=harmflow/7-crash
+    cd "$HARMFLOW_WORKSPACE" &&
+      git checkout -q -b "$BRANCH" &&
+      echo "the fix" > fix.txt &&
+      git add fix.txt &&
+      git -c user.name=HarmFlow -c user.email=harmflow@example.invalid commit -q -m "fix: end the crash" &&
+      git push -q -u origin "$BRANCH" &&
+      PUSHED=$(git rev-parse HEAD) &&
+      echo "work in progress" > notes.txt || exit 1
+    echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t3","name":"Bash","input":{"command":"git push -u origin '"$BRANCH"'","description":"Push the branch"}}]}}'
+    echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t3","content":"pushed '"$PUSHED"'","is_error":false}]}}'
+    hold ;;
+  pullrequest)
+    resume
+    echo '{"type":"pull_request.created","url":"https://github.com/o/r/pull/8","number":8,"workItem":"o/r#8","branch":"harmflow/8-crash","message":"Opened a draft pull request"}' >> "$PROGRESS"
+    hold ;;
 esac
 echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"echo hi","description":"Say hi"}}]}}'
 echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"hi","is_error":false}]}}'

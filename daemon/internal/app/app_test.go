@@ -2886,6 +2886,38 @@ func TestRecoveryMarksInterrupted(t *testing.T) {
 	if list, _ := ctx["interruptedExecutions"].([]any); len(list) != 1 {
 		t.Errorf("context interruptedExecutions: %v", ctx["interruptedExecutions"])
 	}
+
+	// FS-003 AC-013 (FS-003-F11): each recovery counts against the retry limit of the item's own task, here one retry,
+	// where the default of three would leave the item failed after its second interruption.
+	e.idle("crash")
+	issues := strings.Replace(taskYAML("issues", fmt.Sprintf("  githubIssueImplementation:\n    repositories:\n"+
+		"      - name: o/r\n        localPath: %q\n    queue:\n      maxFailedRetries: 1\n", t.TempDir())),
+		"type: general", "type: github-issue-implementation", 1)
+	if _, err := e.app.CreateTask(TaskInput{YAML: issues}); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []domain.WorkItemStatus{domain.WorkItemFailed, domain.WorkItemNeedsAttention} {
+		x := domain.NewExecution(domain.TaskDocument{Metadata: domain.TaskMetadata{ID: "issues"}}, domain.TriggerManual,
+			nil, time.Now())
+		x.Status = domain.StatusRunning
+		x.WorkItem = "o/r#2"
+		if err := e.app.d.Executions.Save(x); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.app.recover(); err != nil {
+			t.Fatal(err)
+		}
+		var item *domain.WorkItem
+		for _, w := range e.app.Queue().WorkItems {
+			if w.TaskID == "issues" && w.Key == "o/r#2" {
+				item = &w
+			}
+		}
+		if item == nil || item.Status != want || item.Failures != i+1 || item.LastExecutionID != x.ID {
+			t.Errorf("after recovery %d, work item %+v; want %s with %d failures, the last by %s", i+1, item, want, i+1,
+				x.ID)
+		}
+	}
 }
 
 // FS-003 FR-010, FR-011, BR-002, AC-012, AC-013 (harmflow-app#63): a crash at any moment leaves a record that is not
