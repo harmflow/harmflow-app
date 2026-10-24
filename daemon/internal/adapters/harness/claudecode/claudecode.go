@@ -717,10 +717,12 @@ func resultText(raw json.RawMessage) string {
 	return string(raw)
 }
 
+// patterns match the CLI's own texts, not words a task's error can hold too: a bare quota or "limit reached", or the
+// "not logged into" of another tool, ends the attempt as a task error (harmflow-app#213).
 var patterns = classify.Patterns{
-	Quota:       regexp.MustCompile(`(?i)(usage limit|limit (has been )?reached|out of (extra )?usage|quota|credit balance is too low|weekly limit|session limit)`),
+	Quota:       regexp.MustCompile(`(?i)(usage limit|you(’|')ve hit your ([\w’']+ ){0,3}limit|out of (extra )?usage|credit balance (is )?too low|(weekly|session|5-hour|opus|sonnet)( weekly)? limit (has been )?reached)`),
 	RateLimit:   regexp.MustCompile(`(?i)(rate[ _-]?limit|too many requests|overloaded_error|api error:? (429|529))`),
-	Unavailable: regexp.MustCompile(`(?i)(invalid api key|please run /login|not logged in|authentication_error|oauth token (has )?expired|api error:? 401|claude auth login|re-authenticate|managed settings .*could not be loaded)`),
+	Unavailable: regexp.MustCompile(`(?i)(invalid api key|please run /login|\bnot logged in\b|authentication_error|oauth token (has )?expired|api error:? 401|claude auth login|re-authenticate|managed settings .*could not be loaded)`),
 	Network:     regexp.MustCompile(`(?i)(ECONNREFUSED|ENOTFOUND|ETIMEDOUT|ECONNRESET|network error|getaddrinfo|fetch failed|connection error)`),
 }
 

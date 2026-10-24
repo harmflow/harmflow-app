@@ -132,6 +132,35 @@ func TestParseQuota(t *testing.T) {
 	}
 }
 
+// A signed-out CLI, as Codex 0.163.0 printed it with an empty CODEX_HOME and no API key, is an
+// unavailable harness.
+func TestParseNotLoggedIn(t *testing.T) {
+	p, _ := replay(t, "not-logged-in.jsonl")
+	if end := p.Finish(1, "", false, false); end.Class != domain.ClassHarnessUnavailable {
+		t.Errorf("Finish(1, \"\", false, false).Class = %s (%s), want harness_unavailable", end.Class, end.Error.Message)
+	}
+}
+
+// harmflow-app#213: a sign-in is Codex's own only; another tool's, such as gh's, is part of the task's own failure.
+func TestParseUnavailable(t *testing.T) {
+	cases := []struct {
+		text string
+		want domain.ErrorClass
+	}{
+		{"Not logged in", domain.ClassHarnessUnavailable},
+		{"no Codex credentials were found. Run codex login or provide an API key through a supported auth env var.", domain.ClassHarnessUnavailable},
+		{"gh: You are not logged into any GitHub hosts. Run gh auth login", domain.ClassTaskError},
+	}
+	for _, c := range cases {
+		t.Run(c.text, func(t *testing.T) {
+			p := &parser{}
+			if end := p.Finish(1, c.text, false, false); end.Class != c.want {
+				t.Errorf("Finish(1, %q, false, false).Class = %s, want %s", c.text, end.Class, c.want)
+			}
+		})
+	}
+}
+
 // A 429 is a rate limit only as an HTTP status; elsewhere it is part of the task's own failure.
 func TestParseRateLimit(t *testing.T) {
 	cases := []struct {
