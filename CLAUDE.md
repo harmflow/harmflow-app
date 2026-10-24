@@ -1,7 +1,8 @@
 # CLAUDE.md — harmflow-app
 
 > Repo-specific guidance for the harmflow desktop app repository. Specifications, ADRs, and architecture live in a
-> private repository: cite its records by ID (`FS-NNN FR-NNN`, `AC-NNN`, `D-NNN`, `ADR-NNN`), never by link or path.
+> private repository: cite its records by ID (`FS-NNN FR-NNN`, `AC-NNN`, `D-NNN`, `ADR-NNN`), never by link, path, or
+> issue reference.
 
 ---
 
