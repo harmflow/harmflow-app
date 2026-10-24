@@ -248,6 +248,20 @@ register_app() {
 	done < <(registered_paths "$id")
 }
 
+# rerun_if_changed BEFORE [ARG...] runs the update-app.sh that the pull brought, in place of this one, when it differs
+# from the one at BEFORE (harmflow-app#231): bash read this whole file before the pull, so the rest of this run would
+# be the old script. Nothing is stopped or built yet, so the new one decides everything. UPDATE_APP_RERUN_FROM tells
+# the new one where the pull started, and that it is the rerun, so it never runs itself again.
+rerun_if_changed() {
+	local before=$1 self=packaging/macos/update-app.sh
+	shift
+	[[ -z ${UPDATE_APP_RERUN_FROM:-} ]] || return 0
+	git -C "$root" diff --quiet "$before" HEAD -- "$self" && return 0
+	say "the pull changed $self; running the new one"
+	rm -rf "$tmp"
+	UPDATE_APP_RERUN_FROM=$before exec "$root/$self" "$@"
+}
+
 main() {
 	root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
 	built="$root/desktop/src-tauri/target/release/bundle/macos/HarmFlow.app"
@@ -270,12 +284,14 @@ main() {
 	[[ -z $(git -C "$root" status --porcelain) ]] ||
 		die "the working tree has uncommitted changes; commit or stash them first. Nothing was changed"
 	local out before
-	before=$(git -C "$root" rev-parse HEAD | cut -c1-7)
+	# A rerun from rerun_if_changed reports the pull from the commit the first run started at.
+	before=${UPDATE_APP_RERUN_FROM:-$(git -C "$root" rev-parse HEAD | cut -c1-7)}
 	out=$(git -C "$root" pull --ff-only origin main 2>&1) ||
 		die "git pull --ff-only origin main cannot fast-forward; nothing was changed:"$'\n'"$out"
 	# The Makefile's COMMIT for the new HEAD: a fixed 7 characters, where --short=7 may give more.
 	commit=$(git -C "$root" rev-parse HEAD | cut -c1-7)
 	if [[ $commit == "$before" ]]; then say "main is up to date at $commit"; else say "main fast-forwarded from $before to $commit"; fi
+	rerun_if_changed "$before" "$@"
 
 	# 2. Build, in a make of its own, so its COMMIT is read after the pull.
 	say "building $commit with make app"
