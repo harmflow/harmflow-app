@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 // Drives the dashboard's shell in a DOM: ⌘B and the sidebar's own control collapse the sidebar to its icons and expand
 // it again, the choice outlives a restart, and the daemon's connection state is the topbar's alone. ⌘N opens the
-// template picker as the topbar's New task does (harmflow-app#169). A render error
-// never leaves the window empty, and the interface tells the shell when it has painted (harmflow-app#96).
+// template picker as the topbar's New task does (harmflow-app#169). ⌘+, ⌘−, and ⌘0 zoom the dashboard everywhere,
+// and the level outlives a restart (harmflow-app#55). A render error never leaves the window empty, and the interface
+// tells the shell when it has painted (harmflow-app#96).
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { act, createElement } from "react";
@@ -367,6 +368,183 @@ describe("new task", () => {
     expect(tooltip()).toBe("New task⌘N");
     await act(async () => newTaskButton().click());
     expect(tooltip()).toBeNull(); // the picker covers the button
+  });
+});
+
+describe("zoom", () => {
+  const zoomIn = { key: "=" };
+  const zoomInWithShift = { key: "+", shiftKey: true };
+  const zoomOut = { key: "-" };
+  const actualSize = { key: "0" };
+  let setZoom: MockInstance<typeof native.setZoom>;
+
+  beforeEach(() => {
+    setZoom = vi.spyOn(native, "setZoom");
+  });
+
+  afterEach(() => {
+    setZoom.mockRestore();
+  });
+
+  /** The level the web view was last set to, in percent. */
+  const level = () => setZoom.mock.lastCall?.[0];
+
+  it("zooms in with ⌘+ and ⌘=, out with ⌘−, and back to 100% with ⌘0, on every screen, from a text field too", async () => {
+    await launch();
+    expect(level()).toBe(100);
+    for (const screen of ["Overview", "Executions", "Tasks", "History", "Settings"]) {
+      await act(async () => navButton(screen).click());
+      expect(await press(undefined, zoomIn)).toBe(true);
+      expect(level()).toBe(110);
+      expect(await press(undefined, zoomInWithShift)).toBe(true);
+      expect(level()).toBe(125);
+      expect(await press(undefined, zoomOut)).toBe(true);
+      expect(level()).toBe(110);
+      expect(await press(undefined, actualSize)).toBe(true);
+      expect(level()).toBe(100);
+    }
+
+    await act(async () => navButton("History").click());
+    const search = host!.querySelector<HTMLInputElement>(".app__content input")!;
+    search.focus();
+    expect(await press(search, zoomOut)).toBe(true);
+    expect(level()).toBe(90);
+  });
+
+  it("takes the keys from the YAML editor, whose keymap lets them through", async () => {
+    await launch();
+    const editorHost = host!.querySelector(".app__content")!.appendChild(document.createElement("div"));
+    const editorRoot = createRoot(editorHost);
+    await act(async () => editorRoot.render(<YamlEditor value={"name: Core\n"} onChange={() => {}} />));
+    try {
+      const content = editorHost.querySelector<HTMLElement>(".cm-content")!;
+      content.focus();
+      expect(await press(content, zoomInWithShift)).toBe(true);
+      expect(level()).toBe(110);
+      expect(await press(content, actualSize)).toBe(true);
+      expect(level()).toBe(100);
+    } finally {
+      act(() => editorRoot.unmount());
+    }
+  });
+
+  it("takes the keys while a dialog is open, and from a control in it", async () => {
+    await launch();
+    await act(async () => [...host!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "New task")!.click());
+    expect(host!.querySelector('[aria-modal="true"]')).not.toBeNull();
+    expect(await press(undefined, zoomIn)).toBe(true);
+    expect(level()).toBe(110);
+    const template = host!.querySelector<HTMLElement>('[aria-modal="true"] .template')!;
+    template.focus();
+    expect(await press(template, zoomOut)).toBe(true);
+    expect(level()).toBe(100);
+    expect(host!.querySelector('[aria-modal="true"]')).not.toBeNull(); // the dialog stays open
+  });
+
+  it("takes the keys on the onboarding screen", async () => {
+    patchStateForTests({ settings: { ...settings, onboardingCompleted: false } });
+    await launch();
+    expect(host!.querySelector(".onboarding")).not.toBeNull();
+    expect(await press(undefined, zoomIn)).toBe(true);
+    expect(level()).toBe(110);
+    expect(await press(undefined, actualSize)).toBe(true);
+    expect(level()).toBe(100);
+  });
+
+  it("takes the keys on the daemon-down screen", async () => {
+    // The screen shows inside the desktop shell alone; everything else here stays a plain browser's.
+    native.available = true;
+    localStorage.setItem("harmflow.onboarded", "1");
+    patchStateForTests({ daemonRunning: false });
+    try {
+      await launch();
+      expect(host!.querySelector(".daemon-down")).not.toBeNull();
+      expect(await press(undefined, zoomOut)).toBe(true);
+      expect(level()).toBe(90);
+      expect(await press(undefined, actualSize)).toBe(true);
+      expect(level()).toBe(100);
+    } finally {
+      native.available = false;
+    }
+  });
+
+  it("stops at 150% and at 80% without wrapping, and the keypad's + and − work too", async () => {
+    await launch();
+    for (let i = 0; i < 6; i++) await press(undefined, { key: "+", code: "NumpadAdd" });
+    expect(level()).toBe(150);
+    expect(setZoom.mock.calls.map(([percent]) => percent)).toEqual([100, 110, 125, 150]);
+    for (let i = 0; i < 8; i++) await press(undefined, { key: "-", code: "NumpadSubtract" });
+    expect(level()).toBe(80);
+    expect(await press(undefined, { key: "-", code: "NumpadSubtract" })).toBe(true); // taken, though it moves nothing
+    expect(level()).toBe(80);
+  });
+
+  it("keeps a held key zooming, up to the end of the range", async () => {
+    await launch();
+    await press(undefined, zoomIn);
+    expect(await press(undefined, { ...zoomIn, repeat: true })).toBe(true);
+    expect(await press(undefined, { ...zoomIn, repeat: true })).toBe(true);
+    expect(await press(undefined, { ...zoomIn, repeat: true })).toBe(true);
+    expect(level()).toBe(150);
+  });
+
+  it("leaves the keys alone with Control or Option, and − and 0 with Shift", async () => {
+    await launch();
+    expect(await press(undefined, { ...zoomIn, ctrlKey: true })).toBe(false);
+    expect(await press(undefined, { ...zoomIn, altKey: true })).toBe(false);
+    expect(await press(undefined, { ...zoomOut, shiftKey: true })).toBe(false);
+    expect(await press(undefined, { ...actualSize, shiftKey: true })).toBe(false);
+    expect(await press(undefined, { ...zoomIn, metaKey: false })).toBe(false);
+    expect(setZoom.mock.calls.map(([percent]) => percent)).toEqual([100]);
+  });
+
+  it("keeps the level across a restart of the app", async () => {
+    await launch();
+    await press(undefined, zoomIn);
+    await press(undefined, zoomIn);
+    expect(level()).toBe(125);
+    quit();
+
+    setZoom.mockClear();
+    await launch();
+    expect(setZoom.mock.calls.map(([percent]) => percent)).toEqual([125]);
+    await press(undefined, actualSize);
+    quit();
+
+    setZoom.mockClear();
+    await launch();
+    expect(setZoom.mock.calls.map(([percent]) => percent)).toEqual([100]);
+  });
+
+  it("opens at 100% when the kept level is not one of the steps", async () => {
+    localStorage.setItem("harmflow.zoom", "175");
+    await launch();
+    expect(level()).toBe(100);
+  });
+
+  it("applies the kept level before it tells the shell the interface is ready, even when the zoom fails", async () => {
+    const ready = vi.spyOn(native, "interfaceReady");
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      let applied!: () => void;
+      setZoom.mockImplementationOnce(() => new Promise<void>((resolve) => (applied = resolve)));
+      localStorage.setItem("harmflow.zoom", "125");
+      await launch();
+      expect(setZoom).toHaveBeenCalledWith(125);
+      expect(ready).not.toHaveBeenCalled();
+      await act(async () => applied());
+      expect(ready).toHaveBeenCalledTimes(1);
+      quit();
+
+      ready.mockClear();
+      setZoom.mockRejectedValueOnce(new Error("not allowed"));
+      await launch();
+      expect(ready).toHaveBeenCalledTimes(1);
+      expect(logged).toHaveBeenCalledWith("HarmFlow: zoom not applied", expect.objectContaining({ message: "not allowed" }));
+    } finally {
+      ready.mockRestore();
+      logged.mockRestore();
+    }
   });
 });
 

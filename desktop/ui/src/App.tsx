@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { native } from "./api/native";
 import { RootBoundary, ScreenBoundary } from "./components/ErrorBoundary";
 import { Header, Sidebar, noticeText, type Screen } from "./components/Shell";
 import { Toasts } from "./components/toast";
 import { applyLanguage } from "./i18n";
+import { storeZoom, storedZoom, zoomKey, zoomed } from "./lib/zoom";
 import { ExecutionsScreen } from "./screens/ExecutionsScreen";
 import { HistoryScreen } from "./screens/HistoryScreen";
 import { DaemonDownScreen, OnboardingScreen } from "./screens/OnboardingScreen";
@@ -51,14 +52,23 @@ export function App() {
   const [importing, setImporting] = useState(false);
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(wasSidebarCollapsed);
+  const [zoom, setZoom] = useState(storedZoom);
+  const zoomApplied = useRef<Promise<void>>(Promise.resolve());
 
   const settings = useStore((s) => s.settings);
   const daemonRunning = useStore((s) => s.daemonRunning);
   const navigation = useStore((s) => s.navigation);
 
-  // The first render committed: the shell may show the window now (harmflow-app#96). An effect rather than an
-  // animation frame, which WebKit may throttle for a hidden page; the shell acts on the first signal alone.
-  useEffect(() => void native.interfaceReady(), []);
+  useEffect(() => {
+    zoomApplied.current = native.setZoom(zoom).catch((error) => console.error("HarmFlow: zoom not applied", error));
+    storeZoom(zoom);
+  }, [zoom]);
+
+  // The first render committed and the kept zoom applied: the shell may show the window now (harmflow-app#96), at its
+  // zoom rather than jumping to it (D-110). Two commands may reach the shell in either order, so this one waits for the
+  // zoom, failed or not. An effect rather than an animation frame, which WebKit may throttle for a hidden page; the
+  // shell acts on the first signal alone.
+  useEffect(() => void zoomApplied.current.then(() => native.interfaceReady()), []);
 
   useEffect(() => {
     startSync();
@@ -151,6 +161,19 @@ export function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [shell]);
+
+  // ⌘+, ⌘−, and ⌘0 zoom the dashboard everywhere, from any focus (D-110): unlike ⌘B, on the onboarding and daemon-down
+  // screens too, and over an open dialog.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const key = zoomKey(e);
+      if (!key) return;
+      e.preventDefault();
+      setZoom((level) => zoomed(level, key));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   if (onboarding) {
     return (
