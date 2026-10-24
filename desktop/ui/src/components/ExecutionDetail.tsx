@@ -2,7 +2,7 @@
 // its raw output, files, commands, results, attempts with the prompt and session context each sent (FS-008 FR-002,
 // FR-008), and estimated token costs (harmflow-app#39). Observe and cancel only — no input reaches the agent
 // (FS-003 FR-003).
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
 import { native } from "../api/native";
@@ -276,10 +276,32 @@ function Timeline({
   const { t, i18n } = useTranslation();
   const listRef = useRef<HTMLOListElement | null>(null);
   const [follow, setFollow] = useState(true);
+  const idPrefix = useId();
+  const optionId = (id: number) => `${idPrefix}-event-${id}`;
 
   useEffect(() => {
     if (follow && listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [items.length, follow]);
+
+  // A step the user chose, by click or key, stops the timeline following the latest one.
+  const select = (id: number) => {
+    setFollow(false);
+    onSelect(id);
+  };
+
+  // The list is one tab stop whose arrow keys step through the events, without wrapping (harmflow-app#190).
+  const onKeyDown = (e: KeyboardEvent<HTMLOListElement>) => {
+    if (e.target !== e.currentTarget || e.altKey || e.ctrlKey || e.metaKey) return;
+    const at = items.findIndex((i) => i.id === selectedId);
+    const last = items.length - 1;
+    const moves: Partial<Record<string, number>> = { ArrowUp: Math.max(at - 1, 0), ArrowDown: Math.min(at + 1, last), Home: 0, End: last };
+    const to = moves[e.key];
+    if (to === undefined) return;
+    e.preventDefault(); // the list does not scroll by itself, even at an edge
+    if (to === at) return;
+    select(items[to].id);
+    listRef.current?.children[to]?.scrollIntoView({ block: "nearest" });
+  };
 
   if (items.length === 0) {
     return (
@@ -297,56 +319,65 @@ function Timeline({
           <span>{t("executions.detail.follow")}</span>
         </label>
       </div>
-      <ol className="timeline__list" ref={listRef}>
+      <ol
+        className="timeline__list"
+        ref={listRef}
+        role="listbox"
+        tabIndex={0}
+        aria-label={t("executions.detail.timeline")}
+        aria-activedescendant={selectedId !== undefined ? optionId(selectedId) : undefined}
+        onKeyDown={onKeyDown}
+      >
         {items.map((item) => {
           const label = item.title ?? (t(item.labelKey as never, { defaultValue: item.event.type }) as string);
           const running = item.event.type === "tool.started" && !item.completed && active;
           return (
-            <li key={item.id}>
-              <button
-                type="button"
-                className={cx("tl-item", `tl-item--${item.tone}`, item.id === selectedId && "tl-item--selected")}
-                onClick={() => {
-                  setFollow(false);
-                  onSelect(item.id);
-                }}
-              >
-                <span className="tl-item__time mono">{formatTime(item.event.timestamp, i18n.language)}</span>
-                <span className="tl-item__rail" aria-hidden="true">
-                  <span className="tl-item__dot" />
+            <li
+              key={item.id}
+              id={optionId(item.id)}
+              role="option"
+              aria-selected={item.id === selectedId}
+              className={cx("tl-item", `tl-item--${item.tone}`, item.id === selectedId && "tl-item--selected")}
+              onClick={() => {
+                select(item.id);
+                // WebKit focuses nothing on a click; the arrow keys work from here on.
+                listRef.current?.focus({ preventScroll: true });
+              }}
+            >
+              <span className="tl-item__time mono">{formatTime(item.event.timestamp, i18n.language)}</span>
+              <span className="tl-item__rail" aria-hidden="true">
+                <span className="tl-item__dot" />
+              </span>
+              <span className="tl-item__icon">
+                <Icon name={item.icon} size={17} />
+              </span>
+              <span className="tl-item__text">
+                <span className="tl-item__title">
+                  {label}
+                  {item.attempt && item.attempt > 1 ? <span className="tl-item__attempt">#{item.attempt}</span> : null}
                 </span>
-                <span className="tl-item__icon">
-                  <Icon name={item.icon} size={17} />
-                </span>
-                <span className="tl-item__text">
-                  <span className="tl-item__title">
-                    {label}
-                    {item.attempt && item.attempt > 1 ? <span className="tl-item__attempt">#{item.attempt}</span> : null}
-                  </span>
-                  {item.detail ? <span className="tl-item__detail mono">{item.detail}</span> : null}
-                </span>
-                <span className="tl-item__state">
-                  {running ? <span className="spinner" aria-label={t("executions.detail.running")} /> : null}
-                  {item.completed && !item.completed.ok ? <Icon name="x" size={14} className="tone-danger" /> : null}
-                </span>
-              </button>
+                {item.detail ? <span className="tl-item__detail mono">{item.detail}</span> : null}
+              </span>
+              <span className="tl-item__state">
+                {running ? <span className="spinner" aria-label={t("executions.detail.running")} /> : null}
+                {item.completed && !item.completed.ok ? <Icon name="x" size={14} className="tone-danger" /> : null}
+              </span>
             </li>
           );
         })}
+        {/* Not an event to select; the header's status says the same. */}
         {active ? (
-          <li>
-            <div className="tl-item tl-item--pending">
-              <span className="tl-item__time mono">{formatTime(new Date().toISOString(), i18n.language)}</span>
-              <span className="tl-item__rail" aria-hidden="true">
-                <span className="tl-item__dot tl-item__dot--hollow" />
-              </span>
-              <span className="tl-item__icon">
-                <Icon name="circle" size={17} />
-              </span>
-              <span className="tl-item__text">
-                <span className="tl-item__title muted">{t(`status.${status}` as never)}…</span>
-              </span>
-            </div>
+          <li className="tl-item tl-item--pending" aria-hidden="true">
+            <span className="tl-item__time mono">{formatTime(new Date().toISOString(), i18n.language)}</span>
+            <span className="tl-item__rail" aria-hidden="true">
+              <span className="tl-item__dot tl-item__dot--hollow" />
+            </span>
+            <span className="tl-item__icon">
+              <Icon name="circle" size={17} />
+            </span>
+            <span className="tl-item__text">
+              <span className="tl-item__title muted">{t(`status.${status}` as never)}…</span>
+            </span>
           </li>
         ) : null}
       </ol>

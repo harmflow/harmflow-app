@@ -549,6 +549,7 @@ export const ptBR: Resources = {
       noResults: "Nenhum resultado informado ainda.",
       noAttempts: "Nenhuma tentativa ainda.",
       follow: "Seguir",
+      timeline: "Linha do tempo dos eventos",
       execId: "Execução",
       workspace: "Workspace",
       branch: "Branch",

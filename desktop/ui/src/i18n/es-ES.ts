@@ -551,6 +551,7 @@ export const esES: Resources = {
       noResults: "Aún no se informaron resultados.",
       noAttempts: "Aún no hay intentos.",
       follow: "Seguir",
+      timeline: "Línea de tiempo de eventos",
       execId: "Ejecución",
       workspace: "Espacio de trabajo",
       branch: "Rama",

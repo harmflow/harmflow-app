@@ -1548,7 +1548,11 @@ body:has([aria-modal="true"]) .tooltip {
   text-align: left;
 }
 
-button.tl-item:hover {
+.tl-item[role="option"] {
+  cursor: pointer;
+}
+
+.tl-item[role="option"]:hover {
   background: var(--hf-color-surface-hover);
 }
 
@@ -1556,6 +1560,16 @@ button.tl-item:hover {
   border-color: rgba(var(--hf-rgb-blue), 0.55);
   background: rgba(var(--hf-rgb-blue), 0.09);
   box-shadow: inset 0 0 18px rgba(var(--hf-rgb-blue), 0.08);
+}
+
+/* The list holds the focus; its ring is drawn on the event the arrow keys move. */
+.timeline__list:focus-visible {
+  outline: none;
+}
+
+.timeline__list:focus-visible .tl-item--selected {
+  outline: 2px solid var(--hf-color-border-focus);
+  outline-offset: -1px;
 }
 
 .tl-item__time {
