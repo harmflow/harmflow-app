@@ -538,6 +538,7 @@ export const enUS = {
       noResults: "No results reported yet.",
       noAttempts: "No attempts yet.",
       follow: "Follow",
+      timeline: "Event timeline",
       execId: "Execution",
       workspace: "Workspace",
       branch: "Branch",

@@ -3,7 +3,7 @@
 // for, and the raw output read from the daemon's route, again while the execution runs (FS-008 FR-008, AC-008).
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Execution, ExecutionOutput, HarmflowEvent } from "../api/types";
 import i18n from "../i18n";
 import { formatTime } from "../lib/format";
@@ -573,6 +573,118 @@ describe("execution detail", () => {
     expect(reads()).toBe(3);
     await act(() => vi.advanceTimersByTimeAsync(10_000));
     expect(reads()).toBe(3);
+  });
+});
+
+// harmflow-app#190: the Events timeline is one tab stop, a list whose arrow keys, Home, and End move the selection.
+describe("the events timeline from the keyboard", () => {
+  const x: Execution = { ...completed, id: "exec-keys" };
+  const said = ["Loading configuration", "Reading the issue.", "Running the tests.", "Opened a draft pull request"];
+  const steps = [
+    event(1, "execution.started", { executionId: x.id, message: said[0] }),
+    event(2, "harness.message", { executionId: x.id, message: said[1] }),
+    event(3, "harness.message", { executionId: x.id, message: said[2] }),
+    event(4, "execution.completed", { executionId: x.id, message: said[3] }),
+  ];
+
+  const list = () => host!.querySelector<HTMLElement>('[role="listbox"]')!;
+  const options = () => [...host!.querySelectorAll<HTMLElement>('[role="option"]')];
+  /** The selected event as the list exposes it, and as the details pane shows it. */
+  const selected = () => {
+    const chosen = options().filter((o) => o.getAttribute("aria-selected") === "true");
+    expect(chosen).toHaveLength(1);
+    expect(list().getAttribute("aria-activedescendant")).toBe(chosen[0].id);
+    return { row: chosen[0].querySelector(".tl-item__detail")!.textContent, details: host!.querySelector(".event-details__text .mono")!.textContent };
+  };
+  const at = (i: number) => ({ row: said[i], details: said[i] });
+  const follow = () => host!.querySelector<HTMLInputElement>(".timeline__tools input[type='checkbox']")!;
+  /** Presses a key where focus is, as the browser would send it; it says whether the default action was prevented. */
+  const press = (key: string, on: HTMLElement = list(), init: KeyboardEventInit = {}) => {
+    const e = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init });
+    act(() => void on.dispatchEvent(e));
+    return e.defaultPrevented;
+  };
+
+  // happy-dom lays nothing out, so the rows the list scrolls into view are counted instead.
+  let scrolled: Element[];
+  beforeEach(() => {
+    scrolled = [];
+    vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (this: Element) {
+      scrolled.push(this);
+    });
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("names the list and exposes the selected event, the latest with none chosen", async () => {
+    await open(x, steps, capture());
+    await choose("Events");
+    expect(list().tabIndex).toBe(0);
+    expect(list().getAttribute("aria-label")).toBe("Event timeline");
+    expect(options()).toHaveLength(4);
+    expect(selected()).toEqual(at(3));
+  });
+
+  it("moves the selection with ↑ and ↓, without wrapping, and turns Follow off once it moves", async () => {
+    await open(x, steps, capture());
+    await choose("Events");
+    expect(follow().checked).toBe(true);
+
+    // At the last event ↓ does nothing, and Follow stays on; the page still does not scroll.
+    expect(press("ArrowDown")).toBe(true);
+    expect(selected()).toEqual(at(3));
+    expect(follow().checked).toBe(true);
+    expect(scrolled).toEqual([]);
+
+    expect(press("ArrowUp")).toBe(true);
+    expect(selected()).toEqual(at(2));
+    expect(follow().checked).toBe(false);
+    expect(scrolled).toEqual([options()[2]]);
+
+    press("ArrowUp");
+    press("ArrowUp");
+    expect(selected()).toEqual(at(0));
+    // At the first event ↑ does nothing.
+    expect(press("ArrowUp")).toBe(true);
+    expect(selected()).toEqual(at(0));
+
+    press("ArrowDown");
+    expect(selected()).toEqual(at(1));
+    expect(scrolled.at(-1)).toBe(options()[1]);
+  });
+
+  it("selects the first event with Home and the last with End, each scrolled into view", async () => {
+    await open(x, steps, capture());
+    await choose("Events");
+    expect(press("Home")).toBe(true);
+    expect(selected()).toEqual(at(0));
+    expect(follow().checked).toBe(false);
+    expect(scrolled).toEqual([options()[0]]);
+    expect(press("End")).toBe(true);
+    expect(selected()).toEqual(at(3));
+    expect(scrolled).toEqual([options()[0], options()[3]]);
+  });
+
+  it("gives the list focus on a click, so the arrow keys work right after it", async () => {
+    await open(x, steps, capture());
+    await choose("Events");
+    await act(async () => options()[1].click());
+    expect(document.activeElement).toBe(list());
+    expect(selected()).toEqual(at(1));
+    expect(follow().checked).toBe(false);
+    press("ArrowDown", document.activeElement as HTMLElement);
+    expect(selected()).toEqual(at(2));
+  });
+
+  it("leaves other keys, keys with a modifier, and keys in another control alone", async () => {
+    await open(x, steps, capture());
+    await choose("Events");
+    expect(press("ArrowDown", follow())).toBe(false);
+    expect(press("ArrowUp", follow())).toBe(false);
+    expect(press("ArrowUp", list(), { metaKey: true })).toBe(false);
+    expect(press("Home", list(), { ctrlKey: true })).toBe(false);
+    expect(press("Enter")).toBe(false);
+    expect(selected()).toEqual(at(3));
+    expect(follow().checked).toBe(true);
   });
 });
 
