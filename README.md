@@ -129,8 +129,12 @@ in its own pull request and is reviewed on its own.
 | `make dev-desktop` | Run the desktop shell against that daemon |
 | `make generate` | Refresh the copies generated from `contracts/`; `make check-generated` fails when one is stale |
 | `make app` | Build `HarmFlow.app` and the DMG, unsigned |
-| `make update-app` | On `main`, fast-forward and run `make app`, then restart on the new build the daemon and the window that were running; refused while executions run (see [`packaging/`](packaging/README.md#updating-the-local-app)) |
+| `make update-app` | On `main`, fast-forward, build when needed, then restart the daemon and window that were running; it checks running executions first and refuses safely (see [`packaging/`](packaging/README.md#updating-the-local-app)) |
 | `make icons` | Render every app and tray icon from the SVGs in `desktop/src-tauri/icons/source` |
+
+`make update-app WAIT=1` waits for running executions to finish before stopping the daemon. The wait is bounded by
+`WAIT_TIMEOUT` seconds (default `3600`); a new execution that starts during the wait is observed by another non-force
+stop attempt. Use `FORCE_BUILD=1` to rebuild an otherwise current bundle.
 
 Three environment variables change where the daemon keeps its data and its token:
 

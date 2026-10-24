@@ -16,13 +16,20 @@ Only what Tauri's own bundle settings (`desktop/src-tauri/tauri.conf.json`) do n
 `make update-app` (`packaging/macos/update-app.sh`) runs `main` as the local app in one command:
 
 1. It refuses, with nothing changed, off `main`, with uncommitted changes, or when `git pull --ff-only origin main`
-   cannot fast-forward. Then it runs `make app`; a failed build leaves the window and the daemon as they were.
-2. It finds the daemon of `$HARMFLOW_HOME`, or of `~/Library/Application Support/HarmFlow`, through that directory's
+   cannot fast-forward. It reads `GET /api/v1/stats` before building. With running executions it reports that the
+   restart will be refused unless they end, then builds as usual; `WAIT=1` waits before building instead.
+2. `make app` writes the clean commit to `desktop/src-tauri/target/release/bundle/macos/HarmFlow.app.commit`. When
+   that stamp already matches `main`, `make update-app` skips the build; `FORCE_BUILD=1` overrides the skip. A failed
+   build leaves the window and the daemon as they were.
+3. It finds the daemon of `$HARMFLOW_HOME`, or of `~/Library/Application Support/HarmFlow`, through that directory's
    `run/daemon.json`, never by process name, so the daemons of other data directories (the e2e one, a worktree's
    development one) are never touched.
-3. It stops that daemon through `POST /api/v1/daemon/stop`, without `force`. While executions run, the daemon refuses
+4. It stops that daemon through `POST /api/v1/daemon/stop`, without `force`. While executions run, the daemon refuses
    and so does the update: the window and the daemon stay as they were, and the new bundle is built but not running.
-4. It quits the window of this checkout's bundle, then restores what it found. A daemon that was running starts from
+   The refusal suggests `WAIT=1`; with that option the script reprints the running count at a fixed interval and retries
+   the same non-force stop until executions end or `WAIT_TIMEOUT` seconds elapse (default 60 minutes). A new firing is
+   handled by another retry, never by cancelling it.
+5. It quits the window of this checkout's bundle, then restores what it found. A daemon that was running starts from
    the new bundle, through `launchctl kickstart` when the launch agent `com.harmflow.daemon` serves that data directory,
    and must answer with the new commit. A window that was open reopens. What was stopped stays stopped.
 

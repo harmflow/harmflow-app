@@ -75,6 +75,37 @@ find_daemon() {
 	pid=$p
 }
 
+# stats_running prints the current execution count, or fails when the daemon cannot answer its stats endpoint.
+stats_running() {
+	[[ $(api GET /stats) == 200 ]] || return 1
+	local running
+	running=$(json_get "$tmp/body" running)
+	[[ $running =~ ^[0-9]+$ ]] || return 1
+	printf '%s' "$running"
+}
+
+# wait_for_idle polls until no execution is running, or until its absolute deadline. It never asks the daemon to force
+# a stop; a new firing observed by the caller's stop request is handled by another pass through this function.
+wait_for_idle() {
+	local deadline=$1 running now
+	while :; do
+		running=$(stats_running) || return 2
+		(( running == 0 )) && return 0
+		now=$(date +%s)
+		(( now >= deadline )) && return 1
+		say "executions running: $running; waiting"
+		sleep "$wait_interval"
+	done
+}
+
+# current_build succeeds only when make app left a bundle and a stamp for the current clean commit.
+current_build() {
+	[[ -d $bundle && -x "$bundle/Contents/MacOS/harmflowd" && -f $build_stamp ]] || return 1
+	local built
+	built=$(tr -d '[:space:]' <"$build_stamp")
+	[[ $built == "$commit" ]]
+}
+
 # window_pids prints the pids of the harmflow-desktop processes whose executable is this checkout's bundle.
 window_pids() { ps -axww -o pid=,comm= | awk -v exe="$window_exe" '{ p = $1; sub(/^ *[0-9]+ +/, ""); if ($0 == exe) print p }'; }
 
@@ -165,11 +196,16 @@ open_window() {
 main() {
 	root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
 	bundle="$root/desktop/src-tauri/target/release/bundle/macos/HarmFlow.app"
+	build_stamp="$bundle.commit"
 	window_exe="$bundle/Contents/MacOS/harmflow-desktop"
 	daemon_exe="$bundle/Contents/MacOS/harmflowd"
 	default_home="$HOME/Library/Application Support/HarmFlow"
 	home="${HARMFLOW_HOME:-$default_home}"
 	runtime="$home/run/daemon.json"
+	wait_timeout="${WAIT_TIMEOUT:-3600}"
+	wait_interval="${WAIT_INTERVAL:-5}"
+	[[ $wait_timeout =~ ^[1-9][0-9]*$ ]] || die "WAIT_TIMEOUT must be a positive number of seconds"
+	[[ $wait_interval =~ ^[1-9][0-9]*$ ]] || die "WAIT_INTERVAL must be a positive number of seconds"
 	tmp=$(mktemp -d)
 	trap 'rm -rf "$tmp"' EXIT
 
@@ -187,11 +223,45 @@ main() {
 	commit=$(git -C "$root" rev-parse HEAD | cut -c1-7)
 	if [[ $commit == "$before" ]]; then say "main is up to date at $commit"; else say "main fast-forwarded from $before to $commit"; fi
 
-	# 2. Build, in a make of its own, so its COMMIT is read after the pull.
-	say "building $commit with make app"
-	"${MAKE:-make}" -C "$root" app || die "make app failed; the window and the daemon were left as they were"
+	# 2. Find the daemon before building so a running execution is reported early, and WAIT=1 can wait without building
+	# until the queue is idle.
+	local running wait_deadline='' wait_status
+	if find_daemon; then
+		running=$(stats_running) || die "the daemon did not answer GET /stats; nothing was changed"
+		if (( running > 0 )); then
+			if [[ ${WAIT:-} == 1 ]]; then
+				wait_deadline=$(( $(date +%s) + wait_timeout ))
+				say "executions are running ($running); WAIT=1 is waiting before building"
+				if wait_for_idle "$wait_deadline"; then
+					say "executions ended; continuing with the update"
+				else
+					wait_status=$?
+					case $wait_status in
+					1) die "executions are running, so nothing was built or stopped; WAIT=1 timed out after ${wait_timeout}s" ;;
+					*) die "the daemon did not answer GET /stats while waiting; nothing was changed" ;;
+					esac
+				fi
+			else
+				say "executions are running ($running); the restart will be refused unless they end; building anyway"
+			fi
+		fi
+	else
+		say "no daemon runs for $home"
+	fi
 
-	# 3. What runs now.
+	# 3. Build in a make of its own, so its COMMIT is read after the pull. A clean current bundle is reusable unless the
+	# caller explicitly asks for a rebuild.
+	if [[ ${FORCE_BUILD:-} == 1 ]]; then
+		say "FORCE_BUILD=1: building $commit with make app"
+		"${MAKE:-make}" -C "$root" app || die "make app failed; the window and the daemon were left as they were"
+	elif current_build; then
+		say "bundle $commit is already built at $bundle; skipping make app"
+	else
+		say "building $commit with make app"
+		"${MAKE:-make}" -C "$root" app || die "make app failed; the window and the daemon were left as they were"
+	fi
+
+	# 4. What runs now. Re-read the runtime after the build in case the daemon changed while make app was running.
 	local daemon_was='' window_was old_pid=''
 	launchd=no
 	if find_daemon; then
@@ -204,21 +274,35 @@ main() {
 	window_was=$(window_pids | tr '\n' ' ')
 	if [[ -n $window_was ]]; then say "window pid $window_was"; else say "no window of $bundle runs"; fi
 
-	# 4. Stop the daemon, never with force, before the window, so a refusal leaves both running.
+	# 5. Stop the daemon, never with force, before the window, so a refusal leaves both running. WAIT=1 keeps retrying
+	# while executions drain; a firing that starts between stats and stop is handled by the same loop.
 	if [[ -n $daemon_was ]]; then
-		case $(api POST /daemon/stop '{}') in
-		202) ;;
-		409)
-			die "executions are running, so nothing was stopped. The new bundle is built at $bundle but not running;" \
-				"run make update-app again when they end"
-			;;
-		*) die "the daemon refused to stop: $(cat "$tmp/body"). Nothing was stopped" ;;
-		esac
+		while :; do
+			case $(api POST /daemon/stop '{}') in
+			202) break ;;
+			409)
+				if [[ ${WAIT:-} != 1 ]]; then
+					die "executions are running, so nothing was stopped. The new bundle is built at $bundle but not running; run make update-app again when they end, or use WAIT=1"
+				fi
+				[[ -n $wait_deadline ]] || wait_deadline=$(( $(date +%s) + wait_timeout ))
+				if wait_for_idle "$wait_deadline"; then
+					continue
+				else
+					wait_status=$?
+					case $wait_status in
+					1) die "executions are running, so nothing was stopped. The new bundle is built at $bundle but not running; WAIT=1 timed out after ${wait_timeout}s" ;;
+					*) die "the daemon did not answer GET /stats while waiting; nothing was stopped" ;;
+					esac
+				fi
+				;;
+			*) die "the daemon refused to stop: $(cat "$tmp/body"). Nothing was stopped" ;;
+			esac
+		done
 		wait_gone "$old_pid" 30 || die "daemon pid $old_pid did not exit within 30 seconds. See $home/logs/daemon.log"
 		say "daemon pid $old_pid stopped"
 	fi
 
-	# 5. Quit the window. SIGTERM ends it also with the tray on, where a plain quit is prevented.
+	# 6. Quit the window. SIGTERM ends it also with the tray on, where a plain quit is prevented.
 	local w
 	for w in $window_was; do
 		kill -TERM "$w" 2>/dev/null || true
@@ -226,7 +310,7 @@ main() {
 		say "window pid $w quit"
 	done
 
-	# 6. Bring back what ran, the daemon first, so the window connects to it at once.
+	# 7. Bring back what ran, the daemon first, so the window connects to it at once.
 	local status=0
 	if [[ -n $daemon_was ]]; then
 		start_daemon

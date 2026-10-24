@@ -12,6 +12,7 @@ BUILT_AT := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 TRIPLE := $(shell rustc -vV 2>/dev/null | sed -n 's/^host: //p')
 DEV_HOME := $(CURDIR)/.harmflow-dev/home
 SIDECAR := desktop/src-tauri/binaries/harmflowd-$(TRIPLE)
+APP_STAMP := desktop/src-tauri/target/release/bundle/macos/HarmFlow.app.commit
 LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuiltAt=$(BUILT_AT)
 COVERAGE := $(CURDIR)/build/coverage
 # The shell's coverage floors, in percent (ADR-015); COVERAGE.md holds the reading they come from.
@@ -122,13 +123,14 @@ dev-desktop: sidecar ## Run the desktop shell against the development daemon
 .PHONY: app
 app: sidecar ## Build HarmFlow.app and the DMG (unsigned until the Developer ID exists, D-080)
 	cd desktop && pnpm tauri build
+	@{ printf '%s\n' "$(COMMIT)" > "$(APP_STAMP).tmp" && mv "$(APP_STAMP).tmp" "$(APP_STAMP)"; }
 	@echo "Bundles in desktop/src-tauri/target/release/bundle/"
 
 # No prerequisite and no $(MAKE) here: the script pulls, then builds in a make of its own, whose COMMIT is read after
 # the pull. A $(MAKE) in the recipe would also run it under make -n.
 .PHONY: update-app
 update-app: ## Bring the local app to the latest main and restart the daemon and window that were running
-	@packaging/macos/update-app.sh
+	@FORCE_BUILD='$(FORCE_BUILD)' WAIT='$(WAIT)' WAIT_TIMEOUT='$(WAIT_TIMEOUT)' packaging/macos/update-app.sh
 
 .PHONY: clean
 clean: ## Remove build output
