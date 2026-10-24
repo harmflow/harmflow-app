@@ -78,6 +78,13 @@ type daemon struct {
 	token string
 }
 
+// in is the daemon with its helpers reporting to t, for a subtest: a helper must not fail its parent test.
+func (d *daemon) in(t *testing.T) *daemon {
+	c := *d
+	c.t = t
+	return &c
+}
+
 // startDaemon starts harmflowd on the home, with env added to the test's own environment, a later entry winning.
 func startDaemon(t *testing.T, home string, env ...string) *daemon {
 	t.Helper()
@@ -411,9 +418,13 @@ func TestAPIGuardOnEveryRoute(t *testing.T) {
 	wrong[len(wrong)-1] ^= 1 // the token with its last character changed
 	for _, r := range append(read, control...) {
 		for _, c := range []struct{ name, token string }{{"no Authorization header", ""}, {"a wrong token", string(wrong)}} {
-			if status, kind, body := d.requestAs(c.token, r.method(), r.path, r.body); !unauthorized(status, kind, body) {
-				t.Errorf("%s with %s: %d %s %s", r.op, c.name, status, kind, body)
-			}
+			t.Run(r.op+" with "+c.name, func(t *testing.T) {
+				d := d.in(t)
+
+				if status, kind, body := d.requestAs(c.token, r.method(), r.path, r.body); !unauthorized(status, kind, body) {
+					t.Errorf("%s %s with %s = %d %s %s, want 401 unauthorized", r.method(), r.path, c.name, status, kind, body)
+				}
+			})
 		}
 	}
 	after := d.guardState()
@@ -1066,25 +1077,29 @@ func TestOneSchemaForEveryEntryPoint(t *testing.T) {
 		{"editor save", "PUT", "/tasks/shared", map[string]any{"yaml": invalid, "baseRevision": rev}},
 		{"import", "POST", "/tasks/import", map[string]any{"yaml": invalid}},
 	} {
-		e, _ := d.call(tc.method, tc.path, tc.body, 422)["error"].(map[string]any)
-		validation, _ := e["validation"].(map[string]any)
-		errs, _ := validation["errors"].([]any)
-		if e["code"] != "validation_failed" || len(errs) == 0 {
-			t.Errorf("%s: error %v", tc.name, e)
-			continue
-		}
-		first := errs[0].(map[string]any)
-		if first["path"] != "/spec/execution/timeoutMinutes" || first["messageKey"] != "schema_minimum" || first["message"] == "" {
-			t.Errorf("%s: first error %v", tc.name, first)
-		}
-		if want == nil {
-			want = first
-		} else if first["path"] != want["path"] || first["messageKey"] != want["messageKey"] || first["message"] != want["message"] {
-			t.Errorf("%s disagrees with the form: %v / %v", tc.name, first, want)
-		}
-		if _, fromYAML := tc.body["yaml"]; fromYAML && first["line"] != float64(line) {
-			t.Errorf("%s: line %v, want %d", tc.name, first["line"], line)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			d := d.in(t)
+
+			e, _ := d.call(tc.method, tc.path, tc.body, 422)["error"].(map[string]any)
+			validation, _ := e["validation"].(map[string]any)
+			errs, _ := validation["errors"].([]any)
+			if e["code"] != "validation_failed" || len(errs) == 0 {
+				t.Errorf("%s %s error = %v, want validation_failed with errors", tc.method, tc.path, e)
+				return
+			}
+			first := errs[0].(map[string]any)
+			if first["path"] != "/spec/execution/timeoutMinutes" || first["messageKey"] != "schema_minimum" || first["message"] == "" {
+				t.Errorf("%s %s first error = %v, want schema_minimum at /spec/execution/timeoutMinutes", tc.method, tc.path, first)
+			}
+			if want == nil {
+				want = first
+			} else if first["path"] != want["path"] || first["messageKey"] != want["messageKey"] || first["message"] != want["message"] {
+				t.Errorf("%s %s first error = %v, want the form's %v", tc.method, tc.path, first, want)
+			}
+			if _, fromYAML := tc.body["yaml"]; fromYAML && first["line"] != float64(line) {
+				t.Errorf("%s %s first error line = %v, want %d", tc.method, tc.path, first["line"], line)
+			}
+		})
 	}
 	if after := taskFiles(t, home); !reflect.DeepEqual(after, before) {
 		t.Errorf("a refused task changed the task files: %v, was %v", after, before)
@@ -2146,11 +2161,14 @@ func TestKillDuringTheSecondAttempt(t *testing.T) {
 	}
 	for i, want := range []struct{ harness, line string }{
 		{"claude-code", `"type":"rate_limit_event"`}, {"codex", `"type":"item.started"`}} {
-		c := captures[i].(map[string]any)
-		if text, _ := c["text"].(string); c["attempt"] != float64(i+1) || c["harness"] != want.harness ||
-			!strings.Contains(text, want.line) {
-			t.Errorf("attempt %d's capture %v lacks %s", i+1, c, want.line)
-		}
+		t.Run(want.harness, func(t *testing.T) {
+
+			c := captures[i].(map[string]any)
+			if text, _ := c["text"].(string); c["attempt"] != float64(i+1) || c["harness"] != want.harness ||
+				!strings.Contains(text, want.line) {
+				t.Errorf("GET /executions/%s/output attempt %d = %v, want %s with %s", id, i+1, c, want.harness, want.line)
+			}
+		})
 	}
 	d2.interruptedOnce(id, "o/r#5")
 
@@ -3204,9 +3222,12 @@ func TestKeychainTokenOpensTheAPI(t *testing.T) {
 		t.Fatalf("GET /health with the keychain's token: %d %s %s", status, kind, body)
 	}
 	for _, c := range []struct{ name, token string }{{"no Authorization header", ""}, {"another token", token + "x"}} {
-		if status, kind, body := d.requestAs(c.token, "GET", "/health", nil); !unauthorized(status, kind, body) {
-			t.Errorf("GET /health with %s: %d %s %s", c.name, status, kind, body)
-		}
+		t.Run(c.name, func(t *testing.T) {
+
+			if status, kind, body := d.requestAs(c.token, "GET", "/health", nil); !unauthorized(status, kind, body) {
+				t.Errorf("GET /health with %s = %d %s %s, want 401 unauthorized", c.name, status, kind, body)
+			}
+		})
 	}
 }
 

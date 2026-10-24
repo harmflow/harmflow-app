@@ -53,14 +53,17 @@ func TestRedact(t *testing.T) {
 		{"This session is run by HarmFlow, a local scheduler.", "This session is run by HarmFlow, a local scheduler."},
 		{"inside=1, side: left, consider=yes", "inside=1, side: left, consider=yes"},
 	} {
-		out := Redact(c.in)
-		if out != c.want {
-			t.Errorf("Redact(%q) = %q, want %q", c.in, out, c.want)
-		}
-		// A capture is redacted as it is written and again as it is read.
-		if again := Redact(out); again != out {
-			t.Errorf("Redact is not idempotent on %q: %q", out, again)
-		}
+		t.Run(c.in, func(t *testing.T) {
+
+			out := Redact(c.in)
+			if out != c.want {
+				t.Errorf("Redact(%q) = %q, want %q", c.in, out, c.want)
+			}
+			// A capture is redacted as it is written and again as it is read.
+			if again := Redact(out); again != out {
+				t.Errorf("Redact(%q) = %q, want it unchanged: redacting is idempotent", out, again)
+			}
+		})
 	}
 }
 

@@ -408,6 +408,13 @@ func (e *env) restart(t *testing.T) *env {
 	return n
 }
 
+// in is the env with its helpers reporting to t, for a subtest: a helper must not fail its parent test.
+func (e *env) in(t *testing.T) *env {
+	c := *e
+	c.t = t
+	return &c
+}
+
 // published lists the events of a type the daemon published since it started, from its replay buffer.
 func (e *env) published(eventType string) []domain.Event {
 	ch, _, cancel := e.app.Subscribe(1)
@@ -2803,10 +2810,13 @@ spec:
 	check := func(id string, eff any, want func(i int) any) {
 		t.Helper()
 		for i, p := range params {
-			got := valueAt(eff, append([]string{"spec"}, strings.Split(p.key, ".")...)...)
-			if fmt.Sprint(got) != fmt.Sprint(want(i)) {
-				t.Errorf("%s: effective spec.%s = %v, want %v", id, p.key, got, want(i))
-			}
+			t.Run(id+" "+p.key, func(t *testing.T) {
+
+				got := valueAt(eff, append([]string{"spec"}, strings.Split(p.key, ".")...)...)
+				if fmt.Sprint(got) != fmt.Sprint(want(i)) {
+					t.Errorf("CreateTask(%s).Effective spec.%s = %v, want %v", id, p.key, got, want(i))
+				}
+			})
 		}
 	}
 	for _, p := range params {
@@ -2947,29 +2957,32 @@ func TestBrokenFileFromTheWatcherIsNamed(t *testing.T) {
 		{"a syntax error", "apiVersion: [broken", "yaml_syntax", "", 1},
 		{"a schema rule", strings.Replace(view.YAML, "kind: Task", "kind: Job", 1), "schema_const", "/kind", 2},
 	} {
-		_ = os.WriteFile(view.Path, []byte(c.yaml), 0o600)
-		e.app.scanTaskFiles(t.Context())
-		got, _ := e.app.GetTask("ext")
-		if !got.Invalid || len(got.Warnings) != 1 || got.Validation == nil || len(got.Validation.Errors) == 0 {
-			t.Fatalf("%s: %+v", c.name, got)
-		}
-		namesFile(t, c.name+": the warning", got.Warnings[0].Text, "ext.yaml", c.key)
-		if got.Warnings[0].Subject != c.path {
-			t.Errorf("%s: the warning's subject %q, want %q", c.name, got.Warnings[0].Subject, c.path)
-		}
-		first := got.Validation.Errors[0]
-		namesFile(t, c.name+": the validation error", first.Text, "ext.yaml", c.key)
-		if first.Path != c.path || first.Line != c.line {
-			t.Errorf("%s: path %q line %d, want %q and %d", c.name, first.Path, first.Line, c.path, c.line)
-		}
-		evs := invalid()
-		if len(evs) != i+1 {
-			t.Fatalf("%s: %d task.invalid events, want %d", c.name, len(evs), i+1)
-		}
-		if ev := evs[i]; ev.MessageKey != "task_changed_externally_invalid" || ev.Params["file"] != "ext.yaml" ||
-			ev.Payload["file"] != "ext.yaml" {
-			t.Errorf("%s: task.invalid %+v", c.name, ev)
-		}
+		t.Run(c.name, func(t *testing.T) {
+
+			_ = os.WriteFile(view.Path, []byte(c.yaml), 0o600)
+			e.app.scanTaskFiles(t.Context())
+			got, _ := e.app.GetTask("ext")
+			if !got.Invalid || len(got.Warnings) != 1 || got.Validation == nil || len(got.Validation.Errors) == 0 {
+				t.Fatalf("GetTask(ext) = %+v, want it invalid, with one warning and a validation error", got)
+			}
+			namesFile(t, c.name+": the warning", got.Warnings[0].Text, "ext.yaml", c.key)
+			if got.Warnings[0].Subject != c.path {
+				t.Errorf("GetTask(ext).Warnings[0].Subject = %q, want %q", got.Warnings[0].Subject, c.path)
+			}
+			first := got.Validation.Errors[0]
+			namesFile(t, c.name+": the validation error", first.Text, "ext.yaml", c.key)
+			if first.Path != c.path || first.Line != c.line {
+				t.Errorf("GetTask(ext).Validation.Errors[0] at %q line %d, want %q line %d", first.Path, first.Line, c.path, c.line)
+			}
+			evs := invalid()
+			if len(evs) != i+1 {
+				t.Fatalf("task.invalid events = %d, want %d", len(evs), i+1)
+			}
+			if ev := evs[i]; ev.MessageKey != "task_changed_externally_invalid" || ev.Params["file"] != "ext.yaml" ||
+				ev.Payload["file"] != "ext.yaml" {
+				t.Errorf("task.invalid = %+v, want task_changed_externally_invalid naming ext.yaml", ev)
+			}
+		})
 	}
 }
 
@@ -3387,44 +3400,48 @@ func TestNoticesFollowTheStartingDefinition(t *testing.T) {
 		{"removed", "execution.completed", "execution.failed", 1, 0},
 		{"added", "execution.failed", "execution.completed", 0, 1},
 	} {
-		e.create(c.id, events(c.before))
-		first, _ := e.app.RunTask(c.id)
-		e.wait(first.ExecutionID, domain.StatusRunning)
-		view, _ := e.app.GetTask(c.id)
-		edited := strings.Replace(taskYAML(c.id, events(c.after)), "name: Task "+c.id, "name: Renamed "+c.id, 1)
-		if _, err := e.app.UpdateTask(t.Context(), c.id, TaskInput{YAML: edited, BaseRevision: view.Revision}); err != nil {
-			t.Fatal(err)
-		}
-		if view, _ := e.app.GetTask(c.id); view.Name != "Renamed "+c.id {
-			t.Fatalf("%s: the edit was not saved: %+v", c.id, view)
-		}
-		if err := os.WriteFile(filepath.Join(gates, c.id), nil, 0o600); err != nil {
-			t.Fatal(err)
-		}
-		e.wait(first.ExecutionID, domain.StatusCompleted)
-		e.idle(c.id) // the notice is decided once the execution has returned
-		got := e.completedNotices(first.ExecutionID)
-		if len(got) != c.first {
-			t.Errorf("%s: the running execution made %d completed notices, want %d", c.id, len(got), c.first)
-		}
-		for _, n := range got {
-			if n.Params["taskName"] != "Task "+c.id || n.Body != "Task "+c.id+" completed." {
-				t.Errorf("%s: a notice names the task as edited, not as it started: %+v", c.id, n)
-			}
-		}
+		t.Run(c.id, func(t *testing.T) {
+			e := e.in(t)
 
-		next, _ := e.app.RunTask(c.id)
-		e.wait(next.ExecutionID, domain.StatusCompleted)
-		e.idle(c.id)
-		got = e.completedNotices(next.ExecutionID)
-		if len(got) != c.next {
-			t.Errorf("%s: the next execution made %d completed notices, want %d", c.id, len(got), c.next)
-		}
-		for _, n := range got {
-			if n.Params["taskName"] != "Renamed "+c.id {
-				t.Errorf("%s: the next execution's notice misses the rename: %+v", c.id, n)
+			e.create(c.id, events(c.before))
+			first, _ := e.app.RunTask(c.id)
+			e.wait(first.ExecutionID, domain.StatusRunning)
+			view, _ := e.app.GetTask(c.id)
+			edited := strings.Replace(taskYAML(c.id, events(c.after)), "name: Task "+c.id, "name: Renamed "+c.id, 1)
+			if _, err := e.app.UpdateTask(t.Context(), c.id, TaskInput{YAML: edited, BaseRevision: view.Revision}); err != nil {
+				t.Fatal(err)
 			}
-		}
+			if view, _ := e.app.GetTask(c.id); view.Name != "Renamed "+c.id {
+				t.Fatalf("GetTask(%s) = %+v, want the edit saved", c.id, view)
+			}
+			if err := os.WriteFile(filepath.Join(gates, c.id), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			e.wait(first.ExecutionID, domain.StatusCompleted)
+			e.idle(c.id) // the notice is decided once the execution has returned
+			got := e.completedNotices(first.ExecutionID)
+			if len(got) != c.first {
+				t.Errorf("completedNotices(running execution) = %d, want %d", len(got), c.first)
+			}
+			for _, n := range got {
+				if n.Params["taskName"] != "Task "+c.id || n.Body != "Task "+c.id+" completed." {
+					t.Errorf("notice = %+v, want it to name the task as it started, Task %s", n, c.id)
+				}
+			}
+
+			next, _ := e.app.RunTask(c.id)
+			e.wait(next.ExecutionID, domain.StatusCompleted)
+			e.idle(c.id)
+			got = e.completedNotices(next.ExecutionID)
+			if len(got) != c.next {
+				t.Errorf("completedNotices(next execution) = %d, want %d", len(got), c.next)
+			}
+			for _, n := range got {
+				if n.Params["taskName"] != "Renamed "+c.id {
+					t.Errorf("notice = %+v, want it to name the task as renamed, Renamed %s", n, c.id)
+				}
+			}
+		})
 	}
 }
 

@@ -29,9 +29,12 @@ func TestCommitOf(t *testing.T) {
 		{"short revision", []debug.BuildSetting{{Key: "vcs.revision", Value: "45a5"}}, "45a5"},
 	}
 	for _, c := range cases {
-		if got := commitOf(c.settings); got != c.want {
-			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
-		}
+		t.Run(c.name, func(t *testing.T) {
+
+			if got := commitOf(c.settings); got != c.want {
+				t.Errorf("commitOf(%v) = %q, want %q", c.settings, got, c.want)
+			}
+		})
 	}
 }
 
