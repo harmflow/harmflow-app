@@ -23,6 +23,8 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
+// Server serves the local API over the use cases of App. The token it checks is held in memory and set with SetToken;
+// a rotation stores a new one, made by NewToken, in Secrets.
 type Server struct {
 	App      *app.App
 	Secrets  ports.SecretStore
@@ -56,15 +58,20 @@ func (s *Server) Listen(port int) error {
 	return nil
 }
 
-func (s *Server) Port() int       { return s.port }
+// Port is the port Listen bound.
+func (s *Server) Port() int { return s.port }
+
+// Address is the loopback address and port Listen bound, as host:port.
 func (s *Server) Address() string { return fmt.Sprintf("127.0.0.1:%d", s.port) }
 
+// SetToken sets the token every request must carry; with none set, every request is rejected.
 func (s *Server) SetToken(t string) {
 	s.mu.Lock()
 	s.token = t
 	s.mu.Unlock()
 }
 
+// Serve serves the API on the listener of Listen until Shutdown, which returns nil.
 func (s *Server) Serve() error {
 	s.srv = &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	err := s.srv.Serve(s.listener)
@@ -84,6 +91,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return err
 }
 
+// Handler routes the API's requests, every one through the Host, Origin, and token checks.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	h := func(pattern string, fn func(w http.ResponseWriter, r *http.Request)) { mux.HandleFunc(pattern, fn) }

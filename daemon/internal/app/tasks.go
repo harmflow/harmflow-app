@@ -43,6 +43,7 @@ type TaskView struct {
 	Validation *ValidationResult `json:"validation,omitempty"`
 }
 
+// ExecutionRef is a short reference to an execution, such as a task's last one.
 type ExecutionRef struct {
 	ID        string                 `json:"id"`
 	Status    domain.ExecutionStatus `json:"status"`
@@ -163,6 +164,8 @@ func (a *App) ListTasks() []TaskView {
 	return out
 }
 
+// GetTask returns a task's full view, with its document, effective document, YAML, and validation; an unknown task is
+// CodeNotFound.
 func (a *App) GetTask(id string) (TaskView, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

@@ -17,6 +17,7 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
+// KeychainService and KeychainAccount name the Keychain item of the token, the one the desktop reads too.
 const (
 	KeychainService = "com.harmflow.local-api"
 	KeychainAccount = "token"
@@ -40,10 +41,13 @@ type Keychain struct {
 
 var _ ports.SecretStore = Keychain{}
 
+// Kind implements ports.SecretStore: keychain.
 func (k Keychain) Kind() string { return "keychain" }
 
+// ErrNoToken means the store holds no token, which is a first start, and not a store it failed to read.
 var ErrNoToken = errors.New("no token stored")
 
+// Get implements ports.SecretStore: it reads the item through security, ErrNoToken when there is none.
 func (k Keychain) Get() (string, error) {
 	args := []string{"find-generic-password", "-s", k.Service, "-a", k.Account, "-w"}
 	if k.Path != "" {
@@ -121,14 +125,17 @@ func (k Keychain) Set(token string) error {
 	return nil
 }
 
+// File keeps the token in the file at Path, which only the user can read.
 type File struct {
 	Path string
 }
 
 var _ ports.SecretStore = File{}
 
+// Kind implements ports.SecretStore: file.
 func (f File) Kind() string { return "file" }
 
+// Get implements ports.SecretStore: it reads the file, ErrNoToken when it does not exist.
 func (f File) Get() (string, error) {
 	data, err := os.ReadFile(f.Path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -140,6 +147,7 @@ func (f File) Get() (string, error) {
 	return strings.TrimSpace(string(data)), nil
 }
 
+// Set implements ports.SecretStore: it writes the token to the file atomically, readable by the user alone.
 func (f File) Set(token string) error {
 	if err := os.MkdirAll(filepath.Dir(f.Path), 0o700); err != nil {
 		return err

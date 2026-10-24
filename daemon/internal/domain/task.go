@@ -4,6 +4,7 @@ package domain
 
 import "strings"
 
+// APIVersion and KindTask are the apiVersion and kind of every task file (D-070).
 const (
 	APIVersion = "harmflow/v1alpha1"
 	KindTask   = "Task"
@@ -36,6 +37,9 @@ const (
 	DefaultEffort = "default"
 )
 
+// The closed-set values of a task's fields, as contracts/schemas/task.schema.json names them: a schedule's missed-run
+// policy, a task's overlapping runs, a permissions profile and network, what a fallback fails over on, and an issue
+// queue's ordering and resume strategy.
 const (
 	MissedRunOnResume = "run_on_resume"
 	MissedRunSkip     = "skip"
@@ -70,6 +74,7 @@ type TaskDocument struct {
 	Spec       TaskSpec     `yaml:"spec" json:"spec"`
 }
 
+// TaskMetadata names a task: its identifier, its display name, and an optional description.
 type TaskMetadata struct {
 	ID          string `yaml:"id" json:"id"`
 	Name        string `yaml:"name" json:"name"`
@@ -111,10 +116,13 @@ type InlineScript struct {
 	Source      string   `yaml:"source" json:"source"`
 }
 
+// Workspace is where the harness session works; Path may use ${NAME} references and ~ (FS-001 FR-007).
 type Workspace struct {
 	Path string `yaml:"path,omitempty" json:"path,omitempty"`
 }
 
+// Schedule is when a task fires: a 5-field cron expression or an interval, never both, in Timezone or the system's time
+// zone (D-071). A task with no schedule runs only by hand.
 type Schedule struct {
 	Cron      string     `yaml:"cron,omitempty" json:"cron,omitempty"`
 	Interval  string     `yaml:"interval,omitempty" json:"interval,omitempty"`
@@ -122,31 +130,41 @@ type Schedule struct {
 	MissedRun *MissedRun `yaml:"missedRun,omitempty" json:"missedRun,omitempty"`
 }
 
+// MissedRun is what becomes of the firings missed while the daemon or the machine was unavailable: one catch-up when
+// it resumes, or none (D-071).
 type MissedRun struct {
 	Policy string `yaml:"policy,omitempty" json:"policy,omitempty"`
 }
 
+// Concurrency is whether a firing that arrives while the task runs waits in the queue or is skipped (D-072).
 type Concurrency struct {
 	OverlappingRuns string `yaml:"overlappingRuns,omitempty" json:"overlappingRuns,omitempty"`
 }
 
+// HarnessProfile is one harness a task may run with: its provider, and the model and effort to ask it for, where
+// DefaultModel and DefaultEffort leave the harness's own.
 type HarnessProfile struct {
 	Provider string `yaml:"provider" json:"provider"`
 	Model    string `yaml:"model,omitempty" json:"model,omitempty"`
 	Effort   string `yaml:"effort,omitempty" json:"effort,omitempty"`
 }
 
+// HarnessSelection is the harness profile a task prefers and the policy for failing over from it (D-067).
 type HarnessSelection struct {
 	Preferred HarnessProfile  `yaml:"preferred" json:"preferred"`
 	Fallback  *FallbackPolicy `yaml:"fallback,omitempty" json:"fallback,omitempty"`
 }
 
+// FallbackPolicy is when an execution fails over to the next candidate profile, and how often: On lists what triggers a
+// failover, and MaxSwitches caps the switches of one execution (D-067).
 type FallbackPolicy struct {
 	On          ChosenList       `yaml:"on,omitempty" json:"on,omitzero"`
 	Candidates  []HarnessProfile `yaml:"candidates,omitempty" json:"candidates,omitempty"`
 	MaxSwitches *int             `yaml:"maxSwitches,omitempty" json:"maxSwitches,omitempty"`
 }
 
+// Permissions is what the harness may do, translated to each harness's native controls (D-068): a profile, whether its
+// writes stay in the workspace, and its network access; Custom holds the lists of the custom profile.
 type Permissions struct {
 	Profile             string             `yaml:"profile,omitempty" json:"profile,omitempty"`
 	RestrictToWorkspace *bool              `yaml:"restrictToWorkspace,omitempty" json:"restrictToWorkspace,omitempty"`
@@ -154,28 +172,37 @@ type Permissions struct {
 	Custom              *CustomPermissions `yaml:"custom,omitempty" json:"custom,omitempty"`
 }
 
+// CustomPermissions is the tools a custom permissions profile allows and denies, and the paths it lets the harness
+// write.
 type CustomPermissions struct {
 	AllowedTools  []string `yaml:"allowedTools,omitempty" json:"allowedTools,omitempty"`
 	DeniedTools   []string `yaml:"deniedTools,omitempty" json:"deniedTools,omitempty"`
 	WritablePaths []string `yaml:"writablePaths,omitempty" json:"writablePaths,omitempty"`
 }
 
+// ExecutionLimits bounds an execution: a timeout shared by all its attempts, the grace a process gets to end once it is
+// asked to stop, and the retries after a rate limit.
 type ExecutionLimits struct {
 	TimeoutMinutes     *int       `yaml:"timeoutMinutes,omitempty" json:"timeoutMinutes,omitempty"`
 	CancelGraceSeconds *int       `yaml:"cancelGraceSeconds,omitempty" json:"cancelGraceSeconds,omitempty"`
 	RateLimit          *RateLimit `yaml:"rateLimit,omitempty" json:"rateLimit,omitempty"`
 }
 
+// RateLimit is how an attempt that hit a rate limit is retried on the same harness: up to MaxRetries times, waiting
+// from InitialWaitSeconds, doubled each retry, up to MaxWaitSeconds (D-082).
 type RateLimit struct {
 	MaxRetries         *int `yaml:"maxRetries,omitempty" json:"maxRetries,omitempty"`
 	InitialWaitSeconds *int `yaml:"initialWaitSeconds,omitempty" json:"initialWaitSeconds,omitempty"`
 	MaxWaitSeconds     *int `yaml:"maxWaitSeconds,omitempty" json:"maxWaitSeconds,omitempty"`
 }
 
+// Notifications is how a task tells its user about its executions; native notifications are the only kind.
 type Notifications struct {
 	Native *NativeNotifications `yaml:"native,omitempty" json:"native,omitempty"`
 }
 
+// NativeNotifications is whether a task posts the operating system's notifications, and for which events; Events left
+// out takes DefaultNotifiedEvents (FS-011 FR-002).
 type NativeNotifications struct {
 	Enabled *bool      `yaml:"enabled,omitempty" json:"enabled,omitempty"`
 	Events  ChosenList `yaml:"events,omitempty" json:"events,omitzero"`
@@ -186,20 +213,28 @@ type NativeNotifications struct {
 // IsZero, which is true for nil alone.
 type ChosenList []string
 
+// IsZero reports whether the list was left out, as yaml.v3's omitempty and encoding/json's omitzero ask.
 func (l ChosenList) IsZero() bool { return l == nil }
 
+// RepositoryTarget is a GitHub repository a task works on: its owner/repo name, the path of its local clone, and the
+// branch its work starts from, DefaultBaseBranch when left out.
 type RepositoryTarget struct {
 	Name       string `yaml:"name" json:"name"`
 	LocalPath  string `yaml:"localPath" json:"localPath"`
 	BaseBranch string `yaml:"baseBranch,omitempty" json:"baseBranch,omitempty"`
 }
 
+// GitHubIssueImplementation is the parameters of the github-issue-implementation type: its repositories, its issue
+// queue, and its delivery (FS-006, FS-007). Which issues are eligible is written in the prompt (D-093).
 type GitHubIssueImplementation struct {
 	Repositories []RepositoryTarget `yaml:"repositories" json:"repositories"`
 	Queue        *IssueQueue        `yaml:"queue,omitempty" json:"queue,omitempty"`
 	Delivery     *Delivery          `yaml:"delivery,omitempty" json:"delivery,omitempty"`
 }
 
+// IssueQueue is how a github-issue-implementation task picks its work items each time it fires: the order issues are
+// read in, how many are discovered and worked, whether work to resume comes before new issues, and how often one item
+// is resumed or retried before it needs a human.
 type IssueQueue struct {
 	Ordering              string `yaml:"ordering,omitempty" json:"ordering,omitempty"`
 	MaxDiscoveredPerCycle *int   `yaml:"maxDiscoveredPerCycle,omitempty" json:"maxDiscoveredPerCycle,omitempty"`
@@ -209,6 +244,7 @@ type IssueQueue struct {
 	MaxFailedRetries      *int   `yaml:"maxFailedRetries,omitempty" json:"maxFailedRetries,omitempty"`
 }
 
+// Delivery is how a work item is delivered: how many times the session tries to repair failing tests.
 type Delivery struct {
 	TestRepairAttempts *int `yaml:"testRepairAttempts,omitempty" json:"testRepairAttempts,omitempty"`
 }

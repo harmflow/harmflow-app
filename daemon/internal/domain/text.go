@@ -64,6 +64,7 @@ func (t *Text) render() {
 // TextError is an error whose text the desktop can translate.
 type TextError struct{ Text }
 
+// Error returns the en-US message.
 func (e *TextError) Error() string { return e.Message }
 
 // TextErr is the error of T(key, template, params...).

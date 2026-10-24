@@ -22,6 +22,8 @@ type TaskInput struct {
 	BaseRevision string          `json:"baseRevision,omitempty"`
 }
 
+// ValidationResult is the outcome of validating a task: its errors and warnings, located in the YAML when possible, and
+// the document as read, with its defaults applied, and as YAML. Valid means it has no error.
 type ValidationResult struct {
 	Valid     bool           `json:"valid"`
 	Errors    []schema.Issue `json:"errors"`

@@ -23,17 +23,22 @@ type Settings struct {
 	OnboardingCompleted bool     `json:"onboardingCompleted"`
 }
 
+// AutostartView is whether the daemon starts with the user's session, by which mechanism, none when the daemon has no
+// service manager, and where its definition lives.
 type AutostartView struct {
 	Enabled   bool   `json:"enabled"`
 	Mechanism string `json:"mechanism"`
 	PlistPath string `json:"plistPath,omitempty"`
 }
 
+// SettingsView is the settings as the API returns them, with the state of autostart.
 type SettingsView struct {
 	Settings
 	Autostart AutostartView `json:"autostart"`
 }
 
+// SettingsPatch is a change to the settings: a nil field leaves its setting as it is, and a path-variable map or a
+// folder list that is set replaces the whole one. Autostart enables or disables the start with the user's session.
 type SettingsPatch struct {
 	Language            *string           `json:"language"`
 	TrayEnabled         *bool             `json:"trayEnabled"`
@@ -70,6 +75,7 @@ func (a *App) loadSettings() error {
 	return nil
 }
 
+// GetSettings returns a copy of the settings, with the state of autostart.
 func (a *App) GetSettings() SettingsView {
 	a.mu.Lock()
 	s := a.settings

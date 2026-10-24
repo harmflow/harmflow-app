@@ -42,6 +42,7 @@ type IntervalRule struct {
 	text  string
 }
 
+// ParseInterval reads an interval: a whole, positive number of minutes, hours, or days, such as 30m, 2h, or 1d.
 func ParseInterval(text string) (*IntervalRule, error) {
 	t := strings.TrimSpace(text)
 	if len(t) < 2 {
@@ -70,10 +71,12 @@ func invalidInterval(text string) error {
 		`invalid interval "{{interval}}": use a whole number of minutes, hours, or days, such as 30m`, "interval", text)
 }
 
+// Next implements Rule: the instant, truncated to the minute, plus the interval.
 func (r *IntervalRule) Next(after time.Time) time.Time {
 	return after.Truncate(time.Minute).Add(r.Every)
 }
 
+// String implements Rule: the interval as the task wrote it, trimmed.
 func (r *IntervalRule) String() string { return r.text }
 
 // CronRule is a 5-field cron expression evaluated in wall-clock time of its location.
@@ -202,6 +205,7 @@ func fieldValue(s string, names map[string]int) (int, error) {
 	return strconv.Atoi(s)
 }
 
+// String implements Rule: the cron expression as the task wrote it, trimmed.
 func (r *CronRule) String() string { return r.text }
 
 // Location is the time zone the rule is evaluated in.

@@ -27,8 +27,12 @@ type Error struct {
 	CurrentRevision string
 }
 
+// Error returns the en-US message.
 func (e *Error) Error() string { return e.Message }
 
+// The codes of an Error, which the API answers with an HTTP status: a malformed request, a missing task or execution,
+// a conflict with the current state, a task that fails validation, a disabled task asked to run, and running executions
+// that a stop must confirm.
 const (
 	CodeBadRequest        = "bad_request"
 	CodeNotFound          = "not_found"
@@ -57,6 +61,8 @@ type Paths struct {
 	UserHome    string
 }
 
+// NewPaths lays the directories out under home, the installation's directory; userHome is the user's home directory,
+// and builtins the directory of the built-in agents and skills.
 func NewPaths(home, userHome, builtins string) Paths {
 	return Paths{
 		Home:        home,
@@ -73,6 +79,8 @@ func NewPaths(home, userHome, builtins string) Paths {
 	}
 }
 
+// Deps is what New wires the use cases to: the installation's paths, the build, the ports, and the intervals tests
+// shorten. A zero clock, wake monitor, location, interval, operating system, or logger takes its default.
 type Deps struct {
 	Paths      Paths
 	Version    string
@@ -124,6 +132,9 @@ type runHandle struct {
 	done            chan struct{}
 }
 
+// App holds the daemon's use cases and their in-memory state: the tasks, executions, schedule, ledger, harness
+// inventory, notifications, and settings. New builds it; Start loads its state and starts its loops, and Stop ends
+// them.
 type App struct {
 	d         Deps
 	log       *log.Logger
@@ -172,6 +183,8 @@ type App struct {
 	shutdownOnce      sync.Once
 }
 
+// New builds the use cases over d, with its defaults filled in, and creates the directories they write to; it loads
+// nothing, which Start does.
 func New(d Deps) (*App, error) {
 	if d.Clock == nil {
 		d.Clock = realClock{}
@@ -342,22 +355,36 @@ func (a *App) emitFor(e domain.Event, started *domain.TaskDocument) domain.Event
 	return stored
 }
 
-func (a *App) Version() string      { return a.d.Version }
-func (a *App) Commit() string       { return a.d.Commit }
-func (a *App) BuiltAt() time.Time   { return a.d.BuiltAt }
-func (a *App) StartedAt() time.Time { return a.startedAt }
-func (a *App) Paths() Paths         { return a.d.Paths }
+// Version is the daemon's version.
+func (a *App) Version() string { return a.d.Version }
 
+// Commit is the short commit the daemon was built from, as Deps.Commit gives it.
+func (a *App) Commit() string { return a.d.Commit }
+
+// BuiltAt is when the daemon was built; zero without a build time.
+func (a *App) BuiltAt() time.Time { return a.d.BuiltAt }
+
+// StartedAt is when New built the use cases, by their clock.
+func (a *App) StartedAt() time.Time { return a.startedAt }
+
+// Paths are the installation's directories.
+func (a *App) Paths() Paths { return a.d.Paths }
+
+// AcceptingFirings reports whether the daemon still starts executions: false once it is stopping or was asked to stop.
 func (a *App) AcceptingFirings() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.accepting
 }
 
+// Subscribe streams the events after the id after, the buffered ones then the live ones, and reports whether the buffer
+// no longer reaches back to that id; the function it returns ends the subscription.
 func (a *App) Subscribe(after int64) (<-chan domain.Event, bool, func()) {
 	return a.d.Events.Subscribe(after)
 }
 
+// ExecutionEvents returns the stored events of an execution after the id after, at most limit when it is positive, and
+// whether retention deleted its log (D-073); an unknown execution is CodeNotFound.
 func (a *App) ExecutionEvents(id string, after int64, limit int) ([]domain.Event, bool, error) {
 	a.mu.Lock()
 	_, ok := a.executions[id]

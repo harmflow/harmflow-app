@@ -70,6 +70,8 @@ type Dir struct {
 	Builtin bool
 }
 
+// Item looks up the agent or skill of that name under the root, its description the first line of its front matter's;
+// false for another kind or when its file cannot be read.
 func (d Dir) Item(kind, name string) (ports.ResolvedItem, bool) {
 	var path, file string
 	switch kind {
@@ -90,6 +92,7 @@ func (d Dir) Item(kind, name string) (ports.ResolvedItem, bool) {
 	return ports.ResolvedItem{Name: name, Kind: kind, Builtin: d.Builtin, Path: path, Description: firstLine(fm.Description)}, true
 }
 
+// Items lists the agents or skills under the root, sorted by name, leaving out any Item cannot read.
 func (d Dir) Items(kind string) []ports.ResolvedItem {
 	var names []string
 	switch kind {

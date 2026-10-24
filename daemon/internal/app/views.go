@@ -61,6 +61,8 @@ func trimParams(p map[string]string, n int) map[string]string {
 	return out
 }
 
+// ExecutionFilter selects executions: of one task, in some statuses, active or not, and created before an instant; a
+// zero field selects all. Limit caps the list, 100 when it is not between 1 and 500.
 type ExecutionFilter struct {
 	TaskID   string
 	Statuses []string
@@ -69,6 +71,7 @@ type ExecutionFilter struct {
 	Before   *time.Time
 }
 
+// ListExecutions lists the executions the filter selects, newest first.
 func (a *App) ListExecutions(f ExecutionFilter) []ExecutionSummary {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -123,6 +126,7 @@ type ExecutionView struct {
 	Script             *domain.ScriptRun       `json:"script,omitempty"`
 }
 
+// GetExecution returns a copy of an execution's full record; an unknown execution is CodeNotFound.
 func (a *App) GetExecution(id string) (ExecutionView, error) {
 	a.mu.Lock()
 	x, ok := a.executions[id]
@@ -152,6 +156,7 @@ type ExecutionOutput struct {
 	LogExpired bool            `json:"logExpired"`
 }
 
+// AttemptOutput is the end of one attempt's capture: Text starts at byte Offset of a capture of Size bytes.
 type AttemptOutput struct {
 	Attempt int    `json:"attempt"`
 	Harness string `json:"harness"`
@@ -183,6 +188,8 @@ func (a *App) ExecutionOutput(id string, limit int64) (ExecutionOutput, error) {
 	return out, nil
 }
 
+// Activity counts executions per hour, oldest hour first: those started in it, those started in it after waiting more
+// than 5 seconds, and those that ended in it completed or failed.
 type Activity struct {
 	Running   []int `json:"running"`
 	Queued    []int `json:"queued"`
@@ -190,6 +197,8 @@ type Activity struct {
 	Failed    []int `json:"failed"`
 }
 
+// Stats is the counters of the executions screen: executions running and queued now, those that completed or failed
+// since midnight, the system gauges, and the activity of the last hours.
 type Stats struct {
 	Running        int            `json:"running"`
 	Queued         int            `json:"queued"`
@@ -255,6 +264,7 @@ func (a *App) Stats() Stats {
 	return s
 }
 
+// Upcoming is a task's next scheduled firing.
 type Upcoming struct {
 	TaskID     string    `json:"taskId"`
 	TaskName   string    `json:"taskName"`
@@ -262,6 +272,8 @@ type Upcoming struct {
 	NextFireAt time.Time `json:"nextFireAt"`
 }
 
+// QueueView is the queue as the API returns it: the firings waiting for their task, oldest first, the next scheduled
+// firings, soonest first, and the work items, last updated first.
 type QueueView struct {
 	Waiting   []ExecutionSummary `json:"waiting"`
 	Upcoming  []Upcoming         `json:"upcoming"`
@@ -317,6 +329,8 @@ type Diagnostics struct {
 	BuiltinsDir  string `json:"builtinsDir"`
 }
 
+// Diagnostics returns the version, the installation's directories, the API's address, and the kind of the token's
+// store.
 func (a *App) Diagnostics(address, tokenStore string) Diagnostics {
 	p := a.d.Paths
 	return Diagnostics{Version: a.d.Version, Address: address, HomeDir: p.Home, TasksDir: p.Tasks, StateDir: p.State,

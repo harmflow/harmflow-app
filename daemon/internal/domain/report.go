@@ -10,6 +10,8 @@ type ExecutionReport struct {
 	Warnings      []ReportWarning  `json:"warnings,omitempty"`
 }
 
+// ReportWarning is a warning in report.json: a code, the agent's message, and the repository it is about. The executor
+// records it as a Warning, keeping repository_unprotected and conflicting_activity and reading any other code as other.
 type ReportWarning struct {
 	Code       string `json:"code"`
 	Message    string `json:"message"`
