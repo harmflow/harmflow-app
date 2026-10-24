@@ -8,6 +8,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"go.uber.org/goleak"
 )
 
 // The commit go build stamps tells builds of the same version apart in Settings → About.
@@ -83,4 +85,9 @@ func TestAcquireLockReportsOtherFailures(t *testing.T) {
 	if !errors.Is(err, syscall.ENOTSUP) || !strings.Contains(err.Error(), path) || strings.Contains(err.Error(), "already running") {
 		t.Errorf("acquireLock(%s) = %v, want an error naming the file and wrapping %v", path, err, syscall.ENOTSUP)
 	}
+}
+
+// run serves the local API on a goroutine; none may outlive the test that started it (D-132).
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
 }
