@@ -43,6 +43,13 @@ export const native = {
     if (isTauri()) await invoke("set_tray_labels", { labels });
   },
 
+  /** The web view's zoom, in percent (D-110). A plain browser keeps its own, in its View menu. */
+  async setZoom(percent: number): Promise<void> {
+    if (!isTauri()) return;
+    const { getCurrentWebview } = await import("@tauri-apps/api/webview");
+    await getCurrentWebview().setZoom(percent / 100);
+  },
+
   /** The first render committed. The shell decides whether that shows the window: a login start stays hidden. */
   async interfaceReady(): Promise<void> {
     if (isTauri()) await invoke("interface_ready");
