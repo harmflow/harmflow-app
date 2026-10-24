@@ -80,6 +80,20 @@ fn read_token(home: &Path, store: Option<&str>) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+fn status_from_health(body: &Value, address: Option<String>) -> DaemonStatus {
+    let get = |key: &str| body.get(key).and_then(Value::as_str).map(str::to_string);
+    DaemonStatus {
+        running: true,
+        address,
+        pid: body.get("pid").and_then(Value::as_u64).map(|p| p as u32),
+        version: get("version"),
+        commit: get("commit"),
+        built_at: get("builtAt"),
+        started_at: get("startedAt"),
+        error: None,
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct DaemonStatus {
@@ -90,6 +104,10 @@ pub struct DaemonStatus {
     pub pid: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub built_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub started_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -205,16 +223,8 @@ impl DaemonClient {
     pub async fn status(&self) -> DaemonStatus {
         let res = self.request("GET", "/health", None).await;
         if res.status == 200 {
-            let get = |k: &str| res.body.get(k).and_then(Value::as_str).map(str::to_string);
             let address = self.connection().ok().map(|c| c.runtime.address);
-            return DaemonStatus {
-                running: true,
-                address,
-                pid: res.body.get("pid").and_then(Value::as_u64).map(|p| p as u32),
-                version: get("version"),
-                started_at: get("startedAt"),
-                error: None,
-            };
+            return status_from_health(&res.body, address);
         }
         self.invalidate();
         let error = res
@@ -340,6 +350,20 @@ mod tests {
         assert_eq!(rt.address, "127.0.0.1:4321");
         assert_eq!(read_token(&dir, rt.token_store.as_deref()).unwrap(), "secret");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn health_status_keeps_build_identity() {
+        let body = serde_json::json!({
+            "pid": 7,
+            "version": "0.1.0",
+            "commit": "abc1234-dirty",
+            "builtAt": "2026-10-20T10:00:00Z",
+            "startedAt": "2026-10-20T10:00:00Z"
+        });
+        let status = status_from_health(&body, Some("127.0.0.1:4321".into()));
+        assert_eq!(status.commit.as_deref(), Some("abc1234-dirty"));
+        assert_eq!(status.built_at.as_deref(), Some("2026-10-20T10:00:00Z"));
     }
 
     /// The daemon `daemon_start` launches leads a process group of its own, apart from the app's. The stand-in for
