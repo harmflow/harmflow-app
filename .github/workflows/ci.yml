@@ -61,6 +61,41 @@ jobs:
             if touched "$pattern"; then echo "$part=true" >> "$GITHUB_OUTPUT"; else echo "$part=false" >> "$GITHUB_OUTPUT"; fi
           done
 
+  security:
+    name: Security (changed commits)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          set -euo pipefail
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl --fail --location --retry 3 --retry-all-errors --retry-delay 2 \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}" \
+            --output "$RUNNER_TEMP/$archive"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/$archive" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+          gitleaks version
+      - name: Scan changed commits
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            range="${BASE_SHA}..${HEAD_SHA}"
+          else
+            range="HEAD^..HEAD"
+          fi
+          gitleaks git --config .gitleaks.toml --redact --no-banner --log-opts="$range" --exit-code 1
+
   generated:
     name: Generated code is current
     needs: changes
@@ -96,6 +131,9 @@ jobs:
       # (D-132): standard library, third party, then the module's own. Run it locally with the same command.
       - name: Import groups
         run: make check-imports
+      - name: Go vulnerability audit
+        working-directory: daemon
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
       - run: make test-daemon
         env:
           GOFLAGS: -race
@@ -111,6 +149,9 @@ jobs:
         with:
           go-version-file: daemon/go.mod
           cache-dependency-path: daemon/go.sum
+      - name: Go vulnerability audit
+        working-directory: tests
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
       # The integration tests, and the daemon's coverage held against daemon/coverage-floors.txt (ADR-015). This is
       # the only job where the unit and integration data can both exist; the daemon job keeps -race.
       - run: make coverage-daemon
@@ -147,6 +188,13 @@ jobs:
         with:
           workspaces: desktop/src-tauri
       - run: make deps
+      - name: JavaScript dependency audit
+        run: pnpm -C desktop audit --audit-level high
+      - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
+        with:
+          tool: cargo-audit
+      - name: Rust dependency audit
+        run: cargo audit --file desktop/src-tauri/Cargo.lock
       # The bundle's sidecar must exist for tauri-build, and the interface for the shell.
       - run: make sidecar
       - run: pnpm -C desktop build
