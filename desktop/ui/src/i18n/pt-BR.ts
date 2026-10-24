@@ -824,6 +824,8 @@ export const ptBR: Resources = {
       saved: "Salva.",
       discard: "Descartar",
       unsaved: "Alterações não salvas",
+      leaveTitle: "Descartar as alterações não salvas?",
+      leaveConfirm: "Sair do editor descarta as alterações que não foram salvas.",
       errorsTitle: "Validação",
       warningsTitle: "Avisos",
       line: "linha {{line}}, coluna {{column}}",

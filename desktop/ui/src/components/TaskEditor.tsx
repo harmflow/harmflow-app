@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ApiError, api } from "../api/client";
+import { native } from "../api/native";
 import type { Task, TaskInput, ValidationResult } from "../api/types";
 import { daemonText } from "../lib/daemonText";
 import { useDebounced } from "../lib/hooks";
@@ -16,6 +17,9 @@ import { YamlEditor } from "./YamlEditor";
 
 type EditorTab = "form" | "yaml";
 
+/** Asks whether the editor may be left, discarding its unsaved changes; resolves true to leave. */
+export type LeaveCheck = () => Promise<boolean>;
+
 export interface TaskEditorProps {
   mode: "create" | "edit";
   /** For edit: the task as loaded. */
@@ -24,6 +28,8 @@ export interface TaskEditorProps {
   initial?: Doc;
   onClose: () => void;
   onSaved: (task: Task) => void;
+  /** Receives the question to ask before leaving while the editor holds unsaved changes, and null once it holds none. */
+  onLeaveCheck?: (check: LeaveCheck | null) => void;
 }
 
 /** YAML for a document the daemon could not serialize; JSON is valid YAML, so nothing is lost. */
@@ -31,7 +37,7 @@ function fallbackYaml(doc: Doc): string {
   return JSON.stringify(doc, null, 2) + "\n";
 }
 
-export function TaskEditor({ mode, task, initial, onClose, onSaved }: TaskEditorProps) {
+export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck }: TaskEditorProps) {
   const { t } = useTranslation();
   const catalog = useStore((s) => s.catalog);
   const harnesses = useStore((s) => s.harnesses);
@@ -51,6 +57,14 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved }: TaskEditor
   const showExternal = !!task && externalChange !== undefined && externalChange > openedAtEvent.current && !externalSeen;
 
   const input = (): TaskInput => (tab === "form" ? { document: doc, baseRevision } : { yaml, baseRevision });
+
+  // Every way out of an editor with unsaved changes asks first, except Save and the editor's own Discard; one with
+  // none closes at once. The shell owns the ways out, so it holds the question while there is one.
+  useEffect(() => {
+    if (!dirty || !onLeaveCheck) return;
+    onLeaveCheck(() => native.confirm(t("tasks.editor.leaveConfirm"), t("tasks.editor.leaveTitle"), t("tasks.editor.discard"), t("common.cancel")));
+    return () => onLeaveCheck(null);
+  }, [dirty, onLeaveCheck, t]);
 
   // Live validation of whatever the current tab holds.
   const probe = useDebounced(tab === "form" ? JSON.stringify(doc) : yaml, 500);

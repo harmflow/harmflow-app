@@ -813,6 +813,8 @@ export const enUS = {
       saved: "Saved.",
       discard: "Discard",
       unsaved: "Unsaved changes",
+      leaveTitle: "Discard unsaved changes?",
+      leaveConfirm: "Leaving the editor discards the changes that were not saved.",
       errorsTitle: "Validation",
       warningsTitle: "Warnings",
       line: "line {{line}}, column {{column}}",

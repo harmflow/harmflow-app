@@ -826,6 +826,8 @@ export const esES: Resources = {
       saved: "Guardada.",
       discard: "Descartar",
       unsaved: "Cambios sin guardar",
+      leaveTitle: "¿Descartar los cambios sin guardar?",
+      leaveConfirm: "Salir del editor descarta los cambios que no se guardaron.",
       errorsTitle: "Validación",
       warningsTitle: "Avisos",
       line: "línea {{line}}, columna {{column}}",

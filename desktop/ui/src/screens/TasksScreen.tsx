@@ -7,7 +7,7 @@ import { native } from "../api/native";
 import type { Task, TaskSummary } from "../api/types";
 import { HarnessLabel } from "../components/Shell";
 import { Icon } from "../components/Icon";
-import { TaskEditor, ValidationPanel } from "../components/TaskEditor";
+import { TaskEditor, ValidationPanel, type LeaveCheck } from "../components/TaskEditor";
 import { toast } from "../components/toast";
 import { Banner, Button, Checkbox, Chip, EmptyState, IconButton, KeyValue, Modal, Select, StatusChip, TextArea, TextInput, Toggle, cx } from "../components/ui";
 import { daemonText } from "../lib/daemonText";
@@ -16,7 +16,8 @@ import { useNow } from "../lib/hooks";
 import { getIn, newTaskDocument, type TemplateKind } from "../lib/taskForm";
 import { actions, useStore } from "../state/store";
 
-export type TaskView = { kind: "list" } | { kind: "new"; template: TemplateKind } | { kind: "edit"; id: string };
+/** A new task's `pick` counts the template picks, so that each one opens an editor of its own. */
+export type TaskView = { kind: "list" } | { kind: "new"; template: TemplateKind; pick?: number } | { kind: "edit"; id: string };
 
 type Filter = "all" | "enabled" | "disabled" | "warnings";
 
@@ -24,17 +25,38 @@ export function TasksScreen({
   view,
   onView,
   onOpenExecution,
+  onLeaveCheck,
 }: {
   view: TaskView;
   onView: (v: TaskView) => void;
   onOpenExecution: (id: string) => void;
+  onLeaveCheck?: (check: LeaveCheck | null) => void;
 }) {
-  if (view.kind === "new") return <NewTask template={view.template} onDone={() => onView({ kind: "list" })} onSaved={(task) => onView({ kind: "edit", id: task.id })} />;
-  if (view.kind === "edit") return <EditTask id={view.id} onDone={() => onView({ kind: "list" })} />;
+  if (view.kind === "new")
+    return (
+      <NewTask
+        key={`${view.template}-${view.pick ?? 0}`}
+        template={view.template}
+        onDone={() => onView({ kind: "list" })}
+        onSaved={(task) => onView({ kind: "edit", id: task.id })}
+        onLeaveCheck={onLeaveCheck}
+      />
+    );
+  if (view.kind === "edit") return <EditTask id={view.id} onDone={() => onView({ kind: "list" })} onLeaveCheck={onLeaveCheck} />;
   return <TaskList onView={onView} onOpenExecution={onOpenExecution} />;
 }
 
-function NewTask({ template, onDone, onSaved }: { template: TemplateKind; onDone: () => void; onSaved: (t: Task) => void }) {
+function NewTask({
+  template,
+  onDone,
+  onSaved,
+  onLeaveCheck,
+}: {
+  template: TemplateKind;
+  onDone: () => void;
+  onSaved: (t: Task) => void;
+  onLeaveCheck?: (check: LeaveCheck | null) => void;
+}) {
   const { t } = useTranslation();
   const catalog = useStore((s) => s.catalog);
   const initial = useMemo(
@@ -53,12 +75,12 @@ function NewTask({ template, onDone, onSaved }: { template: TemplateKind; onDone
   );
   return (
     <div className="screen">
-      <TaskEditor mode="create" initial={initial} onClose={onDone} onSaved={onSaved} />
+      <TaskEditor mode="create" initial={initial} onClose={onDone} onSaved={onSaved} onLeaveCheck={onLeaveCheck} />
     </div>
   );
 }
 
-function EditTask({ id, onDone }: { id: string; onDone: () => void }) {
+function EditTask({ id, onDone, onLeaveCheck }: { id: string; onDone: () => void; onLeaveCheck?: (check: LeaveCheck | null) => void }) {
   const [task, setTask] = useState<Task | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -68,7 +90,7 @@ function EditTask({ id, onDone }: { id: string; onDone: () => void }) {
   if (!task) return null;
   return (
     <div className="screen">
-      <TaskEditor key={task.id} mode="edit" task={task} onClose={onDone} onSaved={(saved) => setTask(saved)} />
+      <TaskEditor key={task.id} mode="edit" task={task} onClose={onDone} onSaved={(saved) => setTask(saved)} onLeaveCheck={onLeaveCheck} />
     </div>
   );
 }

@@ -1,9 +1,11 @@
 // @vitest-environment happy-dom
 // Drives the dashboard's shell in a DOM: ⌘B and the sidebar's own control collapse the sidebar to its icons and expand
 // it again, the choice outlives a restart, and the daemon's connection state is the topbar's alone. ⌘N opens the
-// template picker as the topbar's New task does (harmflow-app#169). ⌘+, ⌘−, and ⌘0 zoom the dashboard everywhere,
-// and the level outlives a restart (harmflow-app#55). A render error never leaves the window empty, and the interface
-// tells the shell when it has painted (harmflow-app#96).
+// template picker as the topbar's New task does (harmflow-app#169). Every way out of a task editor with unsaved
+// changes asks first, and each template pick opens an editor of its own (harmflow-app#170). ⌘+, ⌘−, and ⌘0 zoom the
+// dashboard everywhere, and the level outlives a restart (harmflow-app#55). A render error never leaves the window
+// empty, and the interface tells the shell when it has painted (harmflow-app#96).
+import { EditorView } from "@codemirror/view";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { act, createElement } from "react";
@@ -11,7 +13,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root as ReactRoot } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { native } from "./api/native";
-import type { Settings } from "./api/types";
+import type { Settings, Task, TaskSummary } from "./api/types";
 import { Root } from "./App";
 import { rootOptions } from "./components/ErrorBoundary";
 import { YamlEditor } from "./components/YamlEditor";
@@ -45,12 +47,16 @@ vi.mock("./components/Shell", async (importOriginal) => {
   };
 });
 
+// The daemon answers the paths a test sets here, and nothing else.
+const daemon = vi.hoisted(() => ({ answers: new Map<string, unknown>() }));
+
 vi.mock("./api/transport", () => ({
   isTauri: () => false,
   EVENT_TYPES: [],
   transport: {
     mode: "http",
-    request: async () => ({ status: 404, body: null }),
+    request: async (_method: string, path: string) =>
+      daemon.answers.has(path) ? { status: 200, body: daemon.answers.get(path) } : { status: 404, body: null },
     requestText: async () => ({ status: 404, text: "" }),
     stream: () => () => {},
   },
@@ -112,6 +118,7 @@ beforeEach(() => {
 
 afterEach(() => {
   quit();
+  daemon.answers.clear();
 });
 
 /** Mounts the interface as main.tsx does, with the same root options. */
@@ -368,6 +375,218 @@ describe("new task", () => {
     expect(tooltip()).toBe("New task⌘N");
     await act(async () => newTaskButton().click());
     expect(tooltip()).toBeNull(); // the picker covers the button
+  });
+});
+
+describe("unsaved changes", () => {
+  let confirm: MockInstance<typeof native.confirm>;
+
+  beforeEach(() => {
+    confirm = vi.spyOn(native, "confirm");
+  });
+
+  afterEach(() => {
+    confirm.mockRestore();
+  });
+
+  const title = () => host!.querySelector(".topbar__title")!.textContent;
+  const editor = () => host!.querySelector(".editor");
+  const nameField = () => host!.querySelector<HTMLInputElement>(".editor input")!;
+  const unsaved = () => host!.querySelector(".editor__dirty")?.textContent ?? null;
+  const button = (scope: ParentNode, label: string) => [...scope.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === label)!;
+  const newTaskButton = () => host!.querySelector<HTMLButtonElement>('.topbar__actions button[aria-keyshortcuts="Meta+N"]')!;
+  const asked = () => confirm.mock.calls.length;
+
+  /** Lets an answered question reach the screen. */
+  const settle = () => act(() => new Promise<void>((resolve) => setImmediate(resolve)));
+  const click = async (target: HTMLElement) => {
+    await act(async () => target.click());
+    await settle();
+  };
+
+  /** Picks a template in the topbar's New task picker. */
+  async function newTask(template: string) {
+    await click(newTaskButton());
+    await click([...host!.querySelectorAll<HTMLButtonElement>(".template")].find((b) => b.textContent?.includes(template))!);
+  }
+
+  /** Types into a text field as React sees it. */
+  async function type(input: HTMLInputElement, value: string) {
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => {
+      setValue.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+
+  /** A new task's editor with an unsaved name. */
+  async function editing() {
+    await launch();
+    await newTask("General task");
+    await type(nameField(), "Release notes");
+    expect(unsaved()).toBe("Unsaved changes");
+  }
+
+  it("asks before the sidebar leaves, keeps the editor and its tab on Cancel, and leaves on Discard", async () => {
+    daemon.answers.set("/tasks/validate", { valid: true, errors: [], warnings: [], yaml: "metadata:\n  name: Release notes\n" });
+    await editing();
+    await click(button(host!.querySelector(".tabs")!, "YAML"));
+    expect(host!.querySelector(".cm-content")).not.toBeNull();
+
+    confirm.mockResolvedValue(false);
+    await click(navButton("Executions"));
+    expect(confirm).toHaveBeenLastCalledWith("Leaving the editor discards the changes that were not saved.", "Discard unsaved changes?", "Discard", "Cancel");
+    // Tasks resets the screen to its list, so it asks too.
+    await click(navButton("Tasks"));
+    expect(asked()).toBe(2);
+    expect(title()).toBe("Tasks");
+    expect(unsaved()).toBe("Unsaved changes");
+    expect(host!.querySelector('[role="tab"][aria-selected="true"]')!.textContent).toBe("YAML");
+    expect(host!.querySelector(".cm-content")!.textContent).toContain("Release notes");
+
+    confirm.mockResolvedValue(true);
+    await click(navButton("Executions"));
+    expect(asked()).toBe(3);
+    expect(title()).toBe("Live executions");
+    expect(editor()).toBeNull();
+
+    // The editor is gone, and so is its question.
+    await click(navButton("Tasks"));
+    await click(navButton("History"));
+    expect(asked()).toBe(3);
+    expect(title()).toBe("History");
+  });
+
+  it("asks before a picked template replaces the editor, with ⌘N too, and Discard opens the picked one", async () => {
+    await editing();
+
+    confirm.mockResolvedValue(false);
+    await newTask("Script task");
+    expect(asked()).toBe(1);
+    expect(nameField().value).toBe("Release notes");
+    await press(undefined, { key: "n" });
+    await click([...host!.querySelectorAll<HTMLButtonElement>(".template")].find((b) => b.textContent?.includes("Script task"))!);
+    expect(asked()).toBe(2);
+    expect(nameField().value).toBe("Release notes");
+    expect(host!.querySelector('[role="dialog"]')).toBeNull();
+
+    confirm.mockResolvedValue(true);
+    await newTask("Script task");
+    expect(asked()).toBe(3);
+    expect(nameField().value).toBe("Script task");
+    expect(unsaved()).toBeNull();
+  });
+
+  it("asks from the notification bell, the More menu, and a notice or tray target", async () => {
+    patchStateForTests({
+      unread: [
+        {
+          id: "n1",
+          createdAt: new Date().toISOString(),
+          eventType: "execution.failed",
+          executionId: "exec-1",
+          title: "Nightly failed",
+          body: "Exit code 1",
+          severity: "error",
+          read: false,
+        },
+      ],
+    });
+    try {
+      await editing();
+      confirm.mockResolvedValue(false);
+
+      await click(host!.querySelector<HTMLButtonElement>('button[aria-label="Notifications"]')!);
+      await click(host!.querySelector<HTMLButtonElement>(".notice")!);
+      expect(asked()).toBe(1);
+
+      await click(host!.querySelector<HTMLButtonElement>('button[aria-label="More actions"]')!);
+      await click(button(host!.querySelector(".popover")!, "Open settings"));
+      expect(asked()).toBe(2);
+
+      await act(async () => patchStateForTests({ navigation: { executionId: "exec-1", nonce: 1 } }));
+      await settle();
+      expect(asked()).toBe(3);
+      expect(title()).toBe("Tasks");
+      expect(nameField().value).toBe("Release notes");
+
+      confirm.mockResolvedValue(true);
+      await act(async () => patchStateForTests({ navigation: { executionId: "exec-1", nonce: 2 } }));
+      await settle();
+      expect(asked()).toBe(4);
+      expect(title()).toBe("Live executions");
+    } finally {
+      patchStateForTests({ unread: [], navigation: undefined });
+    }
+  });
+
+  it("leaves an editor without unsaved changes at once, and a second pick opens the second template", async () => {
+    await launch();
+    await newTask("General task");
+    expect(nameField().value).toBe("General task");
+    await newTask("Script task");
+    expect(nameField().value).toBe("Script task");
+    await newTask("Script task");
+    expect(nameField().value).toBe("Script task");
+
+    // The YAML tab's text, put in place by the editor, is no change of the user's.
+    daemon.answers.set("/tasks/validate", { valid: true, errors: [], warnings: [], yaml: "metadata:\n  name: Script task\n" });
+    await click(button(host!.querySelector(".tabs")!, "YAML"));
+    expect(host!.querySelector(".cm-content")).not.toBeNull();
+    expect(unsaved()).toBeNull();
+
+    await click(navButton("Executions"));
+    expect(title()).toBe("Live executions");
+    expect(asked()).toBe(0);
+  });
+
+  it("asks before leaving an existing task's editor with an unsaved edit", async () => {
+    const summary: TaskSummary = { id: "standup", name: "Standup notes", type: "general", enabled: true, revision: "r1", harness: "claude-code", warnings: [] };
+    const document = { apiVersion: "harmflow/v1alpha1", kind: "Task", metadata: { id: "standup", name: "Standup notes" }, spec: { type: "general", prompt: "Write the standup notes." } };
+    daemon.answers.set("/tasks/standup", { ...summary, document, effective: document, yaml: "", path: "standup.yaml" } satisfies Task);
+    patchStateForTests({ tasks: [summary], tasksLoaded: true });
+    try {
+      await launch();
+      await click(navButton("Tasks"));
+      await click(host!.querySelector<HTMLElement>(".task-row__main")!);
+      expect(nameField().value).toBe("Standup notes");
+      await click(navButton("History"));
+      expect(asked()).toBe(0);
+
+      await click(navButton("Tasks"));
+      await click(host!.querySelector<HTMLElement>(".task-row__main")!);
+      await type(nameField(), "Standup summary");
+      confirm.mockResolvedValue(false);
+      await click(navButton("History"));
+      expect(asked()).toBe(1);
+      expect(nameField().value).toBe("Standup summary");
+
+      confirm.mockResolvedValue(true);
+      await click(navButton("History"));
+      expect(title()).toBe("History");
+    } finally {
+      patchStateForTests({ tasks: [], tasksLoaded: false });
+    }
+  });
+
+  it("reports the user's YAML edits alone, not the text its value puts in place", async () => {
+    const changes: string[] = [];
+    const editorHost = document.body.appendChild(document.createElement("div"));
+    const editorRoot = createRoot(editorHost);
+    const render = (value: string) => act(async () => editorRoot.render(<YamlEditor value={value} onChange={(v) => changes.push(v)} />));
+    try {
+      await render("name: Core\n");
+      await render("name: Core saved\n");
+      expect(editorHost.querySelector(".cm-content")!.textContent).toBe("name: Core saved");
+      expect(changes).toEqual([]);
+
+      const view = EditorView.findFromDOM(editorHost.querySelector<HTMLElement>(".cm-editor")!)!;
+      await act(async () => view.dispatch({ changes: { from: view.state.doc.length, insert: "id: core\n" } }));
+      expect(changes).toEqual(["name: Core saved\nid: core\n"]);
+    } finally {
+      act(() => editorRoot.unmount());
+      editorHost.remove();
+    }
   });
 });
 

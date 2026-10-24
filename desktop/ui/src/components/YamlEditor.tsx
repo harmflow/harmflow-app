@@ -3,7 +3,7 @@
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { yaml } from "@codemirror/lang-yaml";
 import { HighlightStyle, bracketMatching, indentOnInput, syntaxHighlighting } from "@codemirror/language";
-import { EditorState, StateEffect, StateField, type Extension } from "@codemirror/state";
+import { Annotation, EditorState, StateEffect, StateField, type Extension } from "@codemirror/state";
 import { Decoration, EditorView, highlightActiveLine, keymap, lineNumbers, type DecorationSet } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { useEffect, useRef } from "react";
@@ -47,6 +47,9 @@ const theme = EditorView.theme(
 );
 
 const setErrorLines = StateEffect.define<number[]>();
+
+/** Marks the text the `value` prop puts in place, which is no edit of the user's and reaches no `onChange`. */
+const fromValue = Annotation.define<boolean>();
 
 const errorLines = StateField.define<DecorationSet>({
   create: () => Decoration.none,
@@ -99,7 +102,7 @@ export function YamlEditor({
       EditorState.tabSize.of(2),
       EditorState.readOnly.of(!!readOnly),
       EditorView.updateListener.of((update) => {
-        if (update.docChanged) onChangeRef.current(update.state.doc.toString());
+        if (update.docChanged && !update.transactions.some((tr) => tr.annotation(fromValue))) onChangeRef.current(update.state.doc.toString());
       }),
     ];
     view.current = new EditorView({ state: EditorState.create({ doc: value, extensions }), parent: host.current });
@@ -113,7 +116,7 @@ export function YamlEditor({
   useEffect(() => {
     const v = view.current;
     if (v && v.state.doc.toString() !== value) {
-      v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: value } });
+      v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: value }, annotations: fromValue.of(true) });
     }
   }, [value]);
 
