@@ -294,7 +294,8 @@ func (a *App) createTask(ctx context.Context, in TaskInput, mode catalogMode, ov
 }
 
 // UpdateTask writes an edit that started from baseRevision; a file changed meanwhile is a conflict, never a silent
-// overwrite (FS-001 FR-005). A running execution keeps the definition it started with (D-083).
+// overwrite (FS-001 FR-005). The identifier and the type stay as the task was saved (FS-001 FR-020). A running
+// execution keeps the definition it started with (D-083).
 func (a *App) UpdateTask(ctx context.Context, id string, in TaskInput) (TaskView, error) {
 	e, err := a.entry(id)
 	if err != nil {
@@ -312,6 +313,15 @@ func (a *App) UpdateTask(ctx context.Context, id string, in TaskInput) (TaskView
 		return TaskView{}, a.invalidError(withError(r, "/metadata/id",
 			domain.T("id_immutable", "the identifier cannot change; duplicate the task instead")))
 	}
+	a.mu.Lock()
+	savedType, revision := e.doc.Spec.Type, e.file.Revision
+	a.mu.Unlock()
+	// The type to keep is the last valid definition's, and a file never valid has none. An edit from an older revision
+	// is left to Save, whose conflict says to reload: the file may have changed the type itself (ADR-005).
+	if savedType != "" && in.BaseRevision == revision && r.doc.Spec.Type != savedType {
+		return TaskView{}, a.invalidError(withError(r, "/spec/type",
+			domain.T("type_immutable", "the type cannot change; create a new task instead")))
+	}
 	f, err := a.d.Tasks.Save(id, r.content, in.BaseRevision)
 	if errors.Is(err, ports.ErrConflict) {
 		return TaskView{}, &Error{Code: CodeConflict, CurrentRevision: f.Revision, Text: domain.T("task_changed_on_disk",
@@ -320,7 +330,6 @@ func (a *App) UpdateTask(ctx context.Context, id string, in TaskInput) (TaskView
 	if err != nil {
 		return TaskView{}, err
 	}
-	_ = e
 	a.afterWrite(f, domain.EventTaskUpdated, r)
 	v, _ := a.GetTask(id) // fails only for a task that is not there, and this one was just written
 	v.Validation = r

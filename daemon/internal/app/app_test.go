@@ -2512,6 +2512,117 @@ func TestValidationAndImport(t *testing.T) {
 	}
 }
 
+// FS-001 FR-020, AC-023: a saved task keeps its type. A duplicate inherits it, and an update that changes it is refused
+// at the type and writes nothing, from the form's document and from the YAML editor alike. The file is the source of
+// truth (ADR-005): a direct edit that changes the type loads, and the task keeps that type from then on.
+func TestUpdateKeepsTheType(t *testing.T) {
+	e := newEnv(t)
+	repo := mkdir(t, filepath.Join(e.app.Paths().UserHome, "repo"))
+	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: issueTask("hub", repo, "")}); err != nil {
+		t.Fatal(err)
+	}
+	if cp, err := e.app.DuplicateTask(t.Context(), "hub"); err != nil || cp.Type != domain.TypeGitHubIssueImplementation {
+		t.Errorf("DuplicateTask(hub) = %q, %v; want a %s task", cp.Type, err, domain.TypeGitHubIssueImplementation)
+	}
+	view, _ := e.app.GetTask("hub")
+	general := taskYAML("hub", "")
+	document, err := json.Marshal(map[string]any{"apiVersion": "harmflow/v1alpha1", "kind": "Task",
+		"metadata": map[string]any{"id": "hub", "name": "Task hub"},
+		"spec": map[string]any{"type": domain.TypeGeneral, "prompt": "Do the work of hub.",
+			"harness": map[string]any{"preferred": map[string]any{"provider": domain.HarnessClaudeCode}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, in := range []TaskInput{{Document: document}, {YAML: general}} {
+		if r := e.app.Validate(t.Context(), in); !r.Valid {
+			t.Fatalf("Validate(the general task) errors = %+v, want none: only its type may fail the update", r.Errors)
+		}
+	}
+	for _, c := range []struct {
+		name string
+		in   TaskInput
+	}{
+		{"the form's document", TaskInput{Document: document, BaseRevision: view.Revision}},
+		{"the YAML editor", TaskInput{YAML: general, BaseRevision: view.Revision}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := e.app.UpdateTask(t.Context(), "hub", c.in)
+			refused, ok := err.(*Error)
+			if !ok || refused.Code != CodeValidationFailed || refused.Key != "type_immutable" {
+				t.Fatalf("UpdateTask(hub as general) error = %v, want %s with type_immutable", err, CodeValidationFailed)
+			}
+			if r := refused.Validation; len(r.Errors) != 1 || r.Errors[0].Path != "/spec/type" {
+				t.Errorf("UpdateTask(hub as general) errors = %+v, want one at /spec/type", r.Errors)
+			}
+			if onDisk, err := os.ReadFile(view.Path); err != nil || string(onDisk) != view.YAML {
+				t.Errorf("the task file after the refused update = %q (%v), want it unchanged", onDisk, err)
+			}
+		})
+	}
+
+	if err := os.WriteFile(view.Path, []byte(general), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.app.scanTaskFiles(t.Context())
+	edited, _ := e.app.GetTask("hub")
+	if edited.Type != domain.TypeGeneral || edited.Invalid {
+		t.Fatalf("GetTask(hub) after the file was rewritten = %s task, invalid %v; want a valid general task", edited.Type,
+			edited.Invalid)
+	}
+	// An editor opened before the rewrite gets the conflict that says to reload, not a refusal of the type it kept.
+	_, err = e.app.UpdateTask(t.Context(), "hub", TaskInput{YAML: view.YAML, BaseRevision: view.Revision})
+	if stale, ok := err.(*Error); !ok || stale.Code != CodeConflict {
+		t.Errorf("UpdateTask(hub from the revision before the rewrite) error = %v, want %s", err, CodeConflict)
+	}
+	kept := strings.Replace(general, "Do the work of hub.", "Do the edited work of hub.", 1)
+	after, err := e.app.UpdateTask(t.Context(), "hub", TaskInput{YAML: kept, BaseRevision: edited.Revision})
+	if err != nil || after.Type != domain.TypeGeneral || after.YAML != kept {
+		t.Errorf("UpdateTask(hub keeping its type) = %s task, YAML %q, %v; want the edit saved", after.Type, after.YAML, err)
+	}
+}
+
+// FS-001 FR-020: the type an update keeps is the task's last valid definition's, which a task whose file broke on disk
+// still has. A file never valid has no type to keep.
+func TestUpdateOfABrokenFileKeepsTheLastValidType(t *testing.T) {
+	e := newEnv(t)
+	script := func(id string) string {
+		return scriptYAML(id, "  script:\n    inline:\n      interpreter: [/bin/sh]\n      source: echo hi\n")
+	}
+	e.create("kept", "")
+	view, _ := e.app.GetTask("kept")
+	if err := os.WriteFile(view.Path, []byte("apiVersion: [broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fresh := filepath.Join(filepath.Dir(view.Path), "fresh.yaml")
+	if err := os.WriteFile(fresh, []byte("apiVersion: [broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.app.scanTaskFiles(t.Context())
+
+	broken, _ := e.app.GetTask("kept")
+	if !broken.Invalid {
+		t.Fatalf("GetTask(kept) = %+v, want it invalid", broken)
+	}
+	_, err := e.app.UpdateTask(t.Context(), "kept", TaskInput{YAML: script("kept"), BaseRevision: broken.Revision})
+	if refused, ok := err.(*Error); !ok || refused.Key != "type_immutable" {
+		t.Errorf("UpdateTask(kept as a script) error = %v, want type_immutable", err)
+	}
+	if fixed, err := e.app.UpdateTask(t.Context(), "kept", TaskInput{YAML: taskYAML("kept", ""), BaseRevision: broken.Revision}); err != nil ||
+		fixed.Type != domain.TypeGeneral || fixed.Invalid {
+		t.Errorf("UpdateTask(kept as general) = %s task, invalid %v, %v; want the file fixed", fixed.Type, fixed.Invalid, err)
+	}
+
+	never, _ := e.app.GetTask("fresh")
+	if !never.Invalid {
+		t.Fatalf("GetTask(fresh) = %+v, want it invalid", never)
+	}
+	if first, err := e.app.UpdateTask(t.Context(), "fresh", TaskInput{YAML: script("fresh"), BaseRevision: never.Revision}); err != nil ||
+		first.Type != domain.TypeScriptTask || first.Invalid {
+		t.Errorf("UpdateTask(fresh as a script) = %s task, invalid %v, %v; want its first valid definition saved", first.Type,
+			first.Invalid, err)
+	}
+}
+
 // FS-012 FR-005: what the daemon tells the user carries a key and params the desktop translates — a validation error,
 // the warning a task keeps, and a use-case error — beside its en-US text.
 func TestMessagesCarryKeys(t *testing.T) {

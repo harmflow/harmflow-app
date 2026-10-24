@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-// Drives the task form's schedule preview in a DOM, against a stand-in for the daemon's local API: the form asks for
-// the occurrences in the task's time zone and lists them in that zone, not the host's (FS-002 FR-002, AC-003). The
+// Drives the task form in a DOM, against a stand-in for the daemon's local API. Its schedule preview asks for the
+// occurrences in the task's time zone and lists them in that zone, not the host's (FS-002 FR-002, AC-003). The
 // daemon's own computation of the occurrences is itest › TestTaskLifecycle's.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -61,10 +61,10 @@ const task = (schedule: Record<string, string>): Doc => ({
   spec: { type: "general", prompt: "Write the standup notes.", harness: { preferred: { provider: "claude-code" } }, schedule },
 });
 
-async function open(doc: Doc) {
+async function open(doc: Doc, mode: "create" | "edit" = "edit") {
   host = document.body.appendChild(document.createElement("div"));
   root = createRoot(host);
-  await act(async () => root!.render(<TaskForm doc={doc} onChange={() => {}} mode="edit" harnesses={[]} errorPaths={new Set()} />));
+  await act(async () => root!.render(<TaskForm doc={doc} onChange={() => {}} mode={mode} harnesses={[]} errorPaths={new Set()} />));
   await settle();
 }
 
@@ -95,5 +95,33 @@ describe("task form schedule preview", () => {
       expect(rows[i]).toMatch(/\b9:00\sAM$/);
       expect(rows[i]).not.toContain("12:00");
     }
+  });
+});
+
+// The type is chosen in the template picker and fixed from then on; the form shows it and follows it (FS-001 FR-001,
+// FR-020). The daemon's refusal of a changed type is app › TestUpdateKeepsTheType's.
+describe("task form type", () => {
+  const typeInput = () =>
+    [...host!.querySelectorAll("label.field")]
+      .find((field) => field.querySelector(".field__label")?.textContent === "Task type")
+      ?.querySelector("input");
+  const sections = () => [...host!.querySelectorAll("section.form-section")].map((s) => s.id);
+
+  it.each(["create", "edit"] as const)("shows the type read-only in %s mode", async (mode) => {
+    await open(task({}), mode);
+    expect(typeInput()?.value).toBe("General");
+    expect(typeInput()?.disabled).toBe(true);
+    expect(host!.querySelector("#section-general select")).toBeNull();
+  });
+
+  it("shows the sections of the document's type", async () => {
+    await open(
+      { apiVersion: "harmflow/v1alpha1", kind: "Task", metadata: { id: "audit", name: "Audit" }, spec: { type: "script", script: { command: ["/bin/date"] } } },
+      "create",
+    );
+    expect(typeInput()?.value).toBe("Script");
+    expect(sections()).toContain("section-script");
+    expect(sections()).not.toContain("section-prompt");
+    expect(sections()).not.toContain("section-harness");
   });
 });

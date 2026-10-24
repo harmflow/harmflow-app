@@ -53,7 +53,6 @@ export function schemaRange(path: readonly (string | number)[]): { min?: number;
   return { min: node?.minimum, max: node?.maximum };
 }
 
-export const TASK_TYPES = schemaEnum(["spec", "type"]);
 export const HARNESS_PROVIDERS = schemaEnum(["spec", "harness", "preferred", "provider"]);
 export const NOTIFIABLE_EVENTS = schemaEnum(["spec", "notifications", "native", "events"]);
 export const ID_PATTERN = new RegExp(schemaAt(["metadata", "id"])?.pattern ?? "^[a-z0-9-]+$");

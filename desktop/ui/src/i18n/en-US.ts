@@ -285,6 +285,7 @@ export const enUS = {
     schema_not: "this combination of properties is not allowed",
     schema_false: "this property is not allowed here",
     id_immutable: "the identifier cannot change; duplicate the task instead",
+    type_immutable: "the type cannot change; create a new task instead",
     id_file_mismatch: 'metadata.id "{{id}}" must match the file name {{file}}.yaml',
     task_file_invalid: "the task file {{file}} fails validation",
     task_file_error: "{{file}}: {{detail}}",
