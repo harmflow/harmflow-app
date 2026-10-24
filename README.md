@@ -129,8 +129,12 @@ in its own pull request and is reviewed on its own.
 | `make dev-desktop` | Run the desktop shell against that daemon |
 | `make generate` | Refresh the copies generated from `contracts/`; `make check-generated` fails when one is stale |
 | `make app` | Build `HarmFlow.app` and the DMG, unsigned |
-| `make update-app` | On `main`, fast-forward and run `make app`, then restart on the new build the daemon and the window that were running; refused while executions run (see [`packaging/`](packaging/README.md#updating-the-local-app)) |
+| `make update-app` | On `main`, fast-forward, build, install to `~/Applications/HarmFlow.app`, and restart the daemon and window that were running; refused while executions run (see [`packaging/`](packaging/README.md#updating-the-local-app)) |
 | `make icons` | Render every app and tray icon from the SVGs in `desktop/src-tauri/icons/source` |
+
+`make app` only builds under `desktop/src-tauri/target/`. Use `make update-app` to copy that build to the stable local
+app at `~/Applications/HarmFlow.app`; set `INSTALL_DIR=/another/directory` to use
+`/another/directory/HarmFlow.app`. Launch the installed app when you want the daemon and window to use the same copy.
 
 Three environment variables change where the daemon keeps its data and its token:
 

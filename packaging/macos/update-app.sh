@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Brings the local app to the latest main and restarts what was running (harmflow-app#102). `make update-app` runs it.
 #
-# It works on the data directory of $HARMFLOW_HOME, or ~/Library/Application Support/HarmFlow, and on the window of
-# this checkout's bundle. It finds the daemon only through that directory's run/daemon.json, never by process name, and
-# stops it through the local API without force, so it never interrupts an execution nor touches another directory's
-# daemon.
+# It works on the data directory of $HARMFLOW_HOME, or ~/Library/Application Support/HarmFlow, and on the installed
+# app at ~/Applications/HarmFlow.app (or $INSTALL_DIR/HarmFlow.app). It finds the daemon only through that
+# directory's run/daemon.json, never by process name, and stops it through the local API without force, so it never
+# interrupts an execution nor touches another directory's daemon.
 
 set -euo pipefail
 
@@ -75,8 +75,43 @@ find_daemon() {
 	pid=$p
 }
 
-# window_pids prints the pids of the harmflow-desktop processes whose executable is this checkout's bundle.
+# window_pids prints the pids of the harmflow-desktop processes whose executable is the installed bundle.
 window_pids() { ps -axww -o pid=,comm= | awk -v exe="$window_exe" '{ p = $1; sub(/^ *[0-9]+ +/, ""); if ($0 == exe) print p }'; }
+
+# prepare_bundle copies the build beside the installed app before anything is stopped. A refusal can therefore remove
+# the staging directory and leave the installed copy and the running processes untouched.
+prepare_bundle() {
+	[[ -d $build_bundle ]] || die "make app produced no bundle at $build_bundle; nothing was changed"
+	mkdir -p "$install_dir" || die "cannot create install directory $install_dir; nothing was changed"
+	stage_dir=$(/usr/bin/mktemp -d "$install_dir/.HarmFlow.app.XXXXXX") ||
+		die "cannot create a staging directory in $install_dir; nothing was changed"
+	/usr/bin/ditto "$build_bundle" "$stage_dir/HarmFlow.app" ||
+		die "could not stage $build_bundle in $install_dir; nothing was changed"
+}
+
+# install_bundle moves the staged copy into place only after the old daemon and window have stopped. The old bundle is
+# held at a unique sibling path until the new rename succeeds, so a failed rename can restore it.
+install_bundle() {
+	local old_bundle=''
+	if [[ -e $bundle || -L $bundle ]]; then
+		old_bundle=$(/usr/bin/mktemp -d "$install_dir/.HarmFlow.app.old.XXXXXX") ||
+			die "cannot reserve a replacement path beside $bundle"
+		rmdir "$old_bundle"
+		mv "$bundle" "$old_bundle" || die "cannot move the existing $bundle aside; the app was stopped"
+	fi
+	if ! mv "$stage_dir/HarmFlow.app" "$bundle"; then
+		if [[ -n $old_bundle ]]; then
+			mv "$old_bundle" "$bundle" || die "cannot install $bundle and cannot restore the previous app"
+		fi
+		die "cannot install $bundle; the previous app was restored when possible"
+	fi
+	if [[ -n $old_bundle ]]; then
+		rm -rf "$old_bundle" || die "installed $bundle, but could not remove the previous app at $old_bundle"
+	fi
+	rmdir "$stage_dir" 2>/dev/null || true
+	stage_dir=''
+	say "installed $bundle"
+}
 
 # use_launch_agent succeeds when the loaded launch agent serves this data directory, so launchd keeps supervising the
 # daemon it restarts. The agent is one per user, at ~/Library/LaunchAgents, whatever the data directory: its
@@ -102,7 +137,7 @@ use_launch_agent() {
 		return 1
 	fi
 	[[ $exe == "$daemon_exe" ]] ||
-		die "launch agent $LABEL runs $exe, not this checkout's $daemon_exe; a kickstart would start that binary. Nothing was stopped"
+		die "launch agent $LABEL runs $exe, not the installed $daemon_exe; a kickstart would start that binary. Open $bundle, then turn Autostart off and on in Settings to rewrite the launch agent. Nothing was stopped"
 	say "launch agent $LABEL: serves $home; harmflowd starts through launchctl kickstart"
 }
 
@@ -164,14 +199,26 @@ open_window() {
 
 main() {
 	root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
-	bundle="$root/desktop/src-tauri/target/release/bundle/macos/HarmFlow.app"
+	build_bundle="$root/desktop/src-tauri/target/release/bundle/macos/HarmFlow.app"
+	install_dir="${INSTALL_DIR:-$HOME/Applications}"
+	if [[ $install_dir == *.app ]]; then
+		bundle=$install_dir
+		install_dir=$(dirname "$bundle")
+	else
+		bundle="$install_dir/HarmFlow.app"
+	fi
 	window_exe="$bundle/Contents/MacOS/harmflow-desktop"
 	daemon_exe="$bundle/Contents/MacOS/harmflowd"
 	default_home="$HOME/Library/Application Support/HarmFlow"
 	home="${HARMFLOW_HOME:-$default_home}"
 	runtime="$home/run/daemon.json"
 	tmp=$(mktemp -d)
-	trap 'rm -rf "$tmp"' EXIT
+	stage_dir=''
+	cleanup() {
+		rm -rf "$tmp"
+		[[ -z $stage_dir ]] || rm -rf "$stage_dir"
+	}
+	trap cleanup EXIT
 
 	# 1. Update: refuse before anything changes.
 	local branch
@@ -189,7 +236,8 @@ main() {
 
 	# 2. Build, in a make of its own, so its COMMIT is read after the pull.
 	say "building $commit with make app"
-	"${MAKE:-make}" -C "$root" app || die "make app failed; the window and the daemon were left as they were"
+	"${MAKE:-make}" -C "$root" app || die "make app failed; the installed app, window, and daemon were left as they were"
+	prepare_bundle
 
 	# 3. What runs now.
 	local daemon_was='' window_was old_pid=''
@@ -197,10 +245,12 @@ main() {
 	if find_daemon; then
 		daemon_was=yes old_pid=$pid
 		say "daemon pid $pid at $addr, data directory $home"
-		if use_launch_agent; then launchd=yes; fi
 	else
 		say "no daemon runs for $home"
 	fi
+	# Check a loaded agent even when the daemon is currently down: OPEN=1 or a later login must not resurrect a target/
+	# binary after this update. A mismatched agent is refused before anything is stopped.
+	if use_launch_agent; then launchd=yes; fi
 	window_was=$(window_pids | tr '\n' ' ')
 	if [[ -n $window_was ]]; then say "window pid $window_was"; else say "no window of $bundle runs"; fi
 
@@ -226,15 +276,20 @@ main() {
 		say "window pid $w quit"
 	done
 
-	# 6. Bring back what ran, the daemon first, so the window connects to it at once.
+	# 6. Install the staged copy only after both processes have stopped, then bring back what ran from that copy.
+	install_bundle
 	local status=0
 	if [[ -n $daemon_was ]]; then
 		start_daemon
 		verify_daemon "$old_pid" || status=1
 	fi
-	if [[ -n $window_was ]]; then open_window || status=1; fi
-	if [[ -z $daemon_was && -z $window_was ]]; then
-		say "nothing was running, so nothing was started; the new bundle is at $bundle"
+	if [[ -n $window_was || ${OPEN:-} == 1 ]]; then
+		open_window || status=1
+		# With no prior daemon, opening the installed app is the daemon start. Verify it when OPEN=1 requested it.
+		if [[ -z $daemon_was && ${OPEN:-} == 1 ]]; then verify_daemon '' || status=1; fi
+	fi
+	if [[ -z $daemon_was && -z $window_was && ${OPEN:-} != 1 ]]; then
+		say "nothing was running, so nothing was started; the installed app is at $bundle"
 	fi
 	return $status
 }
