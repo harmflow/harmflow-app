@@ -1,0 +1,5 @@
+# Cargo's output for the desktop shell. Its name ends in .noindex, so Spotlight does not index it and Launch Services
+# does not register its HarmFlow.app bundles again after make update-app unregisters them (harmflow-app#243). A path
+# here is relative to this file's parent, the repository root; CARGO_TARGET_DIR still overrides it.
+[build]
+target-dir = "desktop/src-tauri/target.noindex"

@@ -1,6 +1,8 @@
 # Build output
 /build/
 /dist/
+desktop/src-tauri/target.noindex/
+# Cargo's output before .cargo/config.toml moved it.
 desktop/src-tauri/target/
 desktop/src-tauri/binaries/
 desktop/ui/dist/

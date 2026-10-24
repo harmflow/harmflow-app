@@ -217,11 +217,12 @@ registered_paths() {
 
 # register_app makes the installed copy the one macOS launches by name (Spotlight, Launchpad, open -a), harmflow-app#186.
 # It registers that copy, then unregisters the bundles with its identifier that compete with it: those in this
-# checkout's target/ directories and those whose path no longer exists, such as an unmounted DMG volume. It leaves
-# registered every other bundle that exists, such as a worktree's build, and it deletes no file. A failure here only
-# warns: the app is already installed.
+# checkout's Cargo output, target.noindex/ or the target/ from before it, and those whose path no longer exists, such
+# as an unmounted DMG volume. It leaves registered every other bundle that exists, such as a worktree's build, and it
+# deletes no file: it only names an old target/ to delete, since Spotlight indexes it and Launch Services registers its
+# bundles again (harmflow-app#243). A failure here only warns: the app is already installed.
 register_app() {
-	local id path reason
+	local id path reason old_out=$root/desktop/src-tauri/target
 	id=$(json_get "$root/desktop/src-tauri/tauri.conf.json" identifier)
 	[[ -n $id ]] || {
 		say "cannot read the bundle identifier from tauri.conf.json; Launch Services was left as it was" >&2
@@ -233,7 +234,7 @@ register_app() {
 	}
 	say "registered $installed with Launch Services"
 	while IFS= read -r path; do
-		if [[ $path == "$root/desktop/src-tauri/target/"* ]]; then
+		if [[ $path == "$cargo_out/"* || $path == "$old_out/"* ]]; then
 			reason="a build in this checkout"
 		elif [[ ! -e $path ]]; then
 			reason="no longer exists"
@@ -246,6 +247,10 @@ register_app() {
 			say "lsregister -u $path failed" >&2
 		fi
 	done < <(registered_paths "$id")
+	if [[ -d $old_out ]]; then
+		say "$old_out is Cargo's output from before target.noindex; Spotlight indexes it and Launch Services registers" \
+			"its bundles again. Delete it: rm -rf '$old_out'"
+	fi
 }
 
 # rerun_if_changed BEFORE [ARG...] runs the update-app.sh that the pull brought, in place of this one, when it differs
@@ -264,7 +269,9 @@ rerun_if_changed() {
 
 main() {
 	root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
-	built="$root/desktop/src-tauri/target/release/bundle/macos/HarmFlow.app"
+	# Cargo's output, as .cargo/config.toml sets it.
+	cargo_out="$root/desktop/src-tauri/target.noindex"
+	built="$cargo_out/release/bundle/macos/HarmFlow.app"
 	local install_dir=${INSTALL_DIR:-$HOME/Applications}
 	[[ $install_dir == /* ]] || die "INSTALL_DIR must be an absolute path, not $install_dir; nothing was changed"
 	installed="$(canon "$install_dir")/HarmFlow.app"

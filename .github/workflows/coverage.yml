@@ -78,7 +78,8 @@ jobs:
           tool: cargo-llvm-cov
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          workspaces: desktop/src-tauri
+          # Cargo's output is target.noindex, as .cargo/config.toml sets it, not the default target.
+          workspaces: desktop/src-tauri -> target.noindex
       - run: make deps
       # The bundle's sidecar must exist for tauri-build, and the interface for the shell.
       - run: make sidecar
