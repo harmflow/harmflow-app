@@ -82,6 +82,7 @@ const (
 	AttemptQuotaExhausted     AttemptOutcome = "quota_exhausted"
 	AttemptRateLimited        AttemptOutcome = "rate_limited"
 	AttemptHarnessUnavailable AttemptOutcome = "harness_unavailable"
+	AttemptNetworkFailed      AttemptOutcome = "network_failed"
 	AttemptTimedOut           AttemptOutcome = "timed_out"
 	AttemptCancelled          AttemptOutcome = "cancelled"
 	AttemptInterrupted        AttemptOutcome = "interrupted"

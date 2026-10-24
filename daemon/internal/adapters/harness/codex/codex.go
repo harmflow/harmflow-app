@@ -643,7 +643,7 @@ var patterns = classify.Patterns{
 	Quota:       regexp.MustCompile(`(?i)(usage limit|insufficient_quota|exceeded your current quota|purchase more credits|plan limit)`),
 	RateLimit:   regexp.MustCompile(`(?i)(rate[ _-]?limit|too many requests|status 429)`),
 	Unavailable: regexp.MustCompile(`(?i)(\bnot logged in\b|please log in|codex login|authentication failed|invalid api key|401 unauthorized|refresh token|token (has )?expired)`),
-	Network:     regexp.MustCompile(`(?i)(stream disconnected|error sending request|connection (refused|reset)|dns error|timed out connecting|network)`),
+	Network:     regexp.MustCompile(`(?i)(stream disconnected|error sending request|connection (refused|reset)|dns error|timed out connecting)`),
 }
 
 // usage is the turns' tokens, priced at the table once the attempt ends.

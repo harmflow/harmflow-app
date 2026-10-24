@@ -149,6 +149,7 @@ export const enUS = {
     quota_exhausted: "Quota exhausted",
     rate_limited: "Rate limited",
     harness_unavailable: "Harness unavailable",
+    network_failed: "Network failure",
     timed_out: "Timed out",
     cancelled: "Cancelled",
     interrupted: "Interrupted",

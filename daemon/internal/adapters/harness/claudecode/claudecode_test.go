@@ -69,6 +69,15 @@ func TestParseNotLoggedIn(t *testing.T) {
 	}
 }
 
+// harmflow-app#212: an unreachable API, as Claude Code 2.1.309 printed it against a closed local port, is a network
+// failure.
+func TestParseNetwork(t *testing.T) {
+	p, _ := replay(t, "network.jsonl")
+	if end := p.Finish(1, "", false, false); end.Class != domain.ClassNetwork {
+		t.Errorf("Finish(1, \"\", false, false).Class = %s (%s), want network", end.Class, end.Error.Message)
+	}
+}
+
 // harmflow-app#213: a failover follows only the CLI's own quota and sign-in texts, without the stream's rate-limit
 // signal; a task's error that mentions a quota, a limit, or another tool's sign-in is the task's own failure.
 func TestFinishClassifiesTheCLIsOwnTexts(t *testing.T) {

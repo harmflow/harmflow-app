@@ -161,6 +161,19 @@ func TestParseUnavailable(t *testing.T) {
 	}
 }
 
+// harmflow-app#212: Codex 0.163.0 waiting for an unreachable provider, as it printed it against a closed local port,
+// is a network failure when the attempt ends; a task's error that only mentions the network is the task's own.
+func TestParseNetwork(t *testing.T) {
+	p, _ := replay(t, "network.jsonl")
+	if end := p.Finish(1, "", false, false); end.Class != domain.ClassNetwork {
+		t.Errorf("Finish(1, \"\", false, false).Class = %s (%s), want network", end.Class, end.Error.Message)
+	}
+	text := "tests failed: TestNetworkPolicy expected 2 rules, got 1"
+	if end := (&parser{}).Finish(1, text, false, false); end.Class != domain.ClassTaskError {
+		t.Errorf("Finish(1, %q, false, false).Class = %s, want task_error", text, end.Class)
+	}
+}
+
 // A 429 is a rate limit only as an HTTP status; elsewhere it is part of the task's own failure.
 func TestParseRateLimit(t *testing.T) {
 	cases := []struct {

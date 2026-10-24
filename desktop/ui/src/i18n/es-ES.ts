@@ -149,6 +149,7 @@ export const esES: Resources = {
     quota_exhausted: "Cuota agotada",
     rate_limited: "Límite de frecuencia",
     harness_unavailable: "Harness no disponible",
+    network_failed: "Fallo de red",
     timed_out: "Tiempo agotado",
     cancelled: "Cancelada",
     interrupted: "Interrumpida",
