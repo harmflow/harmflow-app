@@ -1,7 +1,7 @@
 # CLAUDE.md — harmflow-app
 
-> Repo-specific guidance for the harmflow desktop app repository. Specifications, ADRs, and architecture live in
-> [`harmflow/harmflow-docs`](https://github.com/harmflow/harmflow-docs).
+> Repo-specific guidance for the harmflow desktop app repository. Specifications, ADRs, and architecture live in a
+> private repository: cite its records by ID (`FS-NNN FR-NNN`, `AC-NNN`, `D-NNN`, `ADR-NNN`), never by link or path.
 
 ---
 

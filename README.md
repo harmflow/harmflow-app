@@ -44,8 +44,8 @@
 
 > [!IMPORTANT]
 > **MVP in progress, macOS first.** Nothing here is a signed release: until the Developer ID exists, builds are
-> unsigned and Gatekeeper asks for confirmation on first open. Specifications, ADRs, and architecture live in
-> `harmflow/harmflow-docs`.
+> unsigned and Gatekeeper asks for confirmation on first open. Specifications, ADRs, and architecture live in a
+> private repository; the `FS-`, `FR-`, `AC-`, `D-`, and `ADR-` numbers in code, tests, and schemas name its records.
 
 ## Architecture
 
