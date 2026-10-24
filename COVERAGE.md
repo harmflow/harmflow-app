@@ -1,7 +1,7 @@
 # Test coverage
 
 What the tests of `harmflow-app` reach, as `make coverage` reads it, and the floors that hold it. Coverage is held by a
-ratchet per package, not by a target (ADR-015): each floor is a reading of this file, and CI fails the job that runs a
+ratchet per package, not by a target: each floor is a reading of this file, and CI fails the job that runs a
 part's tests when the part reads below one.
 
 A ratio is covered over total, as a percentage **truncated, never rounded, to two decimals**, computed from the counts

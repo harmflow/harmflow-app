@@ -1,6 +1,6 @@
 # contracts
 
-Written by hand; the single source of truth for every key, enum, event, and route name (`D-091`, `D-094`).
+Written by hand; the single source of truth for every key, enum, event, and route name.
 
 | File | Contract |
 |---|---|
