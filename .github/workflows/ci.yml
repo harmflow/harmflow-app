@@ -90,6 +90,10 @@ jobs:
           cache-dependency-path: daemon/go.sum
       - name: Formatting
         run: test -z "$(gofmt -l daemon tests)" || { gofmt -l daemon tests; exit 1; }
+      # gofmt sorts imports within a group but neither splits nor orders groups. This checks the Go guide's three
+      # (D-132): standard library, third party, then the module's own. Run it locally with the same command.
+      - name: Import groups
+        run: make check-imports
       - run: make test-daemon
         env:
           GOFLAGS: -race
