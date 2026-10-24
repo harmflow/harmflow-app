@@ -1,5 +1,5 @@
 ---
-name: harmflow-github-draft-pr
+name: hf-github-draft-pr
 description: Tests a HarmFlow work item, repairs failing tests within the task's limit, commits and pushes only the work branch, and opens or updates exactly one draft pull request that documents the work — even when tests fail. Never merges. Use it after implementing an issue in its worktree.
 ---
 
@@ -87,7 +87,7 @@ Add the item to `report.json` `workItems`:
 ```
 
 `kind` is `resume` for a managed draft pull request resumed, and `new` for a new issue or a failed one retried
-(harmflow-github-issue-queue §1). The item's outcome is `completed` when its draft pull request was created or updated,
+(hf-github-issue-queue §1). The item's outcome is `completed` when its draft pull request was created or updated,
 even with failing tests; `failed` when the pull request could not be opened (keep the branch and the worktree);
 `needs_attention` when a human must decide. Set the report's `lastOperation` to the last external operation applied, such as
 `pushed harmflow/123-fix to OWNER/REPO` or `opened draft PR OWNER/REPO#45`.

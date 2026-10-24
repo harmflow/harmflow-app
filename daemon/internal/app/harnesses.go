@@ -170,23 +170,25 @@ type Catalog struct {
 	TaskTypes []TaskTypeInfo `json:"taskTypes"`
 }
 
-// Built-in agents and skills of the GitHub issue implementation type, the MVP's only built-in set (D-092).
-var (
-	BuiltinIssueAgent  = "harmflow-github-issue-implementer"
-	BuiltinIssueSkills = []string{"harmflow-github-issue-queue", "harmflow-github-worktree", "harmflow-github-draft-pr"}
-)
+// BuiltinPrefix starts the name of every built-in agent or skill, and of no user's one HarmFlow lists.
+const BuiltinPrefix = "hf-"
 
-const defaultIssuePrompt = `Select one open issue labeled agent-ready that is not labeled blocked, oldest first.
+// BuiltinIssueSkills are the built-in skills of the GitHub issue implementation type, the MVP's only built-in set: the
+// first carries out the task and uses the others.
+var BuiltinIssueSkills = []string{"hf-github-issue-implementer", "hf-github-issue-queue", "hf-github-worktree", "hf-github-draft-pr"}
+
+const defaultIssuePrompt = `Use the skill hf-github-issue-implementer.
+Select one open issue labeled agent-ready that is not labeled blocked, oldest first.
 Implement it following the repository's conventions and run its tests.
 Name the work branch harmflow/<issue-number>-<short-slug> and mark the pull request as managed by HarmFlow with the label harmflow.
 Open or update a draft pull request that reports what was implemented, the tests run, what passed and what failed, and what is pending.`
 
 func (a *App) builtinDir() catalog.Dir { return catalog.Dir{Root: a.d.Paths.Builtins, Builtin: true} }
 
-// resolveItem finds an agent or skill by name for a harness: built-ins by the harmflow- prefix, the user's in the
-// harness configuration (D-092). where says where it was looked for.
+// resolveItem finds an agent or skill by name for a harness: built-ins by the hf- prefix, the user's in the harness
+// configuration. where says where it was looked for.
 func (a *App) resolveItem(kind, name, harness string) (ports.ResolvedItem, string, bool) {
-	if strings.HasPrefix(name, "harmflow-") {
+	if strings.HasPrefix(name, BuiltinPrefix) {
 		it, ok := a.builtinDir().Item(kind, name)
 		return it, "built in", ok
 	}
@@ -200,7 +202,7 @@ func (a *App) resolveItem(kind, name, harness string) (ports.ResolvedItem, strin
 }
 
 // Catalog lists the built-in agents and skills, offered on every harness, then the user's, each with the harnesses
-// whose configuration holds it, sorted by name; a user's item named with the harmflow- prefix is left out.
+// whose configuration holds it, sorted by name; a user's item named with the hf- prefix is left out.
 func (a *App) Catalog() Catalog {
 	c := Catalog{Agents: []CatalogEntry{}, Skills: []CatalogEntry{}}
 	all := sortedKeys(a.adapters)
@@ -212,7 +214,7 @@ func (a *App) Catalog() Catalog {
 		}
 		for _, id := range all {
 			for _, it := range a.adapters[id].UserItems(kind) {
-				if strings.HasPrefix(it.Name, "harmflow-") {
+				if strings.HasPrefix(it.Name, BuiltinPrefix) {
 					continue
 				}
 				e := entries[it.Name]
@@ -233,7 +235,7 @@ func (a *App) Catalog() Catalog {
 	}
 	key, scriptKey := "githubIssueImplementation", "script"
 	c.TaskTypes = []TaskTypeInfo{
-		{ID: domain.TypeGitHubIssueImplementation, ParametersKey: &key, DefaultAgents: []string{BuiltinIssueAgent},
+		{ID: domain.TypeGitHubIssueImplementation, ParametersKey: &key, DefaultAgents: []string{},
 			DefaultSkills: append([]string{}, BuiltinIssueSkills...), DefaultPrompt: defaultIssuePrompt},
 		{ID: domain.TypeGeneral, ParametersKey: nil, DefaultAgents: []string{}, DefaultSkills: []string{}},
 		{ID: domain.TypeScriptTask, ParametersKey: &scriptKey, DefaultAgents: []string{}, DefaultSkills: []string{}},

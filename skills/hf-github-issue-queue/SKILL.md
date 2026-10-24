@@ -1,5 +1,5 @@
 ---
-name: harmflow-github-issue-queue
+name: hf-github-issue-queue
 description: Discovers and orders the work of a HarmFlow GitHub issue task — managed draft pull requests to resume, failed issues to retry, and new eligible issues — applying the task's prompt criteria, the already-processed check, and the queue limits from context.json. Use it before choosing what to implement.
 ---
 

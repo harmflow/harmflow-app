@@ -262,7 +262,7 @@ func (m missingItem) invalidFallback(harness string) domain.Text {
 
 func (m missingItem) params(harness string) []string {
 	source := "harness"
-	if strings.HasPrefix(m.name, "harmflow-") {
+	if strings.HasPrefix(m.name, BuiltinPrefix) {
 		source = "builtin"
 	}
 	return []string{"name", m.name, "harness", harness, "where", m.where, "source", source}

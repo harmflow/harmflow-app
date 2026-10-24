@@ -50,7 +50,7 @@ func main() {
 		return
 	}
 	homeFlag := flag.String("home", "", "HarmFlow's data directory (default: $HARMFLOW_HOME or ~/Library/Application Support/HarmFlow)")
-	builtinsFlag := flag.String("builtins", "", "directory holding the built-in agents/ and skills/")
+	builtinsFlag := flag.String("builtins", "", "directory holding the built-in skills/")
 	portFlag := flag.Int("port", 0, "port to listen on; 0 picks a free one")
 	flag.Parse()
 	if err := run(*homeFlag, *builtinsFlag, *portFlag); err != nil {
@@ -270,7 +270,7 @@ func acquireLock(path string, flock func(fd, how int) error) (*os.File, error) {
 	return f, nil
 }
 
-// findBuiltins locates the built-in agents and skills: inside the app bundle, next to the binary, or in a checkout.
+// findBuiltins locates the built-in skills: inside the app bundle, next to the binary, or in a checkout.
 func findBuiltins(flagValue string) string {
 	if flagValue != "" {
 		return flagValue
@@ -291,17 +291,30 @@ func findBuiltins(flagValue string) string {
 		candidates = append(candidates, d)
 	}
 	for _, c := range candidates {
-		if st, err := os.Stat(filepath.Join(c, "skills")); err == nil && st.IsDir() {
-			if _, err := os.Stat(filepath.Join(c, "agents")); err == nil {
-				abs, err := filepath.Abs(c)
-				if err != nil {
-					return c
-				}
-				return abs
+		if holdsBuiltinSkill(c) {
+			abs, err := filepath.Abs(c)
+			if err != nil {
+				return c
 			}
+			return abs
 		}
 	}
 	return ""
+}
+
+// holdsBuiltinSkill reports whether dir has a skills/ directory with a built-in skill in it, which tells the built-ins
+// apart from any other directory named skills.
+func holdsBuiltinSkill(dir string) bool {
+	entries, err := os.ReadDir(filepath.Join(dir, "skills"))
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() && strings.HasPrefix(e.Name(), app.BuiltinPrefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // userPath is the PATH harnesses and tools need: the user's login-shell PATH when it can be read, the daemon's own,

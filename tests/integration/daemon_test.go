@@ -964,7 +964,19 @@ func TestFormDocumentIsTheFile(t *testing.T) {
 		{"slug":"gpt-5.6-terra","supported_reasoning_levels":[{"effort":"low"},{"effort":"high"}]}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	d := startDaemon(t, home)
+	// HarmFlow ships no built-in agent, so the task's agent is the user's, in the test's own configuration of each
+	// harness.
+	claudeConfig := filepath.Join(home, "claude")
+	for _, dir := range []string{claudeConfig, codexHome} {
+		if err := os.MkdirAll(filepath.Join(dir, "agents"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "agents", "issue-reviewer.md"),
+			[]byte("---\nname: issue-reviewer\ndescription: Reviews an issue.\n---\nReview the issue.\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d := startDaemon(t, home, "CLAUDE_CONFIG_DIR="+claudeConfig)
 	repo := t.TempDir()
 	// Outside the home folder, so an allowed folder (FS-009 FR-014).
 	d.call("PATCH", "/settings", map[string]any{"allowedFolders": []any{repo}}, 200)
@@ -1042,8 +1054,8 @@ func completeTask(id, repo string) map[string]any {
 				"delivery": map[string]any{"testRepairAttempts": 0},
 			},
 			"prompt":      "Implement the oldest issue labelled ready-for-agent.",
-			"agents":      []any{"harmflow-github-issue-implementer"},
-			"skills":      []any{"harmflow-github-issue-queue", "harmflow-github-draft-pr"},
+			"agents":      []any{"issue-reviewer"},
+			"skills":      []any{"hf-github-issue-implementer", "hf-github-issue-queue", "hf-github-draft-pr"},
 			"workspace":   map[string]any{"path": "~/harmflow-work"},
 			"schedule":    map[string]any{"cron": "30 6 * * 1-5", "timezone": "America/Sao_Paulo", "missedRun": map[string]any{"policy": "skip"}},
 			"concurrency": map[string]any{"overlappingRuns": "skip"},
