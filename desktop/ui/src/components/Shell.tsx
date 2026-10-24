@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { api } from "../api/client";
+import { ApiError, api } from "../api/client";
 import { native } from "../api/native";
 import type { Notification } from "../api/types";
 import { translateNested } from "../lib/daemonText";
@@ -12,6 +12,26 @@ import { HarnessMark, Icon, Logo, type IconName } from "./Icon";
 import { Banner, Button, Gauge, IconButton, cx } from "./ui";
 
 export type Screen = "overview" | "executions" | "tasks" | "history" | "settings";
+
+function withoutDirtySuffix(commit: string): string {
+  return commit.endsWith("-dirty") ? commit.slice(0, -"-dirty".length) : commit;
+}
+
+/** A dirty checkout is still the same build when its underlying commit is unchanged. */
+export function daemonBuildMismatch(appCommit?: string, daemonCommit?: string): boolean {
+  if (!appCommit || !daemonCommit) return false;
+  const app = withoutDirtySuffix(appCommit);
+  const daemon = withoutDirtySuffix(daemonCommit);
+  return Boolean(app && daemon && app !== daemon);
+}
+
+/** Stops the attached daemon safely, waits for its process to exit, and starts this bundle's daemon. */
+export async function restartDaemon(): Promise<void> {
+  await api.stopDaemon(false);
+  await native.waitForDaemonStop();
+  await native.startDaemon();
+  await actions.refreshAll();
+}
 
 const NAV: Array<{ key: Screen; icon: IconName }> = [
   { key: "overview", icon: "grid" },
@@ -197,8 +217,30 @@ export function Header({
   const lastUpdate = useStore((s) => s.lastUpdate);
   const health = useStore((s) => s.health);
   const appVersion = useStore((s) => s.appVersion);
-  const mismatch = health && health.version !== appVersion;
+  const appCommit = useStore((s) => s.appCommit);
+  const commitMismatch = daemonBuildMismatch(appCommit, health?.commit);
+  const versionMismatch = Boolean(health && health.version !== appVersion);
+  const [restarting, setRestarting] = useState(false);
+  const [restartError, setRestartError] = useState<string | null>(null);
   const { tipped, tooltip, hide } = useTooltip(tipBelow);
+
+  const onRestartDaemon = async () => {
+    if (restarting || !native.available) return;
+    setRestarting(true);
+    setRestartError(null);
+    try {
+      await restartDaemon();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        setRestartError(t("connection.restartBlocked"));
+      } else {
+        const message = err instanceof Error ? err.message : String(err);
+        setRestartError(t("connection.restartFailed", { message }));
+      }
+    } finally {
+      setRestarting(false);
+    }
+  };
 
   return (
     <header className="topbar" data-tauri-drag-region>
@@ -236,10 +278,27 @@ export function Header({
         <NotificationBell onOpenExecution={onOpenExecution} />
         <MoreMenu onNavigate={onNavigate} />
       </div>
-      {mismatch ? (
+      {commitMismatch ? (
+        <div className="topbar__banner">
+          <Banner
+            tone="warning"
+            icon="alert"
+            actions={
+              native.available ? (
+                <Button variant="secondary" size="sm" icon="refresh" disabled={restarting} onClick={() => void onRestartDaemon()}>
+                  {restarting ? t("connection.restartingDaemon") : t("connection.restartDaemon")}
+                </Button>
+              ) : undefined
+            }
+          >
+            <div>{t("connection.commitMismatch", { daemon: health?.commit ?? "", desktop: appCommit })}</div>
+            {restartError ? <div className="muted">{restartError}</div> : null}
+          </Banner>
+        </div>
+      ) : versionMismatch ? (
         <div className="topbar__banner">
           <Banner tone="warning" icon="alert">
-            {t("connection.versionMismatch", { daemon: health.version, desktop: appVersion })}
+            {t("connection.versionMismatch", { daemon: health?.version ?? "", desktop: appVersion })}
           </Banner>
         </div>
       ) : null}
