@@ -471,6 +471,22 @@ body:has([aria-modal="true"]) .tooltip {
   grid-column: 1 / -1;
 }
 
+/* Zoomed to 125% or more (D-110), the window is narrower in CSS pixels than the layout was drawn for: the titles take
+   the first row, and the status and the actions share the second. */
+@media (max-width: 960px) {
+  .topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .topbar__titles {
+    grid-column: 1 / -1;
+  }
+
+  .topbar__status {
+    align-items: flex-start;
+  }
+}
+
 .conn-pill {
   display: inline-flex;
   align-items: center;
@@ -728,8 +744,9 @@ body:has([aria-modal="true"]) .tooltip {
   color: var(--hf-color-danger);
 }
 
+/* No taller than the room the window leaves below the bell, short of 380 pixels when zoomed in (D-110). */
 .notice-list {
-  max-height: 380px;
+  max-height: min(380px, calc(100vh - 280px));
   overflow-y: auto;
 }
 
@@ -765,6 +782,11 @@ body:has([aria-modal="true"]) .tooltip {
 .notice__time {
   color: var(--hf-color-text-muted);
   font-size: var(--hf-font-size-xs);
+}
+
+/* A long path breaks anywhere rather than widen the list past the popover. */
+.notice__body {
+  overflow-wrap: anywhere;
 }
 
 /* ---------- Screens ---------- */
@@ -864,6 +886,11 @@ body:has([aria-modal="true"]) .tooltip {
   flex: none;
   padding: 0;
   overflow: hidden;
+}
+
+/* A table wider than the screen, as when zoomed in (D-110), scrolls sideways under a footer that stays in view. */
+.table__scroll {
+  overflow-x: auto;
 }
 
 .section-title {
@@ -1842,13 +1869,20 @@ li:last-child .tl-item__rail::before {
   gap: 4px;
 }
 
+/* A long path breaks anywhere rather than widen the list past the panel. */
 .file-list li {
   display: flex;
   align-items: center;
   gap: var(--hf-space-2);
+  min-width: 0;
   padding: 6px var(--hf-space-2);
   border-radius: var(--hf-radius-sm);
   background: var(--hf-color-surface-sunken);
+  overflow-wrap: anywhere;
+}
+
+.file-list li svg {
+  flex: none;
 }
 
 .results {
@@ -2201,6 +2235,22 @@ li:last-child .tl-item__rail::before {
   gap: 2px;
 }
 
+/* Zoomed to 125% or more (D-110), the tiles and the legend take two columns, and the estimate drops to the size of the
+   other figures: "US$ 0,0049" keeps its space unbroken. */
+@media (max-width: 960px) {
+  .costs__tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .costs-tile--hero .costs-tile__value {
+    font-size: var(--hf-font-size-2xl);
+  }
+
+  .costs-legend {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .costs-legend__top {
   display: flex;
   align-items: center;
@@ -2443,11 +2493,12 @@ button.queue-item:hover,
   text-overflow: ellipsis;
 }
 
+/* The time goes to a line of its own when the item is narrow, as when zoomed in (D-110). */
 .queue-item__when {
-  white-space: nowrap;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 5px;
+  gap: 0 5px;
   color: var(--hf-color-text-muted);
   font-size: var(--hf-font-size-xs);
 }
@@ -3129,8 +3180,10 @@ button.queue-item:hover,
   gap: var(--hf-space-3);
 }
 
+/* The actions move below the task's name and details when the row cannot hold both, as when zoomed in (D-110). */
 .task-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--hf-space-4);
   padding: var(--hf-space-3) var(--hf-space-4);
@@ -3148,7 +3201,7 @@ button.queue-item:hover,
 }
 
 .task-row__main {
-  flex: 1;
+  flex: 1 1 280px;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -3192,6 +3245,7 @@ button.queue-item:hover,
   align-items: center;
   gap: var(--hf-space-1);
   flex: none;
+  margin-left: auto;
 }
 
 .task-row__actions .toggle {
@@ -3550,11 +3604,11 @@ button.queue-item:hover,
 
 /* ---------- Onboarding and daemon down ---------- */
 
+/* The card centres by its margins, not by align-items: a card taller than the window, as when zoomed in (D-110),
+   then starts at the top and scrolls, where centring would push its top out of reach. */
 .onboarding,
 .daemon-down {
   display: flex;
-  align-items: center;
-  justify-content: center;
   height: 100vh;
   padding: var(--hf-space-6);
   background:
@@ -3567,6 +3621,7 @@ button.queue-item:hover,
 .onboarding__card,
 .daemon-down__card {
   width: min(760px, 100%);
+  margin: auto;
   padding: var(--hf-space-8);
   border: 1px solid var(--hf-color-border-strong);
   border-radius: var(--hf-radius-lg);

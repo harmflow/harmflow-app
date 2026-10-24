@@ -113,50 +113,52 @@ export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpe
         {visible.length === 0 && !loading ? (
           <EmptyState icon="history" title={t("history.empty")} />
         ) : (
-          <table className="table table--interactive">
-            <thead>
-              <tr>
-                <th>{t("history.columns.status")}</th>
-                <th>{t("history.columns.task")}</th>
-                <th>{t("history.columns.workItem")}</th>
-                <th>{t("history.columns.harness")}</th>
-                <th>{t("history.columns.trigger")}</th>
-                <th>{t("history.columns.started")}</th>
-                <th>{t("history.columns.duration")}</th>
-                <th>{t("history.columns.result")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visible.map((r) => (
-                <tr key={r.id} onClick={() => onOpen(r.id)} className={r.id === openId ? "is-selected" : undefined}>
-                  <td>
-                    <StatusChip status={r.status} compact />
-                  </td>
-                  <td>
-                    <strong>{r.taskName}</strong>
-                    <div className="mono muted small">{r.id}</div>
-                  </td>
-                  <td className="mono">{r.workItem ?? "—"}</td>
-                  <td>
-                    <HarnessLabel harness={r.harness} model={r.model} taskType={r.taskType} />
-                    {r.attemptCount && r.attemptCount > 1 ? <span className="muted small"> ×{r.attemptCount}</span> : null}
-                  </td>
-                  <td>{t(`trigger.${r.trigger}`)}</td>
-                  <td className="mono small">{formatDateTime(r.startedAt ?? r.createdAt, i18n.language)}</td>
-                  <td className="mono">{r.startedAt ? formatElapsed(r.startedAt, r.endedAt) : "—"}</td>
-                  <td>
-                    {r.testsStatus ? (
-                      <Chip tone={r.testsStatus === "passed" ? "success" : r.testsStatus === "failed" ? "danger" : "neutral"} icon="test">
-                        {t(`testsStatus.${r.testsStatus}`)}
-                      </Chip>
-                    ) : null}
-                    {r.pullRequestUrl ? <Chip tone="success" icon="pr">PR</Chip> : null}
-                    {r.warningCount ? <Chip tone="warning" icon="shield">{t("warnings.count", { count: r.warningCount })}</Chip> : null}
-                  </td>
+          <div className="table__scroll">
+            <table className="table table--interactive">
+              <thead>
+                <tr>
+                  <th>{t("history.columns.status")}</th>
+                  <th>{t("history.columns.task")}</th>
+                  <th>{t("history.columns.workItem")}</th>
+                  <th>{t("history.columns.harness")}</th>
+                  <th>{t("history.columns.trigger")}</th>
+                  <th>{t("history.columns.started")}</th>
+                  <th>{t("history.columns.duration")}</th>
+                  <th>{t("history.columns.result")}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {visible.map((r) => (
+                  <tr key={r.id} onClick={() => onOpen(r.id)} className={r.id === openId ? "is-selected" : undefined}>
+                    <td>
+                      <StatusChip status={r.status} compact />
+                    </td>
+                    <td>
+                      <strong>{r.taskName}</strong>
+                      <div className="mono muted small">{r.id}</div>
+                    </td>
+                    <td className="mono">{r.workItem ?? "—"}</td>
+                    <td>
+                      <HarnessLabel harness={r.harness} model={r.model} taskType={r.taskType} />
+                      {r.attemptCount && r.attemptCount > 1 ? <span className="muted small"> ×{r.attemptCount}</span> : null}
+                    </td>
+                    <td>{t(`trigger.${r.trigger}`)}</td>
+                    <td className="mono small">{formatDateTime(r.startedAt ?? r.createdAt, i18n.language)}</td>
+                    <td className="mono">{r.startedAt ? formatElapsed(r.startedAt, r.endedAt) : "—"}</td>
+                    <td>
+                      {r.testsStatus ? (
+                        <Chip tone={r.testsStatus === "passed" ? "success" : r.testsStatus === "failed" ? "danger" : "neutral"} icon="test">
+                          {t(`testsStatus.${r.testsStatus}`)}
+                        </Chip>
+                      ) : null}
+                      {r.pullRequestUrl ? <Chip tone="success" icon="pr">PR</Chip> : null}
+                      {r.warningCount ? <Chip tone="warning" icon="shield">{t("warnings.count", { count: r.warningCount })}</Chip> : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
         <div className="table__footer">
           {exhausted ? (

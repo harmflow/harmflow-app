@@ -152,58 +152,60 @@ function Summary({ cost, active, onReceipt }: { cost: ExecutionCost; active: boo
             {t("executions.detail.costs.receipt")}
           </Button>
         </header>
-        <table className="table costs-table">
-          <thead>
-            <tr>
-              <th>{t("executions.detail.costs.columns.attempt")}</th>
-              <th>{t("executions.detail.costs.columns.harness")}</th>
-              <th className="num">{t("executions.detail.costs.columns.input")}</th>
-              <th className="num">{t("executions.detail.costs.columns.cacheRead")}</th>
-              <th className="num">{t("executions.detail.costs.columns.output")}</th>
-              <th className="num">{t("executions.detail.costs.columns.cost")}</th>
-              <th>{t("executions.detail.costs.columns.source")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {cost.attempts.map((a) => (
-              <tr key={a.attempt.number}>
-                <td className="mono">#{a.attempt.number}</td>
-                <td>
-                  <HarnessLabel harness={a.attempt.harness} model={a.model} />
-                </td>
-                <td className="num mono">{a.tokens ? formatNumber(a.tokens.input + a.tokens.cacheWrite, locale) : "—"}</td>
-                <td className="num mono">{a.tokens ? formatNumber(a.tokens.cacheRead, locale) : "—"}</td>
-                <td className="num mono">{a.tokens && a.outputKnown ? formatNumber(a.tokens.output, locale) : "—"}</td>
-                <td className="num mono">
-                  <strong>{formatUsd(a.cost, locale)}</strong>
-                </td>
-                <td>
-                  <SourceChip a={a} />
-                  {a.attempt.outcome === "quota_exhausted" ? (
-                    <Chip tone="magenta" icon="switch">
-                      {t("attemptOutcome.quota_exhausted")}
-                    </Chip>
-                  ) : null}
-                </td>
+        <div className="table__scroll">
+          <table className="table costs-table">
+            <thead>
+              <tr>
+                <th>{t("executions.detail.costs.columns.attempt")}</th>
+                <th>{t("executions.detail.costs.columns.harness")}</th>
+                <th className="num">{t("executions.detail.costs.columns.input")}</th>
+                <th className="num">{t("executions.detail.costs.columns.cacheRead")}</th>
+                <th className="num">{t("executions.detail.costs.columns.output")}</th>
+                <th className="num">{t("executions.detail.costs.columns.cost")}</th>
+                <th>{t("executions.detail.costs.columns.source")}</th>
               </tr>
-            ))}
-          </tbody>
-          {several ? (
-            <tfoot>
-              <tr className="costs-table__total">
-                <td colSpan={2}>{t("executions.detail.costs.total")}</td>
-                <td className="num mono">{tokens ? formatNumber(tokens.input + tokens.cacheWrite, locale) : "—"}</td>
-                <td className="num mono">{tokens ? formatNumber(tokens.cacheRead, locale) : "—"}</td>
-                <td className="num mono">{tokens ? outputText(tokens.output) : "—"}</td>
-                <td className="num mono">
-                  <strong>{formatUsd(cost.cost, locale)}</strong>
-                  {cost.incomplete && cost.cost !== undefined ? <span className="costs-flag"> + ?</span> : null}
-                </td>
-                <td />
-              </tr>
-            </tfoot>
-          ) : null}
-        </table>
+            </thead>
+            <tbody>
+              {cost.attempts.map((a) => (
+                <tr key={a.attempt.number}>
+                  <td className="mono">#{a.attempt.number}</td>
+                  <td>
+                    <HarnessLabel harness={a.attempt.harness} model={a.model} />
+                  </td>
+                  <td className="num mono">{a.tokens ? formatNumber(a.tokens.input + a.tokens.cacheWrite, locale) : "—"}</td>
+                  <td className="num mono">{a.tokens ? formatNumber(a.tokens.cacheRead, locale) : "—"}</td>
+                  <td className="num mono">{a.tokens && a.outputKnown ? formatNumber(a.tokens.output, locale) : "—"}</td>
+                  <td className="num mono">
+                    <strong>{formatUsd(a.cost, locale)}</strong>
+                  </td>
+                  <td>
+                    <SourceChip a={a} />
+                    {a.attempt.outcome === "quota_exhausted" ? (
+                      <Chip tone="magenta" icon="switch">
+                        {t("attemptOutcome.quota_exhausted")}
+                      </Chip>
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            {several ? (
+              <tfoot>
+                <tr className="costs-table__total">
+                  <td colSpan={2}>{t("executions.detail.costs.total")}</td>
+                  <td className="num mono">{tokens ? formatNumber(tokens.input + tokens.cacheWrite, locale) : "—"}</td>
+                  <td className="num mono">{tokens ? formatNumber(tokens.cacheRead, locale) : "—"}</td>
+                  <td className="num mono">{tokens ? outputText(tokens.output) : "—"}</td>
+                  <td className="num mono">
+                    <strong>{formatUsd(cost.cost, locale)}</strong>
+                    {cost.incomplete && cost.cost !== undefined ? <span className="costs-flag"> + ?</span> : null}
+                  </td>
+                  <td />
+                </tr>
+              </tfoot>
+            ) : null}
+          </table>
+        </div>
       </section>
       <BillingNote cost={cost} active={active} />
     </>
