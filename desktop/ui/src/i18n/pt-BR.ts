@@ -501,6 +501,7 @@ export const ptBR: Resources = {
     detail: {
       selectHint: "Selecione uma execução para ver seus eventos.",
       tabs: {
+        chat: "Chat",
         events: "Eventos",
         raw: "Saída bruta",
         files: "Arquivos alterados",
@@ -527,6 +528,11 @@ export const ptBR: Resources = {
         noOutput: "Nenhuma saída ainda.",
         streams: { stdout: "out", stderr: "err" },
         noHarness: "Uma tarefa de script executa um programa, não um harness: não tem modelo, prompt nem custo.",
+      },
+      chat: {
+        agent: "Agente",
+        noMessages: "Nenhuma mensagem do agente ainda.",
+        messagesExpired: "As mensagens do agente foram apagadas com o log expirado.",
       },
       eventDetails: "Detalhes do evento",
       noEventSelected: "Selecione um evento para ver seus detalhes.",

@@ -6,6 +6,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Execution, ExecutionOutput, HarmflowEvent } from "../api/types";
 import i18n from "../i18n";
+import { formatTime } from "../lib/format";
 import { getState, patchStateForTests } from "../state/store";
 import { ExecutionDetail } from "./ExecutionDetail";
 
@@ -98,9 +99,9 @@ afterEach(() => {
 /** Lets the stand-in daemon's answers arrive and React render them; setImmediate is never faked here. */
 const settle = () => act(() => new Promise<void>((resolve) => setImmediate(resolve)));
 
-async function open(x: Execution, events: HarmflowEvent[], output: ExecutionOutput) {
+async function open(x: Execution, events: HarmflowEvent[], output: ExecutionOutput, logExpired = false) {
   daemon.answers.set(`/executions/${x.id}`, x);
-  daemon.answers.set(`/executions/${x.id}/events`, { events, logExpired: false });
+  daemon.answers.set(`/executions/${x.id}/events`, { events, logExpired });
   daemon.answers.set(`/executions/${x.id}/output`, output);
   host = document.body.appendChild(document.createElement("div"));
   root = createRoot(host);
@@ -109,6 +110,7 @@ async function open(x: Execution, events: HarmflowEvent[], output: ExecutionOutp
 }
 
 const body = () => host!.querySelector(".detail__body")!.textContent ?? "";
+const selectedTab = () => host!.querySelector('[role="tab"][aria-selected="true"]')?.textContent ?? "";
 
 async function choose(label: string): Promise<string> {
   const tab = [...host!.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((b) => b.textContent?.startsWith(label));
@@ -133,6 +135,7 @@ describe("execution detail", () => {
 
     const tabs = [...host!.querySelectorAll('[role="tab"]')].map((t) => t.textContent);
     expect(tabs).toEqual([
+      "Chat(0)",
       expect.stringMatching(/^Events/),
       "Raw output",
       "Changed files(1)",
@@ -142,8 +145,8 @@ describe("execution detail", () => {
       "Costs",
     ]);
 
+    expect(await choose("Events")).toContain("./gradlew test");
     expect(host!.querySelectorAll(".tl-item").length).toBeGreaterThanOrEqual(3);
-    expect(body()).toContain("./gradlew test");
 
     const raw = await choose("Raw output");
     expect(raw).toContain("Attempt 1 · Claude Code");
@@ -218,6 +221,7 @@ describe("execution detail", () => {
       capture(),
     );
 
+    await choose("Events");
     const items = [...host!.querySelectorAll<HTMLElement>(".tl-item")].map((b) => ({
       title: b.querySelector(".tl-item__title")?.textContent, // the event's label, and #n from the second attempt on
       detail: b.querySelector(".tl-item__detail")?.textContent,
@@ -278,7 +282,7 @@ describe("execution detail", () => {
 
       const alerts = host!.querySelector(".detail__alerts")!.textContent;
       expect(alerts).toContain("trocando de Claude Code para Codex");
-      const timeline = body();
+      const timeline = await choose("Eventos");
       expect(timeline).toContain("trocando de Claude Code para Codex");
       expect(timeline).toContain("I could not finish the change.");
       expect(timeline).toContain("Codex não pode continuar (cota esgotada) e nenhum harness alternativo está disponível: You've hit your usage limit");
@@ -313,7 +317,7 @@ describe("execution detail", () => {
     );
 
     expect(host!.querySelector(".detail__alerts")!.textContent).toBe(`Conflicting activity — ${said}`);
-    expect(body()).toContain("Conflicting activity");
+    expect(await choose("Events")).toContain("Conflicting activity");
     expect(await choose("Results")).toContain(`Conflicting activity — ${said}`);
   });
 
@@ -572,6 +576,185 @@ describe("execution detail", () => {
   });
 });
 
+// FS-008 FR-013: a harness task's conversation alone — each attempt's prompt, then the agent messages it received — read
+// only, and the view its detail opens on.
+describe("the chat view (FS-008 FR-013)", () => {
+  const at = (minute: number) => `2026-10-21T09:${String(minute).padStart(2, "0")}:00Z`;
+  const context = "This session is run by HarmFlow, a local scheduler.\nWorkspace: /workspaces/core-banking\n";
+
+  /** Each attempt of the view: its header, then each turn's label, text, and time. */
+  const conversation = () =>
+    [...host!.querySelectorAll(".chat__attempt")].map((li) => ({
+      header: li.querySelector(".chat__header")!.textContent,
+      turns: [...li.querySelectorAll(".chat-turn")].map((turn) => [
+        turn.querySelector(".chat-turn__label")!.textContent,
+        (turn.querySelector(".chat-turn__text") ?? turn.querySelector(".muted"))!.textContent,
+        turn.querySelector("time")!.getAttribute("datetime"),
+      ]),
+    }));
+  const notes = () => [...host!.querySelectorAll(".chat__note")].map((n) => n.textContent);
+
+  it("opens on the chat view: each attempt's prompt, then its agent messages, each with its time, and nothing else (FS-008 AC-014)", async () => {
+    const x: Execution = {
+      ...completed,
+      id: "exec-chat",
+      attempts: [
+        { ...base.attempts[0], startedAt: at(0), prompt: "Implement org/core-banking#123.", sessionContext: context },
+        { ...base.attempts[1], startedAt: at(5), prompt: "Implement org/core-banking#123, from the last commit.", sessionContext: context },
+      ],
+    };
+    const on = { executionId: x.id };
+    const one = { ...on, attempt: 1, harness: "claude-code" };
+    const two = { ...on, attempt: 2, harness: "codex" };
+    await open(
+      x,
+      [
+        event(1, "execution.started", { ...on, timestamp: at(0), message: "Loading configuration" }),
+        event(2, "harness.started", { ...one, timestamp: at(0), message: "Claude Code 2.1.239 started" }),
+        event(3, "harness.message", { ...one, timestamp: at(1), message: "I will read the issue first." }),
+        event(4, "tool.started", { ...one, timestamp: at(2), payload: { toolUseId: "t1", tool: "Bash", input: { command: "./gradlew test" } } }),
+        event(5, "tool.completed", { ...one, timestamp: at(3), payload: { toolUseId: "t1", output: "BUILD SUCCESSFUL" } }),
+        event(6, "harness.message", { ...one, timestamp: at(4), message: "The tests pass." }),
+        event(7, "harness.quota_exhausted", { ...one, timestamp: at(4), severity: "warning", message: "Claude Code exhausted its quota" }),
+        event(8, "harness.switched", { ...one, timestamp: at(5), severity: "warning", message: "switching from Claude Code to Codex" }),
+        event(9, "harness.started", { ...two, timestamp: at(5), message: "Codex 0.163.0 started" }),
+        event(10, "harness.message", { ...two, timestamp: at(6), message: "Picking up from the last commit." }),
+        event(11, "harness.message", { ...two, timestamp: at(7), message: "Pushed the branch." }),
+        event(12, "execution.completed", { ...on, timestamp: at(8), message: "Opened a draft pull request" }),
+      ],
+      capture("Claude AI usage limit reached\n", "git push\n"),
+    );
+
+    // The first tab, and the one shown with nothing clicked.
+    const tabs = [...host!.querySelectorAll('[role="tab"]')].map((t) => t.textContent);
+    expect(tabs.slice(0, 2)).toEqual(["Chat(4)", expect.stringMatching(/^Events/)]);
+    expect(selectedTab()).toBe("Chat(4)");
+
+    expect(conversation()).toEqual([
+      {
+        header: expect.stringMatching(/^Attempt 1Claude Code/),
+        turns: [
+          ["Prompt", "Implement org/core-banking#123.", at(0)],
+          ["Agent", "I will read the issue first.", at(1)],
+          ["Agent", "The tests pass.", at(4)],
+        ],
+      },
+      {
+        header: expect.stringMatching(/^Attempt 2Codex/),
+        turns: [
+          ["Prompt", "Implement org/core-banking#123, from the last commit.", at(5)],
+          ["Agent", "Picking up from the last commit.", at(6)],
+          ["Agent", "Pushed the branch.", at(7)],
+        ],
+      },
+    ]);
+    expect(host!.querySelector(".chat-turn--agent time")!.textContent).toBe(formatTime(at(1), "en-US"));
+
+    // No tool, command, status, or warning event, and not the session context.
+    const shown = body();
+    for (const absent of ["Loading configuration", "Claude Code 2.1.239 started", "./gradlew test", "BUILD SUCCESSFUL", "exhausted its quota", "Codex 0.163.0 started", "Opened a draft pull request", "Session context", "This session is run by HarmFlow"]) {
+      expect(shown, absent).not.toContain(absent);
+    }
+    // Read-only: no text box, and no read of the raw output it does not show.
+    expect(host!.querySelectorAll(".detail__body :is(input, textarea, select, [contenteditable], [role='textbox'])")).toHaveLength(0);
+    expect(daemon.requests).not.toContain(`GET /executions/${x.id}/output`);
+  });
+
+  it("shows the prompt and the messages as plain text, their line breaks kept and nothing in them read as markup (FS-008 FR-013)", async () => {
+    const prompt = "# Task\nFix **the bug** in <code>auth</code>.\n{{token}} $t(app.name)";
+    const said = "Done:\n- [x] tests\n<b>not bold</b> <img src=x onerror=alert(1)> `code`";
+    const x: Execution = { ...completed, id: "exec-chat-plain", attempts: [{ ...base.attempts[0], prompt }] };
+    await open(x, [event(1, "harness.message", { executionId: x.id, attempt: 1, harness: "claude-code", message: said })], capture());
+
+    const texts = [...host!.querySelectorAll(".chat-turn__text")];
+    expect(texts.map((e) => e.textContent)).toEqual([prompt, said]);
+    expect(texts.map((e) => e.children.length)).toEqual([0, 0]);
+  });
+
+  it("says an attempt from a record older than its prompt sent one not recorded (FS-008 FR-013)", async () => {
+    const x: Execution = { ...completed, id: "exec-chat-older", attempts: [base.attempts[0]] };
+    await open(x, [event(1, "harness.message", { executionId: x.id, attempt: 1, harness: "claude-code", timestamp: at(1), message: "Hello." })], capture());
+    expect(conversation()).toEqual([
+      {
+        header: expect.stringMatching(/^Attempt 1Claude Code/),
+        turns: [
+          ["Prompt", "Not recorded", started],
+          ["Agent", "Hello.", at(1)],
+        ],
+      },
+    ]);
+  });
+
+  it("shows an empty state before any attempt (FS-008 FR-013)", async () => {
+    const queued: Execution = { ...base, id: "exec-chat-queued", status: "queued", startedAt: undefined, attempts: [], commands: [] };
+    await open(queued, [event(1, "execution.created", { executionId: queued.id })], capture());
+    expect(selectedTab()).toBe("Chat(0)");
+    expect(body()).toBe("No attempts yet.");
+  });
+
+  it("adds an agent message at the end of the running attempt's conversation as it arrives, with no reload (FS-008 AC-015)", async () => {
+    const attempt = { ...base.attempts[0], startedAt: at(0), endedAt: undefined, outcome: "running" as const, prompt: "Implement org/core-banking#123." };
+    const running: Execution = { ...base, id: "exec-chat-live", harness: "claude-code", attempts: [attempt] };
+    const one = { executionId: running.id, attempt: 1, harness: "claude-code" };
+    await open(running, [event(1, "harness.started", { ...one, timestamp: at(0) })], capture());
+    expect(notes()).toEqual(["No agent messages yet."]);
+
+    const reads = () => daemon.requests.filter((r) => r.startsWith(`GET /executions/${running.id}`)).length;
+    const before = reads();
+    // The stream hands each event to the store, which the view reads.
+    const arrive = (e: HarmflowEvent) =>
+      act(async () => patchStateForTests({ events: { ...getState().events, [running.id]: [...getState().events[running.id], e] } }));
+
+    await arrive(event(2, "harness.message", { ...one, timestamp: at(1), message: "Reading the issue." }));
+    await arrive(event(3, "tool.started", { ...one, timestamp: at(2), payload: { toolUseId: "t1", tool: "Bash", input: { command: "./gradlew test" } } }));
+    await arrive(event(4, "harness.message", { ...one, timestamp: at(3), message: "Running the tests." }));
+    expect(conversation()).toEqual([
+      {
+        header: expect.stringMatching(/^Attempt 1Claude Code/),
+        turns: [
+          ["Prompt", "Implement org/core-banking#123.", at(0)],
+          ["Agent", "Reading the issue.", at(1)],
+          ["Agent", "Running the tests.", at(3)],
+        ],
+      },
+    ]);
+    expect(notes()).toEqual([]);
+    expect(selectedTab()).toBe("Chat(2)");
+
+    // A failover: the next attempt's message shows under its own number before the record is read again, and its
+    // prompt joins it once it is.
+    await arrive(event(5, "harness.message", { executionId: running.id, attempt: 2, harness: "codex", timestamp: at(5), message: "Taking over." }));
+    expect(conversation()[1]).toEqual({ header: "Attempt 2Codex", turns: [["Agent", "Taking over.", at(5)]] });
+    expect(reads()).toBe(before);
+
+    const second = { ...base.attempts[1], startedAt: at(4), endedAt: undefined, outcome: "running" as const, prompt: "Implement org/core-banking#123, resuming." };
+    await act(async () => patchStateForTests({ details: { ...getState().details, [running.id]: { ...running, attempts: [{ ...attempt, outcome: "quota_exhausted", endedAt: at(4) }, second] } } }));
+    expect(conversation()[1].turns).toEqual([
+      ["Prompt", "Implement org/core-banking#123, resuming.", at(4)],
+      ["Agent", "Taking over.", at(5)],
+    ]);
+  });
+
+  it("keeps each attempt's prompt once the log has expired, and says the agent's messages left with it (FS-008 AC-016)", async () => {
+    const x: Execution = {
+      ...completed,
+      id: "exec-chat-expired",
+      attempts: [
+        { ...base.attempts[0], prompt: "Implement org/core-banking#123." },
+        { ...base.attempts[1], prompt: "Implement org/core-banking#123, from the last commit." },
+      ],
+    };
+    await open(x, [], { logExpired: true, attempts: [] }, true);
+    expect(selectedTab()).toBe("Chat(0)");
+    expect(body()).toContain("This execution's log has expired under the retention period; its record is kept.");
+    expect(conversation()).toEqual([
+      { header: expect.stringMatching(/^Attempt 1Claude Code/), turns: [["Prompt", "Implement org/core-banking#123.", started]] },
+      { header: expect.stringMatching(/^Attempt 2Codex/), turns: [["Prompt", "Implement org/core-banking#123, from the last commit.", started]] },
+    ]);
+    expect(notes()).toEqual(["The agent's messages were deleted with the expired log.", "The agent's messages were deleted with the expired log."]);
+  });
+});
+
 // FS-003 FR-003, AC-005: the detail offers Cancel on a running or queued execution, and nothing that writes to the
 // agent; across every tab, the one request that is not a read is that cancel.
 describe("observe and cancel, no conversation (FS-003 AC-005)", () => {
@@ -686,7 +869,7 @@ describe("a script task's execution (FS-013 FR-012, AC-012)", () => {
   it("shows its output by stream and the program as it ran, and no harness, attempts, or costs", async () => {
     await open(script, lines, capture("audit\ntoken [REDACTED]\n"));
     const tabs = [...host!.querySelectorAll('[role="tab"]')].map((b) => b.textContent ?? "");
-    for (const absent of ["Attempts", "Costs", "Changed files", "Commands"]) {
+    for (const absent of ["Chat", "Attempts", "Costs", "Changed files", "Commands"]) {
       expect(tabs.some((t) => t.startsWith(absent)), absent).toBe(false);
     }
     expect(host!.querySelector(".detail__meta")!.textContent).toContain("Program");
@@ -706,5 +889,42 @@ describe("a script task's execution (FS-013 FR-012, AC-012)", () => {
     for (const shown of ["code 3", "/bin/sh", "echo audit", "/Users/me/jobs", "TZ=America/Sao_Paulo", "/runs/exec-script/script.sh"]) {
       expect(program).toContain(shown);
     }
+  });
+
+  it("offers no chat view and opens on its events timeline (FS-008 AC-017)", async () => {
+    const x: Execution = { ...script, id: "exec-script-no-chat" };
+    await open(x, lines, capture("audit\n"));
+    const tabs = [...host!.querySelectorAll('[role="tab"]')].map((b) => b.textContent ?? "");
+    expect(tabs.some((t) => t.startsWith("Chat"))).toBe(false);
+    expect(selectedTab()).toMatch(/^Events/);
+    expect(host!.querySelectorAll(".tl-item").length).toBeGreaterThan(0);
+    expect(host!.querySelector(".chat")).toBeNull();
+  });
+
+  // ExecutionsScreen and HistoryScreen keep one detail mounted as the selection changes.
+  it("opens another execution on its own first tab, Events for a script after a harness task's Chat (FS-008 AC-017)", async () => {
+    const prompted = (id: string): Execution => ({ ...completed, id, attempts: [{ ...base.attempts[0], prompt: "Implement org/core-banking#123." }] });
+    const [first, second, other] = [prompted("exec-switch-first"), prompted("exec-switch-second"), { ...script, id: "exec-switch-script" }];
+    for (const x of [second, other]) {
+      daemon.answers.set(`/executions/${x.id}`, x);
+      daemon.answers.set(`/executions/${x.id}/events`, { events: x === other ? lines : [], logExpired: false });
+    }
+    const show = async (x: Execution) => {
+      await act(async () => root!.render(<ExecutionDetail executionId={x.id} summary={x} />));
+      await settle();
+    };
+
+    await open(first, [], capture());
+    expect(selectedTab()).toBe("Chat(0)");
+    await show(other);
+    expect(selectedTab()).toMatch(/^Events/);
+    expect(body()).toContain("the program exited with code 3");
+
+    // A tab chosen on one harness task does not carry over to the next.
+    await show(first);
+    await choose("Attempts");
+    await show(second);
+    expect(selectedTab()).toBe("Chat(0)");
+    expect(body()).toContain("Implement org/core-banking#123.");
   });
 });

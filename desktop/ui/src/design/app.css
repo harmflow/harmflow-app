@@ -1945,6 +1945,78 @@ li:last-child .tl-item__rail::before {
   justify-content: space-between;
 }
 
+/* Chat tab: each attempt's prompt, then the agent's messages, as plain text with their line breaks (FS-008 FR-013). */
+.chat {
+  display: grid;
+  gap: var(--hf-space-4);
+  max-height: 560px;
+  overflow-y: auto;
+  padding-right: var(--hf-space-2);
+}
+
+.chat__attempt {
+  display: grid;
+  gap: var(--hf-space-2);
+}
+
+.chat__attempt + .chat__attempt {
+  padding-top: var(--hf-space-4);
+  border-top: 1px solid var(--hf-color-border);
+}
+
+.chat__header {
+  display: flex;
+  align-items: center;
+  gap: var(--hf-space-3);
+}
+
+.chat__note {
+  font-size: var(--hf-font-size-sm);
+}
+
+.chat-turn {
+  display: grid;
+  gap: 6px;
+  padding: var(--hf-space-3);
+  border: 1px solid var(--hf-color-border);
+  border-left: 3px solid var(--hf-color-violet);
+  border-radius: var(--hf-radius-md);
+  background: var(--hf-color-surface-sunken);
+}
+
+.chat-turn--prompt {
+  border-left-color: var(--hf-color-cyan);
+}
+
+.chat-turn__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--hf-color-text-muted);
+  font-size: var(--hf-font-size-xs);
+}
+
+.chat-turn--prompt .chat-turn__meta svg {
+  color: var(--hf-color-cyan);
+}
+
+.chat-turn--agent .chat-turn__meta svg {
+  color: var(--hf-color-violet);
+}
+
+.chat-turn__meta time {
+  margin-left: auto;
+  color: var(--hf-color-text-faint);
+}
+
+.chat-turn__text {
+  color: var(--hf-color-text);
+  font-size: var(--hf-font-size-sm);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* Costs tab: the summary and the receipt (harmflow-app#39). */
 
 .costs {
