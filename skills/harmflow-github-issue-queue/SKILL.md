@@ -34,7 +34,7 @@ reads `needs_attention`, or when its `resumes` reached `maxResumeAttempts` or it
 `maxFailedRetries`; report it with outcome `needs_attention` instead.
 
 An issue whose processing failed before any pull request linked it — a push that failed, `gh` unreachable, a daemon
-restart mid-run — is **work to retry** (D-140). Take as work to retry each work item in `context.json` `workItems` that
+restart mid-run — is **work to retry**. Take as work to retry each work item in `context.json` `workItems` that
 reads `failed`, belongs to a repository in `task.parameters.repositories`, and no managed draft pull request above
 resumes, when all of these hold:
 
