@@ -122,7 +122,7 @@ dev-desktop: sidecar ## Run the desktop shell against the development daemon
 .PHONY: app
 app: sidecar ## Build HarmFlow.app and the DMG (unsigned until the Developer ID exists, D-080)
 	cd desktop && pnpm tauri build
-	@echo "Bundles in desktop/src-tauri/target/release/bundle/"
+	@echo "Bundles in desktop/src-tauri/target.noindex/release/bundle/"
 
 # No prerequisite and no $(MAKE) here: the script pulls, then builds in a make of its own, whose COMMIT is read after
 # the pull. A $(MAKE) in the recipe would also run it under make -n. OPEN=1 and INSTALL_DIR reach it through the

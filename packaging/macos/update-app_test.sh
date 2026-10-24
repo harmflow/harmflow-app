@@ -32,7 +32,8 @@ EOF
 	PATH=$work/bin:$base_path
 	unset FAKE_LOADED_PROGRAM
 	root=$work/checkout
-	built=$root/desktop/src-tauri/target/release/bundle/macos/HarmFlow.app
+	cargo_out=$root/desktop/src-tauri/target.noindex
+	built=$cargo_out/release/bundle/macos/HarmFlow.app
 	installed=$work/Applications/HarmFlow.app
 	daemon_exe=$installed/Contents/MacOS/harmflowd
 	default_home=$HOME/Library/Application\ Support/HarmFlow
@@ -135,15 +136,18 @@ dump_record() {
 
 setup "register_app registers the installed copy and unregisters the builds that compete with it"
 fake_lsregister
-mkdir -p "$root/desktop/src-tauri" "$installed" "$root/desktop/src-tauri/target/debug/bundle/macos/HarmFlow.app" \
-	"$work/other worktree/target/release/bundle/macos/HarmFlow.app"
-printf '{"productName": "HarmFlow", "identifier": "com.harmflow.desktop"}\n' >"$root/desktop/src-tauri/tauri.conf.json"
-debug=$root/desktop/src-tauri/target/debug/bundle/macos/HarmFlow.app
+debug=$cargo_out/debug/bundle/macos/HarmFlow.app
+old=$root/desktop/src-tauri/target/release/bundle/macos/HarmFlow.app
+beside=$root/desktop/src-tauri/target-other/release/bundle/macos/HarmFlow.app
 other="$work/other worktree/target/release/bundle/macos/HarmFlow.app"
+mkdir -p "$installed" "$debug" "$old" "$beside" "$other"
+printf '{"productName": "HarmFlow", "identifier": "com.harmflow.desktop"}\n' >"$root/desktop/src-tauri/tauri.conf.json"
 {
 	dump_record "$installed" com.harmflow.desktop
 	dump_record "$built" com.harmflow.desktop
 	dump_record "$debug" com.harmflow.desktop
+	dump_record "$old" com.harmflow.desktop
+	dump_record "$beside" com.harmflow.desktop
 	dump_record /Volumes/dmg.gone0/HarmFlow.app com.harmflow.desktop
 	dump_record "$other" com.harmflow.desktop
 	dump_record /Volumes/dmg.gone1/Other.app com.example.other
@@ -155,11 +159,22 @@ out=$(register_app 2>&1) || fail "register_app failed: $out"
 want="-f $installed
 -u $built
 -u $debug
+-u $old
 -u /Volumes/dmg.gone0/HarmFlow.app"
 [[ $(cat "$work/calls") == "$want" ]] || fail "lsregister calls:"$'\n'"$(cat "$work/calls")"
 [[ $out == *"unregistered $debug (a build in this checkout)"* ]] || fail "does not name the checkout's build: $out"
 [[ $out == *"unregistered /Volumes/dmg.gone0/HarmFlow.app (no longer exists)"* ]] || fail "does not name the gone one: $out"
-[[ -d $debug && -d $other && -d $installed ]] || fail "a bundle was deleted"
+[[ $out == *"$root/desktop/src-tauri/target is Cargo's output from before target.noindex"*"rm -rf"* ]] ||
+	fail "does not name the old target/ to delete: $out"
+[[ -d $debug && -d $old && -d $beside && -d $other && -d $installed ]] || fail "a bundle was deleted"
+
+setup "register_app names no old target/ when there is none"
+fake_lsregister
+mkdir -p "$root/desktop/src-tauri" "$installed"
+printf '{"identifier": "com.harmflow.desktop"}\n' >"$root/desktop/src-tauri/tauri.conf.json"
+dump_record "$installed" com.harmflow.desktop >"$work/dump"
+out=$(register_app 2>&1) || fail "register_app failed: $out"
+[[ $out != *"before target.noindex"* ]] || fail "names an old target/: $out"
 
 # fake_checkout makes $root a git repository whose update-app.sh is a stub that prints how it was started, and commits
 # it; stub_commit SAYS changes the stub and commits again. Each prints the new commit, 7 characters as main reads it.

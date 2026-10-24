@@ -144,12 +144,13 @@ Three environment variables change where the daemon keeps its data and its token
 ## Running the local app
 
 Run the installed copy, `~/Applications/HarmFlow.app`, which `make update-app` builds from `main` and replaces.
-`make update-app` registers that copy with Launch Services and unregisters the bundles of this checkout's `target/` and
-those whose path is gone, so `open -a HarmFlow` opens it
-([`packaging/`](packaging/README.md#launching-by-name)). Spotlight keeps its own index, which may still list the builds
-in `target/`: pick the one in `~/Applications`.
+`make update-app` registers that copy with Launch Services and unregisters the bundles of this checkout's Cargo output
+and those whose path is gone, so launching HarmFlow by name opens it
+([`packaging/`](packaging/README.md#launching-by-name)). Cargo writes to `desktop/src-tauri/target.noindex`
+(`.cargo/config.toml`), which Spotlight does not index. A `desktop/src-tauri/target` left from before that is indexed,
+and its bundles keep coming back: delete it.
 
-A build started from another path, such as a worktree's `target/release`, is another copy with the same data
+A build started from another path, such as a worktree's `target.noindex/release`, is another copy with the same data
 directory: its window attaches to whichever daemon `run/daemon.json` names, and a daemon it starts serves the installed
 app's tasks and executions too. Give such a build a data directory of its own with `HARMFLOW_HOME`, or use
 `make dev-desktop`, which runs on `.harmflow-dev/home`.
