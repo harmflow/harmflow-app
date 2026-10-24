@@ -1,11 +1,12 @@
-// The selected execution: its events as they happen and replayed from the log, its raw output, files, commands,
-// results, attempts with the prompt and session context each sent (FS-008 FR-002, FR-008), and estimated token costs
-// (harmflow-app#39). Observe and cancel only — no input reaches the agent (FS-003 FR-003).
+// The selected execution: its conversation alone (FS-008 FR-013), its events as they happen and replayed from the log,
+// its raw output, files, commands, results, attempts with the prompt and session context each sent (FS-008 FR-002,
+// FR-008), and estimated token costs (harmflow-app#39). Observe and cancel only — no input reaches the agent
+// (FS-003 FR-003).
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
 import { native } from "../api/native";
-import type { Execution, ExecutionOutput, ExecutionSummary, HarmflowEvent, MessageKey, MessageParams } from "../api/types";
+import type { Attempt, Execution, ExecutionOutput, ExecutionSummary, HarmflowEvent, MessageKey, MessageParams } from "../api/types";
 import { isActive } from "../api/types";
 import { daemonText, eventText, fieldText } from "../lib/daemonText";
 import { formatBytes, formatDateTime, formatDuration, formatElapsed, formatTime, elapsedMs } from "../lib/format";
@@ -18,7 +19,7 @@ import { HarnessLabel } from "./Shell";
 import { Icon, type IconName } from "./Icon";
 import { Banner, Button, Chip, CopyButton, EmptyState, KeyValue, StatusChip, Tabs, cx, type TabDef } from "./ui";
 
-type TabKey = "events" | "output" | "program" | "raw" | "files" | "commands" | "results" | "attempts" | "costs";
+type TabKey = "chat" | "events" | "output" | "program" | "raw" | "files" | "commands" | "results" | "attempts" | "costs";
 
 const PROMINENT = new Set([
   "harness.switched",
@@ -34,12 +35,14 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
   const detail = useStore((s) => s.details[executionId]);
   const events = useStore((s) => s.events[executionId]);
   const logExpired = useStore((s) => s.logExpired[executionId]);
-  const [tab, setTab] = useState<TabKey>("events");
+  // The tab the user chose; none, or one this execution lacks, shows the first of its list.
+  const [tab, setTab] = useState<TabKey | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<number | null>(null);
   const now = useNow(1000);
   const { cancel, pending } = useCancel();
 
   useEffect(() => {
+    setTab(null);
     setSelectedEvent(null);
     void actions.loadExecution(executionId);
     void actions.loadEvents(executionId);
@@ -56,6 +59,8 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
   }, [detail, events]);
   const prominent = useMemo(() => (events ?? []).filter((e) => PROMINENT.has(e.type)), [events]);
   const outputLines = useMemo(() => (events ?? []).filter((e) => e.type === "script.output"), [events]);
+  // The chat lists each agent message under its attempt, so it counts only those the daemon stamped with one.
+  const agentMessages = useMemo(() => (events ?? []).filter((e) => e.type === "harness.message" && e.attempt), [events]);
 
   if (!exec) {
     return (
@@ -71,8 +76,8 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
   const issueNumber = workItem?.issueNumber ?? parseIssue(exec.workItem);
   const commands = detail?.commands ?? [];
   const attempts = detail?.attempts ?? [];
-  // A script task runs a program: its output and the program as it ran, and no harness, model, prompt, or cost
-  // (FS-013 FR-012).
+  // A script task runs a program: its output and the program as it ran, and no harness, model, prompt, conversation, or
+  // cost (FS-013 FR-012, FS-008 FR-013).
   const isScript = exec.taskType === "script";
 
   const tabs: TabDef<TabKey>[] = isScript
@@ -84,6 +89,7 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
         { key: "results", label: t("executions.detail.tabs.results"), icon: "pr" },
       ]
     : [
+        { key: "chat", label: t("executions.detail.tabs.chat"), icon: "message", count: agentMessages.length },
         { key: "events", label: t("executions.detail.tabs.events"), icon: "list", count: timeline.length },
         { key: "raw", label: t("executions.detail.tabs.raw"), icon: "terminal" },
         { key: "files", label: t("executions.detail.tabs.files"), icon: "file", count: files.length },
@@ -92,6 +98,7 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
         { key: "attempts", label: t("executions.detail.tabs.attempts"), icon: "layers", count: attempts.length },
         { key: "costs", label: t("executions.detail.tabs.costs"), icon: "coin" },
       ];
+  const shown = tabs.find((d) => d.key === tab)?.key ?? tabs[0].key;
 
   // With nothing chosen, the details follow the latest step.
   const selected = timeline.find((i) => i.id === selectedEvent) ?? timeline[timeline.length - 1];
@@ -155,24 +162,25 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
         </div>
       ) : null}
 
-      <Tabs tabs={tabs} value={tab} onChange={setTab} />
+      <Tabs tabs={tabs} value={shown} onChange={setTab} />
 
       <div className="detail__body">
         {logExpired ? <Banner tone="neutral" icon="clock">{t("executions.detail.logExpired")}</Banner> : null}
-        {tab === "events" ? (
+        {shown === "chat" ? <Chat key={executionId} attempts={attempts} messages={agentMessages} logExpired={logExpired} locale={i18n.language} /> : null}
+        {shown === "events" ? (
           <div className="detail__split">
             <Timeline items={timeline} active={active} selectedId={selected?.id} onSelect={setSelectedEvent} status={exec.status} />
             <EventDetails item={selected} events={events ?? []} locale={i18n.language} />
           </div>
         ) : null}
-        {tab === "output" ? <ScriptOutput lines={outputLines} /> : null}
-        {tab === "program" ? <ScriptProgram detail={detail} active={active} /> : null}
-        {tab === "raw" ? <RawOutput key={executionId} executionId={executionId} active={active} /> : null}
-        {tab === "files" ? <FileList files={files} /> : null}
-        {tab === "commands" ? <CommandList commands={commands} locale={i18n.language} /> : null}
-        {tab === "results" ? <Results detail={detail} summary={exec} /> : null}
-        {tab === "attempts" ? <Attempts detail={detail} locale={i18n.language} now={now} /> : null}
-        {tab === "costs" ? <CostsTab key={executionId} attempts={attempts} active={active} now={now} /> : null}
+        {shown === "output" ? <ScriptOutput lines={outputLines} /> : null}
+        {shown === "program" ? <ScriptProgram detail={detail} active={active} /> : null}
+        {shown === "raw" ? <RawOutput key={executionId} executionId={executionId} active={active} /> : null}
+        {shown === "files" ? <FileList files={files} /> : null}
+        {shown === "commands" ? <CommandList commands={commands} locale={i18n.language} /> : null}
+        {shown === "results" ? <Results detail={detail} summary={exec} /> : null}
+        {shown === "attempts" ? <Attempts detail={detail} locale={i18n.language} now={now} /> : null}
+        {shown === "costs" ? <CostsTab key={executionId} attempts={attempts} active={active} now={now} /> : null}
       </div>
       <p className="detail__footnote">
         <Icon name="shield" size={13} /> {t("executions.detail.noConversation")}
@@ -184,6 +192,72 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
 function parseIssue(workItem?: string): number | undefined {
   const m = workItem?.match(/#(\d+)$/);
   return m ? Number(m[1]) : undefined;
+}
+
+/**
+ * The conversation alone: for each attempt, the prompt it sent, then the agent messages it received, as the daemon kept
+ * and redacted them — plain text, no Markdown — and no other event nor the session context (FS-008 FR-013, D-129). The
+ * prompts live in the record and the messages in the log, so an expired log leaves the prompts.
+ */
+function Chat({ attempts, messages, logExpired, locale }: { attempts: Attempt[]; messages: HarmflowEvent[]; logExpired?: boolean; locale: string }) {
+  const { t } = useTranslation();
+  const ref = useRef<HTMLOListElement | null>(null);
+  // Follows the end of the conversation until the user scrolls up to read.
+  const following = useRef(true);
+  useEffect(() => {
+    if (ref.current && following.current) ref.current.scrollTop = ref.current.scrollHeight;
+  }, [messages.length, attempts.length]);
+  // A message whose attempt the record does not hold yet, the record being read again after the event, still shows.
+  const numbers = [...new Set([...attempts.map((a) => a.number), ...messages.map((e) => e.attempt!)])].sort((a, b) => a - b);
+  if (numbers.length === 0) return <EmptyState icon="message" title={t("executions.detail.noAttempts")} />;
+  return (
+    <ol
+      className="chat"
+      ref={ref}
+      onScroll={(e) => {
+        const el = e.currentTarget;
+        following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+      }}
+    >
+      {numbers.map((number) => {
+        const a = attempts.find((x) => x.number === number);
+        const said = messages.filter((e) => e.attempt === number);
+        return (
+          <li key={number} className="chat__attempt">
+            <header className="chat__header">
+              <strong>{t("executions.detail.attempt", { number })}</strong>
+              <HarnessLabel harness={a?.harness ?? said[0]?.harness} model={a?.model} />
+            </header>
+            {a ? <ChatTurn kind="prompt" label={t("executions.detail.prompt")} time={a.startedAt} text={a.prompt} locale={locale} /> : null}
+            {said.map((e) => (
+              <ChatTurn key={e.id} kind="agent" label={t("executions.detail.chat.agent")} time={e.timestamp} text={e.message} locale={locale} />
+            ))}
+            {said.length === 0 ? (
+              <p className="chat__note muted">{logExpired ? t("executions.detail.chat.messagesExpired") : t("executions.detail.chat.noMessages")}</p>
+            ) : null}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/** One turn of the conversation, its text as React text so that nothing in it is read as markup. */
+function ChatTurn({ kind, label, time, text, locale }: { kind: "prompt" | "agent"; label: string; time?: string; text?: string; locale: string }) {
+  const { t } = useTranslation();
+  return (
+    <div className={cx("chat-turn", `chat-turn--${kind}`)}>
+      <div className="chat-turn__meta">
+        <Icon name={kind === "prompt" ? "prompt" : "message"} size={14} />
+        <span className="chat-turn__label">{label}</span>
+        <time className="mono" dateTime={time}>
+          {formatTime(time, locale)}
+        </time>
+      </div>
+      {/* A record older than D-104 kept no prompt. */}
+      {text ? <div className="chat-turn__text">{text}</div> : <span className="muted">{t("executions.detail.notRecorded")}</span>}
+    </div>
+  );
 }
 
 function Timeline({

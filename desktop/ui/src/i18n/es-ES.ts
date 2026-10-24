@@ -503,6 +503,7 @@ export const esES: Resources = {
     detail: {
       selectHint: "Selecciona una ejecución para ver sus eventos.",
       tabs: {
+        chat: "Chat",
         events: "Eventos",
         raw: "Salida sin procesar",
         files: "Archivos cambiados",
@@ -529,6 +530,11 @@ export const esES: Resources = {
         noOutput: "Todavía no hay salida.",
         streams: { stdout: "out", stderr: "err" },
         noHarness: "Una tarea de script ejecuta un programa, no un harness: no tiene modelo, prompt ni coste.",
+      },
+      chat: {
+        agent: "Agente",
+        noMessages: "Aún no hay mensajes del agente.",
+        messagesExpired: "Los mensajes del agente se borraron con el log caducado.",
       },
       eventDetails: "Detalles del evento",
       noEventSelected: "Selecciona un evento para ver sus detalles.",

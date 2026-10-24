@@ -490,6 +490,7 @@ export const enUS = {
     detail: {
       selectHint: "Select an execution to see its events.",
       tabs: {
+        chat: "Chat",
         events: "Events",
         raw: "Raw output",
         files: "Changed files",
@@ -516,6 +517,11 @@ export const enUS = {
         noOutput: "No output yet.",
         streams: { stdout: "out", stderr: "err" },
         noHarness: "A script task runs a program, not a harness: it has no model, prompt, or cost.",
+      },
+      chat: {
+        agent: "Agent",
+        noMessages: "No agent messages yet.",
+        messagesExpired: "The agent's messages were deleted with the expired log.",
       },
       eventDetails: "Event details",
       noEventSelected: "Select an event to see its details.",
