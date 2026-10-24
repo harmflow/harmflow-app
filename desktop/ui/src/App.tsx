@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { native } from "./api/native";
 import { RootBoundary, ScreenBoundary } from "./components/ErrorBoundary";
 import { Header, Sidebar, noticeText, type Screen } from "./components/Shell";
+import type { LeaveCheck } from "./components/TaskEditor";
 import { Toasts } from "./components/toast";
 import { applyLanguage } from "./i18n";
 import { storeZoom, storedZoom, zoomKey, zoomed } from "./lib/zoom";
@@ -118,26 +119,43 @@ export function App() {
     });
   }, [t]);
 
+  // The open task editor's question while it holds unsaved changes. Every way out of the editor that the shell owns
+  // goes through `leave`: at once with no question held, after a confirmed Discard with one.
+  const leaveCheck = useRef<LeaveCheck | null>(null);
+  const holdLeaveCheck = useCallback((check: LeaveCheck | null) => {
+    leaveCheck.current = check;
+  }, []);
+  const leave = (go: () => void) => {
+    const check = leaveCheck.current;
+    if (!check) return go();
+    void check().then((discard) => discard && go());
+  };
+  const picks = useRef(0);
+
   // A target from the tray or a notice: show the window's matching screen.
   useEffect(() => {
     if (!navigation) return;
-    if (navigation.executionId) {
-      setScreen("executions");
-      setSelectedExecution(navigation.executionId);
-    } else if (navigation.screen) {
-      setScreen(navigation.screen as Screen);
-    }
+    leave(() => {
+      if (navigation.executionId) {
+        setScreen("executions");
+        setSelectedExecution(navigation.executionId);
+      } else if (navigation.screen) {
+        setScreen(navigation.screen as Screen);
+      }
+    });
   }, [navigation]);
 
-  const openExecution = (id: string) => {
-    setScreen("executions");
-    setSelectedExecution(id);
-  };
+  const openExecution = (id: string) =>
+    leave(() => {
+      setScreen("executions");
+      setSelectedExecution(id);
+    });
 
-  const navigate = (s: Screen) => {
-    setScreen(s);
-    if (s === "tasks") setTaskView({ kind: "list" });
-  };
+  const navigate = (s: Screen) =>
+    leave(() => {
+      setScreen(s);
+      if (s === "tasks") setTaskView({ kind: "list" });
+    });
 
   const onboarding =
     !onboardingDismissed && ((settings && !settings.onboardingCompleted) || (daemonRunning === false && !wasOnboarded()));
@@ -233,7 +251,9 @@ export function App() {
               }}
             />
           ) : null}
-          {screen === "tasks" ? <TasksScreen view={taskView} onView={setTaskView} onOpenExecution={openExecution} /> : null}
+          {screen === "tasks" ? (
+            <TasksScreen view={taskView} onView={setTaskView} onOpenExecution={openExecution} onLeaveCheck={holdLeaveCheck} />
+          ) : null}
           {screen === "history" ? <HistoryScreen openId={historyOpen} onOpen={setHistoryOpen} /> : null}
           {screen === "settings" ? <SettingsScreen /> : null}
         </ScreenBoundary>
@@ -243,8 +263,10 @@ export function App() {
           onClose={() => setPicker(false)}
           onPick={(k) => {
             setPicker(false);
-            setScreen("tasks");
-            setTaskView({ kind: "new", template: k });
+            leave(() => {
+              setScreen("tasks");
+              setTaskView({ kind: "new", template: k, pick: ++picks.current });
+            });
           }}
         />
       ) : null}
