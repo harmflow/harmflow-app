@@ -30,6 +30,7 @@ jobs:
       daemon: ${{ steps.parts.outputs.daemon }}
       integration: ${{ steps.parts.outputs.integration }}
       desktop: ${{ steps.parts.outputs.desktop }}
+      packaging: ${{ steps.parts.outputs.packaging }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -51,12 +52,13 @@ jobs:
             echo "$files" | grep -Eq '^(contracts/|Makefile$|\.github/)' && return 0
             echo "$files" | grep -Eq "$1"
           }
-          for part in contracts daemon integration desktop; do
+          for part in contracts daemon integration desktop packaging; do
             case $part in
               contracts)   pattern='^(contracts/|daemon/internal/contracts/|desktop/ui/src/api/generated\.ts$)' ;;
               daemon)      pattern='^daemon/' ;;
               integration) pattern='^(daemon/|tests/|agents/|skills/)' ;;
               desktop)     pattern='^(desktop/|agents/|skills/)' ;;
+              packaging)   pattern='^packaging/' ;;
             esac
             if touched "$pattern"; then echo "$part=true" >> "$GITHUB_OUTPUT"; else echo "$part=false" >> "$GITHUB_OUTPUT"; fi
           done
@@ -153,3 +155,12 @@ jobs:
       - run: pnpm -C desktop typecheck
       # The unit tests of the interface and the shell, their coverage held against its floors (ADR-015).
       - run: make coverage-desktop
+
+  packaging:
+    name: Packaging (macOS)
+    needs: changes
+    if: needs.changes.outputs.packaging == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: make test-packaging

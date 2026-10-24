@@ -2,9 +2,11 @@
 # Brings the local app to the latest main and restarts what was running (harmflow-app#102). `make update-app` runs it.
 #
 # It works on the data directory of $HARMFLOW_HOME, or ~/Library/Application Support/HarmFlow, and on the window of
-# this checkout's bundle. It finds the daemon only through that directory's run/daemon.json, never by process name, and
-# stops it through the local API without force, so it never interrupts an execution nor touches another directory's
-# daemon.
+# the installed copy, $INSTALL_DIR/HarmFlow.app or ~/Applications/HarmFlow.app (harmflow-app#188). It finds the daemon
+# only through that directory's run/daemon.json, never by process name, and stops it through the local API without
+# force, so it never interrupts an execution nor touches another directory's daemon. The daemon and the window it
+# restarts run from the installed copy, which it replaces only once both have stopped; OPEN=1 starts them also when
+# they did not run.
 
 set -euo pipefail
 
@@ -75,15 +77,22 @@ find_daemon() {
 	pid=$p
 }
 
-# window_pids prints the pids of the harmflow-desktop processes whose executable is this checkout's bundle.
-window_pids() { ps -axww -o pid=,comm= | awk -v exe="$window_exe" '{ p = $1; sub(/^ *[0-9]+ +/, ""); if ($0 == exe) print p }'; }
+# window_pids prints the pids of the harmflow-desktop processes whose executable is the installed copy's or this
+# checkout's build, where the window ran before the app had an installed copy.
+window_pids() {
+	ps -axww -o pid=,comm= | awk -v a="$window_exe" -v b="$built/Contents/MacOS/harmflow-desktop" \
+		'{ p = $1; sub(/^ *[0-9]+ +/, ""); if ($0 == a || $0 == b) print p }'
+}
 
-# use_launch_agent succeeds when the loaded launch agent serves this data directory, so launchd keeps supervising the
-# daemon it restarts. The agent is one per user, at ~/Library/LaunchAgents, whatever the data directory: its
-# ProgramArguments say which directory it serves, by --home, or the default one without it.
+# use_launch_agent succeeds when the loaded launch agent serves this data directory and runs the installed harmflowd,
+# so launchd keeps supervising the daemon it restarts. The agent is one per user, at ~/Library/LaunchAgents, whatever
+# the data directory: its ProgramArguments say which directory it serves, by --home, or the default one without it.
+# The daemon writes the plist with its own executable when Autostart is turned on, and launchd keeps the program it
+# loaded until the next login, so both must be the installed harmflowd. It never edits, unloads, or kickstarts the
+# agent to fix either.
 use_launch_agent() {
-	local plist="$HOME/Library/LaunchAgents/$LABEL.plist" pb=/usr/libexec/PlistBuddy
-	if ! launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
+	local plist="$HOME/Library/LaunchAgents/$LABEL.plist" pb=/usr/libexec/PlistBuddy loaded
+	if ! loaded=$(launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null); then
 		say "launch agent $LABEL: not loaded; harmflowd starts directly"
 		return 1
 	fi
@@ -102,7 +111,16 @@ use_launch_agent() {
 		return 1
 	fi
 	[[ $exe == "$daemon_exe" ]] ||
-		die "launch agent $LABEL runs $exe, not this checkout's $daemon_exe; a kickstart would start that binary. Nothing was stopped"
+		die "launch agent $LABEL runs $exe, not the installed $daemon_exe; a kickstart would start that binary." \
+			"Nothing was stopped. To move it: turn Autostart off in Settings, which deletes $plist; run make update-app" \
+			"again, which starts the installed harmflowd; then turn Autostart on, which writes $plist with it"
+	local program
+	program=$(printf '%s\n' "$loaded" | sed -n 's/^[[:space:]]*program = //p' | head -n 1)
+	if [[ $program != "$daemon_exe" ]]; then
+		say "launch agent $LABEL: $plist runs the installed harmflowd, but launchd loaded ${program:-another program}" \
+			"before it changed and keeps it until the next login; harmflowd starts directly"
+		return 1
+	fi
 	say "launch agent $LABEL: serves $home; harmflowd starts through launchctl kickstart"
 }
 
@@ -150,28 +168,56 @@ open_window() {
 		[[ -n ${!name:-} ]] && env+=(--env "$name=${!name}")
 	done
 	# -n: another copy of the app, with the same bundle id, may be running; a plain open would bring that one forward.
-	open -n ${env[@]+"${env[@]}"} "$bundle"
+	open -n ${env[@]+"${env[@]}"} "$installed"
 	for ((i = 0; i < 50; i++)); do
 		if [[ -n $(window_pids) ]]; then
-			say "window reopened, pid $(window_pids | tr '\n' ' ')"
+			say "window opened, pid $(window_pids | tr '\n' ' ')"
 			return
 		fi
 		sleep 0.2
 	done
-	say "the window did not start within 10 seconds: open $bundle" >&2
+	say "the window did not start within 10 seconds: open $installed" >&2
 	return 1
+}
+
+# stage_app copies the build beside the installed copy, on its volume, so install_app replaces it by a rename. The copy
+# has no .app extension, so Launch Services does not take it for a bundle.
+stage_app() {
+	local dir=${installed%/*}
+	mkdir -p "$dir" || die "cannot create $dir; nothing was stopped"
+	staging=$(mktemp -d "$dir/.HarmFlow-update.XXXXXX") || die "cannot write to $dir; nothing was stopped"
+	/usr/bin/ditto "$built" "$staging/HarmFlow" || die "cannot copy $built to $dir; nothing was stopped"
+}
+
+# install_app moves the old copy aside and the staged one into its place, two renames on one volume, so the path never
+# holds a partial bundle; it puts the old copy back when the second rename fails.
+install_app() {
+	if [[ -e $installed ]]; then
+		mv "$installed" "$staging/previous.app" || die "cannot move $installed aside; it was left as it was"
+	fi
+	if ! mv "$staging/HarmFlow" "$installed"; then
+		[[ -e $staging/previous.app ]] && mv "$staging/previous.app" "$installed"
+		die "cannot move the new build to $installed; the previous copy was put back"
+	fi
+	rm -rf "$staging"
+	staging=''
+	say "installed $commit at $installed"
 }
 
 main() {
 	root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
-	bundle="$root/desktop/src-tauri/target/release/bundle/macos/HarmFlow.app"
-	window_exe="$bundle/Contents/MacOS/harmflow-desktop"
-	daemon_exe="$bundle/Contents/MacOS/harmflowd"
+	built="$root/desktop/src-tauri/target/release/bundle/macos/HarmFlow.app"
+	local install_dir=${INSTALL_DIR:-$HOME/Applications}
+	[[ $install_dir == /* ]] || die "INSTALL_DIR must be an absolute path, not $install_dir; nothing was changed"
+	installed="$(canon "$install_dir")/HarmFlow.app"
+	window_exe="$installed/Contents/MacOS/harmflow-desktop"
+	daemon_exe="$installed/Contents/MacOS/harmflowd"
 	default_home="$HOME/Library/Application Support/HarmFlow"
 	home="${HARMFLOW_HOME:-$default_home}"
 	runtime="$home/run/daemon.json"
 	tmp=$(mktemp -d)
-	trap 'rm -rf "$tmp"' EXIT
+	staging=''
+	trap 'rm -rf "$tmp" ${staging:+"$staging"}' EXIT
 
 	# 1. Update: refuse before anything changes.
 	local branch
@@ -198,19 +244,25 @@ main() {
 		daemon_was=yes old_pid=$pid
 		say "daemon pid $pid at $addr, data directory $home"
 		if use_launch_agent; then launchd=yes; fi
+	elif [[ ${OPEN:-} == 1 ]]; then
+		say "no daemon runs for $home; OPEN=1 starts one"
+		if use_launch_agent; then launchd=yes; fi
 	else
 		say "no daemon runs for $home"
 	fi
 	window_was=$(window_pids | tr '\n' ' ')
-	if [[ -n $window_was ]]; then say "window pid $window_was"; else say "no window of $bundle runs"; fi
+	if [[ -n $window_was ]]; then say "window pid $window_was"; else say "no window of $installed runs"; fi
 
-	# 4. Stop the daemon, never with force, before the window, so a refusal leaves both running.
+	# 4. Copy the build beside the installed copy, so a copy that fails stops nothing.
+	stage_app
+
+	# 5. Stop the daemon, never with force, before the window, so a refusal leaves both running.
 	if [[ -n $daemon_was ]]; then
 		case $(api POST /daemon/stop '{}') in
 		202) ;;
 		409)
-			die "executions are running, so nothing was stopped. The new bundle is built at $bundle but not running;" \
-				"run make update-app again when they end"
+			die "executions are running, so nothing was stopped and $installed was left as it was." \
+				"Run make update-app again when they end"
 			;;
 		*) die "the daemon refused to stop: $(cat "$tmp/body"). Nothing was stopped" ;;
 		esac
@@ -218,7 +270,7 @@ main() {
 		say "daemon pid $old_pid stopped"
 	fi
 
-	# 5. Quit the window. SIGTERM ends it also with the tray on, where a plain quit is prevented.
+	# 6. Quit the window. SIGTERM ends it also with the tray on, where a plain quit is prevented.
 	local w
 	for w in $window_was; do
 		kill -TERM "$w" 2>/dev/null || true
@@ -226,17 +278,22 @@ main() {
 		say "window pid $w quit"
 	done
 
-	# 6. Bring back what ran, the daemon first, so the window connects to it at once.
+	# 7. Replace the installed copy, now that nothing runs from it.
+	install_app
+
+	# 8. Bring back what ran, from the installed copy, the daemon first, so the window connects to it at once. With
+	# OPEN=1 both start also when they did not run: the window only offers to start a daemon that is down.
 	local status=0
-	if [[ -n $daemon_was ]]; then
+	if [[ -n $daemon_was || ${OPEN:-} == 1 ]]; then
 		start_daemon
 		verify_daemon "$old_pid" || status=1
 	fi
-	if [[ -n $window_was ]]; then open_window || status=1; fi
-	if [[ -z $daemon_was && -z $window_was ]]; then
-		say "nothing was running, so nothing was started; the new bundle is at $bundle"
+	if [[ -n $window_was || ${OPEN:-} == 1 ]]; then open_window || status=1; fi
+	if [[ -z $daemon_was && -z $window_was && ${OPEN:-} != 1 ]]; then
+		say "nothing was running, so nothing was started; make update-app OPEN=1 opens $installed"
 	fi
 	return $status
 }
 
-main "$@"
+# Sourced, as update-app_test.sh does, it only defines its functions.
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then main "$@"; fi

@@ -63,7 +63,7 @@ deps: ## Install the desktop's JavaScript dependencies
 	pnpm -C desktop install --frozen-lockfile
 
 .PHONY: test
-test: test-daemon test-desktop test-integration ## Run every test
+test: test-daemon test-desktop test-integration test-packaging ## Run every test
 
 .PHONY: test-daemon
 test-daemon: ## Unit tests of the daemon
@@ -125,10 +125,15 @@ app: sidecar ## Build HarmFlow.app and the DMG (unsigned until the Developer ID 
 	@echo "Bundles in desktop/src-tauri/target/release/bundle/"
 
 # No prerequisite and no $(MAKE) here: the script pulls, then builds in a make of its own, whose COMMIT is read after
-# the pull. A $(MAKE) in the recipe would also run it under make -n.
+# the pull. A $(MAKE) in the recipe would also run it under make -n. OPEN=1 and INSTALL_DIR reach it through the
+# environment, as make exports the variables of its command line.
 .PHONY: update-app
-update-app: ## Bring the local app to the latest main and restart the daemon and window that were running
+update-app: ## Bring the local app to the latest main, install it to ~/Applications, and restart what was running
 	@packaging/macos/update-app.sh
+
+.PHONY: test-packaging
+test-packaging: ## Tests of the packaging scripts
+	packaging/macos/update-app_test.sh
 
 .PHONY: clean
 clean: ## Remove build output
