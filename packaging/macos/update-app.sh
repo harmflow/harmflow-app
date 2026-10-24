@@ -13,6 +13,8 @@ set -euo pipefail
 readonly LABEL=com.harmflow.daemon
 readonly KEYCHAIN_SERVICE=com.harmflow.local-api
 readonly KEYCHAIN_ACCOUNT=token
+# Launch Services' own tool; update-app_test.sh replaces it with a fake.
+lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 
 say() { printf 'update-app: %s\n' "$*"; }
 die() {
@@ -204,6 +206,48 @@ install_app() {
 	say "installed $commit at $installed"
 }
 
+# registered_paths ID prints the path of every bundle with identifier ID in Launch Services' database, one per line.
+# Each record of lsregister -dump starts after a line of dashes, its path as "path: <path> (0x...)".
+registered_paths() {
+	"$lsregister" -dump | awk -v id="$1" '
+		/^-+$/ { p = "" }
+		/^path: / { p = $0; sub(/^path: +/, "", p); sub(/ \(0x[0-9a-f]+\)$/, "", p) }
+		$1 == "identifier:" && $2 == id && p != "" { print p; p = "" }'
+}
+
+# register_app makes the installed copy the one macOS launches by name (Spotlight, Launchpad, open -a), harmflow-app#186.
+# It registers that copy, then unregisters the bundles with its identifier that compete with it: those in this
+# checkout's target/ directories and those whose path no longer exists, such as an unmounted DMG volume. It leaves
+# registered every other bundle that exists, such as a worktree's build, and it deletes no file. A failure here only
+# warns: the app is already installed.
+register_app() {
+	local id path reason
+	id=$(json_get "$root/desktop/src-tauri/tauri.conf.json" identifier)
+	[[ -n $id ]] || {
+		say "cannot read the bundle identifier from tauri.conf.json; Launch Services was left as it was" >&2
+		return 1
+	}
+	"$lsregister" -f "$installed" || {
+		say "lsregister -f $installed failed; launching HarmFlow by name may open another build" >&2
+		return 1
+	}
+	say "registered $installed with Launch Services"
+	while IFS= read -r path; do
+		if [[ $path == "$root/desktop/src-tauri/target/"* ]]; then
+			reason="a build in this checkout"
+		elif [[ ! -e $path ]]; then
+			reason="no longer exists"
+		else
+			continue
+		fi
+		if "$lsregister" -u "$path"; then
+			say "unregistered $path ($reason)"
+		else
+			say "lsregister -u $path failed" >&2
+		fi
+	done < <(registered_paths "$id")
+}
+
 main() {
 	root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
 	built="$root/desktop/src-tauri/target/release/bundle/macos/HarmFlow.app"
@@ -278,12 +322,13 @@ main() {
 		say "window pid $w quit"
 	done
 
-	# 7. Replace the installed copy, now that nothing runs from it.
+	# 7. Replace the installed copy, now that nothing runs from it, and make it the one launched by name.
 	install_app
+	local status=0
+	register_app || status=1
 
 	# 8. Bring back what ran, from the installed copy, the daemon first, so the window connects to it at once. With
 	# OPEN=1 both start also when they did not run: the window only offers to start a daemon that is down.
-	local status=0
 	if [[ -n $daemon_was || ${OPEN:-} == 1 ]]; then
 		start_daemon
 		verify_daemon "$old_pid" || status=1

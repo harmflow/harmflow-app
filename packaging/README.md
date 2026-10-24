@@ -50,6 +50,28 @@ on, and launchd keeps the program it loaded until the next login. When the agent
 The script never edits, unloads, or kickstarts an agent that runs another binary. `make test-packaging` covers these
 cases with a fake `launchctl` and a fake plist.
 
+### Launching by name
+
+Every build makes a `HarmFlow.app` with the same bundle identifier, and macOS registers each one with Launch Services:
+this checkout's `target/release` and `target/debug`, every worktree's build, the `/Volumes/dmg.*` volumes that
+`bundle_dmg.sh` mounts while making the DMG. Which one opens by name is up to Launch Services. So after installing,
+`make update-app` runs `lsregister -f` on the installed copy and `lsregister -u` on every registration of that
+identifier that is in this checkout's `desktop/src-tauri/target/` or whose path no longer exists, naming each one. It
+leaves registered the bundles that exist elsewhere, such as another worktree's build, and deletes no file.
+`make test-packaging` covers which registrations it removes, with a fake `lsregister`.
+
+To check that `open -a HarmFlow` starts the installed copy, with another bundle on the machine:
+
+1. Build a debug bundle of this checkout, so a second `HarmFlow.app` exists, and register it, without opening it,
+   which would attach it to the real data directory: `cd desktop && pnpm tauri build --debug`, then
+   `/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f
+   src-tauri/target/debug/bundle/macos/HarmFlow.app`.
+2. Quit every HarmFlow window, from the tray or with Command-Q: `open -a` only brings forward a copy that runs.
+3. Run `make update-app` on `main`. It prints `unregistered …/target/debug/bundle/macos/HarmFlow.app (a build in this
+   checkout)`.
+4. Run `open -a HarmFlow`, then `ps -axww -o comm= | grep harmflow-desktop`: the window's executable is
+   `~/Applications/HarmFlow.app/Contents/MacOS/harmflow-desktop`.
+
 ## Linux and Windows
 
 Not started; the MVP's first target is macOS.
