@@ -38,6 +38,8 @@ EOF
 	default_home=$HOME/Library/Application\ Support/HarmFlow
 	home=$default_home
 	commit=abc1234
+	tmp=$work/tmp
+	mkdir -p "$tmp"
 	staging=''
 }
 
@@ -158,6 +160,50 @@ want="-f $installed
 [[ $out == *"unregistered $debug (a build in this checkout)"* ]] || fail "does not name the checkout's build: $out"
 [[ $out == *"unregistered /Volumes/dmg.gone0/HarmFlow.app (no longer exists)"* ]] || fail "does not name the gone one: $out"
 [[ -d $debug && -d $other && -d $installed ]] || fail "a bundle was deleted"
+
+# fake_checkout makes $root a git repository whose update-app.sh is a stub that prints how it was started, and commits
+# it; stub_commit SAYS changes the stub and commits again. Each prints the new commit, 7 characters as main reads it.
+fake_checkout() {
+	mkdir -p "$root/packaging/macos"
+	git -C "$root" init -q
+	git -C "$root" config user.email test@example.com
+	git -C "$root" config user.name test
+	stub_commit first
+}
+stub_commit() {
+	printf '#!/bin/sh\necho "%s rerun from $UPDATE_APP_RERUN_FROM with $*"\n' "$1" >"$root/packaging/macos/update-app.sh"
+	chmod +x "$root/packaging/macos/update-app.sh"
+	git -C "$root" add -A
+	git -C "$root" commit -q -m "$1"
+	git -C "$root" rev-parse HEAD | cut -c1-7
+}
+
+setup "a pull that changes update-app.sh runs the new one once, with the same arguments"
+before=$(fake_checkout)
+stub_commit second >/dev/null
+unset UPDATE_APP_RERUN_FROM
+rc=0
+out=$(rerun_if_changed "$before" one "two words") || rc=$?
+[[ $rc == 0 ]] || fail "rc $rc: $out"
+[[ $out == *"the pull changed packaging/macos/update-app.sh; running the new one"* ]] || fail "does not say so: $out"
+[[ $out == *"second rerun from $before with one two words" ]] || fail "did not run the new script: $out"
+[[ ! -e $tmp ]] || fail "left its temporary directory"
+
+setup "a pull that leaves update-app.sh as it was goes on with this script"
+before=$(fake_checkout)
+echo other >"$root/other"
+git -C "$root" add -A
+git -C "$root" commit -q -m other
+out=$(rerun_if_changed "$before"; echo "went on") || fail "rerun_if_changed failed: $out"
+[[ $out == "went on" ]] || fail "did something: $out"
+
+setup "the rerun never runs itself again"
+before=$(fake_checkout)
+stub_commit second >/dev/null
+export UPDATE_APP_RERUN_FROM=$before
+out=$(rerun_if_changed "$before"; echo "went on") || fail "rerun_if_changed failed: $out"
+[[ $out == "went on" ]] || fail "ran again: $out"
+unset UPDATE_APP_RERUN_FROM
 
 if ((failures > 0)); then
 	printf '%d failed\n' "$failures" >&2

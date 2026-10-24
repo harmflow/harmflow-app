@@ -19,8 +19,9 @@ installed copy, `~/Applications/HarmFlow.app`, or `$INSTALL_DIR/HarmFlow.app` wh
 builds into `target/` and installs nothing.
 
 1. It refuses, with nothing changed, off `main`, with uncommitted changes, or when `git pull --ff-only origin main`
-   cannot fast-forward. Then it runs `make app`; a failed build leaves the window, the daemon, and the installed copy
-   as they were.
+   cannot fast-forward. When the pull changed `update-app.sh`, it runs the new one in its place, once, before it stops
+   or builds anything: bash has already read the old one. Then it runs `make app`; a failed build leaves the window,
+   the daemon, and the installed copy as they were.
 2. It finds the daemon of `$HARMFLOW_HOME`, or of `~/Library/Application Support/HarmFlow`, through that directory's
    `run/daemon.json`, never by process name, so the daemons of other data directories (the e2e one, a worktree's
    development one) are never touched.
