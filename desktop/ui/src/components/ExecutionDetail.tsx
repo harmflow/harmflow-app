@@ -627,32 +627,34 @@ function CommandList({ commands, locale }: { commands: Execution["commands"]; lo
   const { t } = useTranslation();
   if (commands.length === 0) return <EmptyState icon="prompt" title={t("executions.detail.noCommands")} />;
   return (
-    <table className="table">
-      <thead>
-        <tr>
-          <th>{t("history.columns.status")}</th>
-          <th>{t("executions.detail.tabs.commands")}</th>
-          <th>{t("executions.detail.exitCode")}</th>
-          <th>{t("executions.detail.started")}</th>
-          <th>{t("executions.detail.duration")}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {commands.map((c) => (
-          <tr key={c.id}>
-            <td>
-              <Chip tone={c.status === "failed" ? "danger" : c.status === "running" ? "cyan" : "success"} icon={c.status === "failed" ? "x" : c.status === "running" ? "dot" : "check"}>
-                {t(`executions.detail.commandStatus.${c.status}`)}
-              </Chip>
-            </td>
-            <td className="mono cell-wrap">{c.command}</td>
-            <td className="mono">{c.exitCode ?? "—"}</td>
-            <td className="mono">{formatTime(c.startedAt, locale)}</td>
-            <td className="mono">{c.startedAt ? formatDuration(elapsedMs(c.startedAt, c.endedAt)) : "—"}</td>
+    <div className="table__scroll">
+      <table className="table">
+        <thead>
+          <tr>
+            <th>{t("history.columns.status")}</th>
+            <th>{t("executions.detail.tabs.commands")}</th>
+            <th>{t("executions.detail.exitCode")}</th>
+            <th>{t("executions.detail.started")}</th>
+            <th>{t("executions.detail.duration")}</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {commands.map((c) => (
+            <tr key={c.id}>
+              <td>
+                <Chip tone={c.status === "failed" ? "danger" : c.status === "running" ? "cyan" : "success"} icon={c.status === "failed" ? "x" : c.status === "running" ? "dot" : "check"}>
+                  {t(`executions.detail.commandStatus.${c.status}`)}
+                </Chip>
+              </td>
+              <td className="mono cell-wrap">{c.command}</td>
+              <td className="mono">{c.exitCode ?? "—"}</td>
+              <td className="mono">{formatTime(c.startedAt, locale)}</td>
+              <td className="mono">{c.startedAt ? formatDuration(elapsedMs(c.startedAt, c.endedAt)) : "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
