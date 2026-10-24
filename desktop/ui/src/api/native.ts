@@ -7,6 +7,8 @@ export interface DaemonStatus {
   address?: string;
   pid?: number;
   version?: string;
+  commit?: string;
+  builtAt?: string;
   startedAt?: string;
   error?: string;
 }
@@ -32,6 +34,17 @@ export const native = {
 
   async startDaemon(): Promise<DaemonStatus> {
     return invoke<DaemonStatus>("daemon_start");
+  },
+
+  /** Waits for a requested stop to finish before daemon_start checks whether it needs to spawn a process. */
+  async waitForDaemonStop(): Promise<void> {
+    if (!isTauri()) return;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      const status = await invoke<DaemonStatus>("daemon_status");
+      if (!status.running) return;
+    }
+    throw new Error("the daemon did not stop within 10 seconds");
   },
 
   async setTrayEnabled(enabled: boolean): Promise<void> {
