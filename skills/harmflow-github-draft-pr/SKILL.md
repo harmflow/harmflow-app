@@ -86,7 +86,8 @@ Add the item to `report.json` `workItems`:
  "commits":["<sha>"],"changedFiles":["path"]}
 ```
 
-The item's outcome is `completed` when its draft pull request was created or updated, even with failing tests;
-`failed` when the pull request could not be opened (keep the branch and the worktree); `needs_attention` when a human
-must decide. Set the report's `lastOperation` to the last external operation applied, such as
+`kind` is `resume` for a managed draft pull request resumed, and `new` for a new issue or a failed one retried
+(harmflow-github-issue-queue §1). The item's outcome is `completed` when its draft pull request was created or updated,
+even with failing tests; `failed` when the pull request could not be opened (keep the branch and the worktree);
+`needs_attention` when a human must decide. Set the report's `lastOperation` to the last external operation applied, such as
 `pushed harmflow/123-fix to OWNER/REPO` or `opened draft PR OWNER/REPO#45`.
