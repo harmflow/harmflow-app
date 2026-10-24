@@ -31,7 +31,8 @@ EOF
 	chmod +x "$work/bin/launchctl"
 	PATH=$work/bin:$base_path
 	unset FAKE_LOADED_PROGRAM
-	built=$work/checkout/desktop/src-tauri/target/release/bundle/macos/HarmFlow.app
+	root=$work/checkout
+	built=$root/desktop/src-tauri/target/release/bundle/macos/HarmFlow.app
 	installed=$work/Applications/HarmFlow.app
 	daemon_exe=$installed/Contents/MacOS/harmflowd
 	default_home=$HOME/Library/Application\ Support/HarmFlow
@@ -107,6 +108,56 @@ mkdir -p "$built/Contents/MacOS"
 echo new >"$built/Contents/MacOS/harmflowd"
 (stage_app && install_app) >/dev/null || fail "the install failed"
 [[ $(cat "$daemon_exe") == new ]] || fail "the installed copy is not the build"
+
+# fake_lsregister makes $lsregister a script that prints $work/dump for -dump and logs every other call to $work/calls.
+fake_lsregister() {
+	lsregister=$work/bin/lsregister
+	cat >"$lsregister" <<EOF
+#!/bin/sh
+[ "\$1" = -dump ] && exec cat "$work/dump"
+printf '%s\n' "\$*" >>"$work/calls"
+EOF
+	chmod +x "$lsregister"
+	: >"$work/calls"
+}
+
+# dump_record PATH ID prints a bundle record as lsregister -dump does, trimmed to the lines registered_paths reads.
+dump_record() {
+	printf -- '--------------------------------------------------------------------------------\n'
+	printf 'bundle id:                  HarmFlow (0xc6c4)\n'
+	printf 'path:                       %s (0xf4a4)\n' "$1"
+	printf 'name:                       HarmFlow\n'
+	printf 'identifier:                 %s\n' "$2"
+	printf 'executable:                 Contents/MacOS/harmflow-desktop\n'
+}
+
+setup "register_app registers the installed copy and unregisters the builds that compete with it"
+fake_lsregister
+mkdir -p "$root/desktop/src-tauri" "$installed" "$root/desktop/src-tauri/target/debug/bundle/macos/HarmFlow.app" \
+	"$work/other worktree/target/release/bundle/macos/HarmFlow.app"
+printf '{"productName": "HarmFlow", "identifier": "com.harmflow.desktop"}\n' >"$root/desktop/src-tauri/tauri.conf.json"
+debug=$root/desktop/src-tauri/target/debug/bundle/macos/HarmFlow.app
+other="$work/other worktree/target/release/bundle/macos/HarmFlow.app"
+{
+	dump_record "$installed" com.harmflow.desktop
+	dump_record "$built" com.harmflow.desktop
+	dump_record "$debug" com.harmflow.desktop
+	dump_record /Volumes/dmg.gone0/HarmFlow.app com.harmflow.desktop
+	dump_record "$other" com.harmflow.desktop
+	dump_record /Volumes/dmg.gone1/Other.app com.example.other
+	printf -- '--------------------------------------------------------------------------------\n'
+	printf 'claim id:                   HarmFlow task (0x1)\n'
+	printf 'identifier:                 com.harmflow.desktop\n'
+} >"$work/dump"
+out=$(register_app 2>&1) || fail "register_app failed: $out"
+want="-f $installed
+-u $built
+-u $debug
+-u /Volumes/dmg.gone0/HarmFlow.app"
+[[ $(cat "$work/calls") == "$want" ]] || fail "lsregister calls:"$'\n'"$(cat "$work/calls")"
+[[ $out == *"unregistered $debug (a build in this checkout)"* ]] || fail "does not name the checkout's build: $out"
+[[ $out == *"unregistered /Volumes/dmg.gone0/HarmFlow.app (no longer exists)"* ]] || fail "does not name the gone one: $out"
+[[ -d $debug && -d $other && -d $installed ]] || fail "a bundle was deleted"
 
 if ((failures > 0)); then
 	printf '%d failed\n' "$failures" >&2

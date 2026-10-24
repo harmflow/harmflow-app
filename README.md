@@ -141,6 +141,19 @@ Three environment variables change where the daemon keeps its data and its token
 | `HARMFLOW_TOKEN_STORE` | the Keychain | `file` keeps the local API token in a user-only file instead |
 | `HARMFLOW_KEYCHAIN` | the default keychain | The keychain file that holds the token, for tests; the desktop reads the token from it too |
 
+## Running the local app
+
+Run the installed copy, `~/Applications/HarmFlow.app`, which `make update-app` builds from `main` and replaces.
+`make update-app` registers that copy with Launch Services and unregisters the bundles of this checkout's `target/` and
+those whose path is gone, so `open -a HarmFlow` opens it
+([`packaging/`](packaging/README.md#launching-by-name)). Spotlight keeps its own index, which may still list the builds
+in `target/`: pick the one in `~/Applications`.
+
+A build started from another path, such as a worktree's `target/release`, is another copy with the same data
+directory: its window attaches to whichever daemon `run/daemon.json` names, and a daemon it starts serves the installed
+app's tasks and executions too. Give such a build a data directory of its own with `HARMFLOW_HOME`, or use
+`make dev-desktop`, which runs on `.harmflow-dev/home`.
+
 ## A task is a file
 
 One YAML file per task, in the data directory's `tasks/`, validated by
