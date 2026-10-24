@@ -76,7 +76,21 @@ let host: HTMLElement | undefined;
 beforeAll(async () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   await i18n.changeLanguage("en-US");
+  dropSelectionChange();
 });
+
+/**
+ * Drops selectionchange, which these tests never read. happy-dom fires it while the selection changes, where a browser
+ * schedules it as a task (Selection API). CodeMirror writes the selection inside its own update and reads it back on
+ * that event, so fired at once it re-enters the update, which throws "Calls to EditorView.update are not allowed while
+ * an update is in progress" whenever the editor's focus timer runs more than 200 ms after the focus, as on a loaded CI
+ * runner. Queued as a task instead, it never settles under happy-dom: each read is taken for a change and leads to
+ * another write.
+ */
+function dropSelectionChange() {
+  const dispatch = document.dispatchEvent.bind(document);
+  document.dispatchEvent = (event: Event) => (event.type === "selectionchange" ? true : dispatch(event));
+}
 
 beforeEach(() => {
   localStorage.clear();
