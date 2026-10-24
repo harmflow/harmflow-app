@@ -859,7 +859,9 @@ body:has([aria-modal="true"]) .tooltip {
   padding: var(--hf-space-6);
 }
 
+/* As tall as its rows, so the screen scrolls through them instead of the panel cutting them off. */
 .panel--table {
+  flex: none;
   padding: 0;
   overflow: hidden;
 }
