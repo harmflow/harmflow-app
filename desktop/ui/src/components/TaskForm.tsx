@@ -7,7 +7,7 @@ import type { Catalog, CatalogEntry, Harness, SchedulePreview } from "../api/typ
 import { daemonText } from "../lib/daemonText";
 import { formatDateTime } from "../lib/format";
 import { useDebounced } from "../lib/hooks";
-import { HARNESS_PROVIDERS, NOTIFIABLE_EVENTS, TASK_TYPES, schemaDefault, schemaEnum, schemaRange } from "../lib/schema";
+import { HARNESS_PROVIDERS, NOTIFIABLE_EVENTS, schemaDefault, schemaEnum, schemaRange } from "../lib/schema";
 import {
   envToLines,
   getIn,
@@ -21,7 +21,6 @@ import {
   setProgramKind,
   setScheduleKind,
   slugify,
-  switchTaskType,
   type Doc,
   type Path,
 } from "../lib/taskForm";
@@ -100,8 +99,6 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
     onChange(next);
   };
 
-  const setType = (next: string) => onChange(switchTaskType(doc, next, catalog));
-
   return (
     <div className="task-form">
       <Section id="general" title={t("tasks.sections.general")} icon="file">
@@ -125,14 +122,9 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
           <TextArea rows={2} value={get<string>(["metadata", "description"]) ?? ""} onChange={(e) => set(["metadata", "description"], e.target.value)} />
         </Field>
         <div className="grid-2">
+          {/* The type is chosen in the template picker and fixed from then on (FS-001 FR-020). */}
           <Field label={t("tasks.fields.type")} error={err(["spec", "type"])}>
-            <Select value={type} onChange={(e) => setType(e.target.value)}>
-              {TASK_TYPES.map((tt) => (
-                <option key={tt} value={tt}>
-                  {t(`tasks.types.${tt}` as never, { defaultValue: tt }) as string}
-                </option>
-              ))}
-            </Select>
+            <TextInput value={t(`tasks.types.${type}` as never, { defaultValue: type }) as string} disabled />
           </Field>
           <div className="field field--toggle">
             <Toggle

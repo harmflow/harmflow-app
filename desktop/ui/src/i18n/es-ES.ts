@@ -284,6 +284,7 @@ export const esES: Resources = {
     schema_not: "esta combinación de propiedades no está permitida",
     schema_false: "esta propiedad no está permitida aquí",
     id_immutable: "el identificador no puede cambiar; duplica la tarea en su lugar",
+    type_immutable: "el tipo no puede cambiar; crea una tarea nueva en su lugar",
     id_file_mismatch: 'metadata.id "{{id}}" debe coincidir con el nombre del archivo {{file}}.yaml',
     task_file_invalid: "el archivo de la tarea {{file}} no supera la validación",
     task_file_error: "{{file}}: {{detail}}",

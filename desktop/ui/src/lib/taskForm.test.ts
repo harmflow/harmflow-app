@@ -13,7 +13,6 @@ import {
   setProgramKind,
   setScheduleKind,
   slugify,
-  switchTaskType,
 } from "./taskForm";
 
 const catalog: Catalog = {
@@ -107,20 +106,6 @@ describe("script tasks (FS-013 FR-013)", () => {
     const doc = newTaskDocument("script", catalog, "Weekly audit");
     expect(getIn(doc, ["spec"])).toEqual({ enabled: true, type: "script", script: { command: [""] } });
     expect(getIn(doc, ["metadata", "id"])).toBe("weekly-audit");
-  });
-
-  it("drops what a script task does not take, and gives it back to another type", () => {
-    const general = newTaskDocument("general", catalog, "Notes");
-    const withWorkspace = setIn(general, ["spec", "workspace", "path"], "~/notes");
-    const script = switchTaskType(withWorkspace, "script", catalog);
-    for (const field of ["prompt", "agents", "skills", "workspace", "harness", "githubIssueImplementation"]) {
-      expect(getIn(script, ["spec", field])).toBeUndefined();
-    }
-    expect(getIn(script, ["spec", "script"])).toEqual({ command: [""] });
-    const back = switchTaskType(script, "github-issue-implementation", catalog);
-    expect(getIn(back, ["spec", "script"])).toBeUndefined();
-    expect(getIn(back, ["spec", "prompt"])).toBe("Implement the oldest issue labeled agent-ready.");
-    expect(getIn(back, ["spec", "harness", "preferred", "provider"])).toBe("claude-code");
   });
 
   it("switches between an argument list and an inline script, keeping the rest", () => {

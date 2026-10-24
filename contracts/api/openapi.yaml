@@ -721,6 +721,7 @@ components:
         - schema_false
         # Task rules the schema cannot express
         - id_immutable
+        - type_immutable
         - id_file_mismatch
         - task_file_invalid
         - task_file_error

@@ -284,6 +284,7 @@ export const ptBR: Resources = {
     schema_not: "esta combinação de propriedades não é permitida",
     schema_false: "esta propriedade não é permitida aqui",
     id_immutable: "o identificador não pode mudar; duplique a tarefa em vez disso",
+    type_immutable: "o tipo não pode mudar; crie uma nova tarefa em vez disso",
     id_file_mismatch: 'metadata.id "{{id}}" deve corresponder ao nome do arquivo {{file}}.yaml',
     task_file_invalid: "o arquivo da tarefa {{file}} não passa na validação",
     task_file_error: "{{file}}: {{detail}}",
