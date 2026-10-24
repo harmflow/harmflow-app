@@ -1,0 +1,10 @@
+title = "HarmFlow secret scanning"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "The fake Claude test harness deliberately mentions a redacted secret in a comment; it contains no credential."
+paths = [
+  '''(^|/)tests/integration/testdata/fake-claude$''',
+]
