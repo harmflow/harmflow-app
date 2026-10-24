@@ -37,9 +37,12 @@ git fetch origin BASE
 
 - **New item, branch not on the remote, worktree missing:**
   `git worktree add -b <branch> <worktree path> origin/BASE`
-- **Resumed item, branch on the remote:** `git fetch origin <branch>`, then reuse the worktree if it exists
-  (`git -C <worktree path> pull --ff-only origin <branch>`), or recreate it with
+- **Resumed or retried item, branch on the remote:** `git fetch origin <branch>`, then reuse the worktree if it
+  exists (`git -C <worktree path> pull --ff-only origin <branch>`), or recreate it with
   `git worktree add <worktree path> <branch>` (tracking `origin/<branch>`).
+- **Retried item, branch not on the remote:** the failed attempt may have left the branch and its worktree, kept for
+  diagnosis (§3). Reuse the worktree if it exists, keeping its commits; recreate it with
+  `git worktree add <worktree path> <branch>` if only the local branch exists; otherwise create it as a new item.
 - **The worktree exists but is broken:** `git worktree prune`, then recreate it. Never delete a branch that exists on
   the remote.
 

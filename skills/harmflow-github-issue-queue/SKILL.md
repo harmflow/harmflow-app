@@ -1,6 +1,6 @@
 ---
 name: harmflow-github-issue-queue
-description: Discovers and orders the work of a HarmFlow GitHub issue task — managed draft pull requests to resume and new eligible issues — applying the task's prompt criteria, the already-processed check, and the queue limits from context.json. Use it before choosing what to implement.
+description: Discovers and orders the work of a HarmFlow GitHub issue task — managed draft pull requests to resume, failed issues to retry, and new eligible issues — applying the task's prompt criteria, the already-processed check, and the queue limits from context.json. Use it before choosing what to implement.
 ---
 
 # Build the issue queue
@@ -17,7 +17,7 @@ executions. Read `task.parameters.queue` from `context.json`:
 | `maxResumeAttempts` | 3 | Resumptions of one item before it needs a human |
 | `maxFailedRetries` | 3 | Operational failures of one item before it needs a human |
 
-## 1. Work to resume
+## 1. Work to resume and to retry
 
 For each repository in `task.parameters.repositories`:
 
@@ -32,6 +32,28 @@ Resume a managed draft pull request when its work item (`OWNER/REPO#<issue>`) in
 status `in_progress` or `failed` — tests failed, or the work was left incomplete or interrupted. Skip it when the item
 reads `needs_attention`, or when its `resumes` reached `maxResumeAttempts` or its `failures` exceeded
 `maxFailedRetries`; report it with outcome `needs_attention` instead.
+
+An issue whose processing failed before any pull request linked it — a push that failed, `gh` unreachable, a daemon
+restart mid-run — is **work to retry** (D-140). Take as work to retry each work item in `context.json` `workItems` that
+reads `failed`, belongs to a repository in `task.parameters.repositories`, and no managed draft pull request above
+resumes, when all of these hold:
+
+- no pull request links its issue, in any state — neither one GitHub links to the issue nor one from the item's
+  `branch`, when it records one:
+
+  ```bash
+  gh api graphql -F owner=OWNER -F repo=REPO -F n=<issue> -f query='query($owner: String!, $repo: String!, $n: Int!) {
+    repository(owner: $owner, name: $repo) { issue(number: $n) { state
+      closedByPullRequestsReferences(first: 10, includeClosedPrs: true) { nodes { number } } } } }'
+  gh pr list --repo OWNER/REPO --state all --head <branch> --json number
+  ```
+
+- the issue is still `OPEN`, and still meets the prompt's criteria;
+- its `failures` have not exceeded `maxFailedRetries`.
+
+A failed or interrupted execution in `recentExecutions` does not keep it out. An item that reads `needs_attention`
+is never retried. Work to retry is not new work: it never counts against `maxDiscoveredPerCycle`, and §2 never takes it.
+Report it with `kind` `new` — no pull request is resumed, so it counts toward `maxFailedRetries` only.
 
 ## 2. New issues
 
@@ -75,13 +97,15 @@ An issue is **already processed**, and is not new work, when any of these holds:
 
 - a pull request links it — it appears in a pull request's `closingIssuesReferences`, or a pull request body says
   `Closes #<n>`, `Fixes #<n>`, or `Resolves #<n>`;
-- it appears in `context.json` `workItems` or `recentExecutions`, whatever its status.
+- it appears in `context.json` `workItems` or `recentExecutions`, whatever its status. A `failed` item §1 takes as
+  work to retry is retried there, never taken here as new work.
 
 Exclusions the prompt states apply on top of that. No issue is safe just because it is the first one open.
 
 ## 3. Order and select
 
-New issues keep the order of §2. Merge the two lists by `resumeStrategy`, then take the first `maxItemsPerCycle` items.
+The work of §1 is one list: the managed draft pull requests to resume, then the work to retry. New issues keep the
+order of §2. Merge the two lists by `resumeStrategy`, then take the first `maxItemsPerCycle` items.
 
 For each selected item, append one line to `progress.jsonl`:
 
