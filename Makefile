@@ -70,6 +70,10 @@ test-desktop: ## Type check and unit tests of the desktop
 	pnpm -C desktop test
 	cd desktop/src-tauri && cargo test
 
+.PHONY: check-imports
+check-imports: ## Fail on Go imports outside the Go guide's three groups (D-132), as CI does
+	go -C tests run ./imports $(CURDIR)/daemon $(CURDIR)/tests
+
 .PHONY: test-integration
 test-integration: daemon ## Tests across the daemon's process boundary, with fake harnesses
 	go -C tests test -count=1 ./...
