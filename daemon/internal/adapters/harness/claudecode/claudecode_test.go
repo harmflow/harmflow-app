@@ -60,6 +60,47 @@ func TestParseQuota(t *testing.T) {
 	}
 }
 
+// A signed-out CLI, as Claude Code 2.1.309 printed it with an empty configuration directory, is an
+// unavailable harness.
+func TestParseNotLoggedIn(t *testing.T) {
+	p, _ := replay(t, "not-logged-in.jsonl")
+	if end := p.Finish(1, "", false, false); end.Class != domain.ClassHarnessUnavailable {
+		t.Errorf("Finish(1, \"\", false, false).Class = %s (%s), want harness_unavailable", end.Class, end.Error.Message)
+	}
+}
+
+// harmflow-app#213: a failover follows only the CLI's own quota and sign-in texts, without the stream's rate-limit
+// signal; a task's error that mentions a quota, a limit, or another tool's sign-in is the task's own failure.
+func TestFinishClassifiesTheCLIsOwnTexts(t *testing.T) {
+	cases := []struct {
+		text string
+		want domain.ErrorClass
+	}{
+		{"Claude AI usage limit reached|1792533600", domain.ClassQuotaExhausted},
+		{"Usage limit reached · limit resets 3pm", domain.ClassQuotaExhausted},
+		{"You've hit your weekly limit · resets Oct 27", domain.ClassQuotaExhausted},
+		{"You’ve hit your monthly spend limit.", domain.ClassQuotaExhausted},
+		{"Session limit reached ∙ resets 7pm", domain.ClassQuotaExhausted},
+		{"Opus weekly limit reached ∙ resets Oct 27 at 10am", domain.ClassQuotaExhausted},
+		{"You're out of extra usage · resets 9pm", domain.ClassQuotaExhausted},
+		{"Your credit balance is too low to access the Anthropic API.", domain.ClassQuotaExhausted},
+		{"Not logged in · Please run /login", domain.ClassHarnessUnavailable},
+		{"Not logged in", domain.ClassHarnessUnavailable},
+		{"the test fixture's disk quota helper failed: 3 tests failed", domain.ClassTaskError},
+		{"retry limit reached while waiting for CI", domain.ClassTaskError},
+		{"FAIL TestSessionLimit: the session limit was not enforced", domain.ClassTaskError},
+		{"gh: You are not logged into any GitHub hosts. Run gh auth login", domain.ClassTaskError},
+	}
+	for _, c := range cases {
+		t.Run(c.text, func(t *testing.T) {
+			p := &parser{tools: map[string]toolUse{}}
+			if end := p.Finish(1, c.text, false, false); end.Class != c.want {
+				t.Errorf("Finish(1, %q, false, false).Class = %s, want %s", c.text, end.Class, c.want)
+			}
+		})
+	}
+}
+
 // FS-012 FR-005: the CLI's own error stays as it printed it, with no key; the daemon's text stands in, with one, when
 // the CLI printed nothing, and for a timeout.
 func TestFinishKeysOnlyTheDaemonsText(t *testing.T) {
