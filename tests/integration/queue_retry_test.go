@@ -24,7 +24,7 @@ const (
 
 // An issue whose processing failed before any pull request linked it — here, the daemon killed mid-run — comes back
 // as work to retry in the next firing, ahead of a new issue, and no longer once its retry limit is spent. An issue a
-// pull request links is never selected. The real Claude Code runs the built-in agent and skills of this checkout.
+// pull request links is never selected. The real Claude Code runs the built-in skills of this checkout.
 func TestFailedIssueIsRetriedUntilItsLimit(t *testing.T) {
 	claude := realClaude(t)
 	linked, failing, untouched := queueFixtures(t)
@@ -144,9 +144,9 @@ metadata:
 spec:
   type: github-issue-implementation
   prompt: |
+    Use the skill hf-github-issue-implementer.
     Work only on open issues of %[1]s labelled %[2]s; every other issue is excluded.
-  agents: [harmflow-github-issue-implementer]
-  skills: [harmflow-github-issue-queue, harmflow-github-worktree, harmflow-github-draft-pr]
+  skills: [hf-github-issue-implementer, hf-github-issue-queue, hf-github-worktree, hf-github-draft-pr]
   harness:
     preferred:
       provider: claude-code

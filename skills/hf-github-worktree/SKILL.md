@@ -1,5 +1,5 @@
 ---
-name: harmflow-github-worktree
+name: hf-github-worktree
 description: Prepares an isolated Git worktree and work branch for one HarmFlow work item — new or resumed — under the execution's workspace, checks that the base branch is protected against merging without review, and removes worktrees of items that ended. Use it before changing any code for an issue.
 ---
 

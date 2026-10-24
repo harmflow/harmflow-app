@@ -79,8 +79,8 @@
   </tr>
   <tr>
     <td width="33%" valign="top">
-      <code>04</code> <a href="agents"><b>agents/</b></a> · <a href="skills"><b>skills/</b></a><br>
-      The built-in agent and skills of the GitHub issue implementation type, prefixed <code>harmflow-</code>.
+      <code>04</code> <a href="skills"><b>skills/</b></a><br>
+      The built-in skills of the GitHub issue implementation type, prefixed <code>hf-</code>.
     </td>
     <td width="33%" valign="top">
       <code>05</code> <a href="packaging"><b>packaging/</b></a><br>
@@ -169,11 +169,11 @@ metadata:
 spec:
   type: github-issue-implementation           # or general, with no type parameters
   prompt: |
+    Use the skill hf-github-issue-implementer.
     Select one open issue labeled ready-for-agent, oldest first.
     Implement it following the repository's conventions and run its tests.
     Open a draft pull request that reports what passed and what failed.
-  agents: [harmflow-github-issue-implementer]
-  skills: [harmflow-github-issue-queue, harmflow-github-worktree, harmflow-github-draft-pr]
+  skills: [hf-github-issue-implementer, hf-github-issue-queue, hf-github-worktree, hf-github-draft-pr]
   schedule:
     cron: "0 2 * * 1-5"                       # weeknights at 02:00
     missedRun: {policy: run_on_resume}        # asleep at 02:00? run on wake

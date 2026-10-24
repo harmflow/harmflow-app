@@ -1,5 +1,5 @@
 // Package catalog reads agents and skills in the HarmFlow format (D-092): a skill is a folder with a SKILL.md, an
-// agent is a Markdown file with a front-matter header. Built-in ones ship with HarmFlow under the harmflow- prefix.
+// agent is a Markdown file with a front-matter header. Built-in ones ship with HarmFlow under the hf- prefix.
 package catalog
 
 import (

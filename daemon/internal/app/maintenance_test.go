@@ -42,7 +42,7 @@ func (w *workspaces) git(args ...string) string {
 	return string(out)
 }
 
-// worktree adds a linked worktree on its own branch at <workspace>/<task>/<name>, as harmflow-github-worktree §2 does.
+// worktree adds a linked worktree on its own branch at <workspace>/<task>/<name>, as hf-github-worktree §2 does.
 func (w *workspaces) worktree(task, name string) string {
 	w.t.Helper()
 	w.branches++

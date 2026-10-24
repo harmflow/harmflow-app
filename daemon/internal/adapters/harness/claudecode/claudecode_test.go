@@ -208,27 +208,27 @@ func TestPrepareTranslatesPermissions(t *testing.T) {
 // D-092: built-in skills are delivered as a plugin of the execution; built-in agents are defined for the session.
 func TestPrepareDeliversBuiltins(t *testing.T) {
 	root := t.TempDir()
-	skill := filepath.Join(root, "skills", "harmflow-x")
+	skill := filepath.Join(root, "skills", "hf-x")
 	_ = os.MkdirAll(skill, 0o700)
-	_ = os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("---\nname: harmflow-x\ndescription: d\n---\nbody"), 0o600)
-	agent := filepath.Join(root, "agents", "harmflow-a.md")
+	_ = os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("---\nname: hf-x\ndescription: d\n---\nbody"), 0o600)
+	agent := filepath.Join(root, "agents", "hf-a.md")
 	_ = os.MkdirAll(filepath.Dir(agent), 0o700)
-	_ = os.WriteFile(agent, []byte("---\nname: harmflow-a\ndescription: an agent\n---\nYou implement."), 0o600)
+	_ = os.WriteFile(agent, []byte("---\nname: hf-a\ndescription: an agent\n---\nYou implement."), 0o600)
 	exec := t.TempDir()
 	a := &Adapter{Home: t.TempDir()}
 	info := ports.HarnessInfo{Path: "/bin/claude", Features: map[string]bool{"--agent": true}}
 	inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", ExecutionDir: exec,
 		Permissions: *domain.TaskDocument{}.Effective().Spec.Permissions,
-		Skills:      []ports.ResolvedItem{{Name: "harmflow-x", Kind: "skill", Builtin: true, Path: skill}},
-		Agents:      []ports.ResolvedItem{{Name: "harmflow-a", Kind: "agent", Builtin: true, Path: agent}}})
+		Skills:      []ports.ResolvedItem{{Name: "hf-x", Kind: "skill", Builtin: true, Path: skill}},
+		Agents:      []ports.ResolvedItem{{Name: "hf-a", Kind: "agent", Builtin: true, Path: agent}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(exec, "claude-plugin", "skills", "harmflow-x", "SKILL.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(exec, "claude-plugin", "skills", "hf-x", "SKILL.md")); err != nil {
 		t.Errorf("skill not delivered: %v", err)
 	}
 	args := strings.Join(inv.Args, " ")
-	if !strings.Contains(args, "--plugin-dir "+filepath.Join(exec, "claude-plugin")) || !strings.Contains(args, "--agent harmflow-a") ||
+	if !strings.Contains(args, "--plugin-dir "+filepath.Join(exec, "claude-plugin")) || !strings.Contains(args, "--agent hf-a") ||
 		!strings.Contains(args, `"prompt":"You implement."`) {
 		t.Errorf("args: %s", args)
 	}

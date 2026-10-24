@@ -83,7 +83,7 @@
           "minLength": 1
         },
         "agents": {
-          "description": "Agents cited by name: built-in ones carry the harmflow- prefix, the user's live in the harness configuration (D-092). The first one is the session's main agent; the others are available to it.",
+          "description": "Agents cited by name: built-in ones carry the hf- prefix, the user's live in the harness configuration. The first one is the session's main agent; the others are available to it.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/identifier"

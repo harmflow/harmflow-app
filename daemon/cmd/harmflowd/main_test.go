@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
@@ -87,6 +88,40 @@ func TestAcquireLockReportsOtherFailures(t *testing.T) {
 	}
 	if !errors.Is(err, syscall.ENOTSUP) || !strings.Contains(err.Error(), path) || strings.Contains(err.Error(), "already running") {
 		t.Errorf("acquireLock(%s) = %v, want an error naming the file and wrapping %v", path, err, syscall.ENOTSUP)
+	}
+}
+
+// The built-ins directory is the one whose skills/ holds an hf- skill, with no agents/ beside it; any other directory
+// named skills is not it.
+func TestHoldsBuiltinSkill(t *testing.T) {
+	cases := []struct {
+		name string
+		dirs []string
+		file string
+		want bool
+	}{
+		{"a built-in skill", []string{"skills/hf-github-worktree"}, "", true},
+		{"no skills directory", []string{"agents"}, "", false},
+		{"only the user's skills", []string{"skills/review-notes", "skills/harmflow-github-worktree"}, "", false},
+		{"a file with the prefix", []string{"skills"}, "skills/hf-notes.md", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for _, d := range c.dirs {
+				if err := os.MkdirAll(filepath.Join(dir, d), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if c.file != "" {
+				if err := os.WriteFile(filepath.Join(dir, c.file), nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := holdsBuiltinSkill(dir); got != c.want {
+				t.Errorf("holdsBuiltinSkill(%v) = %v, want %v", c.dirs, got, c.want)
+			}
+		})
 	}
 }
 

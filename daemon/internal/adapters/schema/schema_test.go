@@ -243,8 +243,8 @@ spec:
   enabled: false
   type: github-issue-implementation
   prompt: Implement the oldest eligible issue.
-  agents: [harmflow-github-issue-implementer]
-  skills: [harmflow-github-draft-pr]
+  agents: [issue-reviewer]
+  skills: [hf-github-issue-implementer, hf-github-draft-pr]
   workspace:
     path: ~/work
   schedule:

@@ -356,8 +356,8 @@ func newEnv(t *testing.T, configure ...func(*env)) *env {
 func openEnv(t *testing.T, home string, configure ...func(*env)) *env {
 	t.Helper()
 	builtins := t.TempDir()
-	_ = os.MkdirAll(filepath.Join(builtins, "skills", "harmflow-github-draft-pr"), 0o700)
-	_ = os.WriteFile(filepath.Join(builtins, "skills", "harmflow-github-draft-pr", "SKILL.md"), []byte("---\nname: harmflow-github-draft-pr\ndescription: d\n---\n"), 0o600)
+	_ = os.MkdirAll(filepath.Join(builtins, "skills", "hf-github-draft-pr"), 0o700)
+	_ = os.WriteFile(filepath.Join(builtins, "skills", "hf-github-draft-pr", "SKILL.md"), []byte("---\nname: hf-github-draft-pr\ndescription: d\n---\n"), 0o600)
 	_ = os.MkdirAll(filepath.Join(builtins, "agents"), 0o700)
 	e := &env{t: t, clock: &fakeClock{now: time.Date(2026, 10, 20, 8, 0, 0, 0, time.UTC)}, wake: &fakeWake{},
 		home: home, paths: NewPaths(home, t.TempDir(), builtins), claude: &fakeHarness{id: domain.HarnessClaudeCode},
@@ -2526,7 +2526,7 @@ func TestValidationAndImport(t *testing.T) {
 	if after.YAML != view.YAML {
 		t.Error("the valid definition was replaced")
 	}
-	skills := "  skills: [harmflow-github-draft-pr, user-skill, nowhere-skill]\n"
+	skills := "  skills: [hf-github-draft-pr, user-skill, nowhere-skill]\n"
 	_, err = e.app.CreateTask(t.Context(), TaskInput{YAML: taskYAML("skilled", skills)})
 	if err == nil || !strings.Contains(err.Error(), "nowhere-skill") {
 		t.Fatalf("missing skill on save: %v", err)
@@ -2540,7 +2540,7 @@ func TestValidationAndImport(t *testing.T) {
 		if strings.Contains(w.Message, "nowhere-skill") {
 			warned = true
 		}
-		if strings.Contains(w.Message, "user-skill") || strings.Contains(w.Message, "harmflow-github-draft-pr") {
+		if strings.Contains(w.Message, "user-skill") || strings.Contains(w.Message, "hf-github-draft-pr") {
 			t.Errorf("a resolvable skill was reported missing: %s", w.Message)
 		}
 	}

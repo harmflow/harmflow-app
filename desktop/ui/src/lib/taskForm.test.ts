@@ -22,8 +22,8 @@ const catalog: Catalog = {
     {
       id: "github-issue-implementation",
       parametersKey: "githubIssueImplementation",
-      defaultAgents: ["harmflow-github-issue-implementer"],
-      defaultSkills: ["harmflow-github-draft-pr"],
+      defaultAgents: [],
+      defaultSkills: ["hf-github-issue-implementer", "hf-github-draft-pr"],
       defaultPrompt: "Implement the oldest issue labeled agent-ready.",
     },
     { id: "general", parametersKey: null, defaultAgents: [], defaultSkills: [] },
@@ -69,11 +69,11 @@ describe("form ↔ document", () => {
       metadata: { id: "implement-github-issues", name: "Implement GitHub issues" },
       spec: {
         type: "github-issue-implementation",
-        agents: ["harmflow-github-issue-implementer"],
-        skills: ["harmflow-github-draft-pr"],
+        skills: ["hf-github-issue-implementer", "hf-github-draft-pr"],
         githubIssueImplementation: { repositories: [{ baseBranch: "main" }] },
       },
     });
+    expect(getIn(github, ["spec", "agents"])).toBeUndefined();
     const general = newTaskDocument("general", catalog, "Triagem de e-mail");
     expect(getIn(general, ["spec", "githubIssueImplementation"])).toBeUndefined();
     expect(getIn(general, ["metadata", "id"])).toBe("triagem-de-e-mail");
