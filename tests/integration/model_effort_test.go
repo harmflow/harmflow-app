@@ -128,13 +128,17 @@ func TestModelAndEffortReachTheHarness(t *testing.T) {
 		{"defaults", "", "", "default", "default"},
 		{"chosen", "sonnet", "high", "sonnet", "high"},
 	} {
-		x := d.completedRun(c.task)
-		checkClaudeFlags(t, c.task, recordedArgs(t, x), c.model, c.effort)
-		at := firstAttempt(t, x)
-		checkConfigured(t, c.task, at, c.configuredModel, c.configuredEffort)
-		if at["model"] != "claude-haiku-4-5-20251001" {
-			t.Errorf("%s: the attempt's model %v is not the one the stand-in reported", c.task, at["model"])
-		}
+		t.Run(c.task, func(t *testing.T) {
+			d := d.in(t)
+
+			x := d.completedRun(c.task)
+			checkClaudeFlags(t, c.task, recordedArgs(t, x), c.model, c.effort)
+			at := firstAttempt(t, x)
+			checkConfigured(t, c.task, at, c.configuredModel, c.configuredEffort)
+			if at["model"] != "claude-haiku-4-5-20251001" {
+				t.Errorf("completedRun(%s) attempt model = %v, want claude-haiku-4-5-20251001, the one the stand-in reported", c.task, at["model"])
+			}
+		})
 	}
 }
 
@@ -186,33 +190,37 @@ func TestChangedProfileIsValidatedAndAppliedNextRun(t *testing.T) {
 			check: checkClaudeFlags},
 	}
 	for _, c := range cases {
-		created := d.call("POST", "/tasks", map[string]any{"yaml": profileTask(c.id, c.harness, "")}, 201)
-		x := d.completedRun(c.id)
-		c.check(t, c.id+" before the change", recordedArgs(t, x), "", "")
-		checkConfigured(t, c.id+" before the change", firstAttempt(t, x), "default", "default")
+		t.Run(c.id, func(t *testing.T) {
+			d := d.in(t)
 
-		file := filepath.Join(home, "tasks", c.id+".yaml")
-		before, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, r := range c.refused {
-			status, body := d.request("PUT", "/tasks/"+c.id,
-				map[string]any{"yaml": profileTask(c.id, c.harness, r.profile), "baseRevision": created["revision"]}, nil)
-			if status != 422 || !refusedAt(t, body, "/spec/harness/preferred", r.key) {
-				t.Errorf("%s with %q: status %d, want 422 with %s at /spec/harness/preferred: %s", c.id,
-					strings.TrimSpace(r.profile), status, r.key, body)
-			}
-			if after, _ := os.ReadFile(file); !bytes.Equal(after, before) {
-				t.Errorf("%s with %q: a refused save changed the file:\n%s", c.id, strings.TrimSpace(r.profile), after)
-			}
-		}
+			created := d.call("POST", "/tasks", map[string]any{"yaml": profileTask(c.id, c.harness, "")}, 201)
+			x := d.completedRun(c.id)
+			c.check(t, c.id+" before the change", recordedArgs(t, x), "", "")
+			checkConfigured(t, c.id+" before the change", firstAttempt(t, x), "default", "default")
 
-		d.call("PUT", "/tasks/"+c.id,
-			map[string]any{"yaml": profileTask(c.id, c.harness, c.profile), "baseRevision": created["revision"]}, 200)
-		x = d.completedRun(c.id)
-		c.check(t, c.id+" after the change", recordedArgs(t, x), c.model, c.effort)
-		checkConfigured(t, c.id+" after the change", firstAttempt(t, x), c.model, c.effort)
+			file := filepath.Join(home, "tasks", c.id+".yaml")
+			before, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, r := range c.refused {
+				status, body := d.request("PUT", "/tasks/"+c.id,
+					map[string]any{"yaml": profileTask(c.id, c.harness, r.profile), "baseRevision": created["revision"]}, nil)
+				if status != 422 || !refusedAt(t, body, "/spec/harness/preferred", r.key) {
+					t.Errorf("PUT /tasks/%s with %q = %d %s, want 422 with %s at /spec/harness/preferred", c.id,
+						strings.TrimSpace(r.profile), status, body, r.key)
+				}
+				if after, _ := os.ReadFile(file); !bytes.Equal(after, before) {
+					t.Errorf("task file after a refused PUT with %q =\n%s\nwant it unchanged", strings.TrimSpace(r.profile), after)
+				}
+			}
+
+			d.call("PUT", "/tasks/"+c.id,
+				map[string]any{"yaml": profileTask(c.id, c.harness, c.profile), "baseRevision": created["revision"]}, 200)
+			x = d.completedRun(c.id)
+			c.check(t, c.id+" after the change", recordedArgs(t, x), c.model, c.effort)
+			checkConfigured(t, c.id+" after the change", firstAttempt(t, x), c.model, c.effort)
+		})
 	}
 }
 

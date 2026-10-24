@@ -115,15 +115,18 @@ func TestUncheckedCodexProfileSavesWithAWarning(t *testing.T) {
 		{"      model: no-such-model\n", "codex_model_unknown"},
 		{"      model: gpt-test\n      effort: ultra\n", "codex_effort_invalid"},
 	} {
-		_, err := a.UpdateTask(t.Context(), "pick", TaskInput{YAML: codexTaskYAML("pick", c.profile), BaseRevision: saved.Revision})
-		var refused *Error
-		if !errors.As(err, &refused) || refused.Key != c.key {
-			t.Errorf("%q with the cache: %v, want %s", c.profile, err, c.key)
-			continue
-		}
-		if r := refused.Validation; len(r.Errors) == 0 || r.Errors[0].Path != "/spec/harness/preferred" {
-			t.Errorf("%q: errors %+v", c.profile, r.Errors)
-		}
+		t.Run(c.key, func(t *testing.T) {
+
+			_, err := a.UpdateTask(t.Context(), "pick", TaskInput{YAML: codexTaskYAML("pick", c.profile), BaseRevision: saved.Revision})
+			var refused *Error
+			if !errors.As(err, &refused) || refused.Key != c.key {
+				t.Errorf("UpdateTask(profile %q) error = %v, want %s", c.profile, err, c.key)
+				return
+			}
+			if r := refused.Validation; len(r.Errors) == 0 || r.Errors[0].Path != "/spec/harness/preferred" {
+				t.Errorf("UpdateTask(profile %q) errors = %+v, want the first at /spec/harness/preferred", c.profile, r.Errors)
+			}
+		})
 	}
 	checked, err := a.UpdateTask(t.Context(), "pick", TaskInput{YAML: codexTaskYAML("pick", "      model: gpt-test\n      effort: high\n"),
 		BaseRevision: saved.Revision})

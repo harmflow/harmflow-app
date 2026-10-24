@@ -529,16 +529,19 @@ func TestSchemaErrorsAreTranslatable(t *testing.T) {
 		{valid + "  enabled: maybe\n", "schema_type", "got", "string"},
 	}
 	for _, c := range cases {
-		doc, node, _ := ParseYAML([]byte(c.yaml))
-		issues := v.ValidateTask(doc, node)
-		if len(issues) == 0 {
-			t.Errorf("%s: no issue", c.key)
-			continue
-		}
-		got := issues[0]
-		if got.Key != c.key || got.Params[c.param] != c.want || !strings.Contains(got.Message, c.want) {
-			t.Errorf("%s: got %+v", c.key, got)
-		}
+		t.Run(c.key, func(t *testing.T) {
+
+			doc, node, _ := ParseYAML([]byte(c.yaml))
+			issues := v.ValidateTask(doc, node)
+			if len(issues) == 0 {
+				t.Errorf("ValidateTask(%q) = no issue, want %s", c.yaml, c.key)
+				return
+			}
+			got := issues[0]
+			if got.Key != c.key || got.Params[c.param] != c.want || !strings.Contains(got.Message, c.want) {
+				t.Errorf("ValidateTask(%q)[0] = %+v, want key %s with %s %s", c.yaml, got, c.key, c.param, c.want)
+			}
+		})
 	}
 	_, _, issues := ParseYAML([]byte("kind: [unclosed\n"))
 	if len(issues) != 1 || issues[0].Key != "yaml_syntax" || issues[0].Params["detail"] == "" {
@@ -574,10 +577,13 @@ func TestEventSchema(t *testing.T) {
 		{`"type":"execution.status_changed"`, `"type":"execution.progressed"`, "/type", "schema_enum"},
 		{`"timestamp":"2026-10-20T08:00:00.123456-03:00"`, `"timestamp":"yesterday"`, "/timestamp", ""},
 	} {
-		doc, _ := FromJSON([]byte(strings.Replace(event, c.from, c.to, 1)))
-		issues := v.ValidateEvent(doc)
-		if len(issues) != 1 || issues[0].Path != c.path || issues[0].Key != c.key {
-			t.Errorf("%s: got %+v, want one issue at %s", c.to, issues, c.path)
-		}
+		t.Run(c.path, func(t *testing.T) {
+
+			doc, _ := FromJSON([]byte(strings.Replace(event, c.from, c.to, 1)))
+			issues := v.ValidateEvent(doc)
+			if len(issues) != 1 || issues[0].Path != c.path || issues[0].Key != c.key {
+				t.Errorf("ValidateEvent(event with %s) = %+v, want one issue at %s with key %q", c.to, issues, c.path, c.key)
+			}
+		})
 	}
 }

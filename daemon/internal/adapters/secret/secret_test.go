@@ -23,14 +23,17 @@ func TestKeychainError(t *testing.T) {
 		{"no message", "exit 51", false, "keychain: exit status 51"},
 	}
 	for _, c := range cases {
-		_, err := exec.Command("/bin/sh", "-c", c.script).Output()
-		got := keychainError(err)
-		if errors.Is(got, ErrNoToken) != c.noToken {
-			t.Errorf("%s: got %v", c.name, got)
-		}
-		if c.want != "" && got.Error() != c.want {
-			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
-		}
+		t.Run(c.name, func(t *testing.T) {
+
+			_, err := exec.Command("/bin/sh", "-c", c.script).Output()
+			got := keychainError(err)
+			if errors.Is(got, ErrNoToken) != c.noToken {
+				t.Errorf("keychainError(%v) = %v, want ErrNoToken: %v", err, got, c.noToken)
+			}
+			if c.want != "" && got.Error() != c.want {
+				t.Errorf("keychainError(%v) = %q, want %q", err, got, c.want)
+			}
+		})
 	}
 	if got := keychainError(exec.ErrNotFound); errors.Is(got, ErrNoToken) || !strings.HasPrefix(got.Error(), "keychain: ") {
 		t.Errorf("security missing: got %v", got)

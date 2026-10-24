@@ -143,9 +143,12 @@ func TestDetectionOnlyProbes(t *testing.T) {
 		cli    cli
 		probes []string
 	}{{claude, claudeProbes}, {codex, codexProbes}} {
-		if counts := c.cli.only(t, c.probes...); len(counts) == 0 {
-			t.Errorf("%s was never probed", c.cli.path)
-		}
+		t.Run(filepath.Base(c.cli.path), func(t *testing.T) {
+
+			if counts := c.cli.only(t, c.probes...); len(counts) == 0 {
+				t.Errorf("%s.only(%v) = no probe, want it probed", c.cli.path, c.probes)
+			}
+		})
 	}
 }
 
@@ -165,12 +168,16 @@ func TestReadyHarnessesOnlyProbeAndRun(t *testing.T) {
 		{"readyclaude", "claude-code", claude, claudeProbes, claudeRun},
 		{"readycodex", "codex", codex, codexProbes, codexRun},
 	} {
-		if x := d.runOn(c.task, c.harness); x["status"] != "completed" {
-			t.Fatalf("%s: status %v, error %v", c.task, x["status"], x["errorMessage"])
-		}
-		if counts := c.cli.only(t, append(c.probes, c.run)...); counts[c.run] != 1 || counts["--version"] == 0 {
-			t.Errorf("%s: invocations %v, want the probes and one run", c.harness, counts)
-		}
+		t.Run(c.task, func(t *testing.T) {
+			d := d.in(t)
+
+			if x := d.runOn(c.task, c.harness); x["status"] != "completed" {
+				t.Fatalf("runOn(%s, %s) status = %v, error %v, want completed", c.task, c.harness, x["status"], x["errorMessage"])
+			}
+			if counts := c.cli.only(t, append(c.probes, c.run)...); counts[c.run] != 1 || counts["--version"] == 0 {
+				t.Errorf("%s invocations = %v, want the probes and one run", c.harness, counts)
+			}
+		})
 	}
 }
 
@@ -188,13 +195,17 @@ func TestSignedOutHarnessIsNotReady(t *testing.T) {
 			`login) echo "Logged in using ChatGPT"; exit 0 ;;`, `login) echo "Not logged in" >&2; exit 1 ;;`)},
 	}
 	for _, c := range cases {
-		h := d.setHarness(c.id, c.cli.path)
-		if h["detected"] != true || h["version"] != c.version || h["authentication"] != "invalid" ||
-			h["readiness"] != "not_ready" || h["diagnosticKey"] != c.key || h["diagnostic"] == nil {
-			t.Errorf("%s: detected %v, version %v, authentication %v, readiness %v, diagnostic %v (%v); want detected, "+
-				"%s, invalid, not_ready, %s", c.id, h["detected"], h["version"], h["authentication"], h["readiness"],
-				h["diagnosticKey"], h["diagnostic"], c.version, c.key)
-		}
+		t.Run(c.id, func(t *testing.T) {
+			d := d.in(t)
+
+			h := d.setHarness(c.id, c.cli.path)
+			if h["detected"] != true || h["version"] != c.version || h["authentication"] != "invalid" ||
+				h["readiness"] != "not_ready" || h["diagnosticKey"] != c.key || h["diagnostic"] == nil {
+				t.Errorf("PUT /harnesses/%s = detected %v, version %v, authentication %v, readiness %v, diagnostic %v (%v); "+
+					"want detected, %s, invalid, not_ready, %s", c.id, h["detected"], h["version"], h["authentication"],
+					h["readiness"], h["diagnosticKey"], h["diagnostic"], c.version, c.key)
+			}
+		})
 	}
 }
 

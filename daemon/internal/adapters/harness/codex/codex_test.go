@@ -145,10 +145,13 @@ func TestParseRateLimit(t *testing.T) {
 		{"429 Too Many Requests", domain.ClassRateLimited},
 	}
 	for _, c := range cases {
-		p := &parser{}
-		if end := p.Finish(1, c.text, false, false); end.Class != c.want {
-			t.Errorf("%q: got %s, want %s", c.text, end.Class, c.want)
-		}
+		t.Run(c.text, func(t *testing.T) {
+
+			p := &parser{}
+			if end := p.Finish(1, c.text, false, false); end.Class != c.want {
+				t.Errorf("Finish(1, %q, false, false).Class = %s, want %s", c.text, end.Class, c.want)
+			}
+		})
 	}
 }
 

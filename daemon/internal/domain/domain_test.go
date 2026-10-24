@@ -118,14 +118,17 @@ func TestDecideAfterAttempt(t *testing.T) {
 		{"trigger not chosen", ClassHarnessUnavailable, func(i *FailoverInput) { i.FallbackOn = []string{FallbackOnQuota} }, ActionFail},
 	}
 	for _, c := range cases {
-		in := base
-		in.End = AttemptEnd{Class: c.class}
-		if c.mod != nil {
-			c.mod(&in)
-		}
-		if got := DecideAfterAttempt(in); got != c.want {
-			t.Errorf("%s: got %s, want %s", c.name, got, c.want)
-		}
+		t.Run(c.name, func(t *testing.T) {
+
+			in := base
+			in.End = AttemptEnd{Class: c.class}
+			if c.mod != nil {
+				c.mod(&in)
+			}
+			if got := DecideAfterAttempt(in); got != c.want {
+				t.Errorf("DecideAfterAttempt(%+v) = %s, want %s", in, got, c.want)
+			}
+		})
 	}
 }
 
