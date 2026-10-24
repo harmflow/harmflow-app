@@ -1174,7 +1174,7 @@ components:
         configuredEffort: { type: string, description: "The effort the task asked for, default when it set none. Never the one used." }
         startedAt: { type: string, format: date-time }
         endedAt: { type: string, format: date-time }
-        outcome: { type: string, enum: [running, succeeded, failed, quota_exhausted, rate_limited, harness_unavailable, timed_out, cancelled, interrupted] }
+        outcome: { type: string, enum: [running, succeeded, failed, quota_exhausted, rate_limited, harness_unavailable, network_failed, timed_out, cancelled, interrupted] }
         exitCode: { type: integer }
         sessionId: { type: string }
         errorMessage: { type: string, description: "Why the attempt ended: the daemon's text in en-US, or the harness's own error, which has no errorKey." }

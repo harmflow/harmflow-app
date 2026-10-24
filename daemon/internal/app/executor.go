@@ -731,6 +731,8 @@ func attemptOutcome(c domain.ErrorClass) domain.AttemptOutcome {
 		return domain.AttemptRateLimited
 	case domain.ClassHarnessUnavailable:
 		return domain.AttemptHarnessUnavailable
+	case domain.ClassNetwork:
+		return domain.AttemptNetworkFailed
 	case domain.ClassTimeout:
 		return domain.AttemptTimedOut
 	case domain.ClassCancelled:

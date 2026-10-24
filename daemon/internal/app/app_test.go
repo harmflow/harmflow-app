@@ -228,6 +228,8 @@ func (p *fakeParser) Finish(exit int, _ string, timedOut, cancelled bool) domain
 			FinalText: p.text, Usage: p.usage(domain.UsagePartial)}
 	case "rate":
 		return domain.AttemptEnd{Class: domain.ClassRateLimited, Error: domain.Text{Message: "429"}, RetryAfter: 10 * time.Millisecond}
+	case "network":
+		return domain.AttemptEnd{Class: domain.ClassNetwork, Error: domain.Text{Message: "connect ECONNREFUSED 127.0.0.1:443"}}
 	}
 	return domain.AttemptEnd{Class: domain.ClassTaskError, Error: domain.Text{Message: fmt.Sprintf("exit %d", exit)}}
 }
@@ -888,6 +890,41 @@ func TestQuotaFailover(t *testing.T) {
 	x = e.wait(r.ExecutionID, domain.StatusFailed)
 	if !strings.Contains(x.ErrorMessage, "no alternative") {
 		t.Errorf("error %q", x.ErrorMessage)
+	}
+}
+
+// harmflow-app#212: a network failure is recorded as one, in the record on disk too, and does not fail over even with a
+// fallback configured, as the specification asks.
+func TestNetworkFailureRecordedWithoutFailover(t *testing.T) {
+	e := newEnv(t)
+	e.create("offline", "    fallback:\n      candidates:\n        - provider: codex\n")
+	e.claude.setScript(func(ports.RunRequest) string { return "echo 'END network'" })
+	e.codex.setScript(func(ports.RunRequest) string { return "echo 'END ok'" })
+	r, _ := e.app.RunTask("offline")
+	x := e.wait(r.ExecutionID, domain.StatusFailed)
+	if len(x.Attempts) != 1 || x.Attempts[0].Outcome != domain.AttemptNetworkFailed || x.HarnessSwitches != 0 {
+		t.Fatalf("attempts %+v, %d switches", x.Attempts, x.HarnessSwitches)
+	}
+	e.codex.mu.Lock()
+	prompts := len(e.codex.prompts)
+	e.codex.mu.Unlock()
+	if prompts != 0 {
+		t.Errorf("Codex got %d prompts", prompts)
+	}
+	events, _, _ := e.app.ExecutionEvents(r.ExecutionID, 0, 0)
+	for _, ev := range events {
+		if ev.Type == domain.EventHarnessSwitched {
+			t.Errorf("a %s event followed the network failure", ev.Type)
+		}
+	}
+	e.idle("offline")
+	data, err := os.ReadFile(filepath.Join(e.home, "state", "executions", r.ExecutionID+".json"))
+	var saved domain.Execution
+	if err == nil {
+		err = json.Unmarshal(data, &saved)
+	}
+	if err != nil || len(saved.Attempts) != 1 || saved.Attempts[0].Outcome != domain.AttemptNetworkFailed {
+		t.Errorf("the record on disk lacks the network outcome (%v):\n%s", err, data)
 	}
 }
 

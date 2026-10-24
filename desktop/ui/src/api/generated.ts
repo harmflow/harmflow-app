@@ -848,7 +848,7 @@ export interface components {
             /** Format: date-time */
             endedAt?: string;
             /** @enum {string} */
-            outcome?: "running" | "succeeded" | "failed" | "quota_exhausted" | "rate_limited" | "harness_unavailable" | "timed_out" | "cancelled" | "interrupted";
+            outcome?: "running" | "succeeded" | "failed" | "quota_exhausted" | "rate_limited" | "harness_unavailable" | "network_failed" | "timed_out" | "cancelled" | "interrupted";
             exitCode?: number;
             sessionId?: string;
             /** @description Why the attempt ended: the daemon's text in en-US, or the harness's own error, which has no errorKey. */

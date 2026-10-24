@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","session_id":"44444444-4444-4444-4444-444444444444","model":"claude-opus-5-5"}
+{"type":"system","subtype":"api_retry","attempt":1,"max_retries":1,"retry_delay_ms":517,"error_status":null,"error":"unknown","session_id":"44444444-4444-4444-4444-444444444444"}
+{"type":"assistant","message":{"model":"<synthetic>","role":"assistant","type":"message","content":[{"type":"text","text":"API Error: Connection refused — a firewall or proxy may be blocking it (ECONNREFUSED)"}]},"error":"server_error","session_id":"44444444-4444-4444-4444-444444444444"}
+{"type":"result","subtype":"success","is_error":true,"result":"API Error: Connection refused — a firewall or proxy may be blocking it (ECONNREFUSED)","terminal_reason":"api_error","session_id":"44444444-4444-4444-4444-444444444444"}

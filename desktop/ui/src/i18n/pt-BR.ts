@@ -149,6 +149,7 @@ export const ptBR: Resources = {
     quota_exhausted: "Cota esgotada",
     rate_limited: "Limite de taxa",
     harness_unavailable: "Harness indisponível",
+    network_failed: "Falha de rede",
     timed_out: "Tempo esgotado",
     cancelled: "Cancelada",
     interrupted: "Interrompida",

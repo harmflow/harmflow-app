@@ -177,6 +177,22 @@ describe("execution detail", () => {
     expect(codex).not.toMatch(/Model(default|high)/);
   });
 
+  it.each([
+    ["en-US", "Attempts", "Network failure"],
+    ["es-ES", "Intentos", "Fallo de red"],
+    ["pt-BR", "Tentativas", "Falha de rede"],
+  ])("labels an attempt that ended on a network failure as one in %s (harmflow-app#212)", async (lang, tab, label) => {
+    await i18n.changeLanguage(lang);
+    try {
+      const offline: Execution = { ...base, id: "exec-offline", status: "failed", endedAt: ended, attempts: [{ ...base.attempts[0], outcome: "network_failed" }] };
+      await open(offline, [], capture());
+      await choose(tab);
+      expect(host!.querySelector(".attempt__header")?.textContent).toContain(label);
+    } finally {
+      await i18n.changeLanguage("en-US");
+    }
+  });
+
   it("shows a failover's switch events in its timeline, in order, each with its own tone (FS-005 AC-008)", async () => {
     // A quota failover's events as the daemon emits them, in the order itest › TestFailoverAcrossHarnesses reads.
     const failedOver: Execution = { ...completed, id: "exec-failed-over" };
