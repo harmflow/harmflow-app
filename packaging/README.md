@@ -16,15 +16,35 @@ Only what Tauri's own bundle settings (`desktop/src-tauri/tauri.conf.json`) do n
 `make update-app` (`packaging/macos/update-app.sh`) runs `main` as the local app in one command:
 
 1. It refuses, with nothing changed, off `main`, with uncommitted changes, or when `git pull --ff-only origin main`
-   cannot fast-forward. Then it runs `make app`; a failed build leaves the window and the daemon as they were.
-2. It finds the daemon of `$HARMFLOW_HOME`, or of `~/Library/Application Support/HarmFlow`, through that directory's
+   cannot fast-forward. Then it runs `make app`; a failed build leaves the installed app, window, and daemon as they
+   were.
+2. The build remains in `desktop/src-tauri/target/release/bundle/macos/`. Before stopping anything, the script copies
+   that bundle to a temporary sibling of the installed app. The installed path is `~/Applications/HarmFlow.app` by
+   default, or `$INSTALL_DIR/HarmFlow.app` when `INSTALL_DIR` is set (an `INSTALL_DIR` ending in `.app` is accepted as
+   the complete path).
+3. It finds the daemon of `$HARMFLOW_HOME`, or of `~/Library/Application Support/HarmFlow`, through that directory's
    `run/daemon.json`, never by process name, so the daemons of other data directories (the e2e one, a worktree's
-   development one) are never touched.
-3. It stops that daemon through `POST /api/v1/daemon/stop`, without `force`. While executions run, the daemon refuses
-   and so does the update: the window and the daemon stay as they were, and the new bundle is built but not running.
-4. It quits the window of this checkout's bundle, then restores what it found. A daemon that was running starts from
-   the new bundle, through `launchctl kickstart` when the launch agent `com.harmflow.daemon` serves that data directory,
-   and must answer with the new commit. A window that was open reopens. What was stopped stays stopped.
+   development one) are never touched. A loaded `com.harmflow.daemon` agent for this data directory must already point
+   at the installed `harmflowd`; an older `target/` agent is refused before anything stops. Open the installed app,
+   then turn Autostart off and on in Settings to rewrite that agent.
+4. It stops that daemon through `POST /api/v1/daemon/stop`, without `force`. While executions run, the daemon refuses
+   and so does the update: the installed app remains untouched and the window and daemon stay as they were.
+5. It quits the installed window, moves the staged copy into `HarmFlow.app` with a rename, then restores what ran.
+   A daemon that was running starts from the installed bundle, through `launchctl kickstart` when the launch agent
+   serves that data directory, and must answer with the new commit. A window that was open reopens from the installed
+   bundle. What was stopped stays stopped.
+6. With no daemon/window running, the update installs the bundle and exits. Set `OPEN=1` (`make update-app OPEN=1`) to
+   open the installed app after the update; opening it starts the daemon.
+
+### Manual launch-agent refusal check
+
+On a macOS development machine with an installed copy and a disposable data directory, create or retain a
+`~/Library/LaunchAgents/com.harmflow.daemon.plist` whose first `ProgramArguments` entry is the old
+`desktop/src-tauri/target/release/bundle/macos/HarmFlow.app/Contents/MacOS/harmflowd` while its `--home` points at the
+disposable directory. Load it for the user session, then run `HARMFLOW_HOME=... INSTALL_DIR=... make update-app`.
+The command must print the old executable path and the instruction to open the installed app and toggle Autostart off
+and on; it must not stop the daemon or replace `HarmFlow.app`. After following that instruction, rerun the command and
+verify the plist now names the installed `Contents/MacOS/harmflowd` and the update completes.
 
 ## Linux and Windows
 
