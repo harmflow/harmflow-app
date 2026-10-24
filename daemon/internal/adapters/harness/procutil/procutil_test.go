@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/goleak"
+
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
@@ -39,7 +41,8 @@ func TestMain(m *testing.M) {
 		time.Sleep(10 * time.Minute)
 		os.Exit(0)
 	}
-	os.Exit(m.Run())
+	// The readers of a process's output are goroutines; none may outlive the test that started it (D-132).
+	goleak.VerifyTestMain(m)
 }
 
 // writePid writes the file whole, so a reader never sees part of the pid.
