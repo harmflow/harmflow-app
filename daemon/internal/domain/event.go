@@ -56,8 +56,10 @@ const (
 	EventProcessEnded            = "process.ended"
 )
 
+// Severity is how much an event matters, as an event's severity in contracts/schemas/event.schema.json names it.
 type Severity string
 
+// The severities of an event, from the least to the most severe.
 const (
 	SeverityDebug   Severity = "debug"
 	SeverityInfo    Severity = "info"
@@ -65,6 +67,7 @@ const (
 	SeverityError   Severity = "error"
 )
 
+// EventSchemaVersion is the schemaVersion of every event, the const of contracts/schemas/event.schema.json.
 const EventSchemaVersion = "1"
 
 // Event is a normalized event (architecture/event-model.md). Agent text and tool output keep their original

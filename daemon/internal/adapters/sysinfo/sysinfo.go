@@ -16,6 +16,8 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
+// Reader is the SystemInfo. It keeps the CPU reading for 3 seconds and the directory's size for a minute, so frequent
+// snapshots stay cheap.
 type Reader struct {
 	mu       sync.Mutex
 	dirBytes int64
@@ -26,6 +28,8 @@ type Reader struct {
 
 var _ ports.SystemInfo = (*Reader)(nil)
 
+// Snapshot implements ports.SystemInfo: CPU use, memory, the disk that holds dir, and the size of dir, each under its
+// key, leaving out a gauge it cannot read.
 func (r *Reader) Snapshot(dir string) map[string]any {
 	out := map[string]any{}
 	if cpu, ok := r.cpuPercent(); ok {

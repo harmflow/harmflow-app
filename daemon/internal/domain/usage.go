@@ -45,6 +45,7 @@ type Tokens struct {
 	Output          int64 `json:"output"`
 }
 
+// Add returns the sum of t and o, class by class.
 func (t Tokens) Add(o Tokens) Tokens {
 	return Tokens{Input: t.Input + o.Input, CacheWriteShort: t.CacheWriteShort + o.CacheWriteShort,
 		CacheWriteLong: t.CacheWriteLong + o.CacheWriteLong, CacheRead: t.CacheRead + o.CacheRead, Output: t.Output + o.Output}

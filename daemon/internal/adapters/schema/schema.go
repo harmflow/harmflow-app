@@ -31,12 +31,14 @@ type Issue struct {
 	Code   string `json:"code,omitempty"`
 }
 
+// Validator holds the task, execution report, and event schemas, compiled.
 type Validator struct {
 	task   *jsonschema.Schema
 	report *jsonschema.Schema
 	event  *jsonschema.Schema
 }
 
+// New compiles the embedded schemas; an error means an embedded schema does not compile.
 func New() (*Validator, error) {
 	c := jsonschema.NewCompiler()
 	// An event's timestamp is checked as a date-time; the task and report schemas name no format.

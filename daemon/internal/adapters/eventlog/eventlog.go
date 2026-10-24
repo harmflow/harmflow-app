@@ -28,6 +28,8 @@ const ringSize = 20000
 // client that falls behind never holds up the log or the daemon.
 const subscriberBuffer = 4096
 
+// Log is the EventLog: the JSONL files of the executions in one directory, a ring of the recent events for replay, and
+// the live subscribers.
 type Log struct {
 	dir   string
 	clock func() time.Time
@@ -44,6 +46,8 @@ type Log struct {
 
 var _ ports.EventLog = (*Log)(nil)
 
+// New returns the log of the files in dir, creating the directory when it is missing; clock stamps the events and
+// gives them their ids.
 func New(dir string, clock func() time.Time) (*Log, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
@@ -267,6 +271,8 @@ func (l *Log) DeleteLog(executionID string) error {
 	return err2
 }
 
+// LogModTime implements ports.EventLog: when an execution's JSONL was last written, which ages it for retention; false
+// when it has none.
 func (l *Log) LogModTime(executionID string) (time.Time, bool) {
 	info, err := os.Stat(l.path(executionID))
 	if err != nil {

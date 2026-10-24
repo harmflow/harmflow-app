@@ -523,6 +523,8 @@ type SchedulePreview struct {
 	ErrorParams map[string]string `json:"errorParams,omitempty"`
 }
 
+// PreviewSchedule lists the next count firings of a schedule, five when count is not between 1 and 20, in the
+// schedule's time zone or the daemon's; an invalid schedule has none, and its error.
 func (a *App) PreviewSchedule(s domain.Schedule, count int) SchedulePreview {
 	if count <= 0 || count > 20 {
 		count = 5

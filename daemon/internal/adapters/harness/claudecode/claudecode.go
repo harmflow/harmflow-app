@@ -25,12 +25,14 @@ import (
 )
 
 const (
-	ID   = domain.HarnessClaudeCode
+	// ID is the harness's identifier, as a task's provider names it.
+	ID = domain.HarnessClaudeCode
+	// Name is the harness's display name.
 	Name = "Claude Code"
-	// MinVersion is the oldest release line HarmFlow supports; an older CLI is not ready. TestedMinor is the newest
-	// release line it was tested with: every patch in it runs as supported, and a newer line runs with a warning
-	// (D-078, D-115).
-	MinVersion  = "2.0"
+	// MinVersion is the oldest release line HarmFlow supports; an older CLI is not ready (D-078, D-115).
+	MinVersion = "2.0"
+	// TestedMinor is the newest release line HarmFlow was tested with: every patch in it runs as supported, and a newer
+	// line runs with a warning (D-078, D-115).
 	TestedMinor = "2.1"
 )
 
@@ -39,6 +41,9 @@ var requiredFlags = []string{"--print", "--output-format", "--permission-mode", 
 
 var declaredModels = []string{domain.DefaultModel, "fable", "opus", "sonnet", "haiku"}
 
+// Adapter is the HarnessAdapter of the Claude Code CLI. It looks for the CLI on PathEnv, then in KnownLocations, and
+// runs its probes with Env; the user's agents and skills are read from the configuration directory under Home, or
+// CLAUDE_CONFIG_DIR.
 type Adapter struct {
 	Home    string // the user's home directory
 	PathEnv string
@@ -52,7 +57,10 @@ var (
 	_ ports.HarnessIdentifier = (*Adapter)(nil)
 )
 
-func (a *Adapter) ID() string   { return ID }
+// ID implements ports.HarnessAdapter: the harness's identifier.
+func (a *Adapter) ID() string { return ID }
+
+// Name implements ports.HarnessAdapter: the harness's display name.
 func (a *Adapter) Name() string { return Name }
 
 func (a *Adapter) configDir() string {
@@ -79,6 +87,8 @@ func (a *Adapter) knownLocations() []string {
 var versionRe = regexp.MustCompile(`(\d+\.\d+\.\d+)`)
 var effortRe = regexp.MustCompile(`--effort <level>[\s\S]*?\(([a-z, ]+)\)`)
 
+// Detect implements ports.HarnessAdapter: it finds the CLI, the path set by hand when there is one, then checks its
+// version, the flags HarmFlow needs, its efforts and models, and its sign-in, and says how ready it is.
 func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessInfo {
 	info := ports.HarnessInfo{ID: ID, Name: Name, Authentication: "unknown", Readiness: "not_installed",
 		Models: []ports.ModelInfo{}, Efforts: []string{}, EnforceableControls: []string{}, Installations: []string{},
@@ -194,6 +204,8 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 	return info
 }
 
+// ValidateProfile implements ports.HarnessAdapter: a model is default, an alias Claude Code offers, or a full claude-*
+// name, and an effort other than default is one the detected CLI accepts; with no CLI detected, any effort passes.
 func (a *Adapter) ValidateProfile(info ports.HarnessInfo, model, effort string) error {
 	if model != "" && model != domain.DefaultModel && !strings.HasPrefix(model, "claude-") && !containsStr(declaredModels, model) {
 		return domain.TextErr("claude_model_unknown",
@@ -217,10 +229,12 @@ func (a *Adapter) ValidateProfile(info ports.HarnessInfo, model, effort string) 
 	return nil
 }
 
+// UserItem implements ports.HarnessAdapter, looking the item up in Claude Code's configuration directory.
 func (a *Adapter) UserItem(kind, name string) (ports.ResolvedItem, bool) {
 	return catalog.Dir{Root: a.configDir()}.Item(kind, name)
 }
 
+// UserItems implements ports.HarnessAdapter: the agents or skills of Claude Code's configuration directory.
 func (a *Adapter) UserItems(kind string) []ports.ResolvedItem {
 	return catalog.Dir{Root: a.configDir()}.Items(kind)
 }
@@ -229,6 +243,9 @@ var readTools = []string{"Read", "Glob", "Grep", "Skill", "Task", "TodoWrite"}
 var webTools = []string{"WebFetch", "WebSearch"}
 var writeTools = []string{"Bash", "Edit", "Write", "MultiEdit", "NotebookEdit"}
 
+// Prepare implements ports.HarnessAdapter: a `claude -p` invocation with stream-json output, the model, effort, and
+// context asked for, the built-in skills as a session-only plugin, the built-in agents defined for the session, and
+// the permission profile translated to Claude Code's controls, with the restrictions it enforces and those it cannot.
 func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.Invocation, ports.OutputParser, error) {
 	args := []string{"-p", "--output-format", "stream-json", "--verbose"}
 	if info.Features["--no-session-persistence"] {

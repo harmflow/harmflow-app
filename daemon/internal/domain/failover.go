@@ -6,6 +6,7 @@ import "time"
 // signals only; anything they cannot tell apart is ClassTaskError or ClassUnknown, never quota.
 type ErrorClass string
 
+// The classes of an attempt's end; ClassNone is an attempt that ended with no error.
 const (
 	ClassNone               ErrorClass = ""
 	ClassQuotaExhausted     ErrorClass = "quota_exhausted"
@@ -33,6 +34,8 @@ type AttemptEnd struct {
 // Action is what the executor does after an attempt.
 type Action string
 
+// The actions after an attempt, as DecideAfterAttempt chooses them: finish the execution, retry on the same harness,
+// switch to the next candidate, end because no candidate is left to switch to, or fail.
 const (
 	ActionFinish        Action = "finish"
 	ActionRetrySame     Action = "retry_same"

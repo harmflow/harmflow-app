@@ -122,6 +122,7 @@ func (h HarnessInfo) DiagnosticText() domain.Text {
 	return domain.Text{Key: h.DiagnosticKey, Params: h.DiagnosticParams, Message: h.Diagnostic}
 }
 
+// ModelInfo is a model a harness accepts, with the reasoning efforts it accepts for that model.
 type ModelInfo struct {
 	ID      string   `json:"id"`
 	Efforts []string `json:"efforts,omitempty"`
@@ -181,6 +182,8 @@ type Invocation struct {
 // HarnessEventKind is a normalized observation of the harness's structured output.
 type HarnessEventKind string
 
+// The kinds of a HarnessEvent: the session started, the agent wrote a message, a tool call started or completed, a file
+// changed, the harness printed a warning or a rate-limit notice, or it reported its token use.
 const (
 	HarnessStarted     HarnessEventKind = "started"
 	HarnessMessage     HarnessEventKind = "message"
@@ -193,6 +196,8 @@ const (
 	HarnessUsage HarnessEventKind = "usage"
 )
 
+// HarnessEvent is one observation an OutputParser read from the harness's output; which fields it carries depends on
+// its Kind.
 type HarnessEvent struct {
 	Kind      HarnessEventKind
 	Message   string
@@ -251,6 +256,7 @@ type ToolProber interface {
 	Probe(ctx context.Context) []ToolInfo
 }
 
+// ToolInfo is what a ToolProber found of one tool, git or gh: where it is, its version, and its authentication.
 type ToolInfo struct {
 	ID               string            `json:"id"`
 	Detected         bool              `json:"detected"`

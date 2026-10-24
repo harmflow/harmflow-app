@@ -153,6 +153,8 @@ type CatalogEntry struct {
 	Harnesses   []string `json:"harnesses"`
 }
 
+// TaskTypeInfo is a task type as the editor offers it: the key of its parameters block in a task's spec, nil for a type
+// with none, and the agents, skills, and prompt a new task of the type starts with.
 type TaskTypeInfo struct {
 	ID            string   `json:"id"`
 	ParametersKey *string  `json:"parametersKey"`
@@ -161,6 +163,7 @@ type TaskTypeInfo struct {
 	DefaultPrompt string   `json:"defaultPrompt,omitempty"`
 }
 
+// Catalog is what a task can cite: the agents and skills, built in or the user's, and the task types.
 type Catalog struct {
 	Agents    []CatalogEntry `json:"agents"`
 	Skills    []CatalogEntry `json:"skills"`
@@ -196,6 +199,8 @@ func (a *App) resolveItem(kind, name, harness string) (ports.ResolvedItem, strin
 	return it, where, found
 }
 
+// Catalog lists the built-in agents and skills, offered on every harness, then the user's, each with the harnesses
+// whose configuration holds it, sorted by name; a user's item named with the harmflow- prefix is left out.
 func (a *App) Catalog() Catalog {
 	c := Catalog{Agents: []CatalogEntry{}, Skills: []CatalogEntry{}}
 	all := sortedKeys(a.adapters)

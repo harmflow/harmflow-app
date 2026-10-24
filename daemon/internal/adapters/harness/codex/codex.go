@@ -25,13 +25,19 @@ import (
 )
 
 const (
-	ID         = domain.HarnessCodex
-	Name       = "Codex"
+	// ID is the harness's identifier, as a task's provider names it.
+	ID = domain.HarnessCodex
+	// Name is the harness's display name.
+	Name = "Codex"
+	// TestedUpTo is the newest version HarmFlow was tested with; a newer one runs as untested.
 	TestedUpTo = "0.163.0"
 )
 
 var requiredFlags = []string{"--json", "--sandbox", "--cd", "--skip-git-repo-check"}
 
+// Adapter is the HarnessAdapter of the Codex CLI. It looks for the CLI on PathEnv, then in KnownLocations, and runs its
+// probes with Env; the user's agents and skills, its models cache, and its configuration are read from the Codex home
+// under Home, or CODEX_HOME.
 type Adapter struct {
 	Home    string
 	PathEnv string
@@ -46,7 +52,10 @@ var (
 	_ ports.ProfileWarner     = (*Adapter)(nil)
 )
 
-func (a *Adapter) ID() string   { return ID }
+// ID implements ports.HarnessAdapter: the harness's identifier.
+func (a *Adapter) ID() string { return ID }
+
+// Name implements ports.HarnessAdapter: the harness's display name.
 func (a *Adapter) Name() string { return Name }
 
 func (a *Adapter) codexHome() string {
@@ -73,6 +82,9 @@ func (a *Adapter) knownLocations() []string {
 
 var versionRe = regexp.MustCompile(`(\d+\.\d+\.\d+)`)
 
+// Detect implements ports.HarnessAdapter: it finds the CLI, the path set by hand when there is one, then checks its
+// version, the flags HarmFlow needs, the models and efforts of its models cache, and its sign-in, and says how ready it
+// is.
 func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessInfo {
 	info := ports.HarnessInfo{ID: ID, Name: Name, Authentication: "unknown", Readiness: "not_installed",
 		Models: []ports.ModelInfo{}, Efforts: []string{}, EnforceableControls: []string{}, Installations: []string{},
@@ -248,6 +260,8 @@ func (a *Adapter) models() ([]ports.ModelInfo, []string, string) {
 	return models, append(union, rest...), "reported"
 }
 
+// ValidateProfile implements ports.HarnessAdapter: when the models cache was read, the model is one it lists, and an
+// effort other than default is one that model accepts. Otherwise nothing is checked, and ProfileWarning says so.
 func (a *Adapter) ValidateProfile(info ports.HarnessInfo, model, effort string) error {
 	if !info.Detected || info.CapabilitySource != "reported" {
 		return nil
@@ -299,11 +313,17 @@ func (a *Adapter) ProfileWarning(info ports.HarnessInfo, model, effort string) (
 
 func (a *Adapter) userDir() catalog.Dir { return catalog.Dir{Root: a.codexHome()} }
 
+// UserItem implements ports.HarnessAdapter, looking the item up in the Codex home.
 func (a *Adapter) UserItem(kind, name string) (ports.ResolvedItem, bool) {
 	return a.userDir().Item(kind, name)
 }
+
+// UserItems implements ports.HarnessAdapter: the agents or skills of the Codex home.
 func (a *Adapter) UserItems(kind string) []ports.ResolvedItem { return a.userDir().Items(kind) }
 
+// Prepare implements ports.HarnessAdapter: a `codex exec --json` invocation with the model and effort asked for and the
+// permission profile translated to a sandbox, with the restrictions it enforces and those it cannot. Its stdin is the
+// instructions, which name the built-ins as copied into the execution's directory.
 func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.Invocation, ports.OutputParser, error) {
 	args := []string{"exec", "--json", "--skip-git-repo-check", "--cd", req.WorkDir}
 	if info.Features["--ephemeral"] {

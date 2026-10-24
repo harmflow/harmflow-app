@@ -10,6 +10,7 @@ import (
 // ExecutionStatus is a state of architecture/execution-lifecycle.md.
 type ExecutionStatus string
 
+// The statuses of an execution, as ExecutionStatus in contracts/api/openapi.yaml names them.
 const (
 	StatusQueued           ExecutionStatus = "queued"
 	StatusPreparing        ExecutionStatus = "preparing"
@@ -58,8 +59,11 @@ func (s ExecutionStatus) CanTransition(to ExecutionStatus) error {
 	return nil
 }
 
+// Trigger is what fired an execution: a run by hand, the schedule, or one catch-up for the firings missed while the
+// daemon or the machine was unavailable (D-071).
 type Trigger string
 
+// The triggers of an execution, as Trigger in contracts/api/openapi.yaml names them.
 const (
 	TriggerManual   Trigger = "manual"
 	TriggerSchedule Trigger = "schedule"
@@ -69,6 +73,8 @@ const (
 // AttemptOutcome is how one harness process ended.
 type AttemptOutcome string
 
+// The outcomes of an attempt, as an Attempt's outcome in contracts/api/openapi.yaml names them; AttemptRunning is an
+// attempt that has not ended.
 const (
 	AttemptRunning            AttemptOutcome = "running"
 	AttemptSucceeded          AttemptOutcome = "succeeded"
@@ -120,6 +126,8 @@ func (a *Attempt) SetReason(t Text) {
 	a.Reason, a.ReasonKey, a.ReasonParams = t.Message, t.Key, t.Params
 }
 
+// PullRequestRef is the pull request a work item delivered, as its report gave it: Draft and Created are nil when the
+// report left them out.
 type PullRequestRef struct {
 	Number  int    `json:"number,omitempty"`
 	URL     string `json:"url,omitempty"`
@@ -127,11 +135,14 @@ type PullRequestRef struct {
 	Created *bool  `json:"created,omitempty"`
 }
 
+// TestsResult is the outcome of a work item's tests, as its report gave it.
 type TestsResult struct {
 	Status  string `json:"status,omitempty"`
 	Summary string `json:"summary,omitempty"`
 }
 
+// WorkItemResult is one work item an execution handled, as the session's report gave it
+// (contracts/schemas/execution-report.schema.json); the execution keeps its report's list as it is.
 type WorkItemResult struct {
 	Key          string          `json:"key"`
 	Kind         string          `json:"kind,omitempty"`
@@ -147,12 +158,16 @@ type WorkItemResult struct {
 	ChangedFiles []string        `json:"changedFiles,omitempty"`
 }
 
+// Warning is a warning on an execution or a task: a code, its text, and its subject, such as a repository or the path
+// of the task field it is about.
 type Warning struct {
 	Code string `json:"code"`
 	Text
 	Subject string `json:"subject,omitempty"`
 }
 
+// The codes of a Warning, as Warning in contracts/api/openapi.yaml names them; WarningOther is any warning no other
+// code covers.
 const (
 	WarningPolicyUnenforced      = "policy_unenforced"
 	WarningRepositoryUnprotected = "repository_unprotected"
@@ -166,6 +181,8 @@ const (
 	WarningOther                 = "other"
 )
 
+// CommandRecord is one command the harness ran, recorded when its tool call starts: its status is running until the
+// call ends, then succeeded or failed, and failed if its attempt ends first. Attempt is the number of that attempt.
 type CommandRecord struct {
 	ID        string     `json:"id"`
 	Command   string     `json:"command"`
@@ -244,6 +261,7 @@ type ProcessIdentity struct {
 	Boot        string `json:"boot"`
 }
 
+// ExecutionSchemaVersion is the schema version of the execution records this daemon writes; Upgrade reads older ones.
 const ExecutionSchemaVersion = "2"
 
 // Upgrade reads a record of an older schema as the current one. In schema 1, an attempt's model and effort were the

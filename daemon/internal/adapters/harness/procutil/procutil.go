@@ -26,6 +26,7 @@ import (
 // ends, frees its task, and lets the daemon stop (FS-003 FR-005).
 const outputDelay = 2 * time.Second
 
+// Process is a started invocation, in a process group of its own, with its exit status and the tail of its stderr.
 type Process struct {
 	cmd      *exec.Cmd
 	tree     Tree
@@ -266,13 +267,16 @@ func signalName(s syscall.Signal) string {
 // Done is closed when the process has exited and its output is drained, or has stayed open outputDelay past its exit.
 func (p *Process) Done() <-chan struct{} { return p.done }
 
+// ExitCode is the process's exit code, read once Done is closed.
 func (p *Process) ExitCode() int { return p.exitCode }
 
 // Signal names the signal that ended the process, empty when it exited by itself; ExitCode is then 128 plus its number.
 func (p *Process) Signal() string { return p.signal }
 
+// StderrTail returns the last 64 KiB of the process's stderr.
 func (p *Process) StderrTail() string { return p.stderr.String() }
 
+// Pid is the process's id, the id of its group too; 0 when it never started.
 func (p *Process) Pid() int {
 	if p.cmd.Process == nil {
 		return 0

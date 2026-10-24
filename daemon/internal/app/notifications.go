@@ -201,6 +201,7 @@ func (a *App) saveNotifications() {
 	}
 }
 
+// Notifications lists the notifications kept, newest first, only the unread ones when unreadOnly is set.
 func (a *App) Notifications(unreadOnly bool) []Notification {
 	a.mu.Lock()
 	defer a.mu.Unlock()

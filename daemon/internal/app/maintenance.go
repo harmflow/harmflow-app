@@ -65,11 +65,13 @@ func (a *App) ApplyRetention() {
 	}
 }
 
+// KeptPath is a directory CleanWorkspaces left in place, and why.
 type KeptPath struct {
 	Path   string `json:"path"`
 	Reason string `json:"reason"`
 }
 
+// CleanResult is what CleanWorkspaces removed and what it kept.
 type CleanResult struct {
 	Removed []string   `json:"removed"`
 	Kept    []KeptPath `json:"kept"`

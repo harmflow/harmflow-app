@@ -8,6 +8,8 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 )
 
+// Patterns are one harness's expressions for the error texts of each class: quota exhaustion, a rate limit, an
+// unavailable harness, and a network failure. A nil expression matches nothing.
 type Patterns struct {
 	Quota       *regexp.Regexp
 	RateLimit   *regexp.Regexp

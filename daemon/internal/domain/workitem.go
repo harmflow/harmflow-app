@@ -7,6 +7,7 @@ import "time"
 // apply the retry and resume limits.
 type WorkItemStatus string
 
+// The statuses of a work item, as WorkItem in contracts/api/openapi.yaml names them.
 const (
 	WorkItemInProgress     WorkItemStatus = "in_progress"
 	WorkItemCompleted      WorkItemStatus = "completed"
@@ -15,6 +16,8 @@ const (
 	WorkItemClosed         WorkItemStatus = "closed"
 )
 
+// WorkItem is one entry of the daemon's ledger of a task's work items: the item's latest state, as its last execution
+// reported it, and the resumptions and failures counted toward the limits of WorkItemLimits.
 type WorkItem struct {
 	TaskID          string         `json:"taskId"`
 	Key             string         `json:"key"`

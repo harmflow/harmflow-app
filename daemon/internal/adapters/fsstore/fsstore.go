@@ -102,6 +102,7 @@ type Tasks struct {
 
 var _ ports.TaskRepository = (*Tasks)(nil)
 
+// NewTasks returns the repository of the task files in dir, creating the directory when it is missing.
 func NewTasks(dir string) (*Tasks, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
@@ -109,10 +110,13 @@ func NewTasks(dir string) (*Tasks, error) {
 	return &Tasks{dir: dir}, nil
 }
 
+// Dir implements ports.TaskRepository: the directory of the task files.
 func (t *Tasks) Dir() string { return t.dir }
 
 func (t *Tasks) path(id string) string { return filepath.Join(t.dir, id+".yaml") }
 
+// List implements ports.TaskRepository: every .yaml or .yml file of the directory, sorted by id. A hidden file, a
+// directory, and a file it cannot read are left out.
 func (t *Tasks) List() ([]ports.TaskFile, error) {
 	entries, err := os.ReadDir(t.dir)
 	if err != nil {
@@ -153,6 +157,8 @@ func (t *Tasks) read(path, id string) (ports.TaskFile, error) {
 	return ports.TaskFile{ID: id, Path: path, Content: content, Revision: Revision(content), ModTime: info.ModTime()}, nil
 }
 
+// Get implements ports.TaskRepository: the task's <id>.yaml, or its <id>.yml when there is no .yaml; ErrNotFound when
+// it has neither.
 func (t *Tasks) Get(id string) (ports.TaskFile, error) {
 	f, err := t.read(t.path(id), id)
 	if errors.Is(err, ports.ErrNotFound) {
@@ -163,6 +169,9 @@ func (t *Tasks) Get(id string) (ports.TaskFile, error) {
 	return f, err
 }
 
+// Save implements ports.TaskRepository, writing over the task's existing file, whatever its extension, or a new
+// <id>.yaml. An expected revision of a task that does not exist is ErrNotFound; one that does not match is ErrConflict,
+// returned with the file as it is.
 func (t *Tasks) Save(id string, content []byte, expectedRevision string) (ports.TaskFile, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -181,6 +190,7 @@ func (t *Tasks) Save(id string, content []byte, expectedRevision string) (ports.
 	return t.read(path, id)
 }
 
+// Delete implements ports.TaskRepository: it removes the task's file, ErrNotFound when it has none.
 func (t *Tasks) Delete(id string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -199,6 +209,7 @@ type State struct {
 
 var _ ports.StateStore = (*State)(nil)
 
+// NewState returns the store of the JSON documents in dir, creating the directory when it is missing.
 func NewState(dir string) (*State, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
@@ -206,6 +217,7 @@ func NewState(dir string) (*State, error) {
 	return &State{dir: dir}, nil
 }
 
+// Load implements ports.StateStore: it decodes <name>.json into v and reports whether the document exists.
 func (s *State) Load(name string, v any) (bool, error) {
 	data, err := os.ReadFile(filepath.Join(s.dir, name+".json"))
 	if errors.Is(err, os.ErrNotExist) {
@@ -220,6 +232,7 @@ func (s *State) Load(name string, v any) (bool, error) {
 	return true, nil
 }
 
+// Save implements ports.StateStore: it writes v, indented, as <name>.json.
 func (s *State) Save(name string, v any) error {
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
@@ -237,6 +250,7 @@ type Executions struct {
 
 var _ ports.ExecutionRepository = (*Executions)(nil)
 
+// NewExecutions returns the repository of the execution records in dir, creating the directory when it is missing.
 func NewExecutions(dir string) (*Executions, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
@@ -244,6 +258,7 @@ func NewExecutions(dir string) (*Executions, error) {
 	return &Executions{dir: dir}, nil
 }
 
+// Save implements ports.ExecutionRepository: it writes the record, indented, as <id>.json.
 func (e *Executions) Save(x *domain.Execution) error {
 	data, err := json.MarshalIndent(x, "", "  ")
 	if err != nil {
@@ -252,6 +267,8 @@ func (e *Executions) Save(x *domain.Execution) error {
 	return WriteAtomic(filepath.Join(e.dir, x.ID+".json"), append(data, '\n'), 0o600)
 }
 
+// LoadAll implements ports.ExecutionRepository: every record of the directory, by file name. A file it cannot read
+// or decode, or a record with no id, is left out.
 func (e *Executions) LoadAll() ([]*domain.Execution, error) {
 	entries, err := os.ReadDir(e.dir)
 	if err != nil {

@@ -13,6 +13,8 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
+// Prober is the ToolProber: it looks for git and gh on PathEnv, then in the usual Homebrew and system locations, and
+// runs them with Env.
 type Prober struct {
 	Home    string
 	PathEnv string
@@ -23,6 +25,7 @@ var _ ports.ToolProber = (*Prober)(nil)
 
 var versionRe = regexp.MustCompile(`(\d+\.\d+(\.\d+)?)`)
 
+// Probe implements ports.ToolProber: git, then gh, each with its path and version, and gh's sign-in.
 func (p *Prober) Probe(ctx context.Context) []ports.ToolInfo {
 	return []ports.ToolInfo{p.git(ctx), p.gh(ctx)}
 }

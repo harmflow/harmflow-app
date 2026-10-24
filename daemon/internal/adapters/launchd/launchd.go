@@ -15,8 +15,11 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
+// Label is the launchd label of the user agent, and the name of its plist.
 const Label = "com.harmflow.daemon"
 
+// Agent is the HostServiceManager on macOS: a launchd user agent whose plist at PlistPath starts the daemon, its stdout
+// and stderr going to LogPath.
 type Agent struct {
 	PlistPath string
 	LogPath   string
@@ -27,6 +30,7 @@ type Agent struct {
 
 var _ ports.HostServiceManager = (*Agent)(nil)
 
+// NewAgent returns the user agent of the user whose home directory is home, its plist in ~/Library/LaunchAgents.
 func NewAgent(home, logPath string) *Agent {
 	return &Agent{PlistPath: filepath.Join(home, "Library", "LaunchAgents", Label+".plist"), LogPath: logPath,
 		Launchctl: runLaunchctl}
@@ -34,9 +38,13 @@ func NewAgent(home, logPath string) *Agent {
 
 func runLaunchctl(args ...string) error { return exec.Command("/bin/launchctl", args...).Run() }
 
+// Mechanism implements ports.HostServiceManager: launchd.
 func (a *Agent) Mechanism() string { return "launchd" }
-func (a *Agent) Location() string  { return a.PlistPath }
 
+// Location implements ports.HostServiceManager: the path of the plist.
+func (a *Agent) Location() string { return a.PlistPath }
+
+// Enabled implements ports.HostServiceManager: the plist exists.
 func (a *Agent) Enabled() bool {
 	_, err := os.Stat(a.PlistPath)
 	return err == nil
