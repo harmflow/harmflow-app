@@ -2,6 +2,7 @@
 //! local API. It never drives a harness and never decides an execution's state.
 
 mod daemon;
+mod menu;
 mod notice;
 mod sse;
 mod state;
@@ -78,13 +79,14 @@ fn set_tray_enabled(app: tauri::AppHandle, state: Shared<'_>, enabled: bool) {
 }
 
 /// Tray texts in the interface's language: idle, active ({{count}}), open, quit, stop, stopTitle, stopConfirm,
-/// stopConfirmRunning ({{count}}), stopOk, cancel.
+/// stopConfirmRunning ({{count}}), stopOk, cancel; and the app menu's settings.
 #[tauri::command]
 fn set_tray_labels(app: tauri::AppHandle, state: Shared<'_>, labels: HashMap<String, String>) {
     if let Ok(mut current) = state.tray_labels.lock() {
         *current = labels;
     }
     tray::render(&app);
+    menu::render(&app);
 }
 
 /// The interface committed its first render: a normal start shows the window now, unless the fallback already did
@@ -130,7 +132,11 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
         .manage(state.clone())
+        // Every menu event, the tray's included, has this one handler.
+        .on_menu_event(|app, event| menu::on_event(app, event.id().as_ref()))
         .setup(move |app| {
+            #[cfg(target_os = "macos")]
+            app.set_menu(menu::build(app.handle())?)?;
             tray::create(app.handle())?;
             notice::listen(app.handle())?;
             sse::spawn(app.handle().clone());

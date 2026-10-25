@@ -14,7 +14,7 @@ import { DaemonDownScreen, OnboardingScreen } from "./screens/OnboardingScreen";
 import { OverviewScreen } from "./screens/OverviewScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { TasksScreen, TemplatePicker, type TaskView } from "./screens/TasksScreen";
-import { setNotificationHandler, startSync, useStore } from "./state/store";
+import { actions, setNotificationHandler, startSync, useStore } from "./state/store";
 
 const ONBOARDED_KEY = "harmflow.onboarded";
 const SIDEBAR_KEY = "harmflow.sidebarCollapsed";
@@ -98,7 +98,7 @@ export function App() {
     }
   }, [sidebarCollapsed]);
 
-  // The tray speaks the interface's language too.
+  // The tray and the app menu's Settings… speak the interface's language too.
   useEffect(() => {
     void native.setTrayLabels({
       idle: t("tray.idle"),
@@ -111,6 +111,7 @@ export function App() {
       stopConfirmRunning: t("settings.stopConfirmRunning", { count: "{{count}}" as unknown as number }),
       stopOk: t("settings.stopDaemon"),
       cancel: t("common.cancel"),
+      settings: t("menu.settings"),
     });
   }, [t]);
 
@@ -134,19 +135,6 @@ export function App() {
   };
   const picks = useRef(0);
 
-  // A target from the tray or a notice: show the window's matching screen.
-  useEffect(() => {
-    if (!navigation) return;
-    leave(() => {
-      if (navigation.executionId) {
-        setScreen("executions");
-        setSelectedExecution(navigation.executionId);
-      } else if (navigation.screen) {
-        setScreen(navigation.screen as Screen);
-      }
-    });
-  }, [navigation]);
-
   const openExecution = (id: string) =>
     leave(() => {
       setScreen("executions");
@@ -164,6 +152,24 @@ export function App() {
   // A daemon being restarted is down for a moment: the shell stays, with the topbar saying so.
   const daemonDown = !onboarding && native.available && daemonRunning === false && !restarting;
   const shell = !onboarding && !daemonDown;
+
+  // A target from the tray or a notice shows its execution. A screen from the app menu (⌘,) acts where ⌘N does: in
+  // the shell, with no modal dialog open. A native menu shortcut never reaches the keydown handler below, which keeps
+  // ⌘B and ⌘N off the other screens, so the check is here. Taken or ignored, the target is dropped: one ignored on the
+  // onboarding screen never changes the screen once the shell returns.
+  useEffect(() => {
+    if (!navigation) return;
+    actions.clearNavigation();
+    const { executionId, screen: target } = navigation;
+    if (executionId) {
+      leave(() => {
+        setScreen("executions");
+        setSelectedExecution(executionId);
+      });
+    } else if (target && shell && !document.querySelector('[aria-modal="true"]')) {
+      leave(() => setScreen(target as Screen));
+    }
+  }, [navigation]);
 
   // ⌘B collapses and expands the sidebar, and ⌘N opens the template picker as the topbar's New task does, from
   // any focus, a text field or the YAML editor included. The onboarding and daemon-down screens have no shell, and a

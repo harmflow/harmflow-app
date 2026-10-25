@@ -13,9 +13,13 @@ use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 use crate::state::{ActiveExecution, AppState};
-use crate::window;
 
 const TRAY_ID: &str = "main";
+/// The ids of the tray's items, which `menu::on_event` handles with the app menu's.
+pub const OPEN: &str = "open";
+pub const STOP: &str = "stop";
+pub const QUIT: &str = "quit";
+pub const EXECUTION_PREFIX: &str = "exec:";
 const ACTIVE_STATUSES: [&str; 5] = ["preparing", "running", "switching_harness", "testing", "publishing"];
 const MAX_LISTED: usize = 5;
 
@@ -30,7 +34,6 @@ pub fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .tooltip("HarmFlow")
         .menu(&menu)
         .show_menu_on_left_click(true)
-        .on_menu_event(|app, event| on_menu(app, event.id().as_ref()))
         .build(app)?;
     Ok(())
 }
@@ -45,13 +48,14 @@ fn build_menu<R: Runtime>(app: &AppHandle<R>, running: &[ActiveExecution]) -> ta
     };
     menu.append(&MenuItem::with_id(app, "header", header, false, None::<&str>)?)?;
     for exec in running.iter().take(MAX_LISTED) {
-        menu.append(&MenuItem::with_id(app, format!("exec:{}", exec.id), format!("  {}", exec.label), true, None::<&str>)?)?;
+        let id = format!("{EXECUTION_PREFIX}{}", exec.id);
+        menu.append(&MenuItem::with_id(app, id, format!("  {}", exec.label), true, None::<&str>)?)?;
     }
     menu.append(&PredefinedMenuItem::separator(app)?)?;
-    menu.append(&MenuItem::with_id(app, "open", state.label("open", "Open dashboard"), true, None::<&str>)?)?;
+    menu.append(&MenuItem::with_id(app, OPEN, state.label("open", "Open dashboard"), true, None::<&str>)?)?;
     menu.append(&PredefinedMenuItem::separator(app)?)?;
-    menu.append(&MenuItem::with_id(app, "stop", state.label("stop", "Stop daemon…"), true, None::<&str>)?)?;
-    menu.append(&MenuItem::with_id(app, "quit", state.label("quit", "Quit interface"), true, None::<&str>)?)?;
+    menu.append(&MenuItem::with_id(app, STOP, state.label("stop", "Stop daemon…"), true, None::<&str>)?)?;
+    menu.append(&MenuItem::with_id(app, QUIT, state.label("quit", "Quit interface"), true, None::<&str>)?)?;
     Ok(menu)
 }
 
@@ -121,21 +125,8 @@ async fn refresh(app: &AppHandle, state: &AppState) {
     render(app);
 }
 
-fn on_menu<R: Runtime>(app: &AppHandle<R>, id: &str) {
-    match id {
-        "open" => window::show_main(app),
-        "quit" => app.exit(0),
-        "stop" => confirm_stop(app),
-        other => {
-            if let Some(exec_id) = other.strip_prefix("exec:") {
-                window::show_execution(app, exec_id);
-            }
-        }
-    }
-}
-
 /// Stopping the daemon is its own command, and asks first when executions run.
-fn confirm_stop<R: Runtime>(app: &AppHandle<R>) {
+pub fn confirm_stop<R: Runtime>(app: &AppHandle<R>) {
     let state = app.state::<Arc<AppState>>().inner().clone();
     let count = state.tray_running.lock().map(|r| r.len()).unwrap_or(0);
     let message = if count > 0 {

@@ -1093,6 +1093,10 @@ export const enUS = {
     quit: "Quit interface",
     stop: "Stop daemon…",
   },
+  // HarmFlow's own items in the macOS app menu; the rest of Tauri's default menu stays in English.
+  menu: {
+    settings: "Settings…",
+  },
   gauges: {
     cpu: "CPU",
     ram: "RAM",

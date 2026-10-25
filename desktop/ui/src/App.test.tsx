@@ -18,7 +18,7 @@ import { Root } from "./App";
 import { rootOptions } from "./components/ErrorBoundary";
 import { YamlEditor } from "./components/YamlEditor";
 import i18n from "./i18n";
-import { patchStateForTests } from "./state/store";
+import { actions, getState, patchStateForTests } from "./state/store";
 
 // Which component throws during render; none unless a test says so.
 const boom = vi.hoisted(() => ({ screen: false, sidebar: false }));
@@ -378,6 +378,79 @@ describe("new task", () => {
   });
 });
 
+// The app menu's Settings… (⌘,) reaches the interface as a navigation to the Settings screen.
+describe("settings from the app menu", () => {
+  const title = () => host!.querySelector(".topbar__title")!.textContent;
+  const fromMenu = () => act(async () => actions.navigate({ screen: "settings" }));
+
+  it("opens Settings from every screen, as the sidebar's Settings item does", async () => {
+    await launch();
+    for (const screen of ["Overview", "Executions", "Tasks", "History"]) {
+      await act(async () => navButton(screen).click());
+      await fromMenu();
+      expect(title()).toBe("Settings");
+      expect(navButton("Settings").getAttribute("aria-current")).toBe("page");
+    }
+    expect(getState().navigation).toBeUndefined();
+  });
+
+  it("does nothing over an open modal dialog, and the target it ignored never fires later", async () => {
+    await launch();
+    await act(async () => [...host!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "New task")!.click());
+    expect(host!.querySelector('[aria-modal="true"]')).not.toBeNull();
+    await fromMenu();
+    expect(title()).toBe("Live executions");
+    expect(getState().navigation).toBeUndefined();
+
+    await act(async () => void window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
+    expect(host!.querySelector('[aria-modal="true"]')).toBeNull();
+    expect(title()).toBe("Live executions");
+  });
+
+  it("does nothing on the onboarding screen, and nothing once the shell returns", async () => {
+    patchStateForTests({ settings: { ...settings, onboardingCompleted: false } });
+    await launch();
+    expect(host!.querySelector(".sidebar")).toBeNull();
+    await fromMenu();
+    await act(async () => patchStateForTests({ settings }));
+    expect(title()).toBe("Live executions");
+  });
+
+  it("does nothing on the daemon-down screen, and nothing once the daemon is back", async () => {
+    // The screen shows inside the desktop shell alone.
+    native.available = true;
+    localStorage.setItem("harmflow.onboarded", "1");
+    patchStateForTests({ daemonRunning: false });
+    try {
+      await launch();
+      expect(host!.querySelector(".daemon-down")).not.toBeNull();
+      await fromMenu();
+      await act(async () => patchStateForTests({ daemonRunning: true }));
+      expect(title()).toBe("Live executions");
+    } finally {
+      native.available = false;
+    }
+  });
+
+  it("sends the shell the item's text in the interface's language, again when the language changes", async () => {
+    const labels = vi.spyOn(native, "setTrayLabels");
+    try {
+      await launch();
+      expect(labels.mock.lastCall?.[0].settings).toBe("Settings…");
+      for (const [language, label] of [
+        ["pt-BR", "Configurações…"],
+        ["es-ES", "Ajustes…"],
+      ]) {
+        await act(async () => void i18n.changeLanguage(language));
+        expect(labels.mock.lastCall?.[0].settings).toBe(label);
+      }
+    } finally {
+      await act(async () => void i18n.changeLanguage("en-US"));
+      labels.mockRestore();
+    }
+  });
+});
+
 describe("save", () => {
   it("leaves ⌘S alone outside the task editor, and the editor takes it", async () => {
     await launch();
@@ -532,6 +605,22 @@ describe("unsaved changes", () => {
     } finally {
       patchStateForTests({ unread: [], navigation: undefined });
     }
+  });
+
+  it("asks before the app menu's Settings… leaves the editor", async () => {
+    await editing();
+    confirm.mockResolvedValue(false);
+    await act(async () => actions.navigate({ screen: "settings" }));
+    await settle();
+    expect(asked()).toBe(1);
+    expect(title()).toBe("Tasks");
+    expect(nameField().value).toBe("Release notes");
+
+    confirm.mockResolvedValue(true);
+    await act(async () => actions.navigate({ screen: "settings" }));
+    await settle();
+    expect(asked()).toBe(2);
+    expect(title()).toBe("Settings");
   });
 
   it("leaves an editor without unsaved changes at once, and a second pick opens the second template", async () => {

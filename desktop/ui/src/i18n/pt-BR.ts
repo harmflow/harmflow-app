@@ -1104,6 +1104,9 @@ export const ptBR: Resources = {
     quit: "Sair da interface",
     stop: "Parar o daemon…",
   },
+  menu: {
+    settings: "Configurações…",
+  },
   gauges: {
     cpu: "CPU",
     ram: "RAM",
