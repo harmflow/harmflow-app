@@ -54,6 +54,23 @@ func TestEffectiveDefaults(t *testing.T) {
 	}
 }
 
+// A script task's program starts in its own working directory, never in a workspace, so its effective document has
+// none, as it has no harness; a task of any other type gets an empty one.
+func TestEffectiveWorkspaceFollowsTheType(t *testing.T) {
+	script := TaskDocument{APIVersion: APIVersion, Kind: KindTask, Metadata: TaskMetadata{ID: "s", Name: "S"},
+		Spec: TaskSpec{Type: TypeScriptTask, Script: &ScriptSpec{Command: []string{"echo", "hi"}}}}
+	if w := script.Effective().Spec.Workspace; w != nil {
+		t.Errorf("script task: Effective().Spec.Workspace = %+v, want nil", *w)
+	}
+	for _, typ := range []string{TypeGeneral, TypeGitHubIssueImplementation} {
+		d := minimalTask()
+		d.Spec.Type = typ
+		if w := d.Effective().Spec.Workspace; w == nil || *w != (Workspace{}) {
+			t.Errorf("%s task: Effective().Spec.Workspace = %v, want an empty workspace", typ, w)
+		}
+	}
+}
+
 // A preferred or fallback profile that sets no model or effort reads default for both, which leaves each harness its
 // own; a value a profile sets is kept.
 func TestProfilesReadDefaults(t *testing.T) {

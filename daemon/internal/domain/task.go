@@ -271,7 +271,8 @@ const (
 	DefaultBaseBranch            = "main"
 )
 
-// Effective returns a copy of the document with every default applied, so no optional field is nil.
+// Effective returns a copy of the document with every default applied, so no optional field the task's type takes is
+// nil. A field the type does not take, such as a script task's harness or workspace, is left as it is.
 func (d TaskDocument) Effective() TaskDocument {
 	e := d.clone()
 	s := &e.Spec
@@ -283,9 +284,6 @@ func (d TaskDocument) Effective() TaskDocument {
 	}
 	if s.Skills == nil {
 		s.Skills = []string{}
-	}
-	if s.Workspace == nil {
-		s.Workspace = &Workspace{}
 	}
 	if s.Schedule != nil {
 		if s.Schedule.MissedRun == nil {
@@ -302,7 +300,8 @@ func (d TaskDocument) Effective() TaskDocument {
 		s.Concurrency.OverlappingRuns = OverlapQueue
 	}
 	if s.Type == TypeScriptTask {
-		// No harness: the block stays empty, with no harness default filled in, and HarnessFallback reads nil.
+		// No harness and no workspace: the harness block stays empty, with no harness default filled in, and
+		// HarnessFallback reads nil; the workspace stays unset, as the schema forbids it on a script task.
 		if s.Script == nil {
 			s.Script = &ScriptSpec{}
 		}
@@ -313,6 +312,9 @@ func (d TaskDocument) Effective() TaskDocument {
 			s.Script.Systems = []string{}
 		}
 	} else {
+		if s.Workspace == nil {
+			s.Workspace = &Workspace{}
+		}
 		s.Harness.Preferred = s.Harness.Preferred.withDefaults()
 		if s.Harness.Fallback == nil {
 			s.Harness.Fallback = &FallbackPolicy{}
