@@ -63,6 +63,18 @@ jobs:
             if touched "$pattern"; then echo "$part=true" >> "$GITHUB_OUTPUT"; else echo "$part=false" >> "$GITHUB_OUTPUT"; fi
           done
 
+  # Every run, whatever the change touches: a new file can land in any part. Run it locally with the same command.
+  file-names:
+    name: File names
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: tests/go.mod
+          cache-dependency-path: tests/go.sum
+      - run: make check-file-names
+
   generated:
     name: Generated code is current
     needs: changes

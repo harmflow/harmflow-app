@@ -80,6 +80,10 @@ test-desktop: ## Type check and unit tests of the desktop
 check-imports: ## Fail on Go imports outside the Go guide's three groups, as CI does
 	go -C tests run ./imports $(CURDIR)/daemon $(CURDIR)/tests
 
+.PHONY: check-file-names
+check-file-names: ## Fail on tracked file and folder names outside CLAUDE.md's File names rules, as CI does
+	go -C tests run ./filenames $(CURDIR)
+
 .PHONY: test-integration
 test-integration: daemon ## Tests across the daemon's process boundary, with fake harnesses
 	go -C tests test -count=1 ./...

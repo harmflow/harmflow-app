@@ -28,6 +28,7 @@ CI runs these checks on the Go code; run them before you finish.
 |---|---|
 | Formatting | `gofmt -l daemon tests` prints nothing |
 | Import groups | `make check-imports` |
+| File and folder names, as `CLAUDE.md` sets them | `make check-file-names` |
 | Vet and unit tests, under the race detector | `GOFLAGS=-race make test-daemon` |
 | Integration tests and coverage floors | `make coverage-daemon` |
 
