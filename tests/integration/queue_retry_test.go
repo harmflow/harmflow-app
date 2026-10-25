@@ -126,6 +126,8 @@ func shallowClone(t *testing.T) string {
 		t.Fatal(err)
 	}
 	dir := filepath.Join(parent, filepath.Base(queueRepo))
+	// --depth 1 fetches the latest commit only: the task needs the repository as a local path, and the session is
+	// stopped before it reads any history, so the rest would only slow every run down.
 	if out, err := exec.Command("git", "clone", "--quiet", "--depth", "1", "https://github.com/"+queueRepo, dir).CombinedOutput(); err != nil {
 		t.Fatalf("git clone: %v\n%s", err, out)
 	}
