@@ -110,6 +110,32 @@ coverage-desktop: ## Unit tests of the interface and the shell, held at their fl
 		|| { cargo llvm-cov report --summary-only --json | jq -r --argjson lines $(RUST_FLOOR_LINES) \
 			--argjson functions $(RUST_FLOOR_FUNCTIONS) '$(RUST_FLOOR_VIOLATIONS)' >&2; exit 1; }; }
 
+# Each audit fails on a known vulnerability. govulncheck reports only those the code calls, in its modules and in the
+# Go that runs it. Dependabot cannot see this pin: refresh it by hand. `make -k audit` runs every audit when one fails.
+GOVULNCHECK := golang.org/x/vuln/cmd/govulncheck@v1.9.0
+
+.PHONY: audit
+audit: audit-daemon audit-tests audit-desktop ## Report the known vulnerabilities in every part's dependencies
+
+.PHONY: audit-daemon
+audit-daemon: ## Known vulnerabilities the daemon calls
+	go -C daemon run $(GOVULNCHECK) ./...
+
+.PHONY: audit-tests
+audit-tests: ## Known vulnerabilities the cross-part tests call
+	go -C tests run $(GOVULNCHECK) ./...
+
+.PHONY: audit-desktop
+audit-desktop: audit-interface audit-shell ## Known vulnerabilities in the desktop's dependencies
+
+.PHONY: audit-interface
+audit-interface: ## Advisories against the interface's JavaScript dependencies, moderate and above
+	pnpm -C desktop audit --audit-level moderate
+
+.PHONY: audit-shell
+audit-shell: ## Advisories against the shell's Rust dependencies (needs cargo-audit)
+	cargo audit --file desktop/src-tauri/Cargo.lock
+
 .PHONY: dev-daemon
 dev-daemon: daemon ## Run the daemon on a development data directory
 	HARMFLOW_HOME=$(DEV_HOME) ./build/harmflowd --builtins $(CURDIR)
