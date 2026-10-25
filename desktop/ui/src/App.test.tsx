@@ -68,6 +68,7 @@ vi.mock("./state/store", async (importOriginal) => ({ ...(await importOriginal<t
 const settings: Settings = {
   language: "en-US",
   trayEnabled: true,
+  keepTrayOnQuit: false,
   notificationLevel: "all",
   logRetentionDays: 30,
   theme: "harmflow-dark",

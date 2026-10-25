@@ -68,6 +68,36 @@ func TestAutostartNeedsTheDaemonsExecutable(t *testing.T) {
 	}
 }
 
+// harmflow-app#234: keeping HarmFlow in the menu bar on ⌘Q is off on a fresh data folder, a patch turns it on and off,
+// a patch of another setting leaves it as it is, and it outlives a restart of the daemon.
+func TestKeepTrayOnQuitIsOffByDefaultAndKeepsAPatch(t *testing.T) {
+	e := newEnv(t)
+	if got := e.app.GetSettings().KeepTrayOnQuit; got {
+		t.Fatalf("GetSettings().KeepTrayOnQuit = %v on a fresh data folder, want false", got)
+	}
+	on := true
+	v, err := e.app.UpdateSettings(SettingsPatch{KeepTrayOnQuit: &on})
+	if err != nil {
+		t.Fatalf("UpdateSettings(keepTrayOnQuit: true): %v", err)
+	}
+	if !v.KeepTrayOnQuit || !v.TrayEnabled {
+		t.Errorf("UpdateSettings(keepTrayOnQuit: true) = keepTrayOnQuit %v, trayEnabled %v, want true, true", v.KeepTrayOnQuit, v.TrayEnabled)
+	}
+	lang := "pt-BR"
+	if v, err := e.app.UpdateSettings(SettingsPatch{Language: &lang}); err != nil || !v.KeepTrayOnQuit {
+		t.Errorf("UpdateSettings(language) = keepTrayOnQuit %v, %v, want true, nil", v.KeepTrayOnQuit, err)
+	}
+
+	e = e.restart(t)
+	if got := e.app.GetSettings().KeepTrayOnQuit; !got {
+		t.Errorf("GetSettings().KeepTrayOnQuit = %v after a restart, want true", got)
+	}
+	off := false
+	if v, err := e.app.UpdateSettings(SettingsPatch{KeepTrayOnQuit: &off}); err != nil || v.KeepTrayOnQuit {
+		t.Errorf("UpdateSettings(keepTrayOnQuit: false) = keepTrayOnQuit %v, %v, want false, nil", v.KeepTrayOnQuit, err)
+	}
+}
+
 // A use-case error keeps its text through any wrapping, as the firing history records it.
 func TestErrorTextFindsAWrappedError(t *testing.T) {
 	want := domain.T("task_not_found", "no task {{task}}", "task", "nightly")

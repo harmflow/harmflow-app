@@ -132,6 +132,7 @@ const workItems: WorkItem[] = [
 const settings: Settings = {
   language: "pt-BR",
   trayEnabled: true,
+  keepTrayOnQuit: false,
   notificationLevel: "all",
   logRetentionDays: 30,
   theme: "harmflow-dark",
