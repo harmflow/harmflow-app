@@ -42,8 +42,8 @@ const tipBeside: Place = (target, text, keys) => {
   return { text, keys, top: box.top + box.height / 2, left: edge + 8 };
 };
 
-/** A tooltip just below its target, centred on it: the topbar's. */
-const tipBelow: Place = (target, text, keys) => {
+/** A tooltip just below its target, centred on it: the topbar's, and the task editor's Save. */
+export const tipBelow: Place = (target, text, keys) => {
   const box = target.getBoundingClientRect();
   return { text, keys, top: box.bottom + 8, left: box.left + box.width / 2, below: true };
 };
@@ -52,7 +52,7 @@ const tipBelow: Place = (target, text, keys) => {
  * A tooltip placed by `place`, shown at once on hover and on keyboard focus: `title` appears late and never on focus.
  * `tipped` gives a target its handlers; `tooltip` is the element to render; `hide` clears it.
  */
-function useTooltip(place: Place) {
+export function useTooltip(place: Place) {
   const [tip, setTip] = useState<Tip | null>(null);
   const hide = useCallback(() => setTip(null), []);
   const tipped = (text: string, keys?: string) => ({

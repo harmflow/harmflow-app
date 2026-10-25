@@ -3,7 +3,8 @@
 // tabs carry the task across through the daemon's validation, both ways. A save from the YAML tab sends the text with
 // the revision of the last successful save; a refused one keeps the text and shows the daemon's error at its line, the
 // same error a save from the form shows on its field. The stand-in decides which error the daemon gives: that the daemon
-// gives a document and its YAML the same one is itest › TestOneSchemaForEveryEntryPoint's.
+// gives a document and its YAML the same one is itest › TestOneSchemaForEveryEntryPoint's. ⌘S saves as the Save button
+// does, from any focus in the editor (harmflow-app#230).
 import { EditorView } from "@codemirror/view";
 import { isDeepStrictEqual } from "node:util";
 import { act } from "react";
@@ -15,9 +16,11 @@ import type { Doc } from "../lib/taskForm";
 import { TaskEditor } from "./TaskEditor";
 import { Toasts } from "./toast";
 
-// The daemon as the client sees it: an answer per route, and every request it received with its body as sent.
+// The daemon as the client sees it: an answer per route, which may come later, and every request it received with its
+// body as sent.
+type Answer = { status: number; body: unknown };
 const daemon = vi.hoisted(() => ({
-  routes: new Map<string, (body: unknown) => { status: number; body: unknown }>(),
+  routes: new Map<string, (body: unknown) => Answer | Promise<Answer>>(),
   requests: [] as { method: string; path: string; body: unknown }[],
 }));
 vi.mock("../api/transport", () => ({
@@ -187,6 +190,8 @@ async function open(mode: "create" | "edit") {
 const tab = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((b) => b.textContent === label)!;
 const openTab = () => host!.querySelector('[role="tab"][aria-selected="true"]')!.textContent;
 const save = () => click([...host!.querySelectorAll<HTMLButtonElement>(".editor__actions button")].find((b) => b.textContent === "Save")!);
+const saveButton = () => host!.querySelector<HTMLButtonElement>('.editor__actions button[aria-keyshortcuts="Meta+S"]')!;
+const tooltip = () => document.body.querySelector(".tooltip")?.textContent ?? null;
 const unsaved = () => host!.querySelector(".editor__dirty")?.textContent ?? null;
 const toasts = (tone: string) => [...host!.querySelectorAll(`.toast--${tone}`)].map((t) => t.textContent);
 
@@ -219,6 +224,14 @@ async function type(input: HTMLInputElement, value: string) {
 async function typeYaml(text: string) {
   const view = editor();
   await act(async () => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } }));
+}
+
+/** Presses ⌘S (or the given keys) on a target, where focus is by default; returns whether the editor took the key. */
+async function press(target: EventTarget = document.activeElement ?? document.body, keys: KeyboardEventInit = {}): Promise<boolean> {
+  const event = new KeyboardEvent("keydown", { key: "s", metaKey: true, bubbles: true, cancelable: true, ...keys });
+  await act(async () => void target.dispatchEvent(event));
+  await settle();
+  return event.defaultPrevented;
 }
 
 describe("task editor tabs", () => {
@@ -342,5 +355,121 @@ describe("task editor save from the YAML tab", () => {
     expect(sent("PUT", "/tasks/standup")).toEqual([]);
     expect(onSaved).toHaveBeenCalledExactlyOnceWith(storedTask(taskDoc("Release notes"), "r1"));
     expect(unsaved()).toBeNull();
+  });
+});
+
+describe("task editor ⌘S", () => {
+  it("updates an existing task from a text field of the form, as Save does, with the revision of the last save", async () => {
+    await open("edit");
+    const name = nameField().querySelector("input")!;
+    await type(name, "Standup summary");
+    name.focus();
+    expect(await press(name)).toBe(true);
+    expect(sent("PUT", "/tasks/standup")).toEqual([{ document: taskDoc("Standup summary"), baseRevision: "r1" }]);
+    expect(toasts("success")).toContain("Saved.");
+    expect(unsaved()).toBeNull();
+    expect(onSaved).toHaveBeenCalledExactlyOnceWith(storedTask(taskDoc("Standup summary"), "r2"));
+
+    await type(name, "Standup digest");
+    expect(await press(name)).toBe(true);
+    expect(sent("PUT", "/tasks/standup")[1]).toEqual({ document: taskDoc("Standup digest"), baseRevision: "r2" });
+  });
+
+  it("creates a new task from the YAML editor, refusing an invalid one with the errors Save shows", async () => {
+    await open("create");
+    await click(tab("YAML"));
+    const content = host!.querySelector<HTMLElement>(".cm-content")!;
+    const invalid = taskYaml("Release notes", BAD_CRON);
+    await typeYaml(invalid);
+    expect(await press(content)).toBe(true);
+    expect(errors()).toEqual([cronErrorText]);
+    expect(markedLines()).toEqual([`    cron: "${BAD_CRON}"`]);
+    expect(unsaved()).toBe("Unsaved changes");
+    expect(onSaved).not.toHaveBeenCalled();
+
+    const valid = taskYaml("Release notes");
+    await typeYaml(valid);
+    expect(await press(content)).toBe(true);
+    expect(sent("POST", "/tasks")).toEqual([{ yaml: invalid }, { yaml: valid }]);
+    expect(toasts("success")).toContain("Saved.");
+    expect(onSaved).toHaveBeenCalledExactlyOnceWith(storedTask(taskDoc("Release notes"), "r1"));
+  });
+
+  it("saves with no unsaved change too, and shows the conflict banner when the task changed on disk", async () => {
+    await open("edit");
+    daemon.routes.set("PUT /tasks/standup", () => ({
+      status: 409,
+      body: { error: { code: "revision_conflict", message: "the task changed since it was read", currentRevision: "r7" } },
+    }));
+    expect(await press()).toBe(true);
+    expect(sent("PUT", "/tasks/standup")).toEqual([{ document: taskDoc("Standup notes"), baseRevision: "r1" }]);
+    expect(host!.querySelector(".banner--danger")!.textContent).toContain("The file changed on disk");
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it("sends one request while a save is in progress, however fast the presses come", async () => {
+    await open("edit");
+    let answer!: () => void;
+    daemon.routes.set(
+      "PUT /tasks/standup",
+      () => new Promise<Answer>((resolve) => (answer = () => resolve({ status: 200, body: storedTask(taskDoc("Standup notes"), "r2") }))),
+    );
+    // Two presses in one moment, before the first one's saving state renders, then one more once the button shows it.
+    await act(async () => {
+      for (let i = 0; i < 2; i++) window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", metaKey: true, cancelable: true }));
+    });
+    expect(saveButton().disabled).toBe(true);
+    expect(await press()).toBe(true);
+    expect(sent("PUT", "/tasks/standup")).toHaveLength(1);
+
+    await act(async () => answer());
+    await settle();
+    expect(saveButton().disabled).toBe(false);
+    expect(onSaved).toHaveBeenCalledTimes(1);
+    expect(await press()).toBe(true);
+    expect(sent("PUT", "/tasks/standup")).toHaveLength(2);
+  });
+
+  it("takes ⌘S alone, not with another modifier or as a held key", async () => {
+    await open("edit");
+    for (const keys of [{ shiftKey: true }, { altKey: true }, { ctrlKey: true }, { repeat: true }, { metaKey: false }]) {
+      expect(await press(undefined, keys)).toBe(false);
+    }
+    expect(sent("PUT", "/tasks/standup")).toEqual([]);
+  });
+
+  it("leaves ⌘S alone while a modal dialog is open", async () => {
+    await open("edit");
+    const dialog = document.body.appendChild(document.createElement("div"));
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    try {
+      expect(await press()).toBe(false);
+      expect(sent("PUT", "/tasks/standup")).toEqual([]);
+    } finally {
+      dialog.remove();
+    }
+    expect(await press()).toBe(true);
+    expect(sent("PUT", "/tasks/standup")).toHaveLength(1);
+  });
+
+  it("names ⌘S in the Save button's tooltip, in each language", async () => {
+    await open("edit");
+    expect(saveButton().getAttribute("aria-keyshortcuts")).toBe("Meta+S");
+    try {
+      for (const [language, label] of [
+        ["en-US", "Save"],
+        ["pt-BR", "Salvar"],
+        ["es-ES", "Guardar"],
+      ]) {
+        await act(async () => void i18n.changeLanguage(language));
+        await act(async () => void saveButton().dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
+        expect(tooltip()).toBe(`${label}⌘S`);
+        await act(async () => void saveButton().dispatchEvent(new MouseEvent("mouseout", { bubbles: true })));
+        expect(tooltip()).toBeNull();
+      }
+    } finally {
+      await act(async () => void i18n.changeLanguage("en-US"));
+    }
   });
 });

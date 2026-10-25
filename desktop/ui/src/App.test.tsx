@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
 // Drives the dashboard's shell in a DOM: ⌘B and the sidebar's own control collapse the sidebar to its icons and expand
 // it again, the choice outlives a restart, and the daemon's connection state is the topbar's alone. ⌘N opens the
-// template picker as the topbar's New task does (harmflow-app#169). Every way out of a task editor with unsaved
-// changes asks first, and each template pick opens an editor of its own (harmflow-app#170). ⌘+, ⌘−, and ⌘0 zoom the
-// dashboard everywhere, and the level outlives a restart (harmflow-app#55). A render error never leaves the window
-// empty, and the interface tells the shell when it has painted (harmflow-app#96).
+// template picker as the topbar's New task does (harmflow-app#169). ⌘S saves only in a task editor (harmflow-app#230).
+// Every way out of a task editor with unsaved changes asks first, and each template pick opens an editor of its own
+// (harmflow-app#170). ⌘+, ⌘−, and ⌘0 zoom the dashboard everywhere, and the level outlives a restart (harmflow-app#55).
+// A render error never leaves the window empty, and the interface tells the shell when it has painted (harmflow-app#96).
 import { EditorView } from "@codemirror/view";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -375,6 +375,20 @@ describe("new task", () => {
     expect(tooltip()).toBe("New task⌘N");
     await act(async () => newTaskButton().click());
     expect(tooltip()).toBeNull(); // the picker covers the button
+  });
+});
+
+describe("save", () => {
+  it("leaves ⌘S alone outside the task editor, and the editor takes it", async () => {
+    await launch();
+    for (const screen of ["Overview", "Executions", "Tasks", "History", "Settings"]) {
+      await act(async () => navButton(screen).click());
+      expect(await press(undefined, { key: "s" })).toBe(false);
+    }
+    await act(async () => host!.querySelector<HTMLButtonElement>('.topbar__actions button[aria-keyshortcuts="Meta+N"]')!.click());
+    await act(async () => [...host!.querySelectorAll<HTMLButtonElement>(".template")].find((b) => b.textContent?.includes("General task"))!.click());
+    expect(host!.querySelector(".editor")).not.toBeNull();
+    expect(await press(undefined, { key: "s" })).toBe(true);
   });
 });
 
