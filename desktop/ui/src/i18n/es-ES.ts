@@ -989,6 +989,9 @@ export const esES: Resources = {
     languages: { system: "Idioma del sistema", "pt-BR": "Português (Brasil)", "en-US": "English (US)", "es-ES": "Español" },
     tray: "Mostrar HarmFlow en la barra de menús",
     trayHint: "Activado, cerrar la ventana solo la oculta. El daemon sigue en ejecución en cualquier caso.",
+    keepTrayOnQuit: "Mantener HarmFlow en la barra de menús al salir con ⌘Q",
+    keepTrayOnQuitHint:
+      "Activado, ⌘Q solo oculta la ventana, como cerrarla; Salir de la interfaz, en la barra de menús, sigue saliendo. Desactivado, ⌘Q cierra el panel y la barra de menús. El daemon sigue en ejecución en cualquier caso.",
     autostart: "Iniciar el daemon automáticamente con el sistema",
     autostartHint:
       "Desactivado por defecto. Activado, el daemon — y la barra de menús, si se muestra — se inician cuando entras.",

@@ -477,3 +477,57 @@ describe("the executions screen's cards", () => {
     expect(writes()).toEqual([]);
   });
 });
+
+// Settings → General: keeping HarmFlow in the menu bar on ⌘Q sits under the tray option, and needs the tray.
+describe("the choice to keep HarmFlow in the menu bar on ⌘Q", () => {
+  let root: Root | undefined;
+  let host: HTMLElement | undefined;
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    host?.remove();
+    root = host = undefined;
+    daemon.answers.clear();
+    daemon.requests.length = 0;
+    patchStateForTests({ settings });
+  });
+
+  const settle = () => act(() => new Promise<void>((resolve) => setImmediate(resolve)));
+  const toggles = () => [...host!.querySelectorAll<HTMLLabelElement>("label.toggle")];
+  const keepToggle = () => toggles().find((l) => l.textContent === "Manter o HarmFlow na barra de menus ao sair com ⌘Q")!.querySelector("input")!;
+
+  async function render() {
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(<SettingsScreen />));
+    await settle();
+  }
+
+  it("is off under the tray option, says what ⌘Q does, and saves once switched on", async () => {
+    daemon.answers.set("/settings", settings);
+    await render();
+    const labels = toggles().map((l) => l.textContent);
+    expect(labels.indexOf("Manter o HarmFlow na barra de menus ao sair com ⌘Q")).toBe(labels.indexOf("Mostrar o HarmFlow na barra de menus") + 1);
+    expect(host!.textContent).toContain("Ativado, ⌘Q apenas oculta a janela, como fechá-la");
+    expect(keepToggle().checked).toBe(false);
+    expect(keepToggle().disabled).toBe(false);
+
+    // The daemon stores the patch, and the settings read after it hold it.
+    daemon.answers.set("/settings", { ...settings, keepTrayOnQuit: true });
+    daemon.requests.length = 0;
+    await act(async () => keepToggle().click());
+    await settle();
+    expect(daemon.requests.filter((r) => !r.startsWith("GET "))).toEqual(["PATCH /settings"]);
+    expect(keepToggle().checked).toBe(true);
+  });
+
+  it("is disabled while the tray is off", async () => {
+    patchStateForTests({ settings: { ...settings, trayEnabled: false, keepTrayOnQuit: true } });
+    daemon.answers.set("/settings", { ...settings, trayEnabled: false, keepTrayOnQuit: true });
+    await render();
+    expect(keepToggle().disabled).toBe(true);
+    await act(async () => keepToggle().click());
+    await settle();
+    expect(daemon.requests.filter((r) => !r.startsWith("GET "))).toEqual([]);
+  });
+});

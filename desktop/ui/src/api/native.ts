@@ -42,6 +42,11 @@ export const native = {
     if (isTauri()) await invoke("set_tray_enabled", { enabled });
   },
 
+  /** Whether ⌘Q only hides the window while the tray is shown; the shell decides what Quit does. */
+  async setKeepTrayOnQuit(keep: boolean): Promise<void> {
+    if (isTauri()) await invoke("set_keep_tray_on_quit", { keep });
+  },
+
   /** Tray texts in the interface's language; the tray itself follows the daemon's events on its own. */
   async setTrayLabels(labels: Record<string, string>): Promise<void> {
     if (isTauri()) await invoke("set_tray_labels", { labels });

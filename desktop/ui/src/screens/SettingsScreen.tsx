@@ -66,6 +66,10 @@ export function SettingsScreen() {
     }
   };
 
+  const setKeepTrayOnQuit = async (keep: boolean) => {
+    if (await patch({ keepTrayOnQuit: keep })) await native.setKeepTrayOnQuit(keep);
+  };
+
   const stopDaemon = async () => {
     const message = running > 0 ? t("settings.stopConfirmRunning", { count: running }) : t("settings.stopConfirm");
     if (!(await native.confirm(message, t("settings.stopConfirmTitle"), t("settings.stopDaemon"), t("common.cancel")))) return;
@@ -127,6 +131,14 @@ export function SettingsScreen() {
           </Field>
           <Toggle checked={settings?.trayEnabled ?? true} onChange={(v) => void setTray(v)} label={t("settings.tray")} />
           <p className="field__hint">{t("settings.trayHint")}</p>
+          {/* It depends on the tray: while the tray is off, ⌘Q quits. */}
+          <Toggle
+            checked={settings?.keepTrayOnQuit ?? false}
+            onChange={(v) => void setKeepTrayOnQuit(v)}
+            label={t("settings.keepTrayOnQuit")}
+            disabled={!settings?.trayEnabled}
+          />
+          <p className="field__hint">{t("settings.keepTrayOnQuitHint")}</p>
         </Panel>
 
         <Panel title={t("settings.sections.daemon")} icon="power">

@@ -20,6 +20,8 @@ pub struct AppState {
     connection: Mutex<String>,
     last_event_id: AtomicU64,
     tray_enabled: AtomicBool,
+    /// ⌘Q only hides the window while the tray is shown; off until the stored choice arrives.
+    keep_tray_on_quit: AtomicBool,
     pub tray_running: Mutex<Vec<ActiveExecution>>,
     /// The tray's and the app menu's texts in the interface's language, sent by the webview; English until it does.
     pub tray_labels: Mutex<HashMap<String, String>>,
@@ -37,6 +39,7 @@ impl AppState {
             connection: Mutex::new("connecting".into()),
             last_event_id: AtomicU64::new(0),
             tray_enabled: AtomicBool::new(true),
+            keep_tray_on_quit: AtomicBool::new(false),
             tray_running: Mutex::new(Vec::new()),
             tray_labels: Mutex::new(HashMap::new()),
             tray_refresh_pending: AtomicBool::new(false),
@@ -74,6 +77,14 @@ impl AppState {
 
     pub fn set_tray_enabled(&self, enabled: bool) {
         self.tray_enabled.store(enabled, Ordering::SeqCst);
+    }
+
+    pub fn keep_tray_on_quit(&self) -> bool {
+        self.keep_tray_on_quit.load(Ordering::SeqCst)
+    }
+
+    pub fn set_keep_tray_on_quit(&self, keep: bool) {
+        self.keep_tray_on_quit.store(keep, Ordering::SeqCst);
     }
 
     pub fn label(&self, key: &str, fallback: &str) -> String {

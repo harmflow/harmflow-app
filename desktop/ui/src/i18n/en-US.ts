@@ -976,6 +976,9 @@ export const enUS = {
     languages: { system: "System language", "pt-BR": "Português (Brasil)", "en-US": "English (US)", "es-ES": "Español" },
     tray: "Show HarmFlow in the menu bar",
     trayHint: "With it on, closing the window only hides it. The daemon keeps running either way.",
+    keepTrayOnQuit: "Keep HarmFlow in the menu bar when quitting with ⌘Q",
+    keepTrayOnQuitHint:
+      "With it on, ⌘Q only hides the window, as closing it does; Quit interface in the menu bar still quits. With it off, ⌘Q closes the dashboard and the menu bar. The daemon keeps running either way.",
     autostart: "Start the daemon automatically with the system",
     autostartHint: "Off by default. When on, the daemon — and the menu bar, if shown — start when you sign in.",
     runningNow: "Running now",
