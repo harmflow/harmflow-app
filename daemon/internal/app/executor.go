@@ -413,11 +413,13 @@ func (r *run) attempts(ctx context.Context, start func(harness string) error) (d
 			if err := r.writeContext(prev); err != nil {
 				return domain.StatusFailed, domain.T("context_write_failed", "writing context.json: {{detail}}", "detail", err.Error())
 			}
-			end = r.runAttempt(ctx, ad, info, profile, reason, prev)
+			var timedOut bool
+			end, timedOut = r.runAttempt(ctx, ad, info, profile, reason, prev)
 			if end.Class == domain.ClassCancelled {
 				return domain.StatusCancelled, domain.T("execution_cancelled", "cancelled")
 			}
-			if end.Class == domain.ClassTimeout {
+			// The attempt's outcome may name another cause, and the execution still fails for its timeout.
+			if end.Class == domain.ClassTimeout || timedOut {
 				return domain.StatusFailed, domain.T("execution_timed_out", "the execution timeout elapsed")
 			}
 			a.mu.Lock()
@@ -550,13 +552,15 @@ func (r *run) warn(w domain.Warning, eventType string, emit bool) {
 	}
 }
 
-// runAttempt starts one harness process and follows it to its end.
+// runAttempt starts one harness process and follows it to its end. It also reports whether the execution's timeout
+// ended the process, which the attempt's class does not always say: an attempt the timeout cut short while its harness
+// waited for the network is a network failure.
 func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info ports.HarnessInfo, p domain.HarnessProfile, reason domain.Text,
-	prev []previousAttempt) domain.AttemptEnd {
+	prev []previousAttempt) (domain.AttemptEnd, bool) {
 	a := r.a
 	agents, skills, err := r.resolve(ad)
 	if err != nil {
-		return domain.AttemptEnd{Class: domain.ClassTaskError, Error: domain.TextOf(err)}
+		return domain.AttemptEnd{Class: domain.ClassTaskError, Error: domain.TextOf(err)}, false
 	}
 	now := a.now()
 	a.mu.Lock()
@@ -588,7 +592,7 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 	if err != nil {
 		end := domain.AttemptEnd{Class: domain.ClassTaskError, Error: domain.TextOf(err)}
 		r.endAttempt(end, -1)
-		return end
+		return end, false
 	}
 	inv.ExecutionID = r.x.ID
 	for _, res := range inv.Restrictions {
@@ -628,7 +632,7 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 		end := domain.AttemptEnd{Class: domain.ClassHarnessUnavailable, Error: domain.T("harness_start_failed",
 			"starting {{harness}}: {{detail}}", "harness", ad.Name(), "detail", err.Error())}
 		r.endAttempt(end, -1)
-		return end
+		return end, false
 	}
 	r.event(domain.Event{Type: domain.EventHarnessStarted, Harness: p.Provider,
 		Payload: map[string]any{"configuredModel": p.Model, "configuredEffort": p.Effort, "version": info.Version,
@@ -665,7 +669,7 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 	// Its final text and error quote the harness, and the next attempt's context and the summary quote them in turn.
 	eventlog.RedactFields(&end)
 	r.endAttempt(end, proc.ExitCode())
-	return end
+	return end, timedOut
 }
 
 // closeRaw closes an attempt's raw output. A close that fails loses only the end of that copy, whose lines the events
@@ -934,6 +938,9 @@ func (r *run) onHarnessEvent(he ports.HarnessEvent) {
 		r.event(domain.Event{Type: domain.EventHarnessOutput, Severity: domain.SeverityDebug, Message: trimTo(he.Message, 2000)})
 	case ports.HarnessRateLimit:
 		r.event(domain.Event{Type: domain.EventHarnessOutput, Severity: domain.SeverityWarning, Message: he.Message})
+	case ports.HarnessNetworkWait:
+		r.event(domain.Event{Type: domain.EventHarnessNetworkWaiting, Severity: domain.SeverityWarning,
+			Message: trimTo(he.Message, 2000)})
 	case ports.HarnessUsage:
 		// No event of its own: the record is saved every second, and an open detail reloads on the attempt's next event.
 		a.mu.Lock()

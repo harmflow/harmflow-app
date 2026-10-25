@@ -174,6 +174,87 @@ func TestParseNetwork(t *testing.T) {
 	}
 }
 
+const (
+	networkWait  = `{"type":"error","message":"Reconnecting... waiting for network (Connection failed: error sending request)"}`
+	agentMessage = `{"type":"item.completed","item":{"id":"i-1","type":"agent_message","text":"Back online."}}`
+)
+
+// feed gives the parser each line, as the executor does, and returns the events they produced.
+func feed(p *parser, lines ...string) []ports.HarnessEvent {
+	var events []ports.HarnessEvent
+	for _, l := range lines {
+		events = append(events, p.Line([]byte(l))...)
+	}
+	return events
+}
+
+// harmflow-app#250: Codex never exits while it waits for the network, so a wait is ended by the execution's timeout. The
+// attempt is a network failure when a wait was the last thing Codex printed, and a timeout after any other output.
+func TestFinishAtTheTimeout(t *testing.T) {
+	cases := []struct {
+		name  string
+		file  string // replayed before lines, when set
+		lines []string
+		want  domain.ErrorClass
+	}{
+		{"waiting for the network", "network.jsonl", nil, domain.ClassNetwork},
+		{"an agent message after the wait", "network.jsonl", []string{agentMessage}, domain.ClassTimeout},
+		{"a line that is not JSON after the wait", "network.jsonl", []string{"panic: unexpected"}, domain.ClassTimeout},
+		{"no wait", "", []string{`{"type":"thread.started","thread_id":"t-1"}`, `{"type":"turn.started"}`, agentMessage},
+			domain.ClassTimeout},
+		// Numbered retries end on their own, and an error that names the network is not a wait.
+		{"a numbered retry", "", []string{`{"type":"error","message":"Reconnecting... 2/5 (stream disconnected before completion)"}`},
+			domain.ClassTimeout},
+		{"a network error", "", []string{`{"type":"error","message":"stream disconnected before completion"}`},
+			domain.ClassTimeout},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := &parser{}
+			if c.file != "" {
+				p, _ = replay(t, c.file)
+			}
+			feed(p, c.lines...)
+			end := p.Finish(-1, "", true, false)
+			if end.Class != c.want {
+				t.Errorf("Finish(-1, \"\", true, false).Class = %s (%s), want %s", end.Class, end.Error.Message, c.want)
+			}
+			if c.want == domain.ClassNetwork && !strings.Contains(end.Error.Message, "waiting for network") {
+				t.Errorf("Finish(-1, \"\", true, false).Error = %q, want Codex's notice", end.Error.Message)
+			}
+		})
+	}
+	// A cancellation is one, whatever Codex was doing.
+	p, _ := replay(t, "network.jsonl")
+	if end := p.Finish(-1, "", true, true); end.Class != domain.ClassCancelled {
+		t.Errorf("Finish(-1, \"\", true, true).Class = %s, want cancelled", end.Class)
+	}
+}
+
+// harmflow-app#250: a stretch of waits for the network is one event, its first notice; a wait after other output is a
+// new stretch.
+func TestNetworkWaitIsOneEventPerStretch(t *testing.T) {
+	count := func(events []ports.HarnessEvent) int {
+		n := 0
+		for _, e := range events {
+			if e.Kind == ports.HarnessNetworkWait {
+				n++
+				if !strings.HasPrefix(e.Message, "Reconnecting... waiting for network") {
+					t.Errorf("the wait's event says %q, want Codex's notice", e.Message)
+				}
+			}
+		}
+		return n
+	}
+	if _, events := replay(t, "network.jsonl"); count(events) != 1 {
+		t.Errorf("network.jsonl: %d wait events, want 1: %+v", count(events), events)
+	}
+	events := feed(&parser{}, networkWait, networkWait, agentMessage, networkWait, networkWait)
+	if count(events) != 2 {
+		t.Errorf("two stretches: %d wait events, want 2: %+v", count(events), events)
+	}
+}
+
 // A 429 is a rate limit only as an HTTP status; elsewhere it is part of the task's own failure.
 func TestParseRateLimit(t *testing.T) {
 	cases := []struct {

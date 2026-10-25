@@ -126,6 +126,7 @@ function styleOf(e: HarmflowEvent): Style {
     case "harness.quota_exhausted":
     case "harness.unavailable":
     case "harness.rate_limited":
+    case "harness.network_waiting":
     case "harness.version_untested":
       return { tone: "warning", icon: "alert" };
     case "script.started":

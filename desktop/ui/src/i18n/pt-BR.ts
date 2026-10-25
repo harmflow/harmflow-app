@@ -193,6 +193,7 @@ export const ptBR: Resources = {
       exited: "Harness encerrado",
       quota_exhausted: "Cota do harness esgotada",
       rate_limited: "Limite de taxa; aguardando para tentar de novo",
+      network_waiting: "Aguardando a rede",
       unavailable: "Harness indisponível",
       switched: "Trocando de harness",
       no_alternative: "Nenhum harness alternativo disponível",
