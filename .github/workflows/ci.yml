@@ -75,40 +75,33 @@ jobs:
           cache-dependency-path: tests/go.sum
       - run: make check-file-names
 
-  security:
-    name: Security (changed commits)
+  # Every change runs it, whatever parts it touches: a secret can land in any path. A pull request scans its own
+  # commits, and a push to main every commit it brought, so each commit of a rebase merge is read. The weekly Security
+  # workflow reads the whole history.
+  gitleaks:
+    name: Secret scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Install gitleaks
-        env:
-          GITLEAKS_VERSION: 8.30.1
-          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
-        run: |
-          set -euo pipefail
-          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          curl --fail --location --retry 3 --retry-all-errors --retry-delay 2 \
-            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}" \
-            --output "$RUNNER_TEMP/$archive"
-          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/$archive" | sha256sum --check
-          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
-          gitleaks version
-      - name: Scan changed commits
+      - run: .github/scripts/install-gitleaks.sh
+      - name: Scan the new commits
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" = "pull_request" ]; then
-            range="${BASE_SHA}..${HEAD_SHA}"
-          else
-            range="HEAD^..HEAD"
-          fi
-          gitleaks git --config .gitleaks.toml --redact --no-banner --log-opts="$range" --exit-code 1
+          case $EVENT_NAME in
+            pull_request) range="$BASE_SHA..$HEAD_SHA" ;;
+            # A force push can leave the commit main was at outside the clone: the whole history is read then.
+            push) if git cat-file -e "$BEFORE_SHA^{commit}"; then range="$BEFORE_SHA..$GITHUB_SHA"; else range=$GITHUB_SHA; fi ;;
+            # A dispatch runs CI again on one commit, and reads that commit.
+            *) range="$GITHUB_SHA^..$GITHUB_SHA" ;;
+          esac
+          gitleaks git --config .gitleaks.toml --redact --no-banner --log-opts="$range"
 
   generated:
     name: Generated code is current
@@ -145,12 +138,13 @@ jobs:
       # standard library, third party, then the module's own. Run it locally with the same command.
       - name: Import groups
         run: make check-imports
-      - name: Go vulnerability audit
-        working-directory: daemon
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
       - run: make test-daemon
         env:
           GOFLAGS: -race
+      # The known vulnerabilities the code calls, in its modules and in the Go it is built with (govulncheck). Last, so
+      # a new advisory leaves the tests' results in place.
+      - name: Vulnerabilities
+        run: make audit-daemon
 
   integration:
     name: Integration (macOS)
@@ -163,12 +157,11 @@ jobs:
         with:
           go-version-file: daemon/go.mod
           cache-dependency-path: daemon/go.sum
-      - name: Go vulnerability audit
-        working-directory: tests
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
       # The integration tests, and the daemon's coverage held against daemon/coverage-floors.txt. This is
       # the only job where the unit and integration data can both exist; the daemon job keeps -race.
       - run: make coverage-daemon
+      - name: Vulnerabilities
+        run: make audit-tests
 
   desktop:
     name: Desktop (macOS)
@@ -197,25 +190,21 @@ jobs:
           components: llvm-tools-preview
       - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
         with:
-          tool: cargo-llvm-cov
+          tool: cargo-llvm-cov,cargo-audit
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           # Cargo's output is target.noindex, as .cargo/config.toml sets it, not the default target.
           workspaces: desktop/src-tauri -> target.noindex
       - run: make deps
-      - name: JavaScript dependency audit
-        run: pnpm -C desktop audit --audit-level high
-      - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
-        with:
-          tool: cargo-audit
-      - name: Rust dependency audit
-        run: cargo audit --file desktop/src-tauri/Cargo.lock
       # The bundle's sidecar must exist for tauri-build, and the interface for the shell.
       - run: make sidecar
       - run: pnpm -C desktop build
       - run: pnpm -C desktop typecheck
       # The unit tests of the interface and the shell, their coverage held against its floors.
       - run: make coverage-desktop
+      # The advisories against the interface's and the shell's dependencies; -k runs the second when the first fails.
+      - name: Vulnerabilities
+        run: make -k audit-desktop
 
   packaging:
     name: Packaging (macOS)
