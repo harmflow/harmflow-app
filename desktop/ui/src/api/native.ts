@@ -35,7 +35,7 @@ export const native = {
 
   /** Starts this bundle's daemon when none answers. `replacing`, the pid of a daemon asked to stop, exits first. */
   async startDaemon(replacing?: number): Promise<DaemonStatus> {
-    return invoke<DaemonStatus>("daemon_start", { replacing });
+    return invoke<DaemonStatus>("daemon_start", { replacing: replacing ?? null });
   },
 
   async setTrayEnabled(enabled: boolean): Promise<void> {
