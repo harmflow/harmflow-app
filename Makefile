@@ -12,6 +12,9 @@ BUILT_AT := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 TRIPLE := $(shell rustc -vV 2>/dev/null | sed -n 's/^host: //p')
 DEV_HOME := $(CURDIR)/.harmflow-dev/home
 SIDECAR := desktop/src-tauri/binaries/harmflowd-$(TRIPLE)
+# The commit of the app bundle, which make update-app reads to skip a build of the commit it pulled. make app deletes it
+# before building and writes it once the build succeeds, so it never vouches for a bundle a failed build left half made.
+APP_STAMP := desktop/src-tauri/target.noindex/release/bundle/macos/HarmFlow.app.commit
 LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuiltAt=$(BUILT_AT)
 COVERAGE := $(CURDIR)/build/coverage
 # The shell's coverage floors, in percent; COVERAGE.md holds the reading they come from.
@@ -80,6 +83,10 @@ test-desktop: ## Type check and unit tests of the desktop
 check-imports: ## Fail on Go imports outside the Go guide's three groups, as CI does
 	go -C tests run ./imports $(CURDIR)/daemon $(CURDIR)/tests
 
+.PHONY: check-file-names
+check-file-names: ## Fail on tracked file and folder names outside CLAUDE.md's File names rules, as CI does
+	go -C tests run ./filenames $(CURDIR)
+
 .PHONY: test-integration
 test-integration: daemon ## Tests across the daemon's process boundary, with fake harnesses
 	go -C tests test -count=1 ./...
@@ -106,6 +113,42 @@ coverage-desktop: ## Unit tests of the interface and the shell, held at their fl
 		|| { cargo llvm-cov report --summary-only --json | jq -r --argjson lines $(RUST_FLOOR_LINES) \
 			--argjson functions $(RUST_FLOOR_FUNCTIONS) '$(RUST_FLOOR_VIOLATIONS)' >&2; exit 1; }; }
 
+# Each audit fails on a known vulnerability. govulncheck reports only those the code calls, in its modules and in the
+# Go that runs it. Dependabot cannot see this pin: refresh it by hand. `make -k audit` runs every audit when one fails.
+GOVULNCHECK := golang.org/x/vuln/cmd/govulncheck@v1.9.0
+
+.PHONY: audit
+audit: audit-daemon audit-tests audit-desktop ## Report the known vulnerabilities in every part's dependencies
+
+.PHONY: audit-daemon
+audit-daemon: ## Known vulnerabilities the daemon calls
+	go -C daemon run $(GOVULNCHECK) ./...
+
+.PHONY: audit-tests
+audit-tests: ## Known vulnerabilities the cross-part tests call
+	go -C tests run $(GOVULNCHECK) ./...
+
+.PHONY: audit-desktop
+audit-desktop: audit-interface audit-shell ## Known vulnerabilities in the desktop's dependencies
+
+.PHONY: audit-interface
+audit-interface: ## Advisories against the interface's JavaScript dependencies, moderate and above
+	pnpm -C desktop audit --audit-level moderate
+
+.PHONY: audit-shell
+audit-shell: ## Advisories against the shell's Rust dependencies (needs cargo-audit)
+	cargo audit --file desktop/src-tauri/Cargo.lock
+
+# The toolchain line of go.mod is what CI builds and audits with, and Dependabot does not raise it. The weekly Security
+# workflow runs check-go-toolchain; a failure there is fixed with make go-toolchain and a pull request.
+.PHONY: go-toolchain
+go-toolchain: ## Raise the Go toolchain of daemon/ and tests/ to the newest patch of its minor
+	.github/scripts/go-toolchain.sh update
+
+.PHONY: check-go-toolchain
+check-go-toolchain: ## Fail when the Go toolchain is behind its minor's newest patch, or Go no longer supports the minor
+	.github/scripts/go-toolchain.sh check
+
 .PHONY: dev-daemon
 dev-daemon: daemon ## Run the daemon on a development data directory
 	HARMFLOW_HOME=$(DEV_HOME) ./build/harmflowd --builtins $(CURDIR)
@@ -121,12 +164,14 @@ dev-desktop: sidecar ## Run the desktop shell against the development daemon
 
 .PHONY: app
 app: sidecar ## Build HarmFlow.app and the DMG (unsigned until the Developer ID exists)
+	@rm -f $(APP_STAMP)
 	cd desktop && pnpm tauri build
+	@printf '%s\n' '$(COMMIT)' >$(APP_STAMP)
 	@echo "Bundles in desktop/src-tauri/target.noindex/release/bundle/"
 
 # No prerequisite and no $(MAKE) here: the script pulls, then builds in a make of its own, whose COMMIT is read after
-# the pull. A $(MAKE) in the recipe would also run it under make -n. OPEN=1 and INSTALL_DIR reach it through the
-# environment, as make exports the variables of its command line.
+# the pull. A $(MAKE) in the recipe would also run it under make -n. OPEN=1, INSTALL_DIR, FORCE_BUILD=1, WAIT=1, and
+# WAIT_TIMEOUT reach it through the environment, as make exports the variables of its command line.
 .PHONY: update-app
 update-app: ## Bring the local app to the latest main, install it to ~/Applications, and restart what was running
 	@packaging/macos/update-app.sh

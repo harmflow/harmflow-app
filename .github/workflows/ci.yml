@@ -63,6 +63,46 @@ jobs:
             if touched "$pattern"; then echo "$part=true" >> "$GITHUB_OUTPUT"; else echo "$part=false" >> "$GITHUB_OUTPUT"; fi
           done
 
+  # Every run, whatever the change touches: a new file can land in any part. Run it locally with the same command.
+  file-names:
+    name: File names
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: tests/go.mod
+          cache-dependency-path: tests/go.sum
+      - run: make check-file-names
+
+  # Every change runs it, whatever parts it touches: a secret can land in any path. A pull request scans its own
+  # commits, and a push to main every commit it brought, so each commit of a rebase merge is read. The weekly Security
+  # workflow reads the whole history.
+  gitleaks:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - run: .github/scripts/install-gitleaks.sh
+      - name: Scan the new commits
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          case $EVENT_NAME in
+            pull_request) range="$BASE_SHA..$HEAD_SHA" ;;
+            # A force push can leave the commit main was at outside the clone: the whole history is read then.
+            push) if git cat-file -e "$BEFORE_SHA^{commit}"; then range="$BEFORE_SHA..$GITHUB_SHA"; else range=$GITHUB_SHA; fi ;;
+            # A dispatch runs CI again on one commit, and reads that commit.
+            *) range="$GITHUB_SHA^..$GITHUB_SHA" ;;
+          esac
+          gitleaks git --config .gitleaks.toml --redact --no-banner --log-opts="$range"
+
   generated:
     name: Generated code is current
     needs: changes
@@ -101,6 +141,10 @@ jobs:
       - run: make test-daemon
         env:
           GOFLAGS: -race
+      # The known vulnerabilities the code calls, in its modules and in the Go it is built with (govulncheck). Last, so
+      # a new advisory leaves the tests' results in place.
+      - name: Vulnerabilities
+        run: make audit-daemon
 
   integration:
     name: Integration (macOS)
@@ -116,6 +160,8 @@ jobs:
       # The integration tests, and the daemon's coverage held against daemon/coverage-floors.txt. This is
       # the only job where the unit and integration data can both exist; the daemon job keeps -race.
       - run: make coverage-daemon
+      - name: Vulnerabilities
+        run: make audit-tests
 
   desktop:
     name: Desktop (macOS)
@@ -144,7 +190,7 @@ jobs:
           components: llvm-tools-preview
       - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
         with:
-          tool: cargo-llvm-cov
+          tool: cargo-llvm-cov,cargo-audit
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           # Cargo's output is target.noindex, as .cargo/config.toml sets it, not the default target.
@@ -156,6 +202,9 @@ jobs:
       - run: pnpm -C desktop typecheck
       # The unit tests of the interface and the shell, their coverage held against its floors.
       - run: make coverage-desktop
+      # The advisories against the interface's and the shell's dependencies; -k runs the second when the first fails.
+      - name: Vulnerabilities
+        run: make -k audit-desktop
 
   packaging:
     name: Packaging (macOS)

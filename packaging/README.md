@@ -20,14 +20,21 @@ builds into `target.noindex/` and installs nothing.
 
 1. It refuses, with nothing changed, off `main`, with uncommitted changes, or when `git pull --ff-only origin main`
    cannot fast-forward. When the pull changed `update-app.sh`, it runs the new one in its place, once, before it stops
-   or builds anything: bash has already read the old one. Then it runs `make app`; a failed build leaves the window,
-   the daemon, and the installed copy as they were.
+   or builds anything: bash has already read the old one. Then it reads `running` from `GET /api/v1/stats` of the
+   daemon of step 2, and says so when executions run, since the restart will be refused unless they end first.
+   Then it runs `make app`, unless the build is already of the pulled commit: `make app` writes the commit it built
+   beside the bundle, in `target.noindex/release/bundle/macos/HarmFlow.app.commit`, once the build succeeds.
+   `make update-app FORCE_BUILD=1` builds anyway. A failed build leaves the window, the daemon, and the installed copy
+   as they were.
 2. It finds the daemon of `$HARMFLOW_HOME`, or of `~/Library/Application Support/HarmFlow`, through that directory's
    `run/daemon.json`, never by process name, so the daemons of other data directories (the e2e one, a worktree's
    development one) are never touched.
 3. It copies the build beside the installed copy, then stops that daemon through `POST /api/v1/daemon/stop`, without
    `force`. While executions run, the daemon refuses and so does the update: the window, the daemon, and the installed
-   copy stay as they were.
+   copy stay as they were, and the new build is not running. `make update-app WAIT=1` waits instead: every 5 seconds
+   it says how many executions run, and it asks again, still without `force`, once none does, so an execution that
+   starts in between is waited for too, never cancelled. After `WAIT_TIMEOUT` seconds, 3600 by default, it gives up
+   with the same refusal.
 4. It quits the window of the installed copy, or of this checkout's build in `target.noindex/release`. Only then does
    it replace the installed copy, by moving the old one aside and the new one in.
 5. It restores what it found, from the installed copy. A daemon that was running starts again, through

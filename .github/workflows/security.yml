@@ -1,0 +1,77 @@
+# Reads, every week, what reaches the repository between changes, whatever changed: gitleaks over the whole history,
+# every branch and tag included, the audits of every part's dependencies, so a new advisory against a dependency nobody
+# touched still fails a run, and whether the Go toolchain is the newest patch of its minor, which Dependabot does not
+# raise. CI runs the same scan and audits on each change, scoped to it.
+#
+# The audits run on macOS, the MVP's only platform, so govulncheck reads the daemon as it is built for it. gitleaks
+# reads the history and the toolchain check the Go module proxy, neither a build, so both run on Linux. Actions are
+# pinned as in ci.yml, to the same commits.
+name: Security
+
+on:
+  schedule:
+    - cron: "17 3 * * 1" # Mondays, 00:17 in São Paulo
+  workflow_dispatch:
+  # A change to the scan runs it, so its pull request shows what the scan and the audits find.
+  pull_request:
+    paths:
+      - .github/workflows/security.yml
+      - .github/scripts/install-gitleaks.sh
+      - .github/scripts/go-toolchain.sh
+      - .gitleaks.toml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  history:
+    name: Secret history
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - run: .github/scripts/install-gitleaks.sh
+      - name: Scan the whole history
+        run: gitleaks git --config .gitleaks.toml --redact --no-banner
+
+  dependencies:
+    name: Dependencies (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: daemon/go.mod
+          cache-dependency-path: daemon/go.sum
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: desktop/package.json
+      # No cache: pnpm audit reads the lockfile and installs nothing.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      # cargo audit reads Cargo.lock with the runner's own cargo; it builds nothing, so no toolchain is set up.
+      - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
+        with:
+          tool: cargo-audit
+      # -k runs every audit when one fails, so a run names everything it found.
+      - name: Vulnerabilities
+        run: make -k audit
+
+  toolchain:
+    name: Go toolchain is current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The go command reads the proxy here and builds nothing, so there is nothing to cache.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: daemon/go.mod
+          cache: false
+      # A failure names the patch to move to: make go-toolchain raises both go.mod files to it.
+      - run: make check-go-toolchain

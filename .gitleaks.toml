@@ -1,0 +1,16 @@
+# The secret scans of the CI and Security workflows: gitleaks's default rules, and the false positives they report
+# here. Each allowlist entry names its reason, and is held to the rule, the file, and the lines it covers.
+title = "HarmFlow secret scanning"
+
+[extend]
+useDefault = true
+
+# The comment that lists fake-claude's scenarios names SCENARIO=secret, which generic-api-key reads as a key holding
+# the scenario after it. The line holds no credential; a real one anywhere else in the file is still reported.
+[[allowlists]]
+description = "fake-claude's list of scenarios names SCENARIO=secret"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^tests/integration/testdata/fake-claude$''']
+regexTarget = "line"
+regexes = ['''SCENARIO=secret''']
