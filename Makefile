@@ -136,6 +136,16 @@ audit-interface: ## Advisories against the interface's JavaScript dependencies, 
 audit-shell: ## Advisories against the shell's Rust dependencies (needs cargo-audit)
 	cargo audit --file desktop/src-tauri/Cargo.lock
 
+# The toolchain line of go.mod is what CI builds and audits with, and Dependabot does not raise it. The weekly Security
+# workflow runs check-go-toolchain; a failure there is fixed with make go-toolchain and a pull request.
+.PHONY: go-toolchain
+go-toolchain: ## Raise the Go toolchain of daemon/ and tests/ to the newest patch of its minor
+	.github/scripts/go-toolchain.sh update
+
+.PHONY: check-go-toolchain
+check-go-toolchain: ## Fail when the Go toolchain is behind its minor's newest patch, or Go no longer supports the minor
+	.github/scripts/go-toolchain.sh check
+
 .PHONY: dev-daemon
 dev-daemon: daemon ## Run the daemon on a development data directory
 	HARMFLOW_HOME=$(DEV_HOME) ./build/harmflowd --builtins $(CURDIR)
