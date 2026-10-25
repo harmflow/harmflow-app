@@ -35,10 +35,10 @@ interface Tip {
 
 type Place = (target: HTMLElement, text: string, keys?: string) => Tip;
 
-/** A tooltip just past the sidebar's edge, level with its target. */
-const tipBeside: Place = (target, text, keys) => {
+/** A tooltip just past the edge of the sidebar or of Settings' section list, level with its target. */
+export const tipBeside: Place = (target, text, keys) => {
   const box = target.getBoundingClientRect();
-  const edge = target.closest(".sidebar")?.getBoundingClientRect().right ?? box.right;
+  const edge = target.closest(".sidebar, .settings-nav")?.getBoundingClientRect().right ?? box.right;
   return { text, keys, top: box.top + box.height / 2, left: edge + 8 };
 };
 
@@ -198,11 +198,14 @@ export function commitsDiffer(appCommit?: string, daemonCommit?: string): boolea
  */
 export function Header({
   screen,
+  crumb,
   onNewTask,
   onNavigate,
   onOpenExecution,
 }: {
   screen: Screen;
+  /** What the breadcrumb adds after the screen's own: Settings' open section. */
+  crumb?: string;
   onNewTask: () => void;
   onNavigate: (s: Screen) => void;
   onOpenExecution: (id: string) => void;
@@ -232,6 +235,7 @@ export function Header({
       <div className="topbar__titles">
         <span className="breadcrumb">
           <span className="breadcrumb__prompt">&gt;_</span> {t(`screens.${screen}.breadcrumb`)}
+          {crumb ? ` / ${crumb}` : null}
         </span>
         <h1 className="topbar__title">{t(`screens.${screen}.title`)}</h1>
         <p className="topbar__subtitle">{t(`screens.${screen}.subtitle`)}</p>

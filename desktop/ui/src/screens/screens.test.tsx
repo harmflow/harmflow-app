@@ -213,7 +213,7 @@ describe("screens", () => {
   });
 
   it("lists the allowed folders of Settings beside the path variables", () => {
-    const html = renderToString(<SettingsScreen />);
+    const html = renderToString(<SettingsScreen section="paths" />);
     expect(html).toContain("Pastas permitidas");
     expect(html).toContain('value="/srv/repos"');
     expect(html).toContain("Adicionar pasta");
@@ -224,11 +224,11 @@ describe("screens", () => {
     const { appVersion, appCommit, appBuiltAt } = getState();
     patchStateForTests({ appVersion: "0.1.0", appCommit: "45a57bb", appBuiltAt: "", health: { ...health, commit: "ca16cd7-dirty" } });
     try {
-      const html = renderToString(<SettingsScreen />);
+      const html = renderToString(<SettingsScreen section="about" />);
       expect(html).toContain('<span class="mono">0.1.0 (45a57bb)</span>');
       expect(html).toContain('<span class="mono">0.1.0 (ca16cd7-dirty)</span>');
       patchStateForTests({ appCommit: "", health });
-      const bare = renderToString(<SettingsScreen />);
+      const bare = renderToString(<SettingsScreen section="about" />);
       expect(bare.match(/<span class="mono">0\.1\.0<\/span>/g)).toHaveLength(2);
       expect(bare).not.toContain("0.1.0 (");
     } finally {
@@ -249,16 +249,16 @@ describe("screens", () => {
       health: { ...health, commit: "ca16cd7-dirty", builtAt: daemonBuilt },
     });
     try {
-      const html = renderToString(<SettingsScreen />);
+      const html = renderToString(<SettingsScreen section="about" />);
       expect(html).toContain(`<span class="mono">0.1.0 (45a57bb) · ${at(desktopBuilt)}</span>`);
       expect(html).toContain(`<span class="mono">0.1.0 (ca16cd7-dirty) · ${at(daemonBuilt)}</span>`);
       // A time without a commit has no empty parentheses; a daemon built without make has no time.
       patchStateForTests({ appCommit: "", health: { ...health, commit: "ca16cd7" } });
-      const partial = renderToString(<SettingsScreen />);
+      const partial = renderToString(<SettingsScreen section="about" />);
       expect(partial).toContain(`<span class="mono">0.1.0 · ${at(desktopBuilt)}</span>`);
       expect(partial).toContain('<span class="mono">0.1.0 (ca16cd7)</span>');
       patchStateForTests({ appBuiltAt: "not a time", health });
-      expect(renderToString(<SettingsScreen />).match(/<span class="mono">0\.1\.0<\/span>/g)).toHaveLength(2);
+      expect(renderToString(<SettingsScreen section="about" />).match(/<span class="mono">0\.1\.0<\/span>/g)).toHaveLength(2);
     } finally {
       patchStateForTests({ appVersion, appCommit, appBuiltAt, health: undefined });
     }
@@ -493,8 +493,8 @@ describe("the choice to keep HarmFlow in the menu bar on ⌘Q", () => {
   });
 
   const settle = () => act(() => new Promise<void>((resolve) => setImmediate(resolve)));
-  const toggles = () => [...host!.querySelectorAll<HTMLLabelElement>("label.toggle")];
-  const keepToggle = () => toggles().find((l) => l.textContent === "Manter o HarmFlow na barra de menus ao sair com ⌘Q")!.querySelector("input")!;
+  const rows = () => [...host!.querySelectorAll<HTMLLabelElement>("label.setting-row__label")];
+  const keepToggle = () => document.getElementById(rows().find((l) => l.textContent === "Manter o HarmFlow na barra de menus ao sair com ⌘Q")!.htmlFor) as HTMLInputElement;
 
   async function render() {
     host = document.body.appendChild(document.createElement("div"));
@@ -506,7 +506,7 @@ describe("the choice to keep HarmFlow in the menu bar on ⌘Q", () => {
   it("is off under the tray option, says what ⌘Q does, and saves once switched on", async () => {
     daemon.answers.set("/settings", settings);
     await render();
-    const labels = toggles().map((l) => l.textContent);
+    const labels = rows().map((l) => l.textContent);
     expect(labels.indexOf("Manter o HarmFlow na barra de menus ao sair com ⌘Q")).toBe(labels.indexOf("Mostrar o HarmFlow na barra de menus") + 1);
     expect(host!.textContent).toContain("Ativado, ⌘Q apenas oculta a janela, como fechá-la");
     expect(keepToggle().checked).toBe(false);
@@ -529,5 +529,117 @@ describe("the choice to keep HarmFlow in the menu bar on ⌘Q", () => {
     await act(async () => keepToggle().click());
     await settle();
     expect(daemon.requests.filter((r) => !r.startsWith("GET "))).toEqual([]);
+  });
+});
+
+// Settings shows its sections in a list, in three groups and About, and one section at a time (harmflow-app#251).
+describe("settings sections", () => {
+  let root: Root | undefined;
+  let host: HTMLElement | undefined;
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    host?.remove();
+    root = host = undefined;
+    vi.unstubAllGlobals();
+  });
+
+  async function render(node: ReactNode) {
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(node));
+  }
+
+  const items = () => [...host!.querySelectorAll<HTMLButtonElement>(".settings-nav__item")];
+  const tooltip = () => document.body.querySelector(".tooltip")?.textContent ?? null;
+
+  it("lists three groups under their headings, then About alone under a divider, and marks the open section", async () => {
+    await render(<SettingsScreen section="storage" />);
+    const nav = host!.querySelector("nav.settings-nav")!;
+    const groups = [...nav.querySelectorAll('[role="group"]')].map((g) => ({
+      heading: g.querySelector(".settings-nav__heading")!.textContent,
+      sections: [...g.querySelectorAll(".settings-nav__item")].map((b) => b.textContent),
+    }));
+    expect(groups).toEqual([
+      { heading: "Interface", sections: ["Geral", "Notificações"] },
+      { heading: "Agentes e tarefas", sections: ["Agentes instalados", "Caminhos"] },
+      { heading: "Este computador", sections: ["Daemon", "Armazenamento", "Segurança"] },
+    ]);
+    expect(nav.lastElementChild!.textContent).toBe("Sobre");
+    expect(nav.lastElementChild!.previousElementSibling!.tagName).toBe("HR");
+    for (const item of items()) expect(item.querySelector("svg")).not.toBeNull();
+
+    const open = items().filter((b) => b.getAttribute("aria-current") === "page");
+    expect(open.map((b) => b.textContent)).toEqual(["Armazenamento"]);
+    expect(open[0].className).toContain("nav__item--active");
+    expect(host!.querySelector(".settings__title")!.textContent).toBe("Armazenamento");
+  });
+
+  it("opens a section from the list with a click, Enter, or Space, which a button gives", async () => {
+    const opened: string[] = [];
+    await render(<SettingsScreen section="general" onSection={(s) => opened.push(s)} />);
+    for (const item of items()) {
+      expect(item.tagName).toBe("BUTTON");
+      expect(item.tabIndex).toBe(0);
+    }
+    await act(async () => items().find((b) => b.textContent === "Segurança")!.click());
+    expect(opened).toEqual(["security"]);
+  });
+
+  // Everything the single page showed is still there, each in the section that holds it.
+  it.each([
+    ["general", ["Idioma", "Barra de menus"], ["Mostrar o HarmFlow na barra de menus", "Manter o HarmFlow na barra de menus ao sair com ⌘Q"]],
+    ["notifications", ["Avisos"], ["Nível de notificação"]],
+    ["agents", ["Agentes", "Ferramentas"], ["Detectar de novo", "Claude Code", "Definir caminho"]],
+    ["paths", ["Variáveis de caminho", "Pastas permitidas"], ["PROJECTS_ROOT", "/srv/repos", "Adicionar variável", "Adicionar pasta"]],
+    ["daemon", ["Estado", "Inicialização"], ["Em execução agora", "Parar o daemon", "Iniciar o daemon automaticamente com o sistema"]],
+    ["storage", ["Logs", "Workspaces", "Diretórios"], ["Manter logs de execução por (dias)", "Limpar workspaces", "Disco usado pelo HarmFlow"]],
+    ["security", ["API local"], ["Endereço", "Armazenamento do token", "Substituir o token da API"]],
+    ["about", ["Versões"], ["Versão do painel", "Versão do daemon"]],
+  ] as const)("shows %s with its panels and settings, and no other section's", (section, panels, shown) => {
+    const html = renderToString(<SettingsScreen section={section} />).replace(/<!-- -->/g, "");
+    const titles = [...html.matchAll(/<h2 class="panel__title">(.*?)<\/h2>/g)].map((m) => m[1].replace(/<[^>]+>/g, ""));
+    expect(titles).toEqual(panels);
+    for (const text of shown) expect(html).toContain(text);
+    if (section !== "general") expect(html).not.toContain("Mostrar o HarmFlow na barra de menus");
+  });
+
+  it("keeps only the icons below 640 pixels of content box, with each name as its accessible name and tooltip", async () => {
+    // happy-dom lays nothing out: this stand-in reports the width a test gives.
+    let resize: (width: number) => void = () => {};
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          resize = (width) => callback([{ contentRect: { width } } as ResizeObserverEntry], this as unknown as ResizeObserver);
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    await render(<SettingsScreen section="general" />);
+    const security = () => items().find((b) => b.textContent === "Segurança")!;
+    const hidden = () => items().map((b) => b.querySelector(".nav__label")!.classList.contains("sr-only"));
+
+    await act(async () => resize(640));
+    expect(hidden().every((h) => !h)).toBe(true);
+    await act(async () => void security().dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
+    expect(tooltip()).toBeNull(); // the name is in view
+
+    await act(async () => resize(639));
+    expect(host!.querySelector(".settings")!.className).toContain("settings--icons");
+    expect(hidden().every((h) => h)).toBe(true);
+    expect([...host!.querySelectorAll(".settings-nav__heading")].every((h) => h.classList.contains("sr-only"))).toBe(true);
+    expect(security().textContent).toBe("Segurança");
+    await act(async () => void security().dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
+    expect(tooltip()).toBe("Segurança");
+    await act(async () => void security().dispatchEvent(new MouseEvent("mouseout", { bubbles: true })));
+    await act(async () => security().focus());
+    expect(tooltip()).toBe("Segurança");
+
+    await act(async () => resize(900));
+    expect(hidden().every((h) => !h)).toBe(true);
+    expect(tooltip()).toBeNull(); // the list moved under it
   });
 });

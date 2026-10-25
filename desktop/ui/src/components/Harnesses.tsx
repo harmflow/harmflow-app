@@ -7,6 +7,7 @@ import type { Harness, Tool } from "../api/types";
 import type { Tone } from "../design/tokens";
 import { fieldText } from "../lib/daemonText";
 import { formatRelative } from "../lib/format";
+import { useDraft, type DraftReport } from "../lib/hooks";
 import { actions } from "../state/store";
 import { HarnessMark, Icon, type IconName } from "./Icon";
 import { toast } from "./toast";
@@ -91,11 +92,13 @@ export function ToolRow({ tool }: { tool: Tool }) {
   );
 }
 
-export function HarnessInventory({ harness, locale }: { harness: Harness; locale: string }) {
+/** A harness's inventory card. A path being set by hand is a draft until its Save, reported to `onDraft`. */
+export function HarnessInventory({ harness, locale, onDraft }: { harness: Harness; locale: string; onDraft?: DraftReport }) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [path, setPath] = useState(harness.path ?? "");
   const [busy, setBusy] = useState(false);
+  useDraft(onDraft, `harness:${harness.id}`, editing && path !== (harness.path ?? ""));
 
   const save = async (value: string | null) => {
     setBusy(true);
@@ -211,7 +214,14 @@ export function HarnessInventory({ harness, locale }: { harness: Harness; locale
         </div>
       ) : (
         <div className="inline-actions">
-          <Button size="sm" icon="pencil" onClick={() => setEditing(true)}>
+          <Button
+            size="sm"
+            icon="pencil"
+            onClick={() => {
+              setPath(harness.path ?? ""); // a path typed and cancelled before is no draft
+              setEditing(true);
+            }}
+          >
             {t("harness.setPath")}
           </Button>
           {harness.pathSource === "manual" ? (

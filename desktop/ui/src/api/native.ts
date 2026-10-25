@@ -118,9 +118,9 @@ export const native = {
     if (await n.isPermissionGranted()) n.sendNotification({ title, body, extra: executionId ? { executionId } : undefined });
   },
 
-  async onNavigate(handler: (target: { executionId?: string; screen?: string }) => void): Promise<() => void> {
+  async onNavigate(handler: (target: { executionId?: string; screen?: string; section?: string }) => void): Promise<() => void> {
     if (!isTauri()) return () => {};
     const { listen } = await import("@tauri-apps/api/event");
-    return listen<{ executionId?: string; screen?: string }>("harmflow://navigate", (e) => handler(e.payload));
+    return listen<{ executionId?: string; screen?: string; section?: string }>("harmflow://navigate", (e) => handler(e.payload));
   },
 };
