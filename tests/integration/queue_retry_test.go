@@ -15,22 +15,25 @@ import (
 )
 
 // The queue's fixtures live in this repository on GitHub: three open issues labelled queue-test, the oldest of them
-// linked by an unmanaged draft pull request. A session is stopped as soon as it selects an issue, before it changes
-// anything, so the fixtures stay as they are.
+// linked by an unmanaged draft pull request. A session is stopped as soon as it selects an issue, and cannot change
+// anything before that: its gh refuses every command that writes, and its clone has no push URL. A session that once
+// outran the stop pushed a branch and opened a pull request for a fixture, which then counted as linked.
 const (
 	queueRepo  = "harmflow/harmflow-app"
 	queueLabel = "queue-test"
 )
 
 // An issue whose processing failed before any pull request linked it — here, the daemon killed mid-run — comes back
-// as work to retry in the next firing, ahead of a new issue, and no longer once its retry limit is spent. An issue a
-// pull request links is never selected. The real Claude Code runs the built-in skills of this checkout.
+// as work to retry in the next firing, and no longer once its retry limit is spent. An issue a pull request links is
+// never selected. The real Claude Code runs the built-in skills of this checkout.
 func TestFailedIssueIsRetriedUntilItsLimit(t *testing.T) {
 	claude := realClaude(t)
 	linked, failing, untouched := queueFixtures(t)
 	clone := shallowClone(t)
+	guard, calls := ghGuard(t)
+	env := "PATH=" + guard + string(os.PathListSeparator) + os.Getenv("PATH")
 	home := t.TempDir()
-	d := startDaemon(t, home)
+	d := startDaemon(t, home, env)
 	useClaude(d, claude, clone)
 	d.call("POST", "/tasks", map[string]any{"yaml": queueTask(clone)}, 201)
 
@@ -47,7 +50,12 @@ func TestFailedIssueIsRetriedUntilItsLimit(t *testing.T) {
 		dir := executionDir(d, id)
 		got := selectedIssue(t, d, id, dir)
 		waitTracked(t, d, home, id, dir, got)
-		d = restartMidRun(t, d, home, claude, clone)
+		d = restartMidRun(t, d, home, env, claude, clone)
+		if i == 0 {
+			if data, _ := os.ReadFile(calls); len(data) == 0 {
+				t.Fatal("the session's gh never went through the guard: its shell found another gh first")
+			}
+		}
 		if x := d.call("GET", "/executions/"+id, nil, 200); x["status"] != "interrupted" {
 			t.Errorf("firing %d after the restart: status %v, want interrupted", i+1, x["status"])
 		}
@@ -126,7 +134,42 @@ func shallowClone(t *testing.T) string {
 	if out, err := exec.Command("git", "clone", "--quiet", "--depth", "1", "https://github.com/"+queueRepo, dir).CombinedOutput(); err != nil {
 		t.Fatalf("git clone: %v\n%s", err, out)
 	}
+	if out, err := exec.Command("git", "-C", dir, "remote", "set-url", "--push", "origin", "no-push://queue-test").CombinedOutput(); err != nil {
+		t.Fatalf("git remote set-url --push: %v\n%s", err, out)
+	}
 	return dir
+}
+
+// ghGuard is a directory holding a gh that runs only the commands that read what the queue needs, through the real
+// gh, and refuses every other, and the file where it logs each call.
+func ghGuard(t *testing.T) (dir, calls string) {
+	t.Helper()
+	real, err := exec.LookPath("gh")
+	if err != nil {
+		t.Fatal("gh is not on PATH")
+	}
+	dir = t.TempDir()
+	calls = filepath.Join(dir, "calls.log")
+	script := fmt.Sprintf(`#!/bin/sh
+echo "$*" >> %[2]q
+refuse() { echo "gh $*: refused, this test's session may only read" >&2; exit 1; }
+case "$1 $2" in
+"auth status"|"issue list"|"issue view"|"pr list"|"pr view") exec %[1]q "$@" ;;
+"api graphql")
+  case "$*" in *mutation*) refuse "$@" ;; esac
+  exec %[1]q "$@" ;;
+"api "*)
+  for a in "$@"; do
+    case "$a" in -X*|--method*|-f|-F|--field*|--raw-field*|--input*|-f*|-F*) refuse "$@" ;; esac
+  done
+  exec %[1]q "$@" ;;
+esac
+refuse "$@"
+`, real, calls)
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return dir, calls
 }
 
 func useClaude(d *daemon, claude, clone string) {
@@ -159,7 +202,7 @@ spec:
       # Enough to build the queue and report, and nothing that changes the repository: no push, no pull request, no
       # issue edit, should a session outrun the kill.
       allowedTools: [Read, Glob, Grep, Write, Edit, Skill, TodoWrite, "Bash(echo:*)", "Bash(cat:*)", "Bash(jq:*)",
-        "Bash(date:*)", "Bash(git --version)", "Bash(git fetch:*)", "Bash(git -C:*)", "Bash(gh auth status:*)",
+        "Bash(date:*)", "Bash(git --version)", "Bash(git fetch:*)", "Bash(gh auth status:*)",
         "Bash(gh issue list:*)", "Bash(gh issue view:*)", "Bash(gh pr list:*)", "Bash(gh pr view:*)", "Bash(gh api:*)"]
   execution:
     timeoutMinutes: 15
@@ -238,7 +281,8 @@ func waitTracked(t *testing.T, d *daemon, home, id, dir string, issue int) {
 	}
 	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
 		data, err := os.ReadFile(filepath.Join(home, "state", "executions", id+".json"))
-		if err == nil && json.Unmarshal(data, &rec) == nil && rec.Status == "running" && strings.EqualFold(rec.WorkItem, issueKey(issue)) {
+		// Any state a recovery interrupts: the session may have moved on to testing or publishing.
+		if err == nil && json.Unmarshal(data, &rec) == nil && activeStatus(rec.Status) && strings.EqualFold(rec.WorkItem, issueKey(issue)) {
 			return
 		}
 		if x := d.call("GET", "/executions/"+id, nil, 200); x["endedAt"] != nil {
@@ -246,12 +290,21 @@ func waitTracked(t *testing.T, d *daemon, home, id, dir string, issue int) {
 				runFiles(dir))
 		}
 	}
-	t.Fatalf("the record of %s on disk is %q for %q, want running for %s", id, rec.Status, rec.WorkItem, issueKey(issue))
+	t.Fatalf("the record of %s on disk is %q for %q, want an active state for %s", id, rec.Status, rec.WorkItem,
+		issueKey(issue))
+}
+
+func activeStatus(s string) bool {
+	switch s {
+	case "preparing", "running", "switching_harness", "testing", "publishing":
+		return true
+	}
+	return false
 }
 
 // restartMidRun kills the daemon while a session runs, as a crash would, then ends the session's process group, which
 // a daemon killed this way leaves running, and starts the daemon again on the same home.
-func restartMidRun(t *testing.T, d *daemon, home, claude, clone string) *daemon {
+func restartMidRun(t *testing.T, d *daemon, home, env, claude, clone string) *daemon {
 	t.Helper()
 	out, _ := exec.Command("pgrep", "-P", strconv.Itoa(d.cmd.Process.Pid)).Output()
 	var groups []int
@@ -268,7 +321,7 @@ func restartMidRun(t *testing.T, d *daemon, home, claude, clone string) *daemon 
 	for _, g := range groups {
 		_ = syscall.Kill(-g, syscall.SIGKILL)
 	}
-	d2 := startDaemon(t, home)
+	d2 := startDaemon(t, home, env)
 	useClaude(d2, claude, clone)
 	return d2
 }
