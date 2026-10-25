@@ -10,12 +10,15 @@ import { useDebounced } from "../lib/hooks";
 import type { Doc } from "../lib/taskForm";
 import { actions, getState, useStore } from "../state/store";
 import { Icon } from "./Icon";
+import { tipBelow, useTooltip } from "./Shell";
 import { TaskForm } from "./TaskForm";
 import { toast } from "./toast";
 import { Banner, Button, Chip, Tabs, cx } from "./ui";
 import { YamlEditor } from "./YamlEditor";
 
 type EditorTab = "form" | "yaml";
+
+const SAVE_SHORTCUT = "⌘S";
 
 /** Asks whether the editor may be left, discarding its unsaved changes; resolves true to leave. */
 export type LeaveCheck = () => Promise<boolean>;
@@ -53,6 +56,9 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState(false);
   const [externalSeen, setExternalSeen] = useState(false);
+  // Set on a save's entry, before `saving` renders: two ⌘S presses in one moment send one request.
+  const inFlight = useRef(false);
+  const { tipped, tooltip } = useTooltip(tipBelow);
 
   const showExternal = !!task && externalChange !== undefined && externalChange > openedAtEvent.current && !externalSeen;
 
@@ -104,6 +110,8 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
   };
 
   const save = async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setSaving(true);
     setConflict(false);
     try {
@@ -127,9 +135,27 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
         toast((err as Error).message, "danger");
       }
     } finally {
+      inFlight.current = false;
       setSaving(false);
     }
   };
+
+  // ⌘S saves as the Save button does, from either tab and any focus, the YAML editor included, whose keymap lets the
+  // key through. A modal dialog keeps the keyboard. The listener lives as long as the editor, and calls the latest save,
+  // with the document and revision of the last render. Linux and Windows would check ctrlKey.
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat) return;
+      if (e.key.toLowerCase() !== "s") return;
+      if (document.querySelector('[aria-modal="true"]')) return;
+      e.preventDefault();
+      void saveRef.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const reloadFromDisk = async () => {
     if (!task) return;
@@ -172,10 +198,18 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
           <Button variant="ghost" onClick={onClose}>
             {dirty ? t("tasks.editor.discard") : t("common.close")}
           </Button>
-          <Button variant="primary" icon="check" disabled={saving} onClick={() => void save()}>
+          <Button
+            variant="primary"
+            icon="check"
+            disabled={saving}
+            aria-keyshortcuts="Meta+S"
+            onClick={() => void save()}
+            {...tipped(t("common.save"), SAVE_SHORTCUT)}
+          >
             {saving ? t("common.saving") : t("common.save")}
           </Button>
         </div>
+        {tooltip}
       </header>
 
       {task?.running ? (
