@@ -260,6 +260,77 @@ func TestScriptStopEndsItsProcesses(t *testing.T) {
 	}
 }
 
+// A program that exits on its own leaves no background process running once the execution ends, even one that redirects
+// its output, and the log names it; the execution keeps the result the program's exit status gives.
+func TestScriptExitEndsWhatTheProgramLeft(t *testing.T) {
+	e := newEnv(t)
+	dir := t.TempDir()
+	e.createScript("leaves", fmt.Sprintf(`  script:
+    command: [/bin/sh, -c, "sleep 600 >/dev/null 2>&1 & echo $! > %s/child"]
+  execution:
+    cancelGraceSeconds: 1
+`, dir))
+	x := e.runScript("leaves", domain.StatusCompleted)
+	child := waitForPid(t, filepath.Join(dir, "child"))
+	if alive(child) {
+		t.Errorf("the background child %d survived the program's exit", child)
+	}
+	if x.Attempts[0].Outcome != domain.AttemptSucceeded || *x.Script.ExitCode != 0 {
+		t.Errorf("attempt %+v, script %+v", x.Attempts[0], x.Script)
+	}
+	events, _, _ := e.app.ExecutionEvents(x.ID, 0, 0)
+	named := false
+	for _, ev := range events {
+		named = named || ev.Type == domain.EventProcessEnded && ev.MessageKey == "process_left_ended" &&
+			fmt.Sprint(ev.Payload["pid"]) == strconv.Itoa(child) && ev.Payload["executable"] == "sleep"
+	}
+	if !named {
+		t.Errorf("the log does not name the background child %d: %+v", child, events)
+	}
+}
+
+// A program that exits on its own keeps the result its exit status gives, though a cancel comes while the process it
+// left running, which ignores SIGTERM, is ended over the grace period.
+func TestScriptExitKeepsItsResultThroughACancel(t *testing.T) {
+	e := newEnv(t)
+	dir := t.TempDir()
+	e.createScript("late", fmt.Sprintf(`  script:
+    command: [/bin/sh, -c, "(trap '' TERM; exec sleep 600) >/dev/null 2>&1 & echo $! > %[1]s/child; echo $$ > %[1]s/program"]
+  execution:
+    cancelGraceSeconds: 2
+`, dir))
+	res, err := e.app.RunTask("late")
+	if err != nil || res.Outcome != "started" {
+		t.Fatalf("run late: %v %+v", err, res)
+	}
+	child := waitForPid(t, filepath.Join(dir, "child"))
+	waitReaped(t, waitForPid(t, filepath.Join(dir, "program")))
+	if err := e.app.CancelExecution(res.ExecutionID); err != nil {
+		t.Fatal(err)
+	}
+	x := e.wait(res.ExecutionID, domain.StatusCompleted)
+	e.idle("late")
+	if x.Attempts[0].Outcome != domain.AttemptSucceeded {
+		t.Errorf("attempt %+v", x.Attempts[0])
+	}
+	if alive(child) {
+		t.Errorf("the background child %d survived the program's exit", child)
+	}
+}
+
+// waitReaped waits until the process has exited and been reaped, then a moment more, so that what waits for it has
+// seen it exit.
+func waitReaped(t *testing.T, pid int) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
+			time.Sleep(100 * time.Millisecond)
+			return
+		}
+	}
+	t.Fatalf("process %d never exited", pid)
+}
+
 func waitForPid(t *testing.T, path string) int {
 	t.Helper()
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {

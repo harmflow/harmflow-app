@@ -414,6 +414,7 @@ export const enUS = {
     task_path_refused: "{{field}} of this task is refused: {{detail}}",
     script_write_failed: "writing the inline script: {{detail}}",
     process_ended: "ended {{executable}} (pid {{pid}}), which ran outside the process group",
+    process_left_ended: "ended {{executable}} (pid {{pid}}), which the harness or program left running",
     detection_running: "detection is running",
     harness_manual_path_invalid: "the path set by hand does not exist or is not a file",
     claude_not_found: "claude was not found on PATH or in the usual install locations",

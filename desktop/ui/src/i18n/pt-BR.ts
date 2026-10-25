@@ -423,6 +423,7 @@ export const ptBR: Resources = {
     task_path_refused: "{{field}} desta tarefa foi recusado: {{detail}}",
     script_write_failed: "gravando o script inline: {{detail}}",
     process_ended: "{{executable}} (pid {{pid}}), que estava fora do grupo de processos, foi encerrado",
+    process_left_ended: "{{executable}} (pid {{pid}}), que o harness ou o programa deixou em execução, foi encerrado",
     detection_running: "a detecção está em andamento",
     harness_manual_path_invalid: "o caminho definido manualmente não existe ou não é um arquivo",
     claude_not_found: "claude não foi encontrado no PATH nem nos locais de instalação habituais",

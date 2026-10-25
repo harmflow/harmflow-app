@@ -294,12 +294,15 @@ func (r *run) runScript(ctx context.Context, deadline time.Time) (domain.Executi
 	var status domain.ExecutionStatus
 	var reason domain.Text
 	outcome := domain.AttemptFailed
+	// A program that exited on its own keeps the result its exit status gives, whatever came while what it left running
+	// was ended.
+	stopped := !proc.ExitedOnItsOwn()
 	switch {
-	case r.cancelRequested():
+	case stopped && r.cancelRequested():
 		status, reason, outcome = domain.StatusCancelled, domain.T("execution_cancelled", "cancelled"), domain.AttemptCancelled
-	case r.daemonStopping():
+	case stopped && r.daemonStopping():
 		status, reason, outcome = domain.StatusInterrupted, daemonStopped(), domain.AttemptInterrupted
-	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+	case stopped && errors.Is(ctx.Err(), context.DeadlineExceeded):
 		status, reason = domain.StatusFailed, domain.T("execution_timed_out", "the execution timeout elapsed")
 		outcome = domain.AttemptTimedOut
 	case signal == "" && exit == 0:

@@ -43,6 +43,9 @@ type run struct {
 	attempt        int
 	finalText      string // the agent's last message, the summary when the session leaves no report
 	hasContext     bool   // context.json holds parameters or history the session can use, not only the task's identity
+	// ownEnd is set while the outcome is the end of an attempt whose harness exited on its own: a daemon that began
+	// stopping while what it left running was ended does not make that outcome interrupted.
+	ownEnd bool
 }
 
 func (a *App) launch(x *domain.Execution, h *runHandle) {
@@ -138,7 +141,7 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 	})
 	if status == "" {
 		status, reason = r.outcomeFromReport()
-	} else if r.daemonStopping() && !r.cancelRequested() {
+	} else if r.daemonStopping() && !r.cancelRequested() && !r.ownEnd {
 		// A daemon that stops never continues the execution: it is interrupted.
 		status, reason = domain.StatusInterrupted, daemonStopped()
 	}
@@ -389,6 +392,7 @@ func (r *run) attempts(ctx context.Context, start func(harness string) error) (d
 	var prev []previousAttempt
 	started := false
 	for {
+		r.ownEnd = false
 		if r.cancelRequested() {
 			return domain.StatusCancelled, domain.T("execution_cancelled", "cancelled")
 		}
@@ -660,8 +664,11 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 	if raw != nil {
 		r.closeRaw(raw)
 	}
-	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded) && !r.cancelRequested()
-	end := parser.Finish(proc.ExitCode(), proc.StderrTail(), timedOut, r.cancelRequested())
+	// A harness that exited on its own keeps the outcome its exit gives, whatever came while what it left ran was ended.
+	r.ownEnd = proc.ExitedOnItsOwn()
+	stopped := !r.ownEnd
+	timedOut := stopped && errors.Is(ctx.Err(), context.DeadlineExceeded) && !r.cancelRequested()
+	end := parser.Finish(proc.ExitCode(), proc.StderrTail(), timedOut, stopped && r.cancelRequested())
 	// Its final text and error quote the harness, and the next attempt's context and the summary quote them in turn.
 	eventlog.RedactFields(&end)
 	r.endAttempt(end, proc.ExitCode())

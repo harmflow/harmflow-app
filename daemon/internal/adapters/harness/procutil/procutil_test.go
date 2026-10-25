@@ -275,16 +275,18 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
-// waitForPid reads the pid the harness's tree wrote to path, and knows the process by it and its start time. The
-// process is killed when the test ends, whatever the test found.
+// waitForPid reads the pid the harness's tree wrote to path, and knows the process by it and its start time; with p
+// given, the harness must not exit first. The process is killed when the test ends, whatever the test found.
 func waitForPid(t *testing.T, p *Process, path string) ident {
 	t.Helper()
 	var id ident
 	waitFor(t, "a pid in "+filepath.Base(path), func() bool {
-		select {
-		case <-p.Done():
-			t.Fatalf("the harness exited first, exit %d: %q", p.ExitCode(), p.StderrTail())
-		default:
+		if p != nil {
+			select {
+			case <-p.Done():
+				t.Fatalf("the harness exited first, exit %d: %q", p.ExitCode(), p.StderrTail())
+			default:
+			}
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -457,5 +459,63 @@ func TestWaitIsBoundedWhileAStrayKeepsTheOutput(t *testing.T) {
 	}
 	if len(lines) == 0 || lines[0] != "started" {
 		t.Errorf("stdout lines: %v", lines)
+	}
+}
+
+// A harness that exits on its own leaves no process running once Wait returns, even a background one that redirects
+// its output and so holds nothing up. It is named as one the harness left running, in its group; the harness, which
+// exited by itself, is not named.
+func TestWaitEndsWhatTheHarnessLeftRunning(t *testing.T) {
+	needProcessTable(t)
+	pidFile := t.TempDir() + "/left.pid"
+	p := startShell(t, `sleep 300 >/dev/null 2>&1 & echo $! > "$1"; echo done`, testEnv(), executionID(t), nil, pidFile)
+	<-p.Done()
+	left := waitForPid(t, nil, pidFile)
+	p.Wait(context.Background(), 300*time.Millisecond)
+	if running(left) {
+		t.Errorf("the background process %d the harness left survived Wait", left.pid)
+	}
+	if e, ok := endedOne(p.Ended(), left.pid); !ok || e.Executable != "sleep" || !e.LeftRunning || e.OutsideGroup {
+		t.Errorf("ended %+v, want pid %d, sleep, left running, in the group", p.Ended(), left.pid)
+	}
+	if _, ok := endedOne(p.Ended(), p.Pid()); ok {
+		t.Errorf("ended %+v names the harness %d, which exited by itself", p.Ended(), p.Pid())
+	}
+}
+
+// Once the harness has exited on its own, launchd has adopted what it left in a session of its own, so no snapshot of
+// its descendants finds it. One that carries the execution's id is found by the scan and ended, after the grace period
+// since it ignores SIGTERM; the test binary stands in for it, as its environment can be read. One that cleared the id
+// survives, as EndTree's known limit says.
+func TestWaitAfterTheHarnessExitedEndsOnlyWhatCarriesTheID(t *testing.T) {
+	needProcessTable(t)
+	id := executionID(t)
+	dir := t.TempDir()
+	daemonFile, strayFile := dir+"/daemon.pid", dir+"/stray.pid"
+	env := testEnv(executionIDVariable+"="+id, helperVariable+"=daemonize", "PROCUTIL_PIDFILE="+daemonFile)
+	// The stray leaves the group and the session, and clears the execution's id, before it becomes sleep: macOS hides an
+	// Apple platform binary's environment only while System Integrity Protection is on, which a CI host may turn off.
+	script := `"$1"; perl -e 'use POSIX; POSIX::setsid() or die; open STDOUT, ">/dev/null"; open STDERR, ">/dev/null"; ` +
+		`open F, ">", "$ARGV[0].tmp"; print F $$; close F; rename "$ARGV[0].tmp", $ARGV[0]; ` +
+		`delete $ENV{HARMFLOW_EXECUTION_ID}; exec "sleep", "300"' "$2" & echo done`
+	p := startShell(t, script, env, id, nil, os.Args[0], strayFile)
+	<-p.Done()
+	daemon := waitForPid(t, nil, daemonFile)
+	stray := waitForPid(t, nil, strayFile)
+	waitFor(t, "launchd to adopt the daemon and the stray, running sleep in a session of its own", func() bool {
+		d, dok := processInfo(daemon.pid)
+		s, sok := processInfo(stray.pid)
+		return dok && d.ppid == 1 && sok && s.ppid == 1 && s.name == "sleep" && s.pgid == stray.pid
+	})
+	p.Wait(context.Background(), 300*time.Millisecond)
+	if running(daemon) {
+		t.Errorf("the daemon %d that carries the execution's id survived Wait", daemon.pid)
+	}
+	if e, ok := endedOne(p.Ended(), daemon.pid); !ok || !e.LeftRunning || !e.OutsideGroup {
+		t.Errorf("ended %+v, want pid %d, left running, outside the group", p.Ended(), daemon.pid)
+	}
+	if !running(stray) {
+		t.Errorf("the stray %d was ended, though nothing can find it: EndTree's known limit no longer says what survives",
+			stray.pid)
 	}
 }

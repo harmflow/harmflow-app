@@ -839,6 +839,7 @@ components:
         - script_start_failed
         - script_write_failed
         - process_ended
+        - process_left_ended
         - task_path_refused
         # Harness and tool diagnostics
         - detection_running

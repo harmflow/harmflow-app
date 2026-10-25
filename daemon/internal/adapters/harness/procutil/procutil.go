@@ -1,6 +1,7 @@
 // Package procutil runs one harness process in its own process group, streams its stdout line by line, keeps the
-// tail of its stderr, and on cancellation ends every process the harness started, inside its group or not: a graceful
-// SIGTERM, then SIGKILL after the grace period, so no orphan survives.
+// tail of its stderr, and on cancellation, or once the harness exits on its own, ends every process the harness started
+// that still runs, inside its group or not: a graceful SIGTERM, then SIGKILL after the grace period, so no orphan
+// survives.
 package procutil
 
 import (
@@ -28,15 +29,19 @@ const outputDelay = 2 * time.Second
 
 // Process is a started invocation, in a process group of its own, with its exit status and the tail of its stderr.
 type Process struct {
-	cmd      *exec.Cmd
-	tree     Tree
+	cmd  *exec.Cmd
+	tree Tree
+	// exited is closed once the process has exited and been reaped, whatever its output.
+	exited   chan struct{}
 	done     chan struct{}
 	exitCode int
 	signal   string
 	stderr   *tail
 	mu       sync.Mutex
 	stopping bool
-	ended    []Ended
+	// exitedOnItsOwn is set when the process had exited before Stop began, so Stop's signals did not end it.
+	exitedOnItsOwn bool
+	ended          []Ended
 }
 
 // Start launches the invocation; onLine receives each stdout line, raw receives stdout and stderr verbatim.
@@ -87,7 +92,7 @@ func StartLines(inv ports.Invocation, raw io.Writer, onStdout, onStderr func([]b
 		return nil, err
 	}
 	pid := cmd.Process.Pid
-	p := &Process{cmd: cmd, done: make(chan struct{}), stderr: &tail{max: 64 * 1024},
+	p := &Process{cmd: cmd, exited: make(chan struct{}), done: make(chan struct{}), stderr: &tail{max: 64 * 1024},
 		tree: Tree{Pid: pid, Group: pid, ExecutionID: inv.ExecutionID}}
 	// Read before Wait can reap the process, while its pid is surely its own.
 	if start, err := startTime(pid); err == nil {
@@ -133,6 +138,7 @@ func StartLines(inv ports.Invocation, raw io.Writer, onStdout, onStderr func([]b
 	}()
 	go func() {
 		_ = cmd.Wait() // how the process ended is read from cmd.ProcessState below
+		close(p.exited)
 		select {
 		case <-drained:
 		case <-time.After(outputDelay):
@@ -285,6 +291,7 @@ func (p *Process) Pid() int {
 }
 
 // Stop ends the process and every process it started, with EndTree: SIGTERM, then SIGKILL after the grace period.
+// Once the process has exited on its own, what it ends is what the process left running.
 func (p *Process) Stop(grace time.Duration) {
 	p.mu.Lock()
 	if p.stopping {
@@ -292,31 +299,52 @@ func (p *Process) Stop(grace time.Duration) {
 		return
 	}
 	p.stopping = true
+	select {
+	case <-p.exited:
+		p.exitedOnItsOwn = true
+	default:
+	}
+	left := p.exitedOnItsOwn
 	p.mu.Unlock()
 	if p.tree.Pid == 0 {
 		return
 	}
 	ended := EndTree(p.tree, grace)
+	for i := range ended {
+		ended[i].LeftRunning = left
+	}
 	p.mu.Lock()
 	p.ended = ended
 	p.mu.Unlock()
 }
 
-// Ended lists the processes Stop ended, the harness among them, for the execution's log.
+// ExitedOnItsOwn reports whether the process had exited before Stop began, so that Stop ended only what it left
+// running. A cancel or a timeout that came while Stop did that did not end the process, which keeps the outcome its own
+// exit gives.
+func (p *Process) ExitedOnItsOwn() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.exitedOnItsOwn
+}
+
+// Ended lists the processes Stop ended, for the execution's log: the harness among them when Stop ended it, and
+// otherwise only what it left running.
 func (p *Process) Ended() []Ended {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.ended
 }
 
-// Wait waits for the end or for the context; on the context's end the process is stopped with the grace period.
+// Wait waits for the process to exit, or for the context's end, which stops it. Either way it then ends with Stop every
+// process the harness started that still runs, the grace period applying to them, so none outlives the attempt; it
+// returns once that is done and the output has ended.
 func (p *Process) Wait(ctx context.Context, grace time.Duration) {
 	select {
-	case <-p.done:
+	case <-p.exited:
 	case <-ctx.Done():
-		p.Stop(grace)
-		<-p.done
 	}
+	p.Stop(grace)
+	<-p.done
 }
 
 type tail struct {

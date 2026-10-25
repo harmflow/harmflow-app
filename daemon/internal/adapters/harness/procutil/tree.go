@@ -26,6 +26,9 @@ type Ended struct {
 	// OutsideGroup is set for a process that was not in the harness's process group, which a signal to the group
 	// would have missed.
 	OutsideGroup bool
+	// LeftRunning is set for a process the harness left running when it exited on its own. Process.Stop sets it;
+	// EndTree, which cannot tell how the harness ended, never does.
+	LeftRunning bool
 }
 
 const (
@@ -54,7 +57,10 @@ const executionIDVariable = "HARMFLOW_EXECUTION_ID"
 //
 // Known limit: on macOS, KERN_PROCARGS2 returns no environment for Apple platform binaries, such as /bin/sh or
 // /usr/bin/ssh. Such a process, or one that cleared the variable, survives once it has daemonized, since then neither
-// the snapshot nor the scan finds it.
+// the snapshot nor the scan finds it. The limit is larger once the harness has exited on its own: launchd has adopted
+// every process it left, so the snapshot finds none of them, and such a process survives once it has left the
+// harness's group, as Claude Code runs each Bash tool command in a session of its own, unless it descends from a process
+// found. No snapshot is taken while the harness runs.
 func EndTree(t Tree, grace time.Duration) []Ended {
 	if _, err := processTable(); err != nil || t.Pid <= 1 || t.Start.IsZero() {
 		endGroup(t.Group, grace)

@@ -1867,6 +1867,53 @@ func TestFailoverCostsReportedAndEstimated(t *testing.T) {
 	sameEvents(t, id+".jsonl", throughCompletion(t, id+".jsonl", jsonl), throughCompletion(t, "the replay", events))
 }
 
+// A harness that exits on its own with a quota failure leaves a background process that redirects its output, and the
+// execution fails over. The process is ended before the second attempt starts, and the log names it as left running.
+func TestFailoverEndsWhatTheFirstAttemptLeft(t *testing.T) {
+	d := startDaemon(t, t.TempDir())
+	d.call("POST", "/tasks", map[string]any{"yaml": task("leftover", "SCENARIO=leftover",
+		"    fallback:\n      candidates:\n        - provider: codex\n  execution:\n    cancelGraceSeconds: 1\n")}, 201)
+	run := d.call("POST", "/tasks/leftover/run", nil, 202)
+	id := run["executionId"].(string)
+	x := d.waitStatus(id, "completed", "failed")
+	left := readPid(t, filepath.Join(x["executionDir"].(string), "leftover.pid"))
+	t.Cleanup(func() {
+		if !gone(left) {
+			_ = syscall.Kill(left, syscall.SIGKILL)
+		}
+	})
+	attempts := x["attempts"].([]any)
+	if x["status"] != "completed" || len(attempts) != 2 {
+		t.Fatalf("status %v attempts %v error %v", x["status"], attempts, x["errorMessage"])
+	}
+	if a1 := attempts[0].(map[string]any); a1["harness"] != "claude-code" || a1["outcome"] != "quota_exhausted" {
+		t.Errorf("attempt 1 %v", a1)
+	}
+	if !gone(left) {
+		t.Errorf("the background process %d the first attempt left survived the execution", left)
+	}
+	// The ended process is named before the second harness starts: the daemon names only a process it saw gone.
+	var order []string
+	for _, raw := range d.waitEvent(id, "execution.completed")["events"].([]any) {
+		ev := raw.(map[string]any)
+		p, _ := ev["payload"].(map[string]any)
+		msg, _ := ev["message"].(string)
+		switch {
+		case ev["type"] == "harness.started":
+			order = append(order, "harness.started")
+		case ev["type"] == "process.ended" && p["pid"] == float64(left):
+			if p["executable"] != "sleep" || ev["messageKey"] != "process_left_ended" ||
+				!strings.Contains(msg, "sleep (pid "+strconv.Itoa(left)+")") {
+				t.Errorf("the log names the background process as %v", ev)
+			}
+			order = append(order, "process.ended")
+		}
+	}
+	if strings.Join(order, ",") != "harness.started,process.ended,harness.started" {
+		t.Errorf("the log's order: %v, want the background process ended between the two harnesses", order)
+	}
+}
+
 // tokensOf is the first model's token counts of an attempt's usage.
 func tokensOf(usage map[string]any) map[string]any {
 	models, _ := usage["models"].([]any)
