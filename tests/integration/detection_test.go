@@ -119,9 +119,9 @@ func neverStarted(t *testing.T, x map[string]any, name string) {
 	}
 }
 
-// FS-004 FR-002, AC-003 (harmflow-app#68): the daemon never installs, updates, or signs in a harness. Detecting a
-// signed-out Claude Code and a Codex below the minimum, and running a task on each, invokes only the probes; each
-// execution fails without starting, and the inventory says why.
+// harmflow-app#68: the daemon never installs, updates, or signs in a harness. Detecting a signed-out Claude Code and a
+// Codex below the minimum, and running a task on each, invokes only the probes; each execution fails without starting,
+// and the inventory says why.
 func TestDetectionOnlyProbes(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	claude := standIn(t, "fake-claude", "claude", `auth) echo '{"loggedIn": true}'; exit 0 ;;`,
@@ -152,8 +152,7 @@ func TestDetectionOnlyProbes(t *testing.T) {
 	}
 }
 
-// FS-004 FR-002, AC-003 (harmflow-app#68): with ready harnesses, the daemon invokes each one for its probes and its
-// runs, and for nothing else.
+// harmflow-app#68: with ready harnesses, the daemon invokes each one for its probes and its runs, and for nothing else.
 func TestReadyHarnessesOnlyProbeAndRun(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	claude, codex := standIn(t, "fake-claude", "claude"), standIn(t, "fake-codex", "codex")
@@ -181,8 +180,8 @@ func TestReadyHarnessesOnlyProbeAndRun(t *testing.T) {
 	}
 }
 
-// FS-004 FR-006, AC-007 (harmflow-app#68): a signed-out harness is detected, at its version, with an invalid sign-in:
-// not ready, and the diagnostic says to sign in.
+// harmflow-app#68: a signed-out harness is detected, at its version, with an invalid sign-in: not ready, and the
+// diagnostic says to sign in.
 func TestSignedOutHarnessIsNotReady(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	cases := []struct {
@@ -209,8 +208,7 @@ func TestSignedOutHarnessIsNotReady(t *testing.T) {
 	}
 }
 
-// FS-004 FR-001, FR-006, AC-007 (harmflow-app#68): the inventory names a path set by hand as such, and a run uses that
-// file.
+// harmflow-app#68: the inventory names a path set by hand as such, and a run uses that file.
 func TestManualPathIsTheOneRun(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	claude := standIn(t, "fake-claude", "claude")
@@ -227,8 +225,8 @@ func TestManualPathIsTheOneRun(t *testing.T) {
 	}
 }
 
-// FS-004 FR-007, AC-008 (harmflow-app#68): the inventory never carries a credential, even when a sign-in probe prints
-// one on its output or its error stream.
+// harmflow-app#68: the inventory never carries a credential, even when a sign-in probe prints one on its output or its
+// error stream.
 func TestInventoryCarriesNoCredential(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	// Built here, so no token-shaped literal is in the repository.
@@ -255,8 +253,8 @@ func TestInventoryCarriesNoCredential(t *testing.T) {
 	}
 }
 
-// FS-004 FR-008, AC-009 (harmflow-app#68): a version below the minimum is not ready, and a task on it never starts; an
-// untested newer version is ready, and each run on it records one warning naming the version.
+// harmflow-app#68: a version below the minimum is not ready, and a task on it never starts; an untested newer version
+// is ready, and each run on it records one warning naming the version.
 func TestVersionsOutsideTheTestedRange(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	claude := standIn(t, "fake-claude", "claude", "--permission-mode <mode>  ", "")

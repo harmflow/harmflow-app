@@ -1,6 +1,6 @@
 // The Costs tab's arithmetic (harmflow-app#39): each attempt's tokens and estimated cost as the daemon recorded them,
 // their sum across a failover, and the receipt's lines — tokens × price = amount. The daemon sends numbers and enums
-// only (D-099); every word is the tab's.
+// only; every word is the tab's.
 import type { Attempt } from "../api/types";
 
 /** The token classes of the summary; a receipt splits cache writes by lifetime, which are priced apart. */
@@ -34,7 +34,7 @@ export interface AttemptCost {
   source: FigureSource;
   /**
    * The model that priced the attempt: the harness's full id, or the model the attempt's harness reported when the
-   * usage names none; undefined when neither names one, never the configured value (D-105).
+   * usage names none; undefined when neither names one, never the configured value.
    */
   model?: string;
   modelSource?: Usage["modelSource"];

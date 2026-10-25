@@ -1,5 +1,5 @@
 // Package app holds the daemon's use cases: tasks, scheduling, executions, failover, recovery, notifications, and
-// settings. It orchestrates only; what a task does lives in its prompt, agents, and skills (ADR-013).
+// settings. It orchestrates only; what a task does lives in its prompt, agents, and skills.
 package app
 
 import (
@@ -46,7 +46,7 @@ func newError(code string, text domain.Text) *Error {
 	return &Error{Code: code, Text: text}
 }
 
-// Paths are the directories of one installation (architecture/configuration-layout.md).
+// Paths are the directories of one installation.
 type Paths struct {
 	Home        string
 	Tasks       string
@@ -100,7 +100,7 @@ type Deps struct {
 	Tools      ports.ToolProber
 	// HarnessEnv is the environment harness processes, and script tasks' programs, start with.
 	HarnessEnv []string
-	// OS is this machine's operating system, as a script task names it (FS-013 FR-014); the running one when empty.
+	// OS is this machine's operating system, as a script task names it; the running one when empty.
 	OS string
 	// TickInterval is how often the scheduler looks for due firings.
 	TickInterval time.Duration
@@ -266,7 +266,7 @@ func (a *App) Start(ctx context.Context) error {
 	a.emit(domain.Event{Type: domain.EventDaemonStarted, Payload: map[string]any{"version": a.d.Version, "pid": os.Getpid()}}.Says(
 		domain.T("daemon_started", "HarmFlow daemon {{version}} started", "version", a.d.Version)))
 	a.mu.Lock()
-	a.unavailableUntil = a.now() // the daemon was down until now (D-080)
+	a.unavailableUntil = a.now() // the daemon was down until now
 	a.mu.Unlock()
 	a.wg.Add(3)
 	go a.schedulerLoop(ctx)
@@ -277,7 +277,7 @@ func (a *App) Start(ctx context.Context) error {
 }
 
 // Stop ends the loops and the harness detection Start launched, and interrupts running executions: a stopped daemon
-// never continues them (D-089). The detection ends before the daemon announces that it stops, so no harness check is
+// never continues them. The detection ends before the daemon announces that it stops, so no harness check is
 // recorded after that.
 func (a *App) Stop(reason domain.Text) {
 	a.stopOnce.Do(func() {
@@ -317,7 +317,7 @@ func (a *App) Stop(reason domain.Text) {
 	})
 }
 
-// RequestShutdown asks main to stop the daemon; with running executions it needs force (FS-010 FR-008).
+// RequestShutdown asks main to stop the daemon; with running executions it needs force.
 func (a *App) RequestShutdown(force bool) error {
 	a.mu.Lock()
 	n := 0
@@ -384,7 +384,7 @@ func (a *App) Subscribe(after int64) (<-chan domain.Event, bool, func()) {
 }
 
 // ExecutionEvents returns the stored events of an execution after the id after, at most limit when it is positive, and
-// whether retention deleted its log (D-073); an unknown execution is CodeNotFound.
+// whether retention deleted its log; an unknown execution is CodeNotFound.
 func (a *App) ExecutionEvents(id string, after int64, limit int) ([]domain.Event, bool, error) {
 	a.mu.Lock()
 	_, ok := a.executions[id]

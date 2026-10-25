@@ -1,5 +1,5 @@
 // Command coverage reads the daemon's coverage profile — the unit and integration data make coverage-daemon merges —
-// and prints, per Go package, the statements its tests reach beside the package's floor (ADR-015). It fails when a
+// and prints, per Go package, the statements its tests reach beside the package's floor. It fails when a
 // package reads below its floor, unless -hold=false, which only names it: the nightly report reads main that way. It
 // never adds packages up: each is read, and held, on its own.
 //

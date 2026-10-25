@@ -1,5 +1,5 @@
-// The dashboard's view of the daemon. The daemon decides and the dashboard asks (CONTEXT.md): everything here is
-// fetched from the local API or derived from its events, and recovered after any reconnection (FS-008 FR-003).
+// The dashboard's view of the daemon. The daemon decides and the dashboard asks: everything here is fetched from the
+// local API or derived from its events, and recovered after any reconnection.
 import { useSyncExternalStore } from "react";
 import { api } from "../api/client";
 import { native } from "../api/native";
@@ -203,7 +203,7 @@ export const actions = {
     return detail;
   },
 
-  /** Loads the stored events of an execution after the last one already held (replay, FS-008 FR-002). */
+  /** Loads the stored events of an execution after the last one already held (replay). */
   async loadEvents(id: string) {
     const held = state.events[id] ?? [];
     const after = held.length ? held[held.length - 1].id : 0;
@@ -278,7 +278,7 @@ function handleEvent(e: HarmflowEvent) {
   if (family === "task" || (family === "execution" && e.type !== "execution.status_changed")) {
     debounce("tasks", () => void actions.refreshTasks(), 400);
   }
-  // A check ended: read the inventory again, without detecting again, which would announce another check (FS-004 FR-007).
+  // A check ended: read the inventory again, without detecting again, which would announce another check.
   if (e.type === "harness.checked") {
     debounce("harnesses", () => void actions.refreshHarnesses());
   }

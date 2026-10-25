@@ -15,7 +15,7 @@ func mustLoc(t *testing.T, name string) *time.Location {
 	return l
 }
 
-// FS-002 AC-011: a 5-field cron and a 30-minute interval are accepted; a 6-field cron with seconds is rejected.
+// A 5-field cron and a 30-minute interval are accepted; a 6-field cron with seconds is rejected.
 func TestScheduleFormats(t *testing.T) {
 	if _, err := ParseSchedule(Schedule{Cron: "0 9 * * 1-5"}, time.UTC); err != nil {
 		t.Fatalf("5-field cron rejected: %v", err)
@@ -37,7 +37,7 @@ func TestScheduleFormats(t *testing.T) {
 	}
 }
 
-// FS-002 AC-009: the task's time zone governs; no time zone means the system's.
+// The task's time zone governs; no time zone means the system's.
 func TestTimeZoneGoverns(t *testing.T) {
 	sp := mustLoc(t, "America/Sao_Paulo")
 	withTZ, _ := ParseSchedule(Schedule{Cron: "0 9 * * *", Timezone: "America/Sao_Paulo"}, time.UTC)
@@ -52,8 +52,7 @@ func TestTimeZoneGoverns(t *testing.T) {
 	}
 }
 
-// FS-002 AC-010: a skipped local time fires once at the next valid time; a repeated one fires once, at its first
-// occurrence.
+// A skipped local time fires once at the next valid time; a repeated one fires once, at its first occurrence.
 func TestDaylightSaving(t *testing.T) {
 	ny := mustLoc(t, "America/New_York")
 	// 2026-03-08: clocks jump from 02:00 to 03:00 in New York.

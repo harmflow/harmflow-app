@@ -1,5 +1,5 @@
-// The first and priority screen (D-037): every active execution at once, the selected one in detail, the queue and
-// the recent history beside them (FS-008 FR-001 to FR-004).
+// The first and priority screen: every active execution at once, the selected one in detail, the queue and the recent
+// history beside them.
 import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { isActive } from "../api/types";

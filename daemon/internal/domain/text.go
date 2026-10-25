@@ -6,8 +6,8 @@ import (
 )
 
 // Text is a text the daemon writes for the user. The daemon writes en-US only: Key and Params let the desktop show it
-// in the interface's language, and Message is the en-US text, kept as the fallback (FS-012 FR-005). The agent's text,
-// tool output, and a tool's own error get no key; a Text that quotes one carries it in a param, as it is.
+// in the interface's language, and Message is the en-US text, kept as the fallback. The agent's text, tool output, and
+// a tool's own error get no key; a Text that quotes one carries it in a param, as it is.
 type Text struct {
 	Key      string            `json:"messageKey,omitempty"`
 	Params   map[string]string `json:"params,omitempty"`

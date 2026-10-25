@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // Drives the import dialog against a stand-in for the daemon: a script task's program is shown before anything is
-// saved, and only a second click imports it (FS-013 SEC-001, AC-016).
+// saved, and only a second click imports it.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";

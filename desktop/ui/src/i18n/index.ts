@@ -23,7 +23,7 @@ declare module "i18next" {
   }
 }
 
-/** The operating system's language when it is official, en-US otherwise (FS-012 FR-004). */
+/** The operating system's language when it is official, en-US otherwise. */
 export function systemLanguage(candidates: readonly string[] = navigatorLanguages()): Language {
   for (const tag of candidates) {
     const lower = tag.toLowerCase();
@@ -46,7 +46,7 @@ export function resolveLanguage(setting: string | undefined): Language {
 
 const STORAGE_KEY = "harmflow.language";
 
-/** Applies a language at once, with no restart (FS-012 FR-002). */
+/** Applies a language at once, with no restart. */
 export function applyLanguage(setting: string | undefined): Language {
   const lang = resolveLanguage(setting);
   if (i18n.language !== lang) void i18n.changeLanguage(lang);

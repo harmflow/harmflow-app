@@ -29,8 +29,8 @@ func (d *daemon) refusal(method, path string, body any) (string, string) {
 	return key, field
 }
 
-// FS-009 AC-005, FR-014 (D-113, harmflow-app#77): a payload carrying a path or a program the rule refuses gets 422
-// naming its field, and nothing changes: the harness inventory's state, the task files, and the Settings read as before.
+// harmflow-app#77: a payload carrying a path or a program the rule refuses gets 422 naming its field, and nothing
+// changes: the harness inventory's state, the task files, and the Settings read as before.
 func TestPathsInRequestsAreChecked(t *testing.T) {
 	home := t.TempDir()
 	d := startDaemon(t, home)
@@ -52,7 +52,7 @@ func TestPathsInRequestsAreChecked(t *testing.T) {
 			"path_forbidden_home", "/spec/workspace/path"},
 		// Not created: it resolves through the home folder, which exists, into ~/Library.
 		{"a local path whose .. leads into ~/Library", "POST", "/tasks", map[string]any{"yaml": issueTask("dotdot",
-			"~/harmflow-e3-not-created/../Library/Application Support")}, "path_forbidden_place",
+			"~/harmflow-not-created/../Library/Application Support")}, "path_forbidden_place",
 			"/spec/githubIssueImplementation/repositories/0/localPath"},
 		{"a relative program", "POST", "/tasks", map[string]any{"yaml": scriptTask("relative",
 			"  script:\n    command: [./run.sh]\n")}, "script_program_relative", "/spec/script/command/0"},

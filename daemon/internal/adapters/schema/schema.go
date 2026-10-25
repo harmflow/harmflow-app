@@ -1,5 +1,5 @@
 // Package schema validates task documents, execution reports, and events against the embedded copies of
-// contracts/schemas, and locates each problem in the YAML by line and column (FS-001 FR-007, FR-011).
+// contracts/schemas, and locates each problem in the YAML by line and column.
 package schema
 
 import (
@@ -154,8 +154,7 @@ func (v *Validator) ValidateReport(doc any) []Issue {
 	return collect(v.report.Validate(doc), nil)
 }
 
-// ValidateEvent checks an event, decoded from the JSON its log line or SSE frame carries, against event.schema.json
-// (FS-008 FR-007).
+// ValidateEvent checks an event, decoded from the JSON its log line or SSE frame carries, against event.schema.json.
 func (v *Validator) ValidateEvent(doc any) []Issue {
 	return collect(v.event.Validate(doc), nil)
 }

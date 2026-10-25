@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // Drives the task form in a DOM, against a stand-in for the daemon's local API. Its schedule preview asks for the
-// occurrences in the task's time zone and lists them in that zone, not the host's (FS-002 FR-002, AC-003). The
+// occurrences in the task's time zone and lists them in that zone, not the host's. The
 // daemon's own computation of the occurrences is itest › TestTaskLifecycle's.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -71,7 +71,7 @@ async function open(doc: Doc, mode: "create" | "edit" = "edit") {
 const listed = () => [...host!.querySelectorAll(".preview__list li")].map((li) => li.textContent ?? "");
 
 describe("task form schedule preview", () => {
-  it("lists each occurrence in the task's time zone, not the host's (FS-002 AC-003)", async () => {
+  it("lists each occurrence in the task's time zone, not the host's", async () => {
     expect(Intl.DateTimeFormat().resolvedOptions().timeZone).toBe("UTC");
     expect(new Date("2026-10-23T12:00:00Z").getHours()).toBe(12);
 
@@ -98,8 +98,8 @@ describe("task form schedule preview", () => {
   });
 });
 
-// The type is chosen in the template picker and fixed from then on; the form shows it and follows it (FS-001 FR-001,
-// FR-020). The daemon's refusal of a changed type is app › TestUpdateKeepsTheType's.
+// The type is chosen in the template picker and fixed from then on; the form shows it and follows it. The daemon's
+// refusal of a changed type is app › TestUpdateKeepsTheType's.
 describe("task form type", () => {
   const typeInput = () =>
     [...host!.querySelectorAll("label.field")]

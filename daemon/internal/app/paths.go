@@ -9,7 +9,7 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 )
 
-// pathIssue is a field of a task that breaks the path rule of D-113.
+// pathIssue is a field of a task that breaks the path rule.
 type pathIssue struct {
 	path string
 	text domain.Text
@@ -57,7 +57,7 @@ func (a *App) allowedFolder(f string) (string, error) {
 }
 
 // writablePath expands p, resolves it, and checks it against the rule: what a workspace, a repository's local path, or
-// a writable path of a custom profile becomes, and the path the harness is given (FS-009 FR-014).
+// a writable path of a custom profile becomes, and the path the harness is given.
 func (e pathEnv) writablePath(a *App, p string) (string, error) {
 	expanded, err := domain.ExpandPath(p, a.d.Paths.UserHome, e.vars, os.Getenv)
 	if err != nil {
@@ -74,7 +74,7 @@ func (e pathEnv) writablePath(a *App, p string) (string, error) {
 }
 
 // taskPathIssues checks the paths of doc that let a harness write, whatever its permission profile, and the form of a
-// script's program and working directory (D-113, FS-009 FR-014). A path whose variables are undefined is skipped: its
+// script's program and working directory. A path whose variables are undefined is skipped: its
 // own warning says so, and the check runs once it expands. The daemon's own workspace, used when a task sets none, is
 // not checked.
 func (a *App) taskPathIssues(doc domain.TaskDocument, e pathEnv) []pathIssue {
@@ -138,7 +138,7 @@ func newPathIssues(before, after []pathIssue) []pathIssue {
 }
 
 // refusedPath is why an execution does not start: a path of its task that now breaks the rule, found when it starts,
-// so a symlink retargeted after saving does not lead out (FS-009 FR-014).
+// so a symlink retargeted after saving does not lead out.
 func refusedPath(is pathIssue) domain.Text {
 	return domain.T("task_path_refused", "{{field}} of this task is refused: {{detail}}", "field", is.path).
 		Nest("detail", is.text)

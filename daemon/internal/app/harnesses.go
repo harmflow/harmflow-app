@@ -14,9 +14,8 @@ import (
 
 type schemaIssue = schema.Issue
 
-// Harnesses returns the inventory in a stable order (FS-004 FR-007). Credentials are never part of it. A harness whose
-// first check is still running is checking, never not installed; a later check keeps the previous result until the new
-// one lands (FS-004 FR-006, D-102).
+// Harnesses returns the inventory in a stable order. Credentials are never part of it. A harness whose first check is
+// still running is checking, never not installed; a later check keeps the previous result until the new one lands.
 func (a *App) Harnesses() []ports.HarnessInfo {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -58,9 +57,9 @@ func (a *App) refreshHarnessesAsync(ctx context.Context) {
 	}
 }
 
-// detect revalidates one harness and stores what it found, including the resolved path (FS-004 FR-006), then
-// announces it, so the dashboard reads the inventory again (FS-004 FR-007). A detection whose ctx ended, or that ends
-// once the daemon is stopping, is neither stored nor announced: it was cut short, and the inventory keeps what it had.
+// detect revalidates one harness and stores what it found, including the resolved path, then announces it, so the
+// dashboard reads the inventory again. A detection whose ctx ended, or that ends once the daemon is stopping, is
+// neither stored nor announced: it was cut short, and the inventory keeps what it had.
 func (a *App) detect(ctx context.Context, id string) ports.HarnessInfo {
 	ad := a.adapters[id]
 	a.mu.Lock()
@@ -96,8 +95,8 @@ func (a *App) harnessInfo(ctx context.Context, id string) ports.HarnessInfo {
 	return a.detect(ctx, id)
 }
 
-// SetHarnessPath chooses an installation or a path set by hand; an empty path returns to detection (FS-004 FR-001). A
-// path set by hand must be an executable file whose --version output names the harness, or nothing is saved (D-113).
+// SetHarnessPath chooses an installation or a path set by hand; an empty path returns to detection. A
+// path set by hand must be an executable file whose --version output names the harness, or nothing is saved.
 func (a *App) SetHarnessPath(ctx context.Context, id string, path *string) (ports.HarnessInfo, error) {
 	ad, ok := a.adapters[id]
 	if !ok {

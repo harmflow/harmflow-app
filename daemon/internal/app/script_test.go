@@ -98,8 +98,8 @@ func issueAt(issues []schemaIssue, path string) *schemaIssue {
 	return nil
 }
 
-// FS-013 AC-001: a script task validates with no prompt and no harness, and one that sets a prompt is rejected with an
-// error naming it; command and inline are one or the other.
+// A script task validates with no prompt and no harness, and one that sets a prompt is rejected with an error naming
+// it; command and inline are one or the other.
 func TestScriptTaskValidates(t *testing.T) {
 	e := newEnv(t)
 	r := e.app.Validate(t.Context(), TaskInput{YAML: scriptYAML("plain", "  script:\n    command: [/bin/echo, hi]\n")})
@@ -127,8 +127,8 @@ func TestScriptTaskValidates(t *testing.T) {
 	}
 }
 
-// FS-013 AC-002, AC-006, AC-007: an argument list runs with no shell, the exit status decides the result, and an
-// execution has one attempt and no harness.
+// An argument list runs with no shell, the exit status decides the result, and an execution has one attempt and no
+// harness.
 func TestScriptRunsAndTheExitStatusDecides(t *testing.T) {
 	e := newEnv(t)
 	e.createScript("echo", "  script:\n    command: [/bin/echo, \"$HOME; echo injected\"]\n")
@@ -160,8 +160,8 @@ func TestScriptRunsAndTheExitStatusDecides(t *testing.T) {
 	}
 }
 
-// FS-013 AC-003, AC-004, AC-005: an inline script runs through its interpreter from a file in the execution's
-// directory, in the working directory, with the task's variables, as the user, with the default timeout.
+// An inline script runs through its interpreter from a file in the execution's directory, in the working directory,
+// with the task's variables, as the user, with the default timeout.
 func TestInlineScriptEnvironmentAndWorkingDirectory(t *testing.T) {
 	e := newEnv(t)
 	wd := t.TempDir()
@@ -206,7 +206,7 @@ func TestInlineScriptEnvironmentAndWorkingDirectory(t *testing.T) {
 	}
 }
 
-// FS-013 AC-008: standard output and error reach the events, each line with its stream, and are kept redacted.
+// Standard output and error reach the events, each line with its stream, and are kept redacted.
 func TestScriptOutputIsMarkedAndRedacted(t *testing.T) {
 	e := newEnv(t)
 	token := "ghp_" + strings.Repeat("a", 36)
@@ -223,7 +223,7 @@ func TestScriptOutputIsMarkedAndRedacted(t *testing.T) {
 	}
 }
 
-// FS-013 AC-009, AC-010: cancelling, and the timeout, stop the program and the process it started in the background.
+// Cancelling, and the timeout, stop the program and the process it started in the background.
 func TestScriptStopEndsItsProcesses(t *testing.T) {
 	e := newEnv(t)
 	dir := t.TempDir()
@@ -282,8 +282,8 @@ func alive(pid int) bool {
 	return true
 }
 
-// FS-013 AC-011: a daemon that starts after a crash ends what an interrupted script execution's program left
-// running, and nothing in a group it cannot prove is that program's.
+// A daemon that starts after a crash ends what an interrupted script execution's program left running, and nothing in
+// a group it cannot prove is that program's.
 func TestRecoveryEndsWhatTheProgramLeft(t *testing.T) {
 	e := newEnv(t)
 	start := func() (*procutil.Process, procutil.Identity) {
@@ -334,7 +334,7 @@ func TestRecoveryEndsWhatTheProgramLeft(t *testing.T) {
 	}
 }
 
-// FS-013 AC-012: the record keeps the program as it ran, whatever edit follows.
+// The record keeps the program as it ran, whatever edit follows.
 func TestScriptRecordKeepsWhatRan(t *testing.T) {
 	e := newEnv(t)
 	body := "  script:\n    inline:\n      interpreter: [/bin/sh]\n      source: echo first\n"
@@ -351,7 +351,7 @@ func TestScriptRecordKeepsWhatRan(t *testing.T) {
 	}
 }
 
-// FS-013 AC-014: a task that declares only other systems shows why it does not run here, and no firing starts it.
+// A task that declares only other systems shows why it does not run here, and no firing starts it.
 func TestScriptDoesNotRunOnAnUndeclaredSystem(t *testing.T) {
 	e := newEnv(t)
 	v := e.createScript("windows", "  script:\n    command: [/bin/echo]\n    systems: [windows]\n"+
@@ -373,7 +373,7 @@ func TestScriptDoesNotRunOnAnUndeclaredSystem(t *testing.T) {
 	e.runScript("here", domain.StatusCompleted)
 }
 
-// FS-013 AC-015: a program not found on this machine is a warning on save, and its execution fails naming it.
+// A program not found on this machine is a warning on save, and its execution fails naming it.
 func TestMissingInterpreterWarnsAndFails(t *testing.T) {
 	e := newEnv(t)
 	v := e.createScript("pwsh", "  script:\n    inline:\n      interpreter: [no-such-interpreter-xyz]\n      source: x\n")
@@ -390,7 +390,7 @@ func TestMissingInterpreterWarnsAndFails(t *testing.T) {
 	}
 }
 
-// FS-013 AC-016: an imported script task is saved disabled, whatever its file says, also over an existing task.
+// An imported script task is saved disabled, whatever its file says, also over an existing task.
 func TestImportedScriptTaskIsDisabled(t *testing.T) {
 	e := newEnv(t)
 	yaml := scriptYAML("imported", "  enabled: true\n  script:\n    command: [/bin/echo, hi]\n")
@@ -413,7 +413,7 @@ func TestImportedScriptTaskIsDisabled(t *testing.T) {
 	}
 }
 
-// FS-013 AC-017: with the default profile, the restriction nothing enforces is named on the task and the execution.
+// With the default profile, the restriction nothing enforces is named on the task and the execution.
 func TestScriptRestrictionsAreUnenforced(t *testing.T) {
 	e := newEnv(t)
 	v := e.createScript("confined", "  script:\n    command: [/bin/echo]\n")
@@ -432,7 +432,7 @@ func TestScriptRestrictionsAreUnenforced(t *testing.T) {
 	}
 }
 
-// FS-013 AC-018, AC-019: a script task is caught up, queued, and notified like any task.
+// A script task is caught up, queued, and notified like any task.
 func TestScriptTaskSharesTheScheduler(t *testing.T) {
 	e := newEnv(t)
 	e.createScript("weekly", "  script:\n    command: [/bin/sh, -c, \"exit 1\"]\n  schedule:\n    interval: 1h\n")

@@ -66,14 +66,14 @@ export function App() {
   }, [zoom]);
 
   // The first render committed and the kept zoom applied: the shell may show the window now (harmflow-app#96), at its
-  // zoom rather than jumping to it (D-110). Two commands may reach the shell in either order, so this one waits for the
+  // zoom rather than jumping to it. Two commands may reach the shell in either order, so this one waits for the
   // zoom, failed or not. An effect rather than an animation frame, which WebKit may throttle for a hidden page; the
   // shell acts on the first signal alone.
   useEffect(() => void zoomApplied.current.then(() => native.interfaceReady()), []);
 
   useEffect(() => {
     startSync();
-    // macOS asks once; later launches answer at once (FS-011 FR-003 — notices respect the OS's permission).
+    // macOS asks once; later launches answer at once (notices respect the OS's permission).
     void native.ensureNotificationPermission();
   }, []);
 
@@ -162,7 +162,7 @@ export function App() {
   const daemonDown = !onboarding && native.available && daemonRunning === false;
   const shell = !onboarding && !daemonDown;
 
-  // ⌘B collapses and expands the sidebar, and ⌘N opens the template picker as the topbar's New task does (D-120), from
+  // ⌘B collapses and expands the sidebar, and ⌘N opens the template picker as the topbar's New task does, from
   // any focus, a text field or the YAML editor included. The onboarding and daemon-down screens have no shell, and a
   // modal dialog, the picker included, keeps the keyboard. Linux and Windows would check ctrlKey.
   useEffect(() => {
@@ -180,7 +180,7 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [shell]);
 
-  // ⌘+, ⌘−, and ⌘0 zoom the dashboard everywhere, from any focus (D-110): unlike ⌘B, on the onboarding and daemon-down
+  // ⌘+, ⌘−, and ⌘0 zoom the dashboard everywhere, from any focus: unlike ⌘B, on the onboarding and daemon-down
   // screens too, and over an open dialog.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

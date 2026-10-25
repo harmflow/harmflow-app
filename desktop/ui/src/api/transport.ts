@@ -1,5 +1,5 @@
 // How the interface reaches the daemon. Inside the Tauri shell every request goes through the Rust core, which holds
-// the token, so it never reaches the webview (FS-009 FR-005); events arrive as Tauri events from the Rust SSE client.
+// the token, so it never reaches the webview; events arrive as Tauri events from the Rust SSE client.
 // In a plain browser on the Vite dev server, requests go to /api, which the dev server proxies to the daemon with the
 // token added server-side.
 import eventSchema from "../../../../contracts/schemas/event.schema.json";

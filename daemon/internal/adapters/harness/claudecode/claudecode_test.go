@@ -39,7 +39,7 @@ func TestParseSuccess(t *testing.T) {
 		kinds[ports.HarnessFileChanged] != 1 || kinds[ports.HarnessMessage] != 1 {
 		t.Fatalf("unexpected events: %v", kinds)
 	}
-	// FS-005 FR-008: the init line names the model the session runs, which the attempt records (D-105).
+	// The init line names the model the session runs, which the attempt records.
 	if e := events[0]; e.Kind != ports.HarnessStarted || e.Model != "claude-haiku-4-5-20251001" || e.Effort != "" {
 		t.Errorf("start: %+v", e)
 	}
@@ -52,7 +52,7 @@ func TestParseSuccess(t *testing.T) {
 	}
 }
 
-// FS-005 FR-004: a rejected plan window is a quota exhaustion, from the stream's own signal.
+// A rejected plan window is a quota exhaustion, from the stream's own signal.
 func TestParseQuota(t *testing.T) {
 	p, _ := replay(t, "quota.jsonl")
 	if end := p.Finish(1, "", false, false); end.Class != domain.ClassQuotaExhausted {
@@ -110,8 +110,8 @@ func TestFinishClassifiesTheCLIsOwnTexts(t *testing.T) {
 	}
 }
 
-// FS-012 FR-005: the CLI's own error stays as it printed it, with no key; the daemon's text stands in, with one, when
-// the CLI printed nothing, and for a timeout.
+// The CLI's own error stays as it printed it, with no key; the daemon's text stands in, with one, when the CLI printed
+// nothing, and for a timeout.
 func TestFinishKeysOnlyTheDaemonsText(t *testing.T) {
 	p := &parser{tools: map[string]toolUse{}}
 	if end := p.Finish(2, "Error: boom", false, false); end.Error.Key != "" || end.Error.Message != "Error: boom" {
@@ -126,8 +126,8 @@ func TestFinishKeysOnlyTheDaemonsText(t *testing.T) {
 	}
 }
 
-// FS-009 FR-005: the CLI's error is redacted before the 2000-character tail cuts it; cut first, a secret would keep
-// part of itself, too little to match its pattern.
+// The CLI's error is redacted before the 2000-character tail cuts it; cut first, a secret would keep part of itself,
+// too little to match its pattern.
 func TestFinishRedactsBeforeTheTail(t *testing.T) {
 	token := "ghp_" + strings.Repeat("a", 36)
 	end := (&parser{tools: map[string]toolUse{}}).Finish(2, "Error: "+token+" "+strings.Repeat("y", 1969), false, false)
@@ -160,7 +160,7 @@ func TestParseAuthAndOthers(t *testing.T) {
 	}
 }
 
-// D-068: each profile is translated to Claude Code's own flags, and what they cannot confine is named.
+// Each profile is translated to Claude Code's own flags, and what they cannot confine is named.
 func TestPrepareTranslatesPermissions(t *testing.T) {
 	a := &Adapter{Home: t.TempDir()}
 	info := ports.HarnessInfo{Path: "/bin/claude", Features: map[string]bool{"--agent": true, "--no-session-persistence": true}}
@@ -205,7 +205,7 @@ func TestPrepareTranslatesPermissions(t *testing.T) {
 	}
 }
 
-// D-092: built-in skills are delivered as a plugin of the execution; built-in agents are defined for the session.
+// Built-in skills are delivered as a plugin of the execution; built-in agents are defined for the session.
 func TestPrepareDeliversBuiltins(t *testing.T) {
 	root := t.TempDir()
 	skill := filepath.Join(root, "skills", "hf-x")
@@ -237,8 +237,8 @@ func TestPrepareDeliversBuiltins(t *testing.T) {
 	}
 }
 
-// FS-004 FR-004, AC-005: a task's model and effort reach Claude Code as --model and --effort. A task that sets neither,
-// or sets default, passes neither flag, so the CLI's own default applies.
+// A task's model and effort reach Claude Code as --model and --effort. A task that sets neither, or sets default,
+// passes neither flag, so the CLI's own default applies.
 func TestPrepareModelAndEffort(t *testing.T) {
 	a := &Adapter{Home: t.TempDir()}
 	info := ports.HarnessInfo{Path: "/bin/claude", Features: map[string]bool{"--model": true, "--effort": true}}
@@ -426,9 +426,9 @@ func TestDetectSupportedRangeByMinor(t *testing.T) {
 	}
 }
 
-// FS-004 FR-006, FR-008 (harmflow-app#71): what the probes could not establish reads unknown, never a known state. A
-// sign-in is invalid only when the CLI says it is signed out; a probe that is killed, as one is at its timeout, or that
-// fails otherwise leaves the harness ready with a diagnostic, and the first execution proves the sign-in.
+// harmflow-app#71: what the probes could not establish reads unknown, never a known state. A sign-in is invalid only
+// when the CLI says it is signed out; a probe that is killed, as one is at its timeout, or that fails otherwise leaves
+// the harness ready with a diagnostic, and the first execution proves the sign-in.
 func TestDetectReadsOnlyWhatTheProbesEstablish(t *testing.T) {
 	version, signedIn := `echo "2.1.239 (Claude Code)"`, `echo '{"loggedIn": true}'`
 	cases := []struct {
@@ -478,9 +478,9 @@ func TestValidateProfile(t *testing.T) {
 	}
 }
 
-// D-113, FS-004 FR-001: a harness is a file whose --version names it. Discovery skips one that does not and takes the
-// next location; a path set by hand that does not is installed but not ready, saying why; Identify refuses both it and
-// a file that cannot be executed.
+// A harness is a file whose --version names it. Discovery skips one that does not and takes the next location; a path
+// set by hand that does not is installed but not ready, saying why; Identify refuses both it and a file that cannot be
+// executed.
 func TestDetectSkipsAFileThatIsNotClaudeCode(t *testing.T) {
 	impostor := filepath.Join(t.TempDir(), "claude")
 	if err := os.WriteFile(impostor, []byte("#!/bin/bash\necho \"GNU bash, version 5.2.0\"\n"), 0o755); err != nil {

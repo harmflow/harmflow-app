@@ -71,7 +71,7 @@ func (a *App) loadTasks(ctx context.Context) error {
 	return nil
 }
 
-// taskFileName is the name of the task's file in the tasks directory, which a task file's error names (FS-001 FR-007).
+// taskFileName is the name of the task's file in the tasks directory, which a task file's error names.
 func taskFileName(f ports.TaskFile) string {
 	if f.Path == "" {
 		return f.ID + ".yaml"
@@ -105,7 +105,7 @@ func (a *App) loadTaskFile(ctx context.Context, f ports.TaskFile) *taskEntry {
 		e.invalid = nil
 		e.warnings = issuesToWarnings(r.Warnings)
 	} else {
-		// Each error names its file, beside the line and column it keeps (FS-001 FR-007).
+		// Each error names its file, beside the line and column it keeps.
 		file := taskFileName(f)
 		for i := range r.Errors {
 			r.Errors[i].Text = domain.T("task_file_error", "{{file}}: {{detail}}", "file", file).Nest("detail", r.Errors[i].Text)
@@ -248,14 +248,14 @@ func (a *App) invalidError(r *ValidationResult) *Error {
 	return &Error{Code: CodeValidationFailed, Text: text, Validation: r}
 }
 
-// CreateTask validates and writes a new task file; the daemon is its only writer (FS-001 FR-004).
+// CreateTask validates and writes a new task file; the daemon is its only writer.
 func (a *App) CreateTask(ctx context.Context, in TaskInput) (TaskView, error) {
 	return a.createTask(ctx, in, catalogStrict, false, false)
 }
 
-// ImportTask accepts a portable task, warning about agents and skills this machine lacks (FS-001 FR-018). An imported
+// ImportTask accepts a portable task, warning about agents and skills this machine lacks. An imported
 // script task is saved disabled, whatever its file says: it runs a program with the user's rights, and runs only once
-// the user has seen it and enabled it (FS-013 SEC-001).
+// the user has seen it and enabled it.
 func (a *App) ImportTask(ctx context.Context, yamlText string, overwrite bool) (TaskView, error) {
 	return a.createTask(ctx, TaskInput{YAML: yamlText}, catalogLenient, overwrite, true)
 }
@@ -294,8 +294,8 @@ func (a *App) createTask(ctx context.Context, in TaskInput, mode catalogMode, ov
 }
 
 // UpdateTask writes an edit that started from baseRevision; a file changed meanwhile is a conflict, never a silent
-// overwrite (FS-001 FR-005). The identifier and the type stay as the task was saved (FS-001 FR-020). A running
-// execution keeps the definition it started with (D-083).
+// overwrite. The identifier and the type stay as the task was saved. A running execution keeps the definition it
+// started with.
 func (a *App) UpdateTask(ctx context.Context, id string, in TaskInput) (TaskView, error) {
 	e, err := a.entry(id)
 	if err != nil {
@@ -317,7 +317,7 @@ func (a *App) UpdateTask(ctx context.Context, id string, in TaskInput) (TaskView
 	savedType, revision := e.doc.Spec.Type, e.file.Revision
 	a.mu.Unlock()
 	// The type to keep is the last valid definition's, and a file never valid has none. An edit from an older revision
-	// is left to Save, whose conflict says to reload: the file may have changed the type itself (ADR-005).
+	// is left to Save, whose conflict says to reload: the file may have changed the type itself.
 	if savedType != "" && in.BaseRevision == revision && r.doc.Spec.Type != savedType {
 		return TaskView{}, a.invalidError(withError(r, "/spec/type",
 			domain.T("type_immutable", "the type cannot change; create a new task instead")))
@@ -364,7 +364,7 @@ func (a *App) afterWrite(f ports.TaskFile, eventType string, r *ValidationResult
 		Payload: map[string]any{"revision": f.Revision}})
 }
 
-// DeleteTask removes a task; a running one goes once its execution finishes (D-083). Its records stay.
+// DeleteTask removes a task; a running one goes once its execution finishes. Its records stay.
 func (a *App) DeleteTask(id string) (bool, error) {
 	a.mu.Lock()
 	e, ok := a.tasks[id]
@@ -398,7 +398,7 @@ func (a *App) removeTask(id string) error {
 	return nil
 }
 
-// DuplicateTask copies a task under a new identifier, disabled (FS-001 AC-002).
+// DuplicateTask copies a task under a new identifier, disabled.
 func (a *App) DuplicateTask(ctx context.Context, id string) (TaskView, error) {
 	e, err := a.entry(id)
 	if err != nil {
@@ -426,7 +426,7 @@ func (a *App) DuplicateTask(ctx context.Context, id string) (TaskView, error) {
 }
 
 // disableImported sets spec.enabled to false in an imported script task's YAML, keeping the rest of the file, and says
-// so in the warnings the import returns (FS-013 SEC-001).
+// so in the warnings the import returns.
 func disableImported(r *ValidationResult) error {
 	out, err := setYAMLField(r.content, "spec", "enabled", false)
 	if err != nil {
@@ -441,7 +441,7 @@ func disableImported(r *ValidationResult) error {
 }
 
 // SetEnabled toggles spec.enabled in place, keeping the file's comments. Disabling lets a running execution finish
-// and drops a waiting firing (D-083).
+// and drops a waiting firing.
 func (a *App) SetEnabled(ctx context.Context, id string, enabled bool) (TaskView, error) {
 	e, err := a.entry(id)
 	if err != nil {
@@ -461,7 +461,7 @@ func (a *App) SetEnabled(ctx context.Context, id string, enabled bool) (TaskView
 	return a.UpdateTask(ctx, id, TaskInput{YAML: string(out), BaseRevision: rev})
 }
 
-// ExportTask returns the portable YAML: the definition only, with no state, logs, or credentials (FS-001 FR-006).
+// ExportTask returns the portable YAML: the definition only, with no state, logs, or credentials.
 func (a *App) ExportTask(id string) ([]byte, error) {
 	e, err := a.entry(id)
 	if err != nil {
@@ -473,7 +473,7 @@ func (a *App) ExportTask(id string) ([]byte, error) {
 	return []byte(eventlog.Redact(string(content))), nil
 }
 
-// watchLoop detects external edits of task files (FS-001 FR-005).
+// watchLoop detects external edits of task files.
 func (a *App) watchLoop(ctx context.Context) {
 	defer a.wg.Done()
 	t := time.NewTicker(2 * time.Second)
@@ -516,7 +516,7 @@ func (a *App) scanTaskFiles(ctx context.Context) {
 				"file", taskFileName(f))))
 			continue
 		}
-		// Disabled in its file, a task drops its waiting firing as one disabled through the API does (D-083).
+		// Disabled in its file, a task drops its waiting firing as one disabled through the API does.
 		if !enabled {
 			a.dropQueued(f.ID, domain.T("task_was_disabled", "the task was disabled"))
 		}

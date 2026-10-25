@@ -29,7 +29,7 @@ func TestTasksRevisionConflict(t *testing.T) {
 	if _, err := repo.Save("a", []byte("two"), f.Revision); err != nil {
 		t.Fatalf("save from the current revision: %v", err)
 	}
-	// An edit that started from the first revision must not overwrite the second (FS-001 FR-005).
+	// An edit that started from the first revision must not overwrite the second.
 	if _, err := repo.Save("a", []byte("three"), f.Revision); !errors.Is(err, ports.ErrConflict) {
 		t.Fatalf("got %v, want a conflict", err)
 	}
@@ -43,7 +43,7 @@ func TestTasksRevisionConflict(t *testing.T) {
 	}
 }
 
-// FS-001 AC-009: an interrupted write leaves the complete old file; temporary files are not listed as tasks.
+// An interrupted write leaves the complete old file; temporary files are not listed as tasks.
 func TestAtomicWriteLeavesNoPartialFile(t *testing.T) {
 	dir := t.TempDir()
 	repo, _ := NewTasks(dir)
@@ -82,9 +82,9 @@ spec:
 `, name, strings.Repeat("A week of notes. ", 100))
 }
 
-// FS-001 AC-009: a save killed with SIGKILL leaves the complete old file or the complete new one, on the real file
-// system. A child process saves a new version through Tasks.Save and holds at a point of the write until the parent
-// kills it there, so the kill never depends on timing. A new Tasks on the same directory then reads what it left.
+// A save killed with SIGKILL leaves the complete old file or the complete new one, on the real file system. A child
+// process saves a new version through Tasks.Save and holds at a point of the write until the parent kills it there, so
+// the kill never depends on timing. A new Tasks on the same directory then reads what it left.
 func TestSaveSurvivesAKill(t *testing.T) {
 	if holdMidSave() {
 		return

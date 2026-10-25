@@ -48,7 +48,7 @@ func keyOf(err error) string {
 	return TextOf(err).Key
 }
 
-// D-113, FS-009 FR-014: the allowed area and the forbidden places, for paths that exist and paths not created yet.
+// The allowed area and the forbidden places, for paths that exist and paths not created yet.
 func TestPathRuleAllowsAndForbids(t *testing.T) {
 	f := newFixture(t)
 	cases := []struct {
@@ -81,7 +81,7 @@ func TestPathRuleAllowsAndForbids(t *testing.T) {
 	}
 }
 
-// FS-009 §10, symlinks and directory traversal: a .. segment or a symlink that leads out is refused where it leads.
+// Symlinks and directory traversal: a .. segment or a symlink that leads out is refused where it leads.
 func TestPathRuleResolvesTraversalAndSymlinks(t *testing.T) {
 	f := newFixture(t)
 	out := filepath.Join(f.home, "Developer", "out")

@@ -16,9 +16,9 @@ func installed(h map[string]any) map[string]int {
 	return counts
 }
 
-// FS-004 FR-001, AC-002 (harmflow-app#70): with one Codex on the daemon's PATH and a second outside it, setting the
-// second by hand offers both, and a run uses the second. Choosing the first then makes the next run use the first.
-// Only the stand-ins are checked: a real Codex on the login shell's PATH can be offered too.
+// harmflow-app#70: with one Codex on the daemon's PATH and a second outside it, setting the second by hand offers both,
+// and a run uses the second. Choosing the first then makes the next run use the first. Only the stand-ins are checked:
+// a real Codex on the login shell's PATH can be offered too.
 func TestChooseAmongInstallations(t *testing.T) {
 	first, second := standIn(t, "fake-codex", "codex"), standIn(t, "fake-codex", "codex")
 	d := startDaemon(t, t.TempDir(), "PATH="+filepath.Dir(first.path)+":"+os.Getenv("PATH"))

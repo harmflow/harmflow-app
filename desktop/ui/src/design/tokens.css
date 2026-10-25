@@ -1,7 +1,7 @@
 /*
- * HarmFlow design tokens (FS-012 FR-007, D-079). Every color, typeface, spacing, and radius in the interface comes
- * from here, so the Phase 2 themes only have to replace these values. The palette is a placeholder until the visual
- * identity is approved (D-095): graphite near-black, cyan/teal and violet/magenta accents (D-046).
+ * HarmFlow design tokens. Every color, typeface, spacing, and radius in the interface comes from here, so the
+ * Phase 2 themes only have to replace these values. The palette is a placeholder until the visual identity is
+ * approved: graphite near-black, cyan/teal and violet/magenta accents.
  */
 :root {
   color-scheme: dark;

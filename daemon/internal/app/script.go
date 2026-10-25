@@ -16,10 +16,10 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
-// A script task runs a program of the user's instead of a harness session (FS-013): one process per execution, as
+// A script task runs a program of the user's instead of a harness session: one process per execution, as
 // its only attempt, with no failover, and an outcome from the program's exit status.
 
-// currentOS names the running system as a script task declares it (FS-013 FR-014).
+// currentOS names the running system as a script task declares it.
 func currentOS() string {
 	switch runtime.GOOS {
 	case "darwin":
@@ -36,7 +36,7 @@ func (a *App) systemsText(doc domain.TaskDocument) domain.Text {
 }
 
 // scriptEnv is the environment the program starts with: base, with the task's variables replacing any of the same
-// name (FS-013 FR-004, FR-005).
+// name.
 func scriptEnv(base []string, vars map[string]string) []string {
 	out := make([]string, 0, len(base)+len(vars))
 	for _, kv := range base {
@@ -61,7 +61,7 @@ func envValue(env []string, key string) string {
 }
 
 // findProgram resolves a program the way its process finds it: a path, after ~ and ${NAME}, relative to the working
-// directory; a bare name on the PATH of env (FS-013 FR-015).
+// directory; a bare name on the PATH of env.
 func (a *App) findProgram(name, workDir string, env []string) (string, error) {
 	notFound := domain.TextErr("script_program_not_found", "the program {{program}} was not found on this machine",
 		"program", name)
@@ -100,7 +100,7 @@ func (a *App) baseEnv() []string {
 }
 
 // scriptChecks are a script task's rules the schema cannot express. Each is a warning, never an error: a task written
-// for another machine still saves and imports (FS-013 FR-014, FR-015).
+// for another machine still saves and imports.
 func (a *App) scriptChecks(r *ValidationResult, doc domain.TaskDocument) {
 	s := doc.Spec.Script
 	if s == nil {
@@ -131,7 +131,7 @@ func workingDirectoryMissing(path string) domain.Text {
 }
 
 // scriptRestrictions names each restriction a script task declares. Nothing confines a program of the user's, so none
-// is enforced, and each runs with a warning (D-068, FS-013 SEC-002).
+// is enforced, and each runs with a warning.
 func scriptRestrictions(p domain.Permissions) []domain.Warning {
 	var names []string
 	switch p.Profile {
@@ -347,8 +347,8 @@ func (r *run) endScript(outcome domain.AttemptOutcome, reason domain.Text, exit 
 	r.save(true)
 }
 
-// endLeftovers ends what an interrupted script execution's program left running, and says so on the execution
-// (FS-013 FR-010). It runs when the daemon starts, before the record is saved.
+// endLeftovers ends what an interrupted script execution's program left running, and says so on the execution. It
+// runs when the daemon starts, before the record is saved.
 func (a *App) endLeftovers(ctx context.Context, x *domain.Execution) {
 	if x.Script == nil || x.Script.Process == nil {
 		return

@@ -1,4 +1,4 @@
-// Package secret keeps the local API token (D-090): in the macOS Keychain, through the security CLI so the desktop
+// Package secret keeps the local API token: in the macOS Keychain, through the security CLI so the desktop
 // reads the same item without a prompt, or in a file only the user can read.
 package secret
 
@@ -64,8 +64,8 @@ func (k Keychain) Get() (string, error) {
 }
 
 // keychainError maps a failed security command. Only exit 44, errSecItemNotFound, means no token is stored: a locked
-// keychain or a refused prompt exits with another code, which must not read as a first start that makes a new token
-// (FS-009 FR-013). The command's message says why it failed.
+// keychain or a refused prompt exits with another code, which must not read as a first start that makes a new token.
+// The command's message says why it failed.
 func keychainError(err error) error {
 	var ee *exec.ExitError
 	if !errors.As(err, &ee) {

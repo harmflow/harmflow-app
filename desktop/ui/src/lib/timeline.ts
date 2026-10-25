@@ -1,6 +1,5 @@
 // Turns normalized events into the steps of the execution timeline. The label of each type and the daemon's own
-// messages are translated; the agent's text, commands, and tool output stay as the harness produced them
-// (FS-012 FR-005).
+// messages are translated; the agent's text, commands, and tool output stay as the harness produced them.
 import type { HarmflowEvent } from "../api/types";
 import type { Tone } from "../design/tokens";
 import { eventText } from "./daemonText";
@@ -249,7 +248,7 @@ export function changedFilesFromEvents(events: readonly HarmflowEvent[]): string
   return files;
 }
 
-/** The latest step of an execution, for its card: never a made-up percentage (FS-008 FR-009). */
+/** The latest step of an execution, for its card: never a made-up percentage. */
 export function currentStepFrom(events: readonly HarmflowEvent[]): HarmflowEvent | undefined {
   const timeline = buildTimeline(events);
   return timeline.length ? timeline[timeline.length - 1].event : undefined;

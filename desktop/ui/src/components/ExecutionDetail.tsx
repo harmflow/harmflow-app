@@ -1,7 +1,6 @@
-// The selected execution: its conversation alone (FS-008 FR-013), its events as they happen and replayed from the log,
-// its raw output, files, commands, results, attempts with the prompt and session context each sent (FS-008 FR-002,
-// FR-008), and estimated token costs (harmflow-app#39). Observe and cancel only — no input reaches the agent
-// (FS-003 FR-003).
+// The selected execution: its conversation alone, its events as they happen and replayed from the log, its raw
+// output, files, commands, results, attempts with the prompt and session context each sent, and estimated token costs
+// (harmflow-app#39). Observe and cancel only — no input reaches the agent.
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
@@ -77,7 +76,7 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
   const commands = detail?.commands ?? [];
   const attempts = detail?.attempts ?? [];
   // A script task runs a program: its output and the program as it ran, and no harness, model, prompt, conversation, or
-  // cost (FS-013 FR-012, FS-008 FR-013).
+  // cost.
   const isScript = exec.taskType === "script";
 
   const tabs: TabDef<TabKey>[] = isScript
@@ -196,7 +195,7 @@ function parseIssue(workItem?: string): number | undefined {
 
 /**
  * The conversation alone: for each attempt, the prompt it sent, then the agent messages it received, as the daemon kept
- * and redacted them — plain text, no Markdown — and no other event nor the session context (FS-008 FR-013, D-129). The
+ * and redacted them — plain text, no Markdown — and no other event nor the session context. The
  * prompts live in the record and the messages in the log, so an expired log leaves the prompts.
  */
 function Chat({ attempts, messages, logExpired, locale }: { attempts: Attempt[]; messages: HarmflowEvent[]; logExpired?: boolean; locale: string }) {
@@ -254,7 +253,7 @@ function ChatTurn({ kind, label, time, text, locale }: { kind: "prompt" | "agent
           {formatTime(time, locale)}
         </time>
       </div>
-      {/* A record older than D-104 kept no prompt. */}
+      {/* A record made before prompts were recorded kept no prompt. */}
       {text ? <div className="chat-turn__text">{text}</div> : <span className="muted">{t("executions.detail.notRecorded")}</span>}
     </div>
   );
@@ -489,7 +488,7 @@ function RawOutput({ executionId, active }: { executionId: string; active: boole
   return <RawCaptures output={output} />;
 }
 
-/** What the harness printed, attempt by attempt, as the daemon captured and redacted it (FS-008 FR-008). */
+/** What the harness printed, attempt by attempt, as the daemon captured and redacted it. */
 export function RawCaptures({ output }: { output?: ExecutionOutput }) {
   const { t, i18n } = useTranslation();
   const ref = useRef<HTMLPreElement | null>(null);
@@ -543,7 +542,7 @@ export function RawCaptures({ output }: { output?: ExecutionOutput }) {
   );
 }
 
-/** A script's output, line by line, each marked with its stream, as the daemon redacted it (FS-013 FR-008). */
+/** A script's output, line by line, each marked with its stream, as the daemon redacted it. */
 function ScriptOutput({ lines }: { lines: HarmflowEvent[] }) {
   const { t } = useTranslation();
   const ref = useRef<HTMLPreElement | null>(null);
@@ -583,7 +582,7 @@ function ScriptOutput({ lines }: { lines: HarmflowEvent[] }) {
   );
 }
 
-/** The program as it ran, its working directory and variables, and how it ended (FS-013 FR-011, FR-012). */
+/** The program as it ran, its working directory and variables, and how it ended. */
 function ScriptProgram({ detail, active }: { detail?: Execution; active: boolean }) {
   const { t } = useTranslation();
   const s = detail?.script;
@@ -807,7 +806,7 @@ function Attempts({ detail, locale, now }: { detail?: Execution; locale: string;
   );
 }
 
-/** What the harness reported using, or that it reported nothing — never the configured value in its place (D-105). */
+/** What the harness reported using, or that it reported nothing — never the configured value in its place. */
 function UsedValue({ used, configured }: { used?: string; configured: string }) {
   const { t } = useTranslation();
   return (
@@ -820,7 +819,7 @@ function UsedValue({ used, configured }: { used?: string; configured: string }) 
   );
 }
 
-/** What the attempt sent the harness, as the daemon recorded and redacted it; older records have none (FS-008 FR-008). */
+/** What the attempt sent the harness, as the daemon recorded and redacted it; older records have none. */
 function AttemptInput({ label, text }: { label: string; text?: string }) {
   const { t } = useTranslation();
   if (!text) {

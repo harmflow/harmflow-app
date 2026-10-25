@@ -48,7 +48,7 @@ func TestValidTask(t *testing.T) {
 	}
 }
 
-// FS-001 AC-009: a syntax error names the line.
+// A syntax error names the line.
 func TestSyntaxErrorLine(t *testing.T) {
 	_, _, issues := ParseYAML([]byte("apiVersion: harmflow/v1alpha1\nkind: Task\nmetadata:\n  id: [unclosed\n"))
 	if len(issues) != 1 || issues[0].Line == 0 || issues[0].Code != "syntax" {
@@ -61,7 +61,7 @@ func TestSyntaxErrorLine(t *testing.T) {
 var versionSecond = strings.Replace(valid, "apiVersion: harmflow/v1alpha1\nkind: Task\n",
 	"kind: Task\napiVersion: harmflow/v1alpha1\n", 1)
 
-// FS-001 FR-007: a task file names its schema version, and one with no version or another version is refused.
+// A task file names its schema version, and one with no version or another version is refused.
 func TestSchemaVersionIsRequired(t *testing.T) {
 	v, _ := New()
 	doc, node, _ := ParseYAML([]byte(versionSecond))
@@ -82,7 +82,7 @@ func TestSchemaVersionIsRequired(t *testing.T) {
 	}
 }
 
-// FS-001 AC-010, AC-013: a general task takes no repository; a GitHub task needs them; a schema error is located.
+// A general task takes no repository; a GitHub task needs them; a schema error is located.
 func TestTypeParametersAndLocation(t *testing.T) {
 	v, _ := New()
 	gh := strings.Replace(valid, "type: general", "type: github-issue-implementation", 1)
@@ -104,7 +104,7 @@ func TestTypeParametersAndLocation(t *testing.T) {
 	}
 }
 
-// FS-013 FR-002: the rules of a type apply only to a task that names it, so a task with no type is told its type is
+// The rules of a type apply only to a task that names it, so a task with no type is told its type is
 // missing, and not that its prompt and harness are not allowed.
 func TestTypeRulesNeedTheType(t *testing.T) {
 	v, _ := New()
@@ -122,7 +122,7 @@ func TestTypeRulesNeedTheType(t *testing.T) {
 	}
 }
 
-// FS-001 FR-008, AC-010: every task has a type. A task with none is told so at its spec, on that line, and an empty
+// Every task has a type. A task with none is told so at its spec, on that line, and an empty
 // type is not one of the types.
 func TestTaskNeedsAType(t *testing.T) {
 	v, _ := New()
@@ -142,7 +142,7 @@ func TestTaskNeedsAType(t *testing.T) {
 	}
 }
 
-// FS-001 FR-019, AC-022 (D-094): the contracts name things one way. Property names are camelCase; the identifiers of
+// The contracts name things one way. Property names are camelCase; the identifiers of
 // named things, task types and harnesses, are kebab-case like any identifier; event types are object.action in
 // snake_case, in the event schema and in the events a task is notified about; every other enum value is snake_case.
 // Each name that breaks its rule is reported at its JSON pointer.
@@ -197,7 +197,7 @@ func TestNamingViolationsNameThePointer(t *testing.T) {
 	}
 }
 
-// FS-001 FR-019, D-094: event.schema.json is the one list of event types. A task is notified only about event types
+// event.schema.json is the one list of event types. A task is notified only about event types
 // it lists, and the daemon's Event constants are exactly that list, with EventSchemaVersion its schemaVersion.
 func TestEventTypesHaveOneSource(t *testing.T) {
 	task, event := schemaJSON(t, contracts.TaskSchema), schemaJSON(t, contracts.EventSchema)
@@ -229,7 +229,7 @@ func TestEventTypesHaveOneSource(t *testing.T) {
 	}
 }
 
-// FS-001 FR-012, FR-019: the effective definition the daemon returns, every default filled in, is a valid task: for
+// The effective definition the daemon returns, every default filled in, is a valid task: for
 // one that sets every field of its type, beside a fallback and a repository that leave theirs to the defaults, and for
 // one that sets only what it must. The daemon reads the file into a TaskDocument and returns Effective() as JSON.
 func TestEffectiveDocumentValidates(t *testing.T) {
@@ -406,7 +406,7 @@ var (
 	eventTypeName = regexp.MustCompile(`^[a-z][a-z0-9]*(_[a-z0-9]+)*\.[a-z][a-z0-9]*(_[a-z0-9]+)*$`)
 )
 
-// namingViolations walks a schema and returns each name that breaks FS-001 FR-019, at its JSON pointer: a property
+// namingViolations walks a schema and returns each name that breaks a naming rule, at its JSON pointer: a property
 // name that is not camelCase, and an enum value that is not snake_case, or, for the enums kinds names by the pointer
 // of their schema, not an identifier or not an event type. Keywords and the names of $defs are not document keys, and
 // const, default, and examples hold values, not names, so the walk skips them.
@@ -493,7 +493,7 @@ func pointerToken(key string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(key, "~", "~0"), "/", "~1")
 }
 
-// FS-001 AC-022: notifications cite the schema's event names.
+// Notifications cite the schema's event names.
 func TestNotificationEventNames(t *testing.T) {
 	v, _ := New()
 	bad := valid + "  notifications:\n    native:\n      events: [needs-attention]\n"
@@ -517,7 +517,7 @@ func TestSchedulesAreExclusive(t *testing.T) {
 	}
 }
 
-// FS-012 FR-005: a schema error carries a key and params the desktop translates, beside its en-US text.
+// A schema error carries a key and params the desktop translates, beside its en-US text.
 func TestSchemaErrorsAreTranslatable(t *testing.T) {
 	v, _ := New()
 	cases := []struct {
@@ -561,7 +561,7 @@ func TestReportSchema(t *testing.T) {
 	}
 }
 
-// FS-008 FR-007: an event follows the event model. A type the schema does not list, or a timestamp that is not a
+// An event follows the event model. A type the schema does not list, or a timestamp that is not a
 // date-time, fails, and the issue names that field alone.
 func TestEventSchema(t *testing.T) {
 	v, _ := New()

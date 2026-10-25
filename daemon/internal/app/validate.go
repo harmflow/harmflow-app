@@ -37,8 +37,7 @@ type ValidationResult struct {
 	node    *yaml.Node
 }
 
-// catalogMode decides whether a missing agent or skill is an error (saving, FS-001 FR-010) or a warning (import and
-// external edits, FS-001 FR-018).
+// catalogMode decides whether a missing agent or skill is an error (saving) or a warning (import and external edits).
 type catalogMode int
 
 const (
@@ -170,7 +169,7 @@ func (a *App) semanticChecks(ctx context.Context, r *ValidationResult, doc domai
 			r.addWarning(path+"/provider", domain.WarningHarnessNotReady, domain.T("harness_not_ready",
 				"{{harness}} is not ready: {{detail}}", "harness", ad.Name()).Nest("detail", info.DiagnosticText()))
 		}
-		// Agents and skills must be available to every harness of the chain (D-092).
+		// Agents and skills must be available to every harness of the chain.
 		missing := a.missingItems(doc, p.Provider)
 		for _, m := range missing {
 			code := domain.WarningMissingSkill
@@ -197,7 +196,7 @@ func (a *App) semanticChecks(ctx context.Context, r *ValidationResult, doc domai
 		}
 	}
 	// The paths that let a harness write, and a script's program, are errors in every mode: a task file written outside
-	// the dashboard is checked too, and loads as invalid (D-113, FS-009 FR-014).
+	// the dashboard is checked too, and loads as invalid.
 	refused := map[string]bool{}
 	for _, is := range a.taskPathIssues(doc, a.currentPathEnv()) {
 		r.addError(is.path, is.text)
@@ -284,7 +283,7 @@ func (a *App) missingItems(doc domain.TaskDocument, harness string) []missingIte
 }
 
 // policyWarnings names each declared restriction the primary harness, or nothing at all for a script task's program,
-// can enforce (D-068, FS-009 FR-010, FS-013 SEC-002).
+// can enforce.
 func (a *App) policyWarnings(ctx context.Context, doc domain.TaskDocument) []domain.Warning {
 	eff := doc.Effective()
 	if doc.IsScript() {

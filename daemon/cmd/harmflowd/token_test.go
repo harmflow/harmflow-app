@@ -57,7 +57,7 @@ func runToken(t *testing.T) string {
 }
 
 // A Keychain that cannot be read is retried, then stops the start: it never moves the token to a file or makes a new
-// one (#15, FS-009 FR-011, FR-013).
+// one (#15).
 func TestStartupTokenKeychainErrorMakesNoTokenAndNoFile(t *testing.T) {
 	store := &fakeKeychain{reads: []fakeRead{{err: errLocked}}}
 	leftover := runToken(t)

@@ -235,8 +235,8 @@ func (p *fakeParser) Finish(exit int, _ string, timedOut, cancelled bool) domain
 }
 
 // hookedEvents runs the test's hook on each event before it is appended, on the goroutine that emits it. It then checks
-// the event as the log wrote it against event.schema.json, so every test's events follow the event model (FS-008
-// FR-007); the problems are reported when the test ends, since an event may come from another goroutine.
+// the event as the log wrote it against event.schema.json, so every test's events follow the event model; the problems
+// are reported when the test ends, since an event may come from another goroutine.
 type hookedEvents struct {
 	*eventlog.Log
 	schema  *schema.Validator
@@ -538,7 +538,7 @@ sleep 1.2; printf '%%s' '%[2]s' > %[1]s/report.json; echo 'END ok'`, req.Executi
 	if x.PullRequestURL != "https://github.com/o/r/pull/9" || x.TestsStatus != "failed" || x.WorkItem != "o/r#7" {
 		t.Errorf("report not applied: %+v", x.ExecutionSummary)
 	}
-	// FS-006 FR-010: a draft PR with failing tests is completed, and its item stays resumable.
+	// A draft PR with failing tests is completed, and its item stays resumable.
 	q := e.app.Queue()
 	if len(q.WorkItems) != 1 || q.WorkItems[0].Status != domain.WorkItemInProgress {
 		t.Errorf("work items: %+v", q.WorkItems)
@@ -565,8 +565,8 @@ sleep 1.2; printf '%%s' '%[2]s' > %[1]s/report.json; echo 'END ok'`, req.Executi
 	e.wait(res.ExecutionID, domain.StatusNoWork)
 }
 
-// FS-006 AC-015: a conflict the agent met keeps its code in the record, and its log holds it as a warning that a
-// replay returns; the execution continues.
+// A conflict the agent met keeps its code in the record, and its log holds it as a warning that a replay returns; the
+// execution continues.
 func TestConflictingActivityIsLogged(t *testing.T) {
 	e := newEnv(t)
 	e.create("conflict", "")
@@ -618,8 +618,8 @@ func TestConflictingActivityIsLogged(t *testing.T) {
 	}
 }
 
-// FS-008 FR-007: every event the use cases append follows event.schema.json. hookedEvents checks each one in every
-// test; this one runs a success, a failover, a cancellation, and a no_work outcome, and makes sure each was checked.
+// Every event the use cases append follows event.schema.json. hookedEvents checks each one in every test; this one
+// runs a success, a failover, a cancellation, and a no_work outcome, and makes sure each was checked.
 func TestEventsFitTheirSchema(t *testing.T) {
 	e := newEnv(t)
 	e.create("succeeds", "")
@@ -675,7 +675,7 @@ func TestEventsFitTheirSchema(t *testing.T) {
 	}
 }
 
-// FS-003 AC-010, AC-002: a task never runs twice at once; one firing waits and the next coalesce into it.
+// A task never runs twice at once; one firing waits and the next coalesce into it.
 func TestOverlapQueueCoalesces(t *testing.T) {
 	e := newEnv(t)
 	e.create("busy", "")
@@ -701,7 +701,7 @@ func TestOverlapQueueCoalesces(t *testing.T) {
 	}
 }
 
-// FS-003 AC-011: with skip, an overlapping firing is dropped and logged.
+// With skip, an overlapping firing is dropped and logged.
 func TestOverlapSkip(t *testing.T) {
 	e := newEnv(t)
 	e.create("skipper", "  concurrency:\n    overlappingRuns: skip\n")
@@ -732,7 +732,7 @@ func TestOverlapSkip(t *testing.T) {
 	}
 }
 
-// FS-003 AC-001, AC-006: different tasks run in parallel on the same harness; cancelling one leaves the others.
+// Different tasks run in parallel on the same harness; cancelling one leaves the others.
 func TestParallelTasksAndIsolatedCancel(t *testing.T) {
 	e := newEnv(t)
 	for _, id := range []string{"a", "b", "c"} {
@@ -757,8 +757,8 @@ func TestParallelTasksAndIsolatedCancel(t *testing.T) {
 	}
 }
 
-// FS-003 BR-003: three tasks run at once on the same harness; one fails when its harness exits with an error, and the
-// other two keep running, then complete, their records and attempts untouched by the failure.
+// Three tasks run at once on the same harness; one fails when its harness exits with an error, and the other two keep
+// running, then complete, their records and attempts untouched by the failure.
 func TestFailureLeavesTheOthersRunning(t *testing.T) {
 	e := newEnv(t)
 	tasks := []string{"a", "b", "c"}
@@ -826,8 +826,8 @@ func TestFailureLeavesTheOthersRunning(t *testing.T) {
 	}
 }
 
-// FS-003 FR-005, D-083: an execution cancelled or dropped while it is still queued never runs, even when its task was
-// already claimed for it: fire and startQueued claim the task before the executor leaves queued.
+// An execution cancelled or dropped while it is still queued never runs, even when its task was already claimed for
+// it: fire and startQueued claim the task before the executor leaves queued.
 func TestCancelBeforeItStarts(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -868,7 +868,7 @@ func TestCancelBeforeItStarts(t *testing.T) {
 	}
 }
 
-// FS-005 §5.1: quota on the preferred harness fails over to the fallback in the same execution.
+// Quota on the preferred harness fails over to the fallback in the same execution.
 func TestQuotaFailover(t *testing.T) {
 	e := newEnv(t)
 	e.create("failover", "    fallback:\n      candidates:\n        - provider: codex\n")
@@ -880,11 +880,11 @@ func TestQuotaFailover(t *testing.T) {
 		x.HarnessSwitches != 1 {
 		t.Fatalf("attempts: %+v", x.Attempts)
 	}
-	// The alternative gets the same prompt; the summary of the previous attempt is in its context (D-067).
+	// The alternative gets the same prompt; the summary of the previous attempt is in its context.
 	if got := e.codex.prompts[len(e.codex.prompts)-1]; got != "Do the work of failover." {
 		t.Errorf("prompt %q", got)
 	}
-	// With the switch used up, a second quota has no alternative and the execution fails explicitly (FS-005 FR-003).
+	// With the switch used up, a second quota has no alternative and the execution fails explicitly.
 	e.codex.setScript(func(ports.RunRequest) string { return "echo 'END quota'" })
 	r, _ = e.app.RunTask("failover")
 	x = e.wait(r.ExecutionID, domain.StatusFailed)
@@ -928,8 +928,8 @@ func TestNetworkFailureRecordedWithoutFailover(t *testing.T) {
 	}
 }
 
-// FS-005 FR-008 (D-105): an attempt records the model and effort its harness reported, and says nothing about the
-// ones it did not report; the configured values are kept apart and never stand in for them.
+// An attempt records the model and effort its harness reported, and says nothing about the ones it did not report;
+// the configured values are kept apart and never stand in for them.
 func TestAttemptRecordsTheReportedModel(t *testing.T) {
 	e := newEnv(t)
 	e.create("attributed", "      effort: high\n    fallback:\n      candidates:\n        - provider: codex\n")
@@ -997,8 +997,8 @@ func TestUsagePerAttempt(t *testing.T) {
 	}
 }
 
-// FS-008 FR-010, AC-013: each attempt keeps the prompt and the session context the harness received, redacted like the
-// raw output, in the record on disk too; a later edit of the task's prompt does not change what the execution shows.
+// Each attempt keeps the prompt and the session context the harness received, redacted like the raw output, in the
+// record on disk too; a later edit of the task's prompt does not change what the execution shows.
 func TestAttemptKeepsItsInput(t *testing.T) {
 	e := newEnv(t)
 	token := "ghp_" + strings.Repeat("a", 36)
@@ -1097,9 +1097,9 @@ func TestRunningAttemptShowsItsInput(t *testing.T) {
 	e.wait(r.ExecutionID, domain.StatusCancelled)
 }
 
-// FS-008 FR-008, FR-010; FS-009 FR-007: a failover's context quotes the previous attempt's last message, so a secret
-// the agent printed would reach the next harness, perhaps another provider's. The daemon redacts it as it reads it, so
-// the next harness, the record, and the record on disk all show [REDACTED].
+// A failover's context quotes the previous attempt's last message, so a secret the agent printed would reach the next
+// harness, perhaps another provider's. The daemon redacts it as it reads it, so the next harness, the record, and the
+// record on disk all show [REDACTED].
 func TestFailoverContextRedacted(t *testing.T) {
 	e := newEnv(t)
 	token := "ghp_" + strings.Repeat("b", 36)
@@ -1142,8 +1142,8 @@ func TestFailoverContextRedacted(t *testing.T) {
 	}
 }
 
-// FS-008 FR-010: what the harness needs verbatim, such as its workspace path, reaches it as is, and the record keeps it
-// redacted like the prompt. No agent text reaches the context unredacted, so this is the record's own redaction.
+// What the harness needs verbatim, such as its workspace path, reaches it as is, and the record keeps it redacted like
+// the prompt. No agent text reaches the context unredacted, so this is the record's own redaction.
 func TestContextRedactedInTheRecord(t *testing.T) {
 	e := newEnv(t)
 	token := "ghp_" + strings.Repeat("d", 36)
@@ -1163,7 +1163,7 @@ func TestContextRedactedInTheRecord(t *testing.T) {
 	x := e.wait(r.ExecutionID, domain.StatusCompleted)
 	mu.Lock()
 	defer mu.Unlock()
-	// As is, once resolved: the harness gets the path the rule checked (FS-009 FR-014).
+	// As is, once resolved: the harness gets the path the rule checked.
 	resolved, _ := domain.ResolvePath(work)
 	if !strings.Contains(sent, "Workspace: "+resolved) {
 		t.Fatalf("the harness did not get its workspace path as is:\n%s", sent)
@@ -1173,9 +1173,9 @@ func TestContextRedactedInTheRecord(t *testing.T) {
 	}
 }
 
-// FS-009 FR-005, FR-007: what the agent writes — its progress, its last message, its report — is redacted before
-// HarmFlow keeps or relays it: in the record and the API, the work-item ledger, context.json, the event log, and the
-// next attempt's context. It is redacted before it is trimmed, so a token cut short by a trim leaves no prefix behind.
+// What the agent writes — its progress, its last message, its report — is redacted before HarmFlow keeps or relays
+// it: in the record and the API, the work-item ledger, context.json, the event log, and the next attempt's context. It
+// is redacted before it is trimmed, so a token cut short by a trim leaves no prefix behind.
 func TestAgentTextRedactedEverywhere(t *testing.T) {
 	e := newEnv(t)
 	token := "ghp_" + strings.Repeat("c", 36)
@@ -1339,7 +1339,7 @@ func TestSaveWhileTheExecutionChanges(t *testing.T) {
 	<-done
 }
 
-// FS-005 FR-009: a harness already unavailable when the task fires is skipped for the fallback.
+// A harness already unavailable when the task fires is skipped for the fallback.
 func TestUnavailableStartsOnFallback(t *testing.T) {
 	e := newEnv(t)
 	e.create("unavail", "    fallback:\n      candidates:\n        - provider: codex\n")
@@ -1364,13 +1364,13 @@ func TestUnavailableStartsOnFallback(t *testing.T) {
 	if unavailable < 0 {
 		t.Error("no explicit event named the unavailable harness")
 	}
-	// The harness is revalidated before the execution starts (FS-004 FR-003).
+	// The harness is revalidated before the execution starts.
 	if started < unavailable {
 		t.Errorf("execution.started at %d, harness.unavailable at %d", started, unavailable)
 	}
 }
 
-// FS-004 AC-004: with no ready harness in its chain, the execution fails without starting, and names the harness.
+// With no ready harness in its chain, the execution fails without starting, and names the harness.
 func TestUnavailableWithoutFallbackNeverStarts(t *testing.T) {
 	e := newEnv(t)
 	e.create("gone", "")
@@ -1407,8 +1407,8 @@ func TestUnavailableWithoutFallbackNeverStarts(t *testing.T) {
 	}
 }
 
-// FS-004 AC-011, FR-006: a harness whose first check still runs is checking, never not installed; its result arrives
-// with harness.checked, and a later check keeps the previous result until the new one lands (D-102).
+// A harness whose first check still runs is checking, never not installed; its result arrives with harness.checked,
+// and a later check keeps the previous result until the new one lands.
 func TestHarnessIsCheckingUntilItsCheckEnds(t *testing.T) {
 	var release func()
 	e := newEnv(t, func(e *env) { release = e.codex.hold(t) })
@@ -1468,7 +1468,7 @@ func TestHarnessIsCheckingUntilItsCheckEnds(t *testing.T) {
 	}
 }
 
-// FS-005 FR-010: a rate limit retries on the same harness, never switches.
+// A rate limit retries on the same harness, never switches.
 func TestRateLimitRetriesSameHarness(t *testing.T) {
 	e := newEnv(t)
 	e.create("rated", "    fallback:\n      candidates:\n        - provider: codex\n  execution:\n    rateLimit:\n      initialWaitSeconds: 1\n")
@@ -1490,7 +1490,7 @@ func TestRateLimitRetriesSameHarness(t *testing.T) {
 	}
 }
 
-// FS-002 AC-007, AC-005: misfires coalesce into one catch-up, or are skipped.
+// Misfires coalesce into one catch-up, or are skipped.
 func TestMisfiresCoalesce(t *testing.T) {
 	e := newEnv(t)
 	e.create("daily", "  schedule:\n    cron: \"0 9 * * *\"\n    timezone: UTC\n")
@@ -1518,9 +1518,8 @@ func TestMisfiresCoalesce(t *testing.T) {
 	}
 }
 
-// FS-002 AC-004, AC-005, AC-008: firings missed while the daemon was down follow the task's missed-run policy once,
-// after the restart: one catch-up for the first missed firing, or none. The next firing is the next occurrence, and
-// another restart runs nothing.
+// Firings missed while the daemon was down follow the task's missed-run policy once, after the restart: one catch-up
+// for the first missed firing, or none. The next firing is the next occurrence, and another restart runs nothing.
 func TestMisfiresAcrossRestart(t *testing.T) {
 	e := newEnv(t)
 	e.create("daily", "  schedule:\n    cron: \"0 9 * * *\"\n    timezone: UTC\n")
@@ -1563,9 +1562,8 @@ func TestMisfiresAcrossRestart(t *testing.T) {
 	nextFires()
 }
 
-// FS-002 FR-010, AC-012 (D-083): a changed schedule takes effect at once, however it changes: an edit through the
-// API, an edit of the task file, or a change of the time zone alone. The next firing follows the new schedule, and the
-// old one never fires.
+// A changed schedule takes effect at once, however it changes: an edit through the API, an edit of the task file, or a
+// change of the time zone alone. The next firing follows the new schedule, and the old one never fires.
 func TestChangedScheduleTakesEffect(t *testing.T) {
 	bangkok, err := time.LoadLocation("Asia/Bangkok")
 	if err != nil {
@@ -1635,8 +1633,8 @@ func TestChangedScheduleTakesEffect(t *testing.T) {
 	}
 }
 
-// FS-002 AC-004, AC-005, D-080: a firing that came due while the daemon was down is a misfire however short the
-// outage, here a restart 60 seconds after it, and follows the task's missed-run policy.
+// A firing that came due while the daemon was down is a misfire however short the outage, here a restart 60 seconds
+// after it, and follows the task's missed-run policy.
 func TestMisfireAcrossShortRestart(t *testing.T) {
 	e := newEnv(t)
 	e.create("daily", "  schedule:\n    cron: \"0 9 * * *\"\n    timezone: UTC\n")
@@ -1686,8 +1684,8 @@ func (e *env) lastFiring(id string) firingRecord {
 	return h[len(h)-1]
 }
 
-// FS-002 FR-006, AC-008: the firings of a three-day outage are recorded, the catch-up with its execution and the
-// skipped misfires with the policy, and the records survive a restart.
+// The firings of a three-day outage are recorded, the catch-up with its execution and the skipped misfires with the
+// policy, and the records survive a restart.
 func TestFiringsRecordedAcrossRestart(t *testing.T) {
 	e := newEnv(t)
 	e.create("daily", "  schedule:\n    cron: \"0 9 * * *\"\n    timezone: UTC\n")
@@ -1720,8 +1718,8 @@ func TestFiringsRecordedAcrossRestart(t *testing.T) {
 	}
 }
 
-// FS-002 FR-006: a firing due while its task is disabled, pending deletion, or invalid on disk is recorded as
-// skipped, with the reason.
+// A firing due while its task is disabled, pending deletion, or invalid on disk is recorded as skipped, with the
+// reason.
 func TestHeldBackFiringsRecorded(t *testing.T) {
 	e := newEnv(t)
 	schedule := "  schedule:\n    cron: \"0 9 * * *\"\n    timezone: UTC\n"
@@ -1769,8 +1767,8 @@ func TestHeldBackFiringsRecorded(t *testing.T) {
 	}
 }
 
-// FS-002 FR-004, AC-006: a firing due while the machine slept is a misfire however soon the machine wakes, here 60
-// seconds after it; a sleep that ended before a firing's time changes nothing.
+// A firing due while the machine slept is a misfire however soon the machine wakes, here 60 seconds after it; a sleep
+// that ended before a firing's time changes nothing.
 func TestMisfireDuringSleep(t *testing.T) {
 	e := newEnv(t)
 	e.create("daily", "  schedule:\n    cron: \"0 9 * * *\"\n    timezone: UTC\n")
@@ -1807,7 +1805,7 @@ func TestMisfireDuringSleep(t *testing.T) {
 	}
 }
 
-// FS-001 AC-015, AC-016: a running execution keeps its definition; the waiting firing picks up the edit.
+// A running execution keeps its definition; the waiting firing picks up the edit.
 func TestEditWhileRunning(t *testing.T) {
 	e := newEnv(t)
 	e.create("edited", "")
@@ -1827,16 +1825,16 @@ func TestEditWhileRunning(t *testing.T) {
 	if len(prompts) != 2 || prompts[0] != "Do the work of edited." || prompts[1] != "Do the edited work." {
 		t.Errorf("prompts %q", prompts)
 	}
-	// An edit from a stale revision is a conflict, never a silent overwrite (FS-001 AC-006).
+	// An edit from a stale revision is a conflict, never a silent overwrite.
 	if _, err := e.app.UpdateTask(t.Context(), "edited", TaskInput{YAML: edited, BaseRevision: view.Revision}); err == nil ||
 		err.(*Error).Code != CodeConflict {
 		t.Errorf("stale revision: %v", err)
 	}
 }
 
-// FS-001 FR-013, AC-015 (D-083): what a running execution reads after an edit still comes from the definition it
-// started with. The edit changes the prompt and removes the fallback while the first attempt runs; the quota that ends
-// that attempt still switches to codex, and codex reads the prompt as it was. The next execution runs the edit.
+// What a running execution reads after an edit still comes from the definition it started with. The edit changes the
+// prompt and removes the fallback while the first attempt runs; the quota that ends that attempt still switches to
+// codex, and codex reads the prompt as it was. The next execution runs the edit.
 func TestEditWhileRunningKeepsTheStartingDefinition(t *testing.T) {
 	e := newEnv(t)
 	gates := t.TempDir()
@@ -1895,8 +1893,8 @@ func TestEditWhileRunningKeepsTheStartingDefinition(t *testing.T) {
 	}
 }
 
-// FS-001 FR-013, AC-019: an edit that fails validation while an execution runs changes nothing. The task keeps its file
-// and revision, the execution ends with the definition it started with, and so does the next one.
+// An edit that fails validation while an execution runs changes nothing. The task keeps its file and revision, the
+// execution ends with the definition it started with, and so does the next one.
 func TestInvalidEditWhileRunning(t *testing.T) {
 	e := newEnv(t)
 	gates := t.TempDir()
@@ -1939,7 +1937,7 @@ func TestInvalidEditWhileRunning(t *testing.T) {
 	}
 }
 
-// FS-001 AC-017, AC-018: disabling lets the execution finish; deleting waits for it; records stay.
+// Disabling lets the execution finish; deleting waits for it; records stay.
 func TestDisableAndDeleteWhileRunning(t *testing.T) {
 	e := newEnv(t)
 	e.create("going", "")
@@ -1975,9 +1973,9 @@ func TestDisableAndDeleteWhileRunning(t *testing.T) {
 	}
 }
 
-// FS-001 FR-015, AC-017 (D-083): disabling a running task lets its execution finish and stops every new firing until
-// the task is enabled: the firing waiting behind it is cancelled and never starts, and a firing that comes due while
-// it is disabled creates no execution. Once enabled, the next firing is on time, not a catch-up.
+// Disabling a running task lets its execution finish and stops every new firing until the task is enabled: the firing
+// waiting behind it is cancelled and never starts, and a firing that comes due while it is disabled creates no
+// execution. Once enabled, the next firing is on time, not a catch-up.
 func TestDisableStopsNewFiringsUntilEnabled(t *testing.T) {
 	e := newEnv(t)
 	gates := t.TempDir()
@@ -2107,9 +2105,9 @@ func presentFiles(files []string) []string {
 	return out
 }
 
-// FS-008 FR-011, AC-011 (D-073): with logRetentionDays at 7, retention deletes the log, the raw captures, and the
-// execution directory of an ended execution whose log is 8 days old, and keeps every file of one whose log is 6 days
-// old. FR-010, AC-010: the expired execution's record is still listed and read whole; only its log reads as expired.
+// With logRetentionDays at 7, retention deletes the log, the raw captures, and the execution directory of an ended
+// execution whose log is 8 days old, and keeps every file of one whose log is 6 days old. The expired execution's
+// record is still listed and read whole; only its log reads as expired.
 func TestRetentionDeletesOnlyExpiredLogs(t *testing.T) {
 	const day = 24 * time.Hour
 	e := newEnv(t)
@@ -2163,7 +2161,7 @@ func TestRetentionDeletesOnlyExpiredLogs(t *testing.T) {
 	}
 	if !x.LogExpired || x.Status != domain.StatusCompleted || x.WorkItem != "o/r#7" || len(x.WorkItems) != 1 ||
 		x.WorkItems[0].Key != "o/r#7" || x.PullRequestURL != "https://github.com/o/r/pull/9" {
-		t.Errorf("the record lost what FR-010 keeps: log expired %v, %+v, work items %+v", x.LogExpired,
+		t.Errorf("the record lost what outlives an expired log: log expired %v, %+v, work items %+v", x.LogExpired,
 			x.ExecutionSummary, x.WorkItems)
 	}
 	if len(x.Attempts) != 2 || x.Attempts[0].Harness != domain.HarnessClaudeCode ||
@@ -2197,8 +2195,8 @@ func TestRetentionDeletesOnlyExpiredLogs(t *testing.T) {
 	}
 }
 
-// FS-008 FR-011 (D-073): logRetentionDays is 30 on a fresh install, so a 29-day-old log is kept and a 31-day-old one
-// deleted; it accepts 1 to 3650 and rejects 0 and 3651; and a saved value is still in force after a restart.
+// logRetentionDays is 30 on a fresh install, so a 29-day-old log is kept and a 31-day-old one deleted; it accepts 1 to
+// 3650 and rejects 0 and 3651; and a saved value is still in force after a restart.
 func TestLogRetentionSetting(t *testing.T) {
 	const day = 24 * time.Hour
 	e := newEnv(t)
@@ -2251,10 +2249,10 @@ func TestLogRetentionSetting(t *testing.T) {
 	expiredOver(e, 28)
 }
 
-// FS-008 FR-011: a retention pass that finds another one deleting waits for it, so once ApplyRetention returns, every
-// log past the cutoff is deleted and its record says so. A pass that went on beside the other would skip the log the
-// other had just deleted, since a missing log is aged by its execution's end, and return before that log's record
-// read expired. That is what the start's pass and TestLogRetentionSetting's own call after its restart could do.
+// A retention pass that finds another one deleting waits for it, so once ApplyRetention returns, every log past the
+// cutoff is deleted and its record says so. A pass that went on beside the other would skip the log the other had just
+// deleted, since a missing log is aged by its execution's end, and return before that log's record read expired. That
+// is what the start's pass and TestLogRetentionSetting's own call after its restart could do.
 func TestRetentionPassesRunOneAtATime(t *testing.T) {
 	e := newEnv(t)
 	e.create("aged", "")
@@ -2301,7 +2299,7 @@ func TestRetentionPassesRunOneAtATime(t *testing.T) {
 	<-first
 }
 
-// FS-008 FR-011: retention never deletes the log of an execution still running or queued, however old its file is.
+// Retention never deletes the log of an execution still running or queued, however old its file is.
 func TestRetentionKeepsTheLogsOfActiveExecutions(t *testing.T) {
 	const day = 24 * time.Hour
 	e := newEnv(t)
@@ -2347,8 +2345,8 @@ func TestRetentionKeepsTheLogsOfActiveExecutions(t *testing.T) {
 	e.idle("busy")
 }
 
-// FS-001 FR-015, D-083: a running task disabled or deleted by a change of its file drops its waiting firing, as one
-// disabled or deleted through the API does, and the firing never starts.
+// A running task disabled or deleted by a change of its file drops its waiting firing, as one disabled or deleted
+// through the API does, and the firing never starts.
 func TestExternalChangeDropsTheWaitingFiring(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -2410,9 +2408,8 @@ func removeTaskFile(t *testing.T, path string) {
 	}
 }
 
-// FS-003 FR-007, AC-009; FS-001 FR-015 (D-083): a firing waiting when the daemon stopped still waits after the
-// restart, then starts; when its task file was disabled or deleted while the daemon was down, it is cancelled instead,
-// never starts, and leaves the queue.
+// A firing waiting when the daemon stopped still waits after the restart, then starts; when its task file was disabled
+// or deleted while the daemon was down, it is cancelled instead, never starts, and leaves the queue.
 func TestWaitingFiringAcrossRestart(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -2458,9 +2455,8 @@ func TestWaitingFiringAcrossRestart(t *testing.T) {
 	}
 }
 
-// FS-010 FR-002, AC-004 (D-008): autostart is opt-in. Starting the app, a patch that leaves autostart out, and
-// completing onboarding neither turn it on nor off; only a patch that names it does, and turning it on starts this
-// daemon with its data directory.
+// Autostart is opt-in. Starting the app, a patch that leaves autostart out, and completing onboarding neither turn it
+// on nor off; only a patch that names it does, and turning it on starts this daemon with its data directory.
 func TestAutostartChangesOnlyOnRequest(t *testing.T) {
 	service := &fakeAutostart{}
 	exe := "/Applications/HarmFlow.app/Contents/MacOS/harmflowd"
@@ -2511,8 +2507,7 @@ func TestAutostartChangesOnlyOnRequest(t *testing.T) {
 	calls("autostart: false", 1, 1)
 }
 
-// FS-001 AC-004, AC-012, AC-021: an invalid change keeps the valid file; a missing skill is an error on save and a
-// warning on import.
+// An invalid change keeps the valid file; a missing skill is an error on save and a warning on import.
 func TestValidationAndImport(t *testing.T) {
 	e := newEnv(t)
 	e.create("valid", "")
@@ -2549,9 +2544,9 @@ func TestValidationAndImport(t *testing.T) {
 	}
 }
 
-// FS-001 FR-020, AC-023: a saved task keeps its type. A duplicate inherits it, and an update that changes it is refused
-// at the type and writes nothing, from the form's document and from the YAML editor alike. The file is the source of
-// truth (ADR-005): a direct edit that changes the type loads, and the task keeps that type from then on.
+// A saved task keeps its type. A duplicate inherits it, and an update that changes it is refused at the type and writes
+// nothing, from the form's document and from the YAML editor alike. The file is the source of truth: a direct edit
+// that changes the type loads, and the task keeps that type from then on.
 func TestUpdateKeepsTheType(t *testing.T) {
 	e := newEnv(t)
 	repo := mkdir(t, filepath.Join(e.app.Paths().UserHome, "repo"))
@@ -2618,8 +2613,8 @@ func TestUpdateKeepsTheType(t *testing.T) {
 	}
 }
 
-// FS-001 FR-020: the type an update keeps is the task's last valid definition's, which a task whose file broke on disk
-// still has. A file never valid has no type to keep.
+// The type an update keeps is the task's last valid definition's, which a task whose file broke on disk still has. A
+// file never valid has no type to keep.
 func TestUpdateOfABrokenFileKeepsTheLastValidType(t *testing.T) {
 	e := newEnv(t)
 	script := func(id string) string {
@@ -2660,8 +2655,8 @@ func TestUpdateOfABrokenFileKeepsTheLastValidType(t *testing.T) {
 	}
 }
 
-// FS-012 FR-005: what the daemon tells the user carries a key and params the desktop translates — a validation error,
-// the warning a task keeps, and a use-case error — beside its en-US text.
+// What the daemon tells the user carries a key and params the desktop translates — a validation error, the warning a
+// task keeps, and a use-case error — beside its en-US text.
 func TestMessagesCarryKeys(t *testing.T) {
 	e := newEnv(t)
 	skills := "  skills: [nowhere-skill]\n"
@@ -2696,8 +2691,8 @@ func TestMessagesCarryKeys(t *testing.T) {
 	}
 }
 
-// FS-012 FR-005: what the daemon writes about an execution — its events, its error and its attempts' errors and reasons,
-// its step — carries a key, and a text it quotes keeps its own; the agent's words and a harness's own error carry none.
+// What the daemon writes about an execution — its events, its error and its attempts' errors and reasons, its step —
+// carries a key, and a text it quotes keeps its own; the agent's words and a harness's own error carry none.
 func TestExecutionTextsCarryKeys(t *testing.T) {
 	e := newEnv(t)
 	e.create("keyed", "    fallback:\n      candidates:\n        - provider: codex\n")
@@ -2772,7 +2767,7 @@ func (e *env) eventKeys(id, last string) map[string]string {
 	return keys
 }
 
-// FS-001 AC-002: duplicate creates a disabled copy with a new identifier.
+// Duplicate creates a disabled copy with a new identifier.
 func TestDuplicate(t *testing.T) {
 	e := newEnv(t)
 	e.create("orig", "")
@@ -2785,8 +2780,8 @@ func TestDuplicate(t *testing.T) {
 	}
 }
 
-// FS-001 FR-006, AC-008: an export masks a password, a cookie, and a session value wherever the file holds one — the
-// prompt, the description, or a comment — leaves the words around them, and still validates.
+// An export masks a password, a cookie, and a session value wherever the file holds one — the prompt, the description,
+// or a comment — leaves the words around them, and still validates.
 func TestExportMasksCredentials(t *testing.T) {
 	e := newEnv(t)
 	task := `apiVersion: harmflow/v1alpha1
@@ -2834,9 +2829,9 @@ spec:
 	}
 }
 
-// FS-001 FR-004, AC-001; FS-011 FR-002; FS-005 FR-001: an empty list of notified events or failover triggers is a
-// choice. Saved from the form or as YAML, and duplicated, the file keeps the key and the API's document and effective
-// carry the empty list; an execution then neither notifies nor fails over.
+// An empty list of notified events or failover triggers is a choice. Saved from the form or as YAML, and duplicated,
+// the file keeps the key and the API's document and effective carry the empty list; an execution then neither notifies
+// nor fails over.
 func TestEmptyListsAreKept(t *testing.T) {
 	e := newEnv(t)
 	doc, _ := json.Marshal(map[string]any{"apiVersion": "harmflow/v1alpha1", "kind": "Task",
@@ -2903,10 +2898,10 @@ func valueAt(v any, keys ...string) any {
 	return v
 }
 
-// FS-001 FR-012, AC-014: every default of D-082 stays adjustable per task, through the YAML key the schema names. A
-// task that sets each one, 0 included wherever the schema allows it, keeps it; a task that sets none gets every
-// default; one that sets only its timeout keeps it and gets the others. Each value is read from the effective
-// definition the API returns, by its key, so a key that drifted between the schema, the file, and the API fails here.
+// Every default stays adjustable per task, through the YAML key the schema names. A task that sets each one, 0
+// included wherever the schema allows it, keeps it; a task that sets none gets every default; one that sets only its
+// timeout keeps it and gets the others. Each value is read from the effective definition the API returns, by its key,
+// so a key that drifted between the schema, the file, and the API fails here.
 func TestDefaultsAndOverridesFromYAML(t *testing.T) {
 	e := newEnv(t)
 	params := []struct {
@@ -2990,7 +2985,7 @@ spec:
 	})
 }
 
-// FS-001 AC-005, AC-006: an external edit converges and is announced; an invalid one keeps the last valid definition.
+// An external edit converges and is announced; an invalid one keeps the last valid definition.
 func TestExternalEdits(t *testing.T) {
 	e := newEnv(t)
 	e.create("ext", "")
@@ -3053,9 +3048,9 @@ func namesFile(t *testing.T, what string, text domain.Text, file, innerKey strin
 	}
 }
 
-// FS-001 FR-007, AC-009: a task file found broken at start is named, beside its line, in the task's warning and its
-// validation errors, and announced by task.invalid as one the watcher finds. The file is broken.yml, not the
-// broken.yaml its id would give, so the name is the file's own.
+// A task file found broken at start is named, beside its line, in the task's warning and its validation errors, and
+// announced by task.invalid as one the watcher finds. The file is broken.yml, not the broken.yaml its id would give,
+// so the name is the file's own.
 func TestBrokenFileAtStartIsNamed(t *testing.T) {
 	var invalid func() []domain.Event
 	e := newEnv(t, func(e *env) {
@@ -3091,8 +3086,8 @@ func TestBrokenFileAtStartIsNamed(t *testing.T) {
 	}
 }
 
-// FS-001 FR-007, AC-009: the watcher names a loaded task's file once it breaks, for a syntax error and for a schema
-// rule, which keeps its JSON pointer and line.
+// The watcher names a loaded task's file once it breaks, for a syntax error and for a schema rule, which keeps its
+// JSON pointer and line.
 func TestBrokenFileFromTheWatcherIsNamed(t *testing.T) {
 	e := newEnv(t)
 	e.create("ext", "")
@@ -3142,9 +3137,9 @@ const (
 	taskFileCrashHeld       = "held before the rename"
 )
 
-// FS-001 AC-009: a daemon killed while it saves a task file starts again with the task's old definition. A child
-// process saves a new version through the real fsstore and holds once its temporary file is written and synced, before
-// the rename; it is killed there with SIGKILL, and a new App starts over the directory the kill left.
+// A daemon killed while it saves a task file starts again with the task's old definition. A child process saves a new
+// version through the real fsstore and holds once its temporary file is written and synced, before the rename; it is
+// killed there with SIGKILL, and a new App starts over the directory the kill left.
 func TestStartAfterAKillMidSave(t *testing.T) {
 	if taskFileCrashChild() {
 		return
@@ -3268,8 +3263,8 @@ func killTaskFileSave(t *testing.T, dir, content string) {
 	}
 }
 
-// FS-009 FR-007: a record or a ledger saved before the agent's text was redacted on arrival would keep a credential
-// with no time limit, so the daemon redacts both as it loads them, and saves them back.
+// A record or a ledger saved before the agent's text was redacted on arrival would keep a credential with no time
+// limit, so the daemon redacts both as it loads them, and saves them back.
 func TestRedactsWhatWasKeptBefore(t *testing.T) {
 	e := newEnv(t)
 	token := "ghp_" + strings.Repeat("e", 36)
@@ -3310,7 +3305,7 @@ func TestRedactsWhatWasKeptBefore(t *testing.T) {
 	}
 }
 
-// FS-003 AC-009, AC-013: a restart marks active executions interrupted and counts the failure against the item.
+// A restart marks active executions interrupted and counts the failure against the item.
 func TestRecoveryMarksInterrupted(t *testing.T) {
 	e := newEnv(t)
 	e.create("crash", "")
@@ -3330,7 +3325,7 @@ func TestRecoveryMarksInterrupted(t *testing.T) {
 	if len(q.WorkItems) != 1 || q.WorkItems[0].Failures != 1 || q.WorkItems[0].LastOperation != x.LastOperation {
 		t.Errorf("work item %+v", q.WorkItems)
 	}
-	// The next execution's context names the interruption and its last operation (D-089).
+	// The next execution's context names the interruption and its last operation.
 	e.claude.setScript(func(req ports.RunRequest) string { return "echo 'END ok'" })
 	r, _ := e.app.RunTask("crash")
 	done := e.wait(r.ExecutionID, domain.StatusCompleted)
@@ -3344,8 +3339,8 @@ func TestRecoveryMarksInterrupted(t *testing.T) {
 		t.Errorf("context interruptedExecutions: %v", ctx["interruptedExecutions"])
 	}
 
-	// FS-003 AC-013 (FS-003-F11): each recovery counts against the retry limit of the item's own task, here one retry,
-	// where the default of three would leave the item failed after its second interruption.
+	// Each recovery counts against the retry limit of the item's own task, here one retry, where the default of three
+	// would leave the item failed after its second interruption.
 	e.idle("crash")
 	issues := strings.Replace(taskYAML("issues", fmt.Sprintf("  githubIssueImplementation:\n    repositories:\n"+
 		"      - name: o/r\n        localPath: %q\n    queue:\n      maxFailedRetries: 1\n",
@@ -3378,10 +3373,10 @@ func TestRecoveryMarksInterrupted(t *testing.T) {
 	}
 }
 
-// FS-003 FR-010, FR-011, BR-002, AC-012, AC-013 (harmflow-app#63): a crash at any moment leaves a record that is not
-// behind the execution's log. The home is copied just before an event is appended, which is what a crash then leaves
-// on disk, and a new daemon recovers the copy: it names the last operation the log recorded, counts the interruption
-// against the item the session selected, and the next session's context carries both.
+// harmflow-app#63: a crash at any moment leaves a record that is not behind the execution's log. The home is copied
+// just before an event is appended, which is what a crash then leaves on disk, and a new daemon recovers the copy: it
+// names the last operation the log recorded, counts the interruption against the item the session selected, and the
+// next session's context carries both.
 func TestRecoveryAfterACrashMatchesTheLog(t *testing.T) {
 	const item = "o/r#7"
 	selected := `{"type":"work_item.selected","workItem":"o/r#7","message":"Fix the crash"}`
@@ -3504,7 +3499,7 @@ func (e *env) crashAt(task string, crash func(domain.Event) bool) (*env, string)
 	return openEnv(e.t, home), r.ExecutionID
 }
 
-// D-074: notices follow the task's events and the global level.
+// Notices follow the task's events and the global level.
 func TestNotificationLevels(t *testing.T) {
 	e := newEnv(t)
 	e.create("noisy", "")
@@ -3532,8 +3527,8 @@ func TestNotificationLevels(t *testing.T) {
 	}
 }
 
-// FS-001 FR-013, D-083: whether a running execution notifies is decided by the definition it started with, its task's
-// name included; an edit to the task's notifications applies from the next execution.
+// Whether a running execution notifies is decided by the definition it started with, its task's name included; an
+// edit to the task's notifications applies from the next execution.
 func TestNoticesFollowTheStartingDefinition(t *testing.T) {
 	e := newEnv(t)
 	gates := t.TempDir()
@@ -3604,7 +3599,7 @@ func (e *env) completedNotices(executionID string) []Notification {
 	return out
 }
 
-// FS-011 FR-005: past the cap the oldest read notices go first, and an unread notice is never dropped.
+// Past the cap the oldest read notices go first, and an unread notice is never dropped.
 func TestNotificationCapKeepsUnread(t *testing.T) {
 	e := newEnv(t)
 	e.create("noisy", "")
@@ -3653,8 +3648,8 @@ func TestNotificationCapKeepsUnread(t *testing.T) {
 	}
 }
 
-// FS-012 FR-005: a notice sends the params its text reads. A message the daemon wrote is nested with its key, so the
-// desktop translates it in place; the agent's words are quoted as they are.
+// A notice sends the params its text reads. A message the daemon wrote is nested with its key, so the desktop
+// translates it in place; the agent's words are quoted as they are.
 func TestNoticeSendsTheParamsItsTextReads(t *testing.T) {
 	e := newEnv(t)
 	e.create("loud", "  notifications:\n    native:\n      events: [execution.started, execution.completed, "+
@@ -3716,7 +3711,7 @@ func (e *env) noticeParams(eventType string) map[string]string {
 	return params
 }
 
-// FS-009 FR-010: an unenforced restriction runs with a warning on the task and on the execution.
+// An unenforced restriction runs with a warning on the task and on the execution.
 func TestPolicyWarningIsShown(t *testing.T) {
 	e := newEnv(t)
 	e.create("policy", "")

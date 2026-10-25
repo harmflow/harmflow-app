@@ -1,5 +1,5 @@
 // Command imports checks that the imports of every Go file under the given directories are in the three groups of the
-// Go code guide (D-132): the standard library, then third-party modules, then the module's own packages, separated by
+// Go code guide: the standard library, then third-party modules, then the module's own packages, separated by
 // blank lines. gofmt sorts imports within a group but neither splits nor orders groups, so CI runs this beside it.
 //
 // Usage: go -C tests run ./imports <dir>...

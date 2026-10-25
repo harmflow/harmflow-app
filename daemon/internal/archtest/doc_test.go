@@ -12,8 +12,8 @@ import (
 )
 
 // TestExportedNamesAreDocumented checks that every exported name of the daemon's production files outside
-// internal/contracts has a doc comment (D-132, harmflow/harmflow-app#198). Each failure names the file, the line, and
-// the name.
+// internal/contracts has a doc comment (harmflow/harmflow-app#198). Each failure names the file, the line, and the
+// name.
 func TestExportedNamesAreDocumented(t *testing.T) {
 	missing, err := undocumented(filepath.Join("..", ".."))
 	if err != nil {

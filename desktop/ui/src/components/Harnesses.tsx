@@ -1,4 +1,4 @@
-// The installed-agents inventory (FS-004 FR-007): what was detected, where, at which version, and whether it is ready.
+// The installed-agents inventory: what was detected, where, at which version, and whether it is ready.
 // Credentials are never shown.
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -13,7 +13,7 @@ import { toast } from "./toast";
 import { Button, Chip, KeyValue, TextInput } from "./ui";
 
 // A ready harness with something detection could not establish — its sign-in, or a version it can vouch for — is a
-// warning, with the diagnostic saying why (FS-004 FR-006, FR-008).
+// warning, with the diagnostic saying why.
 export function readinessTone(h: Harness): Tone {
   switch (h.readiness) {
     case "ready":
@@ -43,7 +43,7 @@ function readinessIcon(h: Harness): IconName {
   }
 }
 
-// While its first check runs, a harness is neither detected nor missing yet (FS-004 FR-007, D-102).
+// While its first check runs, a harness is neither detected nor missing yet.
 export function HarnessRow({ harness }: { harness: Harness }) {
   const { t } = useTranslation();
   return (
@@ -129,7 +129,7 @@ export function HarnessInventory({ harness, locale }: { harness: Harness; locale
           ],
           [
             t("harness.installations"),
-            // Each installation is a choice, the one in use marked; one chosen is saved as a path set by hand (FS-004 FR-001).
+            // Each installation is a choice, the one in use marked; one chosen is saved as a path set by hand.
             harness.installations.length ? (
               <ul className="installations">
                 {harness.installations.map((entry) => (

@@ -11,7 +11,7 @@ import (
 )
 
 // Identity recognizes a process group after the daemon that started it is gone: the group's id, its leader's start
-// time, and the system's boot time, as the operating system reports them (FS-013 FR-010).
+// time, and the system's boot time, as the operating system reports them.
 type Identity struct {
 	Group       int
 	LeaderStart string

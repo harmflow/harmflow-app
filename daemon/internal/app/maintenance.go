@@ -28,7 +28,7 @@ func (a *App) maintenanceLoop(ctx context.Context) {
 }
 
 // ApplyRetention deletes the logs and execution directories older than the retention period. The execution records
-// themselves are kept with no limit (D-073). A pass waits for one already running: beside it, it would skip a log the
+// themselves are kept with no limit. A pass waits for one already running: beside it, it would skip a log the
 // other had just deleted, since a missing log is aged by its execution's end, and return before that log's record
 // says it expired.
 func (a *App) ApplyRetention() {
@@ -77,7 +77,7 @@ type CleanResult struct {
 	Kept    []KeptPath `json:"kept"`
 }
 
-// CleanWorkspaces removes the worktrees no longer needed (FS-006 FR-016, D-073). A worktree is tied to its work item
+// CleanWorkspaces removes the worktrees no longer needed. A worktree is tied to its work item
 // through the path hf-github-worktree §2 gives it, <workspace>/<repo-name>-<issue-number>, or the worktreePath a
 // report named; it is removed only when that item reads closed in the ledger, or when the item's last execution was
 // cancelled, failed (a timeout included), or interrupted and its log has expired. Every other worktree is kept: those

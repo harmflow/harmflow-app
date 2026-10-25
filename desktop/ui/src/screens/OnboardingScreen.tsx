@@ -1,5 +1,5 @@
-// First use (FS-010 §5.1, FR-007): the scope of local operation, what was detected, autostart offered unchecked
-// (D-008), a manual start of the daemon, a first task, then the live executions screen.
+// First use: the scope of local operation, what was detected, autostart offered unchecked, a manual start of the
+// daemon, a first task, then the live executions screen.
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../api/client";

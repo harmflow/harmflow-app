@@ -7,7 +7,7 @@ describe("daemonText", () => {
     await i18n.changeLanguage("pt-BR");
   });
 
-  it("translates a daemon text from its key and params (FS-012 FR-005)", () => {
+  it("translates a daemon text from its key and params", () => {
     const text = {
       message: 'skill "lint" cannot be found for Codex (the Codex configuration)',
       messageKey: "skill_not_found" as const,
@@ -57,7 +57,7 @@ describe("daemonText", () => {
     );
   });
 
-  it("names a task file before the error it quotes (FS-001 FR-007)", () => {
+  it("names a task file before the error it quotes", () => {
     const syntax = {
       file: "broken.yml",
       detail: "YAML syntax error: line 3: did not find expected ',' or ']'",

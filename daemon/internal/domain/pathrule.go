@@ -6,8 +6,8 @@ import (
 )
 
 // PathRule is where a path that lets a harness write may lead: a task's workspace, its repositories' local paths, and
-// the writable paths of a custom profile (D-113, FS-009 FR-014). It checks a path ResolvePath returned, so neither a ..
-// segment nor a symlink leads out. The check is defense in depth, not a barrier against a caller that holds the API's
+// the writable paths of a custom profile. It checks a path ResolvePath returned, so neither a .. segment nor a symlink
+// leads out. The check is defense in depth, not a barrier against a caller that holds the API's
 // token, who can run any program through a script task.
 type PathRule struct {
 	home    string

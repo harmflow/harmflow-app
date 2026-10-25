@@ -39,10 +39,9 @@ func (d *daemon) waitEnd(id string, timeout time.Duration) map[string]any {
 	return nil
 }
 
-// D-068: a task's permissions become Claude Code's own. In a real headless session, a command the task allows runs,
-// while make stays refused although a rule allows it: Claude Code asks for an approval no one can give. Tasks that build
-// with make run its recipes command by command instead; this test fails the day Claude Code runs make, so they can call
-// it again.
+// A task's permissions become Claude Code's own. In a real headless session, a command the task allows runs, while make
+// stays refused although a rule allows it: Claude Code asks for an approval no one can give. Tasks that build with make
+// run its recipes command by command instead; this test fails the day Claude Code runs make, so they can call it again.
 func TestClaudeCodeRefusesMakeInATask(t *testing.T) {
 	claude := realClaude(t)
 	d := startDaemon(t, t.TempDir())

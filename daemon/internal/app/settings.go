@@ -8,7 +8,7 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 )
 
-// Settings are the preferences the dashboard changes (FS-010 FR-009, FS-011 FR-006, FS-012).
+// Settings are the preferences the dashboard changes.
 type Settings struct {
 	SchemaVersion     string            `json:"schemaVersion"`
 	Language          string            `json:"language"`
@@ -18,7 +18,7 @@ type Settings struct {
 	Theme             string            `json:"theme"`
 	PathVariables     map[string]string `json:"pathVariables"`
 	// AllowedFolders are where, beside the home folder and the mounted volumes, a path that lets a harness write may
-	// lead (D-113, FS-009 FR-014).
+	// lead.
 	AllowedFolders      []string `json:"allowedFolders"`
 	OnboardingCompleted bool     `json:"onboardingCompleted"`
 }
@@ -96,7 +96,7 @@ func (a *App) GetSettings() SettingsView {
 
 var varName = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 
-// UpdateSettings applies a patch. Autostart is opt-in: it changes only when the user asks (D-008).
+// UpdateSettings applies a patch. Autostart is opt-in: it changes only when the user asks.
 func (a *App) UpdateSettings(p SettingsPatch) (SettingsView, error) {
 	if p.Language != nil && !containsString([]string{"pt-BR", "en-US", "es-ES", "system"}, *p.Language) {
 		return SettingsView{}, newError(CodeValidationFailed,
@@ -169,7 +169,7 @@ func (a *App) UpdateSettings(p SettingsPatch) (SettingsView, error) {
 }
 
 // checkPathSettings refuses an allowed folder in a place no harness may write, and a change to the path variables or the
-// allowed folders that would put a saved task's path outside the rule, naming the task (D-113, FS-009 FR-014).
+// allowed folders that would put a saved task's path outside the rule, naming the task.
 func (a *App) checkPathSettings(p SettingsPatch) error {
 	if p.PathVariables == nil && p.AllowedFolders == nil {
 		return nil

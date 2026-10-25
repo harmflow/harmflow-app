@@ -43,7 +43,7 @@ export const native = {
     if (isTauri()) await invoke("set_tray_labels", { labels });
   },
 
-  /** The web view's zoom, in percent (D-110). A plain browser keeps its own, in its View menu. */
+  /** The web view's zoom, in percent. A plain browser keeps its own, in its View menu. */
   async setZoom(percent: number): Promise<void> {
     if (!isTauri()) return;
     const { getCurrentWebview } = await import("@tauri-apps/api/webview");
@@ -102,7 +102,7 @@ export const native = {
     return (await n.requestPermission()) === "granted";
   },
 
-  /** A click on the notice opens the execution it names; the shell handles the click (FS-011 FR-003). */
+  /** A click on the notice opens the execution it names; the shell handles the click. */
   async notify(title: string, body: string, executionId?: string): Promise<void> {
     if (!isTauri()) return;
     const n = await import("@tauri-apps/plugin-notification");

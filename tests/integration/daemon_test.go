@@ -1,5 +1,5 @@
 // Package integration runs the real harmflowd binary and talks to it over its local API, with stand-in harness CLIs
-// that speak the real output formats. These are the E3 tests across the daemon's process boundary.
+// that speak the real output formats. These are the tests across the daemon's process boundary.
 package integration
 
 import (
@@ -57,7 +57,7 @@ func TestMain(m *testing.M) {
 	binary = filepath.Join(dir, "harmflowd")
 	args := []string{"build", "-ldflags", "-X main.BuiltAt=" + builtAt, "-o", binary}
 	// make coverage-daemon sets GOCOVERDIR: each daemon then writes its counters there when it exits, to be merged
-	// with the unit tests' own, in the same counter mode (ADR-015).
+	// with the unit tests' own, in the same counter mode.
 	if os.Getenv("GOCOVERDIR") != "" {
 		args = append(args, "-cover", "-covermode=atomic")
 	}
@@ -259,8 +259,8 @@ spec:
 %s`, id, id, prompt, extra)
 }
 
-// FS-009 FR-004, FR-005: the token is required everywhere; a web page's Origin and a non-loopback Host are refused.
-// FS-009 FR-003, AC-003: each refusal is recorded in daemon.log with its reason, never with the token it presented.
+// The token is required everywhere; a web page's Origin and a non-loopback Host are refused. Each refusal is recorded
+// in daemon.log with its reason, never with the token it presented.
 func TestAPIProtection(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	saved := d.token
@@ -326,11 +326,11 @@ func TestAPIProtection(t *testing.T) {
 // how many requests the entry stands for since when.
 var rejectionEntry = regexp.MustCompile(`local API rejected (\S+) ("(?:[^"\\]|\\.)*"): ([^(]+) \((\d+) requests? since (\S+)\)$`)
 
-// FS-009 FR-004, AC-004, FR-011: no request without the token changes anything. Every operation of the contract, the
-// control routes, the read routes, /health, and the SSE stream, gets 401 with no Authorization header and with a wrong
-// token. Each request would change something if the guard let it through; afterwards the task files, the tasks, the
-// executions, the notices, the settings, the harness paths, and the token are as they were, the execution started
-// before still runs, and the daemon still answers.
+// No request without the token changes anything. Every operation of the contract, the control routes, the read routes,
+// /health, and the SSE stream, gets 401 with no Authorization header and with a wrong token. Each request would change
+// something if the guard let it through; afterwards the task files, the tasks, the executions, the notices, the
+// settings, the harness paths, and the token are as they were, the execution started before still runs, and the daemon
+// still answers.
 func TestAPIGuardOnEveryRoute(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	d.call("POST", "/tasks", map[string]any{"yaml": task("finished", "SCENARIO=ok", "")}, 201)
@@ -612,8 +612,8 @@ func sortedUnion(a, b map[string]string) []string {
 	return keys
 }
 
-// FS-009 FR-005, AC-005: the API listens on loopback only, and the SSE stream refuses a request with no Authorization
-// header like any other route.
+// The API listens on loopback only, and the SSE stream refuses a request with no Authorization header like any other
+// route.
 func TestAPILoopbackOnly(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	if status, kind, body := d.requestAs("", "GET", "/events/stream", nil); !unauthorized(status, kind, body) ||
@@ -706,10 +706,10 @@ func nonLoopbackAddresses(t *testing.T) []string {
 	return out
 }
 
-// FS-009 FR-013, AC-013: a restart keeps the token, and only a rotation replaces it. A client holds the token it read
-// from run/token, as a script does: it keeps working across a restart, and fails on a REST route and on the stream
-// once the token is rotated, while the token read again works, also after another restart. The rotation's response
-// never holds the new token.
+// A restart keeps the token, and only a rotation replaces it. A client holds the token it read from run/token, as a
+// script does: it keeps working across a restart, and fails on a REST route and on the stream once the token is
+// rotated, while the token read again works, also after another restart. The rotation's response never holds the new
+// token.
 func TestAPITokenAcrossRestartAndRotation(t *testing.T) {
 	home := t.TempDir()
 	tokenFile := filepath.Join(home, "run", "token")
@@ -796,10 +796,9 @@ func TestHealthNamesTheBuildTime(t *testing.T) {
 	}
 }
 
-// FS-010 FR-002, AC-004 (D-008): a fresh install keeps autostart off and writes no user agent. FS-010 FR-003, AC-005: a
-// daemon started by hand, not by launchd, fires its scheduled task while autostart reads off, so "running now" and
-// "starts at login" are two states. HOME is a throwaway directory: the daemon's user agent would lie under it, never
-// in the developer's own LaunchAgents.
+// A fresh install keeps autostart off and writes no user agent. A daemon started by hand, not by launchd, fires its
+// scheduled task while autostart reads off, so "running now" and "starts at login" are two states. HOME is a throwaway
+// directory: the daemon's user agent would lie under it, never in the developer's own LaunchAgents.
 func TestHandStartedDaemonFiresWithAutostartOff(t *testing.T) {
 	userHome := t.TempDir()
 	t.Setenv("HOME", userHome)
@@ -823,7 +822,7 @@ func TestHandStartedDaemonFiresWithAutostartOff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("next firing %v: %v", created["nextFireAt"], err)
 	}
-	// Schedules have no seconds field (D-071), so the firing comes at the next minute boundary, at most 60 s away; the
+	// Schedules have no seconds field, so the firing comes at the next minute boundary, at most 60 s away; the
 	// run then has as long again to complete on a loaded host.
 	deadline := next.Add(60 * time.Second)
 	var x map[string]any
@@ -856,8 +855,8 @@ func TestHandStartedDaemonFiresWithAutostartOff(t *testing.T) {
 	autostartOff("after the run")
 }
 
-// FS-001 AC-001, AC-003, AC-004, AC-005, AC-006, AC-007, AC-008: the daemon is the only writer; form and YAML go
-// through one validation; files and dashboard converge; conflicts are reported.
+// The daemon is the only writer; form and YAML go through one validation; files and dashboard converge; conflicts are
+// reported.
 func TestTaskLifecycle(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	doc := map[string]any{"apiVersion": "harmflow/v1alpha1", "kind": "Task",
@@ -874,7 +873,7 @@ func TestTaskLifecycle(t *testing.T) {
 	if created["nextFireAt"] == nil {
 		t.Error("no next firing")
 	}
-	// An empty list the form sends is a choice the file keeps, not a key dropped for its default (FS-011 FR-002).
+	// An empty list the form sends is a choice the file keeps, not a key dropped for its default.
 	empty := map[string]any{"apiVersion": "harmflow/v1alpha1", "kind": "Task",
 		"metadata": map[string]any{"id": "form-empty", "name": "Form empty"},
 		"spec": map[string]any{"type": "general", "prompt": "p",
@@ -896,7 +895,7 @@ func TestTaskLifecycle(t *testing.T) {
 	if v1["valid"] != false || e1["path"] != e2["path"] || e1["message"] != e2["message"] || e2["line"] == nil {
 		t.Errorf("form and editor disagree: %v / %v", e1, e2)
 	}
-	// The desktop translates the error from its key and params (FS-012 FR-005).
+	// The desktop translates the error from its key and params.
 	if e1["messageKey"] != "schema_pattern" || e2["messageKey"] != e1["messageKey"] || e1["params"] == nil {
 		t.Errorf("no translatable key: %v / %v", e1, e2)
 	}
@@ -950,8 +949,8 @@ func TestTaskLifecycle(t *testing.T) {
 	}
 }
 
-// FS-001 AC-001, AC-005 (FR-004, ADR-005): a form document that sets every section is written as a file equal to it,
-// which passes validation and is listed; after an edit outside the daemon, the task the API returns is the file.
+// A form document that sets every section is written as a file equal to it, which passes validation and is listed;
+// after an edit outside the daemon, the task the API returns is the file.
 func TestFormDocumentIsTheFile(t *testing.T) {
 	home := t.TempDir()
 	// Codex's models cache, read when the harness is detected, makes the candidate's model and effort ones the daemon
@@ -978,7 +977,7 @@ func TestFormDocumentIsTheFile(t *testing.T) {
 	}
 	d := startDaemon(t, home, "CLAUDE_CONFIG_DIR="+claudeConfig)
 	repo := t.TempDir()
-	// Outside the home folder, so an allowed folder (FS-009 FR-014).
+	// Outside the home folder, so an allowed folder.
 	d.call("PATCH", "/settings", map[string]any{"allowedFolders": []any{repo}}, 200)
 	complete := completeTask("complete", repo)
 	// An empty list of failover triggers or notified events is a choice the file keeps (harmflow/harmflow-app#83).
@@ -1075,8 +1074,8 @@ func completeTask(id, repo string) map[string]any {
 		}}
 }
 
-// FS-001 AC-013 (FR-011, BR-001): one file that breaks a schema rule is refused the same way by the form, the YAML
-// editor's create and save, and import, and nothing is written; the file with the rule fixed is accepted by each.
+// One file that breaks a schema rule is refused the same way by the form, the YAML editor's create and save, and
+// import, and nothing is written; the file with the rule fixed is accepted by each.
 func TestOneSchemaForEveryEntryPoint(t *testing.T) {
 	home := t.TempDir()
 	d := startDaemon(t, home)
@@ -1191,7 +1190,7 @@ func taskFiles(t *testing.T, home string) map[string]string {
 	return out
 }
 
-// FS-001 FR-007, AC-009: a task file broken while the daemon is down is named, beside its line, once it restarts.
+// A task file broken while the daemon is down is named, beside its line, once it restarts.
 func TestRestartNamesTheBrokenFile(t *testing.T) {
 	home := t.TempDir()
 	startDaemon(t, home).stop()
@@ -1228,8 +1227,8 @@ func TestRestartNamesTheBrokenFile(t *testing.T) {
 	}
 }
 
-// FS-002 FR-009, AC-011: a save accepts a 5-field cron or a simple interval, and rejects a cron with a seconds field
-// without writing a task file.
+// A save accepts a 5-field cron or a simple interval, and rejects a cron with a seconds field without writing a task
+// file.
 func TestScheduleFormatsOnSave(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	before := time.Now().Truncate(time.Minute)
@@ -1351,7 +1350,7 @@ type loggedEvent struct {
 	Type string `json:"type"`
 }
 
-// checkEvent checks one event's JSON against event.schema.json (FS-008 FR-007) and returns its id and type.
+// checkEvent checks one event's JSON against event.schema.json and returns its id and type.
 func checkEvent(t *testing.T, source string, raw []byte) loggedEvent {
 	t.Helper()
 	s, err := eventSchema()
@@ -1435,8 +1434,8 @@ func sameEvents(t *testing.T, source string, got, received []loggedEvent) {
 	}
 }
 
-// FS-008 FR-002, AC-001: live events over SSE, and the same events, in the same order, in the replay the API serves and
-// in the JSONL log; a reconnection resumes after the last id.
+// Live events over SSE, and the same events, in the same order, in the replay the API serves and in the JSONL log; a
+// reconnection resumes after the last id.
 func TestRunStreamAndReplay(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	d.call("POST", "/tasks", map[string]any{"yaml": task("streamed", "SCENARIO=report", "")}, 201)
@@ -1498,9 +1497,9 @@ func TestRunStreamAndReplay(t *testing.T) {
 	}
 }
 
-// FS-008 AC-007: a client that disconnects while an execution runs, and reconnects with Last-Event-ID set to the last
-// event it received, receives every event emitted while it was away, in order, once each and with no replay_gap, and
-// then live ones. What it received in the end is the stored log.
+// A client that disconnects while an execution runs, and reconnects with Last-Event-ID set to the last event it
+// received, receives every event emitted while it was away, in order, once each and with no replay_gap, and then live
+// ones. What it received in the end is the stored log.
 func TestReconnectionIsLossless(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	// With no notice, the stored log ends at execution.completed, so it can equal what the client received whole.
@@ -1605,8 +1604,8 @@ func (d *daemon) eventsAfter(t *testing.T, executionID string, after int64) []lo
 	return replay.Events
 }
 
-// FS-008 FR-009, AC-009: a running execution's detail and its row in the list give its current step and when it
-// started, and no field of either speaks of a percentage or of progress.
+// A running execution's detail and its row in the list give its current step and when it started, and no field of
+// either speaks of a percentage or of progress.
 func TestRunningExecutionShowsStepAndStart(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	d.call("POST", "/tasks", map[string]any{"yaml": task("steady", "SCENARIO=slow", "  execution:\n    cancelGraceSeconds: 1\n")}, 201)
@@ -1668,8 +1667,8 @@ func progressKeys(v any, path string) []string {
 	return out
 }
 
-// FS-008 AC-008: the raw output of a completed execution is what the CLI printed, stdout and stderr, with the token
-// it contained redacted.
+// The raw output of a completed execution is what the CLI printed, stdout and stderr, with the token it contained
+// redacted.
 func TestRawOutputRedacted(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	d.call("POST", "/tasks", map[string]any{"yaml": task("leaky", "SCENARIO=secret", "")}, 201)
@@ -1694,7 +1693,7 @@ func TestRawOutputRedacted(t *testing.T) {
 	if strings.Contains(text, "ghp_") {
 		t.Errorf("the token survived:\n%s", text)
 	}
-	// FS-009 FR-005: the record the API serves keeps the command and the final text, redacted, in its detail and list.
+	// The record the API serves keeps the command and the final text, redacted, in its detail and list.
 	detail, _ := json.Marshal(d.call("GET", "/executions/"+id, nil, 200))
 	status, list := d.request("GET", "/executions?taskId=leaky", nil, nil)
 	if status != 200 {
@@ -1713,9 +1712,8 @@ func TestRawOutputRedacted(t *testing.T) {
 	}
 }
 
-// FS-008 FR-011, AC-011 (D-073): the daemon applies log retention on its own when it starts, and deletes a log older
-// than the default 30 days. FR-010, AC-010: the execution is still served with its pull request and its attempt, and
-// its events read as expired.
+// The daemon applies log retention on its own when it starts, and deletes a log older than the default 30 days. The
+// execution is still served with its pull request and its attempt, and its events read as expired.
 func TestRetentionExpiresTheLogAtStart(t *testing.T) {
 	home := t.TempDir()
 	d := startDaemon(t, home)
@@ -1754,7 +1752,7 @@ func TestRetentionExpiresTheLogAtStart(t *testing.T) {
 	attempts, _ := x["attempts"].([]any)
 	if x["status"] != "completed" || x["workItem"] != "o/r#3" || x["pullRequestUrl"] != "https://github.com/o/r/pull/4" ||
 		len(attempts) != 1 {
-		t.Fatalf("the record lost what FR-010 keeps: %v", x)
+		t.Fatalf("the record lost what outlives an expired log: %v", x)
 	}
 	if a, _ := attempts[0].(map[string]any); a["harness"] != "claude-code" || a["outcome"] != "succeeded" {
 		t.Errorf("the record lost its attempt: %v", a)
@@ -1765,7 +1763,7 @@ func TestRetentionExpiresTheLogAtStart(t *testing.T) {
 	}
 }
 
-// FS-005 §5.1: Claude Code exhausts its quota; Codex finishes the same execution.
+// Claude Code exhausts its quota; Codex finishes the same execution.
 func TestFailoverAcrossHarnesses(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	_ = os.MkdirAll(filepath.Join(d.home, "codex"), 0o700)
@@ -1782,8 +1780,8 @@ func TestFailoverAcrossHarnesses(t *testing.T) {
 	if a1["harness"] != "claude-code" || a1["outcome"] != "quota_exhausted" || a2["harness"] != "codex" || a2["outcome"] != "succeeded" {
 		t.Errorf("attempts %v %v", a1, a2)
 	}
-	// FS-005 AC-008 (D-105): Claude Code's init line names its model; Codex's stream names none, and neither names its
-	// effort, so those are absent, and the configured default is kept apart, never in their place.
+	// Claude Code's init line names its model; Codex's stream names none, and neither names its effort, so those are
+	// absent, and the configured default is kept apart, never in their place.
 	if a1["model"] != "claude-haiku-4-5-20251001" || a2["model"] != nil || a1["effort"] != nil || a2["effort"] != nil ||
 		a1["configuredModel"] != "default" || a2["configuredModel"] != "default" ||
 		a2["configuredEffort"] != "default" {
@@ -1792,7 +1790,7 @@ func TestFailoverAcrossHarnesses(t *testing.T) {
 	if x["model"] != nil {
 		t.Errorf("the execution's model %v is not its current attempt's", x["model"])
 	}
-	// FS-008 FR-007: the replay and the JSONL log hold the same events, each fitting event.schema.json.
+	// The replay and the JSONL log hold the same events, each fitting event.schema.json.
 	id := run["executionId"].(string)
 	events, jsonl := d.storedLog(t, id)
 	sameEvents(t, id+".jsonl", throughCompletion(t, id+".jsonl", jsonl), throughCompletion(t, "the replay", events))
@@ -1820,7 +1818,7 @@ func TestFailoverAcrossHarnesses(t *testing.T) {
 	if m := u2["models"].([]any)[0].(map[string]any); m["model"] != "gpt-from-config" {
 		t.Errorf("attempt 2 model: %v", m)
 	}
-	// FS-008 FR-010: each attempt keeps the prompt it sent and its own session context, under the contract's names.
+	// Each attempt keeps the prompt it sent and its own session context, under the contract's names.
 	c1, _ := a1["sessionContext"].(string)
 	c2, _ := a2["sessionContext"].(string)
 	if a1["prompt"] != "SCENARIO=quota" || a2["prompt"] != "SCENARIO=quota" {
@@ -1832,8 +1830,8 @@ func TestFailoverAcrossHarnesses(t *testing.T) {
 	}
 }
 
-// FS-008 AC-012: a failover whose attempts both reported their usage. Claude Code's cost is the one its CLI printed;
-// Codex's, at the model its configuration sets, is estimated from the price table and stamped on the attempt.
+// A failover whose attempts both reported their usage. Claude Code's cost is the one its CLI printed; Codex's, at the
+// model its configuration sets, is estimated from the price table and stamped on the attempt.
 func TestFailoverCostsReportedAndEstimated(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	_ = os.MkdirAll(filepath.Join(d.home, "codex"), 0o700)
@@ -1863,7 +1861,7 @@ func TestFailoverCostsReportedAndEstimated(t *testing.T) {
 		tokensOf(u2)["input"] != float64(160035-135680) {
 		t.Errorf("attempt 2 usage: %v", u2)
 	}
-	// FS-008 FR-007: the replay and the JSONL log hold the same events, each fitting event.schema.json.
+	// The replay and the JSONL log hold the same events, each fitting event.schema.json.
 	id := run["executionId"].(string)
 	events, jsonl := d.storedLog(t, id)
 	sameEvents(t, id+".jsonl", throughCompletion(t, id+".jsonl", jsonl), throughCompletion(t, "the replay", events))
@@ -1879,10 +1877,9 @@ func tokensOf(usage map[string]any) map[string]any {
 	return tokens
 }
 
-// FS-003 AC-007, AC-006: cancelling ends the harness and its children, the one in its group and the one in a session
-// of its own, as Claude Code runs a tool command, and the log names the second; another task keeps running.
-// FS-003 FR-005: the execution ends cancelled, and its record, log, raw output, workspace, and execution directory are
-// kept.
+// Cancelling ends the harness and its children, the one in its group and the one in a session of its own, as Claude
+// Code runs a tool command, and the log names the second; another task keeps running. The execution ends cancelled, and
+// its record, log, raw output, workspace, and execution directory are kept.
 func TestCancelEndsTheTree(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	d.call("POST", "/tasks", map[string]any{"yaml": task("slow-a", "SCENARIO=session PARTIAL=1", "  execution:\n    cancelGraceSeconds: 1\n")}, 201)
@@ -1995,8 +1992,8 @@ func (d *daemon) waitEvent(id, eventType string) map[string]any {
 	return nil
 }
 
-// FS-003 FR-005, AC-007: a process that keeps the harness's output, and that no search for the execution's processes
-// finds, holds up neither the cancellation nor the task's next run nor the daemon's stop.
+// A process that keeps the harness's output, and that no search for the execution's processes finds, holds up neither
+// the cancellation nor the task's next run nor the daemon's stop.
 func TestAStrayKeepingTheOutputHoldsNothingUp(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	d.call("POST", "/tasks", map[string]any{"yaml": task("stray", "SCENARIO=stray", "  execution:\n    cancelGraceSeconds: 1\n")}, 201)
@@ -2052,7 +2049,7 @@ func waitPs(t *testing.T, pid int, field, want string) {
 	t.Fatalf("process %d: %s is %q, want %q", pid, field, got, want)
 }
 
-// FS-003 AC-009: an execution running when the daemon is killed reads interrupted after the restart, with its log.
+// An execution running when the daemon is killed reads interrupted after the restart, with its log.
 func TestRestartInterrupts(t *testing.T) {
 	home := t.TempDir()
 	d := startDaemon(t, home)
@@ -2078,8 +2075,8 @@ func TestRestartInterrupts(t *testing.T) {
 	d2.call("POST", "/executions/"+run["executionId"].(string)+"/cancel", nil, 202)
 }
 
-// FS-003 AC-003, AC-002: while Claude Code is busy in one task, a Codex task runs and completes; running the busy task
-// again queues its firing instead of starting a second execution, and the first one keeps running.
+// While Claude Code is busy in one task, a Codex task runs and completes; running the busy task again queues its firing
+// instead of starting a second execution, and the first one keeps running.
 func TestAnotherHarnessIsNotBlocked(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	d.call("POST", "/tasks", map[string]any{"yaml": task("busy", "SCENARIO=slow", "")}, 201)
@@ -2123,10 +2120,9 @@ func TestAnotherHarnessIsNotBlocked(t *testing.T) {
 	d.call("POST", "/executions/"+busy+"/cancel", nil, 202)
 }
 
-// FS-003 AC-009, BR-002 (FS-003-F07): the session selects a work item, Claude Code exhausts its quota, and Codex takes
-// over; the daemon is killed while Codex runs. After the restart, the execution is interrupted with both its attempts,
-// and the log and raw capture of each; the interruption counts once against the item. Starting again over that
-// recovered state changes nothing.
+// The session selects a work item, Claude Code exhausts its quota, and Codex takes over; the daemon is killed while
+// Codex runs. After the restart, the execution is interrupted with both its attempts, and the log and raw capture of
+// each; the interruption counts once against the item. Starting again over that recovered state changes nothing.
 func TestKillDuringTheSecondAttempt(t *testing.T) {
 	home := t.TempDir()
 	d := startDaemon(t, home)
@@ -2226,10 +2222,9 @@ func (d *daemon) interruptedOnce(id, key string) {
 	}
 }
 
-// FS-003 AC-012, FR-010, the daemon's side (FS-003-F10): the session selects a work item, completes a git push, and
-// waits; the daemon is killed as soon as the push's tool.completed is in the log. After the restart, the execution is
-// interrupted and never continued, the item is failed with the push as its last operation, and the next run is a new
-// execution whose context names both.
+// The daemon's side: the session selects a work item, completes a git push, and waits; the daemon is killed as soon as
+// the push's tool.completed is in the log. After the restart, the execution is interrupted and never continued, the
+// item is failed with the push as its last operation, and the next run is a new execution whose context names both.
 func TestKillAfterAPush(t *testing.T) {
 	const item, push = "o/r#7", "git push -u origin harmflow/7-crash"
 	home := t.TempDir()
@@ -2267,10 +2262,9 @@ func TestKillAfterAPush(t *testing.T) {
 	}
 }
 
-// FS-003 AC-014, FR-012 (FS-003-F12): the session commits on a branch, pushes it to the workspace repository's
-// origin, a local bare repository, and waits; the daemon is killed and restarted, and the task's next execution runs to
-// its end. Nothing the interrupted one did is undone: the pushed branch and its commit, the local branch, and the
-// workspace's files, the uncommitted one included.
+// The session commits on a branch, pushes it to the workspace repository's origin, a local bare repository, and waits;
+// the daemon is killed and restarted, and the task's next execution runs to its end. Nothing the interrupted one did is
+// undone: the pushed branch and its commit, the local branch, and the workspace's files, the uncommitted one included.
 func TestNothingUndoneAfterAKill(t *testing.T) {
 	const branch = "refs/heads/harmflow/7-crash"
 	home := t.TempDir()
@@ -2305,10 +2299,10 @@ func TestNothingUndoneAfterAKill(t *testing.T) {
 	}
 }
 
-// FS-003 FR-006, the daemon's side (FS-003-F06): the session selects a work item, opens a pull request, and waits; the
-// daemon is killed once the execution names the pull request. The next execution's context lists the interrupted
-// execution with its work item and the pull request as its last operation, and its recent executions carry the pull
-// request's URL: what the next session reconciles with, instead of opening another.
+// The daemon's side: the session selects a work item, opens a pull request, and waits; the daemon is killed once the
+// execution names the pull request. The next execution's context lists the interrupted execution with its work item and
+// the pull request as its last operation, and its recent executions carry the pull request's URL: what the next session
+// reconciles with, instead of opening another.
 func TestKillAfterAPullRequest(t *testing.T) {
 	const item, url = "o/r#8", "https://github.com/o/r/pull/8"
 	home := t.TempDir()
@@ -2380,7 +2374,7 @@ func pushRepository(t *testing.T) (remote, repo string) {
 func (d *daemon) runUntilPushed(taskID, repo, push string) (id, pushed string) {
 	t := d.t
 	t.Helper()
-	// The repository is outside the home folder, so an allowed folder (FS-009 FR-014).
+	// The repository is outside the home folder, so an allowed folder.
 	d.call("PATCH", "/settings", map[string]any{"allowedFolders": []any{repo}}, 200)
 	d.call("POST", "/tasks", map[string]any{"yaml": task(taskID, "ITEM=o/r#7 SCENARIO=push",
 		"  workspace:\n    path: "+strconv.Quote(repo)+"\n")}, 201)
@@ -2477,8 +2471,8 @@ func readContext(t *testing.T, x map[string]any) (ctx struct {
 	return ctx
 }
 
-// FS-003 FR-007, AC-009; FS-001 FR-015 (D-083): a firing waiting when the daemon is killed starts after the restart;
-// when its task file was disabled or deleted while the daemon was down, it is cancelled instead and never starts.
+// A firing waiting when the daemon is killed starts after the restart; when its task file was disabled or deleted while
+// the daemon was down, it is cancelled instead and never starts.
 func TestWaitingFiringAcrossKill(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -2654,8 +2648,8 @@ func scheduleOf(t *testing.T, home, id string) map[string]any {
 // it finds due before the test asserts that it fired nothing: the check leaves no other trace.
 const startCheck = time.Second
 
-// FS-002 AC-004, AC-005, AC-008: firings missed while the daemon was down follow each task's missed-run policy once
-// after it starts again: one catch-up, or none. One more restart runs nothing.
+// Firings missed while the daemon was down follow each task's missed-run policy once after it starts again: one
+// catch-up, or none. One more restart runs nothing.
 func TestMissedFiringsAcrossRestart(t *testing.T) {
 	home := t.TempDir()
 	d := startDaemon(t, home)
@@ -2688,9 +2682,9 @@ func TestMissedFiringsAcrossRestart(t *testing.T) {
 	}
 }
 
-// FS-002 AC-008; FS-003 FR-007, AC-009: firings survive the daemon being killed. The firing it was running reads
-// interrupted and is not caught up again; the one waiting keeps its ID and starts, the task's only new execution; the
-// scheduler's record of the last and next firings is what it was before the kill. One more restart runs nothing.
+// Firings survive the daemon being killed. The firing it was running reads interrupted and is not caught up again; the
+// one waiting keeps its ID and starts, the task's only new execution; the scheduler's record of the last and next
+// firings is what it was before the kill. One more restart runs nothing.
 func TestFiringsSurviveAKill(t *testing.T) {
 	home := t.TempDir()
 	d := startDaemon(t, home)
@@ -2748,9 +2742,8 @@ func TestFiringsSurviveAKill(t *testing.T) {
 	}
 }
 
-// FS-010 FR-004, §5.2 (FS-010-F04): a scheduled task runs from its firing to completed while no client is connected.
-// FS-008 FR-003, AC-003 (FS-008-F03), the daemon's side: a client that connects only afterwards lists the execution,
-// recovers its whole history, and resumes the stream after it.
+// A scheduled task runs from its firing to completed while no client is connected. On the daemon's side, a client that
+// connects only afterwards lists the execution, recovers its whole history, and resumes the stream after it.
 func TestScheduledRunWithDashboardClosed(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	// The task the late client runs to cause a new event; with no schedule, it never fires.
@@ -2763,7 +2756,7 @@ func TestScheduledRunWithDashboardClosed(t *testing.T) {
 	}
 
 	// From here until the execution ends, the test calls nothing and opens no stream: it reads logs/ only. Schedules
-	// have no seconds field (D-071), so the firing comes at the next minute boundary, then within a scheduler tick.
+	// have no seconds field, so the firing comes at the next minute boundary, then within a scheduler tick.
 	id, logged := waitLogEnd(t, d.home, "", 90*time.Second, nil)
 	d.call("POST", "/tasks/every-minute/disable", nil, 200)
 	if first, last := logged[0], logged[len(logged)-1]; first.Type != "execution.created" ||
@@ -2774,7 +2767,7 @@ func TestScheduledRunWithDashboardClosed(t *testing.T) {
 	if x["taskId"] != "every-minute" || x["trigger"] != "schedule" || x["status"] != "completed" {
 		t.Errorf("execution %s: task %v, trigger %v, status %v", id, x["taskId"], x["trigger"], x["status"])
 	}
-	// FS-002 FR-001, AC-001 (FS-002-F01): the scheduler fired the occurrence the save announced, on a minute boundary.
+	// The scheduler fired the occurrence the save announced, on a minute boundary.
 	// Only the execution's own view carries scheduledFor; the list does not.
 	scheduledFor, err := time.Parse(time.RFC3339Nano, fmt.Sprint(x["scheduledFor"]))
 	announced, _ := time.Parse(time.RFC3339Nano, fmt.Sprint(scheduled["nextFireAt"]))
@@ -2853,8 +2846,8 @@ func TestScheduledRunWithDashboardClosed(t *testing.T) {
 	d.waitStatus(lateID, "completed")
 }
 
-// FS-010 AC-006 (FS-010-F04): a client that closes its stream during an execution stops nothing. The execution goes on
-// to completed with no client connected, and GET /health answers throughout from the same daemon.
+// A client that closes its stream during an execution stops nothing. The execution goes on to completed with no client
+// connected, and GET /health answers throughout from the same daemon.
 func TestClosingTheStreamStopsNothing(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	d.call("POST", "/tasks", map[string]any{"yaml": task("ticks", "SCENARIO=ticks", "")}, 201)
@@ -2911,9 +2904,9 @@ func TestClosingTheStreamStopsNothing(t *testing.T) {
 	}
 }
 
-// FS-010 FR-004 (FS-010-F04): the daemon outlives the process that started it. A short-lived parent starts harmflowd as
-// the desktop does, in a new process group with its standard streams closed. The test ends the parent's whole process
-// group during an execution; the daemon keeps answering and completes the execution.
+// The daemon outlives the process that started it. A short-lived parent starts harmflowd as the desktop does, in a new
+// process group with its standard streams closed. The test ends the parent's whole process group during an execution;
+// the daemon keeps answering and completes the execution.
 func TestDaemonOutlivesItsStarter(t *testing.T) {
 	d, pid, endParent := startDetachedDaemon(t, t.TempDir())
 	if pgid, err := syscall.Getpgid(pid); err != nil || pgid != pid || pgid == syscall.Getpgrp() {
@@ -3095,8 +3088,8 @@ func waitLogEnd(t *testing.T, home, id string, timeout time.Duration, each func(
 	return "", nil
 }
 
-// FS-002 AC-004, AC-005, D-080: a firing that came due while the daemon was down follows the missed-run policy, even
-// when the daemon is back a minute later.
+// A firing that came due while the daemon was down follows the missed-run policy, even when the daemon is back a minute
+// later.
 func TestMisfireAcrossShortRestart(t *testing.T) {
 	home := t.TempDir()
 	d := startDaemon(t, home)
@@ -3131,7 +3124,7 @@ func firings(t *testing.T, home, taskID string) []map[string]any {
 	return state.Firings[taskID]
 }
 
-// FS-002 FR-006, AC-008: the record of misfires skipped per the policy survives the daemon being killed.
+// The record of misfires skipped per the policy survives the daemon being killed.
 func TestSkippedMisfireSurvivesAKill(t *testing.T) {
 	home := t.TempDir()
 	d := startDaemon(t, home)
@@ -3228,9 +3221,9 @@ func checkKeychainStore(t *testing.T, home string) {
 	}
 }
 
-// FS-009 FR-011, AC-011 on the Keychain: with the default store pointed at a throwaway keychain, the daemon keeps the
-// token it makes on its first start in that keychain and writes no run/token. The token security reads from the
-// keychain opens the API; a request without it, or with another, gets the guard's 401 (#79).
+// With the default store pointed at a throwaway keychain, the daemon keeps the token it makes on its first start in
+// that keychain and writes no run/token. The token security reads from the keychain opens the API; a request without
+// it, or with another, gets the guard's 401 (#79).
 func TestKeychainTokenOpensTheAPI(t *testing.T) {
 	keychain := throwawayKeychain(t)
 	home := t.TempDir()
@@ -3253,8 +3246,8 @@ func TestKeychainTokenOpensTheAPI(t *testing.T) {
 	}
 }
 
-// FS-009 FR-013, AC-013 on the Keychain: a restart on the same home and keychain keeps the token byte for byte. A
-// rotation replaces it in the keychain: the new token works and the old one gets 401, also after another restart (#79).
+// A restart on the same home and keychain keeps the token byte for byte. A rotation replaces it in the keychain: the
+// new token works and the old one gets 401, also after another restart (#79).
 func TestKeychainTokenAcrossRestartAndRotation(t *testing.T) {
 	keychain := throwawayKeychain(t)
 	home := t.TempDir()

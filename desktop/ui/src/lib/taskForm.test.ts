@@ -85,7 +85,7 @@ describe("form ↔ document", () => {
 });
 
 describe("schema", () => {
-  it("reads the defaults of D-082 from the contract", () => {
+  it("reads the defaults from the contract", () => {
     expect(schemaDefault(["spec", "execution", "timeoutMinutes"])).toBe(60);
     expect(schemaDefault(["spec", "githubIssueImplementation", "queue", "maxItemsPerCycle"])).toBe(1);
     expect(schemaDefault(["spec", "githubIssueImplementation", "queue", "ordering"])).toBe("oldest_first");
@@ -101,7 +101,7 @@ describe("schema", () => {
   });
 });
 
-describe("script tasks (FS-013 FR-013)", () => {
+describe("script tasks", () => {
   it("starts with an empty argument list and no prompt or harness", () => {
     const doc = newTaskDocument("script", catalog, "Weekly audit");
     expect(getIn(doc, ["spec"])).toEqual({ enabled: true, type: "script", script: { command: [""] } });

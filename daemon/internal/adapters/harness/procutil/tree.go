@@ -40,7 +40,7 @@ const (
 // executionIDVariable is the one variable of a process's environment the scan reads.
 const executionIDVariable = "HARMFLOW_EXECUTION_ID"
 
-// EndTree ends every process the harness started, wherever it moved, and returns those it ended (FS-003 FR-005). It
+// EndTree ends every process the harness started, wherever it moved, and returns those it ended. It
 // finds them three ways: the harness's descendants by parent pid, kept from a snapshot taken before SIGTERM and added
 // to by another before SIGKILL, so a descendant that left the group or the session is found while its parent runs;
 // the processes of the user whose environment, as they started, carries the execution's id, so one that daemonized

@@ -1,31 +1,31 @@
 // Package domain holds HarmFlow's entities, invariants, and transitions. It imports nothing specific to a harness,
-// GitHub, Tauri, or an operating system (ADR-001).
+// GitHub, Tauri, or an operating system.
 package domain
 
 import "strings"
 
-// APIVersion and KindTask are the apiVersion and kind of every task file (D-070).
+// APIVersion and KindTask are the apiVersion and kind of every task file.
 const (
 	APIVersion = "harmflow/v1alpha1"
 	KindTask   = "Task"
 )
 
-// Task types (D-060). The behavior of each lives in its prompt, agents, and skills (D-064), except a script task's,
-// which is its program: it runs instead of a harness session (FS-013).
+// Task types. The behavior of each lives in its prompt, agents, and skills, except a script task's, which is its
+// program: it runs instead of a harness session.
 const (
 	TypeGitHubIssueImplementation = "github-issue-implementation"
 	TypeGeneral                   = "general"
 	TypeScriptTask                = "script"
 )
 
-// Operating systems a script task may declare (FS-013 FR-014).
+// Operating systems a script task may declare.
 const (
 	SystemMacOS   = "macos"
 	SystemLinux   = "linux"
 	SystemWindows = "windows"
 )
 
-// Harness providers of the MVP (D-017).
+// Harness providers of the MVP.
 const (
 	HarnessClaudeCode = "claude-code"
 	HarnessCodex      = "codex"
@@ -65,8 +65,8 @@ const (
 	ResumeAlternate = "alternate"
 )
 
-// TaskDocument is one task file: apiVersion, kind, metadata, and spec (D-070). Optional scalars are pointers so a
-// document keeps only what its author set; Effective fills the defaults in.
+// TaskDocument is one task file: apiVersion, kind, metadata, and spec. Optional scalars are pointers so a document
+// keeps only what its author set; Effective fills the defaults in.
 type TaskDocument struct {
 	APIVersion string       `yaml:"apiVersion" json:"apiVersion"`
 	Kind       string       `yaml:"kind" json:"kind"`
@@ -100,7 +100,7 @@ type TaskSpec struct {
 }
 
 // ScriptSpec is the program a script task runs: Command, an argument list started with no shell, or Inline, a script
-// run through its interpreter (FS-013 FR-003, FR-004, FR-014).
+// run through its interpreter.
 type ScriptSpec struct {
 	Command          []string          `yaml:"command,omitempty" json:"command,omitempty"`
 	Inline           *InlineScript     `yaml:"inline,omitempty" json:"inline,omitempty"`
@@ -116,13 +116,13 @@ type InlineScript struct {
 	Source      string   `yaml:"source" json:"source"`
 }
 
-// Workspace is where the harness session works; Path may use ${NAME} references and ~ (FS-001 FR-007).
+// Workspace is where the harness session works; Path may use ${NAME} references and ~.
 type Workspace struct {
 	Path string `yaml:"path,omitempty" json:"path,omitempty"`
 }
 
 // Schedule is when a task fires: a 5-field cron expression or an interval, never both, in Timezone or the system's time
-// zone (D-071). A task with no schedule runs only by hand.
+// zone. A task with no schedule runs only by hand.
 type Schedule struct {
 	Cron      string     `yaml:"cron,omitempty" json:"cron,omitempty"`
 	Interval  string     `yaml:"interval,omitempty" json:"interval,omitempty"`
@@ -131,12 +131,12 @@ type Schedule struct {
 }
 
 // MissedRun is what becomes of the firings missed while the daemon or the machine was unavailable: one catch-up when
-// it resumes, or none (D-071).
+// it resumes, or none.
 type MissedRun struct {
 	Policy string `yaml:"policy,omitempty" json:"policy,omitempty"`
 }
 
-// Concurrency is whether a firing that arrives while the task runs waits in the queue or is skipped (D-072).
+// Concurrency is whether a firing that arrives while the task runs waits in the queue or is skipped.
 type Concurrency struct {
 	OverlappingRuns string `yaml:"overlappingRuns,omitempty" json:"overlappingRuns,omitempty"`
 }
@@ -149,22 +149,22 @@ type HarnessProfile struct {
 	Effort   string `yaml:"effort,omitempty" json:"effort,omitempty"`
 }
 
-// HarnessSelection is the harness profile a task prefers and the policy for failing over from it (D-067).
+// HarnessSelection is the harness profile a task prefers and the policy for failing over from it.
 type HarnessSelection struct {
 	Preferred HarnessProfile  `yaml:"preferred" json:"preferred"`
 	Fallback  *FallbackPolicy `yaml:"fallback,omitempty" json:"fallback,omitempty"`
 }
 
 // FallbackPolicy is when an execution fails over to the next candidate profile, and how often: On lists what triggers a
-// failover, and MaxSwitches caps the switches of one execution (D-067).
+// failover, and MaxSwitches caps the switches of one execution.
 type FallbackPolicy struct {
 	On          ChosenList       `yaml:"on,omitempty" json:"on,omitzero"`
 	Candidates  []HarnessProfile `yaml:"candidates,omitempty" json:"candidates,omitempty"`
 	MaxSwitches *int             `yaml:"maxSwitches,omitempty" json:"maxSwitches,omitempty"`
 }
 
-// Permissions is what the harness may do, translated to each harness's native controls (D-068): a profile, whether its
-// writes stay in the workspace, and its network access; Custom holds the lists of the custom profile.
+// Permissions is what the harness may do, translated to each harness's native controls: a profile, whether its writes
+// stay in the workspace, and its network access; Custom holds the lists of the custom profile.
 type Permissions struct {
 	Profile             string             `yaml:"profile,omitempty" json:"profile,omitempty"`
 	RestrictToWorkspace *bool              `yaml:"restrictToWorkspace,omitempty" json:"restrictToWorkspace,omitempty"`
@@ -189,7 +189,7 @@ type ExecutionLimits struct {
 }
 
 // RateLimit is how an attempt that hit a rate limit is retried on the same harness: up to MaxRetries times, waiting
-// from InitialWaitSeconds, doubled each retry, up to MaxWaitSeconds (D-082).
+// from InitialWaitSeconds, doubled each retry, up to MaxWaitSeconds.
 type RateLimit struct {
 	MaxRetries         *int `yaml:"maxRetries,omitempty" json:"maxRetries,omitempty"`
 	InitialWaitSeconds *int `yaml:"initialWaitSeconds,omitempty" json:"initialWaitSeconds,omitempty"`
@@ -202,7 +202,7 @@ type Notifications struct {
 }
 
 // NativeNotifications is whether a task posts the operating system's notifications, and for which events; Events left
-// out takes DefaultNotifiedEvents (FS-011 FR-002).
+// out takes DefaultNotifiedEvents.
 type NativeNotifications struct {
 	Enabled *bool      `yaml:"enabled,omitempty" json:"enabled,omitempty"`
 	Events  ChosenList `yaml:"events,omitempty" json:"events,omitzero"`
@@ -225,7 +225,7 @@ type RepositoryTarget struct {
 }
 
 // GitHubIssueImplementation is the parameters of the github-issue-implementation type: its repositories, its issue
-// queue, and its delivery (FS-006, FS-007). Which issues are eligible is written in the prompt (D-093).
+// queue, and its delivery. Which issues are eligible is written in the prompt.
 type GitHubIssueImplementation struct {
 	Repositories []RepositoryTarget `yaml:"repositories" json:"repositories"`
 	Queue        *IssueQueue        `yaml:"queue,omitempty" json:"queue,omitempty"`
@@ -249,14 +249,13 @@ type Delivery struct {
 	TestRepairAttempts *int `yaml:"testRepairAttempts,omitempty" json:"testRepairAttempts,omitempty"`
 }
 
-// DefaultNotifiedEvents are the events a task notifies when it leaves its events out; an empty list notifies none
-// (FS-011 FR-002).
+// DefaultNotifiedEvents are the events a task notifies when it leaves its events out; an empty list notifies none.
 var DefaultNotifiedEvents = []string{
 	EventExecutionCompleted, EventExecutionFailed, EventExecutionNeedsAttention, EventPullRequestCreated,
 	EventHarnessNoAlternative,
 }
 
-// Defaults of D-082 (FS-001 FR-012).
+// Defaults of a task's optional fields.
 const (
 	DefaultTimeoutMinutes        = 60
 	DefaultCancelGraceSeconds    = 30
@@ -415,13 +414,13 @@ func (d TaskDocument) Profiles() []HarnessProfile {
 	return append([]HarnessProfile{e.Spec.Harness.Preferred}, e.Spec.Harness.Fallback.Candidates...)
 }
 
-// IsScript reports whether the task runs a program instead of a harness session (FS-013).
+// IsScript reports whether the task runs a program instead of a harness session.
 func (d TaskDocument) IsScript() bool {
 	return d.Spec.Type == TypeScriptTask
 }
 
-// RunsOn reports whether the task may run on a system: a script task only on those it declares, when it declares any
-// (FS-013 FR-014); every other task everywhere.
+// RunsOn reports whether the task may run on a system: a script task only on those it declares, when it declares any;
+// every other task everywhere.
 func (d TaskDocument) RunsOn(system string) bool {
 	if !d.IsScript() || d.Spec.Script == nil || len(d.Spec.Script.Systems) == 0 {
 		return true
@@ -484,7 +483,7 @@ func (d TaskDocument) TypeParameters() any {
 	}
 }
 
-// ExpandPath replaces ${NAME} references and a leading ~ in a task path (FS-001 FR-007).
+// ExpandPath replaces ${NAME} references and a leading ~ in a task path.
 func ExpandPath(path, home string, vars map[string]string, env func(string) string) (string, error) {
 	out := path
 	if strings.HasPrefix(out, "~/") || out == "~" {

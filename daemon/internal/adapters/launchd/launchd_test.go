@@ -13,9 +13,8 @@ import (
 	"testing"
 )
 
-// FS-010 FR-002 (D-008, D-062): autostart is off until Enable writes the user agent, which starts this daemon, with
-// its data directory, at login. Each value the agent holds is escaped: the executable, an argument, the environment,
-// and the log path.
+// Autostart is off until Enable writes the user agent, which starts this daemon, with its data directory, at login.
+// Each value the agent holds is escaped: the executable, an argument, the environment, and the log path.
 func TestEnableWritesTheUserAgent(t *testing.T) {
 	var calls [][]string
 	dir := t.TempDir()

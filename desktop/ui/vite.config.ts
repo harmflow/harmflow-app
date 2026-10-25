@@ -10,7 +10,7 @@ import pkg from "./package.json" with { type: "json" };
 
 // In a plain browser the dashboard reaches the daemon through this dev server: /api is forwarded to the address in
 // the daemon's runtime file, with the token added here and the Origin header dropped, so the token never reaches the
-// page and the daemon's CSRF check holds (D-090, FS-009 FR-005). Inside Tauri the Rust core does this instead.
+// page and the daemon's CSRF check holds. Inside Tauri the Rust core does this instead.
 
 interface Runtime {
   address: string;
@@ -121,7 +121,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
-    // Read and held only with --coverage (`pnpm test:coverage`, ADR-015). The include is explicit so that a source file
+    // Read and held only with --coverage (`pnpm test:coverage`). The include is explicit so that a source file
     // no test imports still counts; code nobody writes by hand does not.
     coverage: {
       provider: "v8",

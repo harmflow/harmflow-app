@@ -1,4 +1,4 @@
-# Task runner for the harmflow-app monorepo (D-091). Run `make help` for the list.
+# Task runner for the harmflow-app monorepo. Run `make help` for the list.
 
 SHELL := /bin/bash
 VERSION := 0.1.0
@@ -14,7 +14,7 @@ DEV_HOME := $(CURDIR)/.harmflow-dev/home
 SIDECAR := desktop/src-tauri/binaries/harmflowd-$(TRIPLE)
 LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuiltAt=$(BUILT_AT)
 COVERAGE := $(CURDIR)/build/coverage
-# The shell's coverage floors, in percent (ADR-015); COVERAGE.md holds the reading they come from.
+# The shell's coverage floors, in percent; COVERAGE.md holds the reading they come from.
 RUST_FLOOR_LINES := 27.49
 RUST_FLOOR_FUNCTIONS := 25.00
 # cargo llvm-cov fails below a floor without saying which, so its summary is read again to name the counter that fell,
@@ -77,14 +77,14 @@ test-desktop: ## Type check and unit tests of the desktop
 	cd desktop/src-tauri && cargo test
 
 .PHONY: check-imports
-check-imports: ## Fail on Go imports outside the Go guide's three groups (D-132), as CI does
+check-imports: ## Fail on Go imports outside the Go guide's three groups, as CI does
 	go -C tests run ./imports $(CURDIR)/daemon $(CURDIR)/tests
 
 .PHONY: test-integration
 test-integration: daemon ## Tests across the daemon's process boundary, with fake harnesses
 	go -C tests test -count=1 ./...
 
-# Coverage is held by a ratchet, never by a target (ADR-015): each target fails when a part reads below its floor.
+# Coverage is held by a ratchet, never by a target: each target fails when a part reads below its floor.
 # COVERAGE.md holds the reading the floors come from.
 .PHONY: coverage
 coverage: coverage-daemon coverage-desktop ## Read the tests' coverage of the daemon, the interface, and the shell
@@ -120,7 +120,7 @@ dev-desktop: sidecar ## Run the desktop shell against the development daemon
 		pnpm -C desktop tauri dev
 
 .PHONY: app
-app: sidecar ## Build HarmFlow.app and the DMG (unsigned until the Developer ID exists, D-080)
+app: sidecar ## Build HarmFlow.app and the DMG (unsigned until the Developer ID exists)
 	cd desktop && pnpm tauri build
 	@echo "Bundles in desktop/src-tauri/target.noindex/release/bundle/"
 

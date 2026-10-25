@@ -51,7 +51,7 @@ export function OverviewScreen({
       <Counters />
       <div className="overview-grid">
         <Panel title={t("overview.daemon")} icon="power">
-          {/* Running now and autostart enabled are two different states (FS-010 FR-003). */}
+          {/* Running now and autostart enabled are two different states. */}
           <div className="state-pair">
             <div className="state-pair__item">
               <span className="state-pair__label">{t("overview.runningNow")}</span>

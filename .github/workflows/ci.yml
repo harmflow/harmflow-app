@@ -1,6 +1,6 @@
-# CI follows D-091: a pull request runs only the parts it touches, a change in contracts/ runs every part, and main
-# runs everything. The full macOS, Linux, and Windows matrix of D-091 starts when the Linux and Windows ports exist;
-# until then every job runs on macOS, the MVP's only platform.
+# A pull request runs only the parts it touches, a change in contracts/ runs every part, and main runs everything.
+# The full macOS, Linux, and Windows matrix starts when the Linux and Windows ports exist; until then every job runs
+# on macOS, the MVP's only platform.
 #
 # Every action is pinned to a full commit SHA, with the release it corresponds to in a comment, so a moved tag cannot
 # change what CI runs; a new action follows the same rule. Dependabot (.github/dependabot.yml) proposes the updates.
@@ -94,8 +94,8 @@ jobs:
           cache-dependency-path: daemon/go.sum
       - name: Formatting
         run: test -z "$(gofmt -l daemon tests)" || { gofmt -l daemon tests; exit 1; }
-      # gofmt sorts imports within a group but neither splits nor orders groups. This checks the Go guide's three
-      # (D-132): standard library, third party, then the module's own. Run it locally with the same command.
+      # gofmt sorts imports within a group but neither splits nor orders groups. This checks the Go guide's three:
+      # standard library, third party, then the module's own. Run it locally with the same command.
       - name: Import groups
         run: make check-imports
       - run: make test-daemon
@@ -113,7 +113,7 @@ jobs:
         with:
           go-version-file: daemon/go.mod
           cache-dependency-path: daemon/go.sum
-      # The integration tests, and the daemon's coverage held against daemon/coverage-floors.txt (ADR-015). This is
+      # The integration tests, and the daemon's coverage held against daemon/coverage-floors.txt. This is
       # the only job where the unit and integration data can both exist; the daemon job keeps -race.
       - run: make coverage-daemon
 
@@ -154,7 +154,7 @@ jobs:
       - run: make sidecar
       - run: pnpm -C desktop build
       - run: pnpm -C desktop typecheck
-      # The unit tests of the interface and the shell, their coverage held against its floors (ADR-015).
+      # The unit tests of the interface and the shell, their coverage held against its floors.
       - run: make coverage-desktop
 
   packaging:

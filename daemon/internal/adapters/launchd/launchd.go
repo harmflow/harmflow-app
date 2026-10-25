@@ -1,5 +1,4 @@
-// Package launchd starts the daemon with the user's session as a launchd user agent (D-062). It is off until the
-// user opts in (D-008).
+// Package launchd starts the daemon with the user's session as a launchd user agent. It is off until the user opts in.
 package launchd
 
 import (

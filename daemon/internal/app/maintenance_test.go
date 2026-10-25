@@ -121,8 +121,8 @@ func (w *workspaces) gone(res CleanResult, p string) {
 	}
 }
 
-// FS-006 FR-016: a cancelled execution leaves no report, so its worktree is tied to it through the ledger's work item
-// and the path the worktree skill gives it, and kept until the execution's log expires.
+// A cancelled execution leaves no report, so its worktree is tied to it through the ledger's work item and the path the
+// worktree skill gives it, and kept until the execution's log expires.
 func TestCleanKeepsACancelledWorktreeUntilItsLogExpires(t *testing.T) {
 	w := newWorkspaces(t)
 	w.create("fixer", "")
@@ -136,8 +136,8 @@ func TestCleanKeepsACancelledWorktreeUntilItsLogExpires(t *testing.T) {
 	w.gone(w.app.CleanWorkspaces(), p)
 }
 
-// FS-006 FR-016: deleting a task removes nothing by itself; a failed execution's worktree is kept while the
-// execution's log is, and goes with it. The empty directory of the deleted task goes last.
+// Deleting a task removes nothing by itself; a failed execution's worktree is kept while the execution's log is, and
+// goes with it. The empty directory of the deleted task goes last.
 func TestCleanKeepsAFailedWorktreeOfADeletedTaskWhileItsLogIsKept(t *testing.T) {
 	w := newWorkspaces(t)
 	w.create("gone", "")
@@ -163,8 +163,8 @@ func TestCleanKeepsAFailedWorktreeOfADeletedTaskWhileItsLogIsKept(t *testing.T) 
 	}
 }
 
-// FS-006 FR-016: a completed item's draft pull request is still open, and a needs_attention item waits for a human;
-// both keep their worktrees, even once their executions' logs expire.
+// A completed item's draft pull request is still open, and a needs_attention item waits for a human; both keep their
+// worktrees, even once their executions' logs expire.
 func TestCleanKeepsCompletedAndNeedsAttentionWorktrees(t *testing.T) {
 	w := newWorkspaces(t)
 	w.create("drafts", "")
@@ -191,8 +191,8 @@ func TestCleanKeepsCompletedAndNeedsAttentionWorktrees(t *testing.T) {
 	check(w.app.CleanWorkspaces())
 }
 
-// FS-006 FR-016, FS-010 AC-013: a closed item's worktree is removed, at the skill's path in any case, or at the path
-// its report named; the ledger's closed status wins over an earlier failed execution that reported the same path.
+// A closed item's worktree is removed, at the skill's path in any case, or at the path its report named; the ledger's
+// closed status wins over an earlier failed execution that reported the same path.
 func TestCleanRemovesTheWorktreeOfAClosedItem(t *testing.T) {
 	w := newWorkspaces(t)
 	w.create("merged", "")
@@ -217,8 +217,8 @@ func TestCleanRemovesTheWorktreeOfAClosedItem(t *testing.T) {
 	}
 }
 
-// FS-006 FR-016: the clean-up never removes what it has no record of: a worktree no work item or report names, in a
-// task's workspace or in one no task or ledger entry knows.
+// The clean-up never removes what it has no record of: a worktree no work item or report names, in a task's workspace
+// or in one no task or ledger entry knows.
 func TestCleanKeepsWorktreesItCannotAttribute(t *testing.T) {
 	w := newWorkspaces(t)
 	w.create("known", "")

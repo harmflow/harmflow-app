@@ -1,5 +1,5 @@
 //! The HarmFlow desktop: the dashboard window, the tray, and native notifications, as a client of the daemon's
-//! local API (ADR-001, ADR-002, ADR-003). It never drives a harness and never decides an execution's state.
+//! local API. It never drives a harness and never decides an execution's state.
 
 mod daemon;
 mod notice;
@@ -49,7 +49,7 @@ async fn daemon_status(state: Shared<'_>) -> Result<DaemonStatus, String> {
     Ok(state.daemon.status().await)
 }
 
-/// Starts the bundled daemon when none answers, then waits until it does (FS-010 FR-003).
+/// Starts the bundled daemon when none answers, then waits until it does.
 #[tauri::command]
 async fn daemon_start(state: Shared<'_>) -> Result<DaemonStatus, String> {
     let current = state.daemon.status().await;

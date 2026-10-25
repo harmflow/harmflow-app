@@ -3,14 +3,14 @@ info:
   title: HarmFlow local API
   version: v1
   description: |
-    The only control surface of the HarmFlow daemon (ADR-003), on HTTP bound to 127.0.0.1 with Server-Sent Events
-    for the live stream (ADR-004). The daemon picks a free port at start and writes it, with its pid and version, to
-    a runtime file only the user can read (D-090).
+    The only control surface of the HarmFlow daemon, on HTTP bound to 127.0.0.1 with Server-Sent Events
+    for the live stream. The daemon picks a free port at start and writes it, with its pid and version, to
+    a runtime file only the user can read.
 
     Every request, the SSE stream included, carries the per-installation token in `Authorization: Bearer <token>`.
-    Requests whose `Host` is not the loopback address, or whose `Origin` is a web page, are rejected (FS-009 FR-005).
+    Requests whose `Host` is not the loopback address, or whose `Origin` is a web page, are rejected.
 
-    Naming follows D-094: plural resources, actions as a POST to a verb sub-resource, camelCase keys, snake_case
+    Naming uses plural resources, actions as a POST to a verb sub-resource, camelCase keys, snake_case
     values from closed sets, and `object.action` event types.
 servers:
   - url: http://127.0.0.1:{port}/api/v1
@@ -49,7 +49,7 @@ paths:
       tags: [daemon]
       operationId: stopDaemon
       summary: Stop the daemon
-      description: Refused with 409 while executions run, unless force is set; the desktop asks for confirmation first (FS-010 FR-008).
+      description: Refused with 409 while executions run, unless force is set; the desktop asks for confirmation first.
       requestBody:
         content:
           application/json:
@@ -93,7 +93,7 @@ paths:
     get:
       tags: [harnesses]
       operationId: listHarnesses
-      summary: Detected harnesses and their capabilities (FS-004 FR-007)
+      summary: Detected harnesses and their capabilities
       responses:
         "200":
           description: One entry per supported harness, detected or not.
@@ -123,7 +123,7 @@ paths:
     put:
       tags: [harnesses]
       operationId: setHarnessPath
-      summary: Choose an installation or set a path by hand (FS-004 FR-001)
+      summary: Choose an installation or set a path by hand
       requestBody:
         required: true
         content:
@@ -133,8 +133,8 @@ paths:
               properties:
                 path:
                   description: >-
-                    Absolute path of the CLI, an executable file whose --version output names the harness
-                    (D-113); null returns to automatic detection.
+                    Absolute path of the CLI, an executable file whose --version output names the harness;
+                    null returns to automatic detection.
                   type: [string, "null"]
       responses:
         "200":
@@ -163,7 +163,7 @@ paths:
     get:
       tags: [tasks]
       operationId: getCatalog
-      summary: Agents and skills a task can cite, built in or the user's (D-092)
+      summary: Agents and skills a task can cite, built in or the user's
       responses:
         "200":
           description: The catalog.
@@ -236,7 +236,7 @@ paths:
                 overwrite: { type: boolean, default: false }
       responses:
         "201":
-          description: The imported task; warnings name the agents and skills this machine lacks (FS-001 FR-018).
+          description: The imported task; warnings name the agents and skills this machine lacks.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Task" }
@@ -261,7 +261,7 @@ paths:
       tags: [tasks]
       operationId: updateTask
       summary: Update a task
-      description: baseRevision must be the revision the edit started from; a file changed meanwhile is a conflict, never a silent overwrite (FS-001 FR-005).
+      description: baseRevision must be the revision the edit started from; a file changed meanwhile is a conflict, never a silent overwrite.
       requestBody:
         required: true
         content:
@@ -280,7 +280,7 @@ paths:
       tags: [tasks]
       operationId: deleteTask
       summary: Delete a task
-      description: A running task is deleted once its execution finishes (D-083); its execution records stay.
+      description: A running task is deleted once its execution finishes; its execution records stay.
       responses:
         "202":
           description: Deletion waits for the running execution.
@@ -343,7 +343,7 @@ paths:
     post:
       tags: [tasks]
       operationId: disableTask
-      summary: Disable a task; a running execution finishes normally (D-083)
+      summary: Disable a task; a running execution finishes normally
       responses:
         "200":
           description: The task.
@@ -358,7 +358,7 @@ paths:
     get:
       tags: [tasks]
       operationId: exportTask
-      summary: Portable YAML, with no secrets, logs, or state (FS-001 FR-006)
+      summary: Portable YAML, with no secrets, logs, or state
       responses:
         "200":
           description: The task's YAML.
@@ -371,7 +371,7 @@ paths:
     post:
       tags: [tasks]
       operationId: previewSchedule
-      summary: The next occurrences of a schedule, in its time zone (FS-002 FR-002)
+      summary: The next occurrences of a schedule, in its time zone
       requestBody:
         required: true
         content:
@@ -436,7 +436,7 @@ paths:
     post:
       tags: [executions]
       operationId: cancelExecution
-      summary: Cancel one execution; the others continue (FS-003 FR-004)
+      summary: Cancel one execution; the others continue
       responses:
         "202":
           description: Cancellation was recorded and is being carried out.
@@ -461,7 +461,7 @@ paths:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 5000, default: 2000 } }
       responses:
         "200":
-          description: Events in order; logExpired is true when retention removed the log (D-073).
+          description: Events in order; logExpired is true when retention removed the log.
           content:
             application/json:
               schema:
@@ -480,7 +480,7 @@ paths:
     get:
       tags: [executions]
       operationId: getExecutionOutput
-      summary: The harness's raw output, one capture per attempt, redacted (FS-008 FR-008)
+      summary: The harness's raw output, one capture per attempt, redacted
       description: |
         What the CLI printed on stdout and stderr, as the daemon captured it, with secrets masked. Each capture is the
         end of its attempt's output, at most `limit` bytes, starting at a line. While the execution runs the captures
@@ -492,7 +492,7 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 8388608, default: 1048576 }
       responses:
         "200":
-          description: One capture per attempt, in order; logExpired is true when retention removed them (D-073).
+          description: One capture per attempt, in order; logExpired is true when retention removed them.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ExecutionOutput" }
@@ -559,7 +559,7 @@ paths:
     post:
       tags: [settings]
       operationId: rotateToken
-      summary: Replace the API token (D-090); the response is the last one the old token authorizes
+      summary: Replace the API token; the response is the last one the old token authorizes
       responses:
         "200":
           description: The token was replaced in the credential store.
@@ -571,7 +571,7 @@ paths:
     post:
       tags: [settings]
       operationId: cleanWorkspaces
-      summary: Remove the worktrees no longer needed (D-073, FS-010 FR-010)
+      summary: Remove the worktrees no longer needed
       responses:
         "200":
           description: What was removed and what was kept.
@@ -665,9 +665,9 @@ components:
     MessageKey:
       description: >-
         Names a text the daemon writes for the user. The desktop shows it in the interface's language, filling it with
-        its params; the message beside it is the same text in en-US, shown for a key the desktop does not know
-        (FS-012 FR-005). The agent's text, tool output, and a tool's own error get no key and stay as they are. A text
-        is a message with messageKey and params, or a field such as errorMessage with errorKey and errorParams.
+        its params; the message beside it is the same text in en-US, shown for a key the desktop does not know. The
+        agent's text, tool output, and a tool's own error get no key and stay as they are. A text is a message with
+        messageKey and params, or a field such as errorMessage with errorKey and errorParams.
       type: string
       enum:
         # Requests and their resources
@@ -946,7 +946,7 @@ components:
             failed: { type: array, items: { type: integer } }
 
     ReadinessState:
-      description: FS-004 FR-006. checking while a harness's first check runs; a later check keeps the previous state (D-102).
+      description: checking while a harness's first check runs; a later check keeps the previous state.
       type: string
       enum: [checking, not_installed, installed, version_identified, authenticated, ready, not_ready]
 
@@ -985,7 +985,7 @@ components:
         efforts: { type: array, items: { type: string } }
         capabilitySource: { type: string, enum: [reported, verified, declared] }
         enforceableControls:
-          description: The native controls the installed version offers (D-068).
+          description: The native controls the installed version offers.
           type: array
           items: { type: string }
         lastCheckedAt: { type: string, format: date-time }
@@ -1168,8 +1168,8 @@ components:
         number: { type: integer }
         harness: { type: string, description: "Empty for a script task's attempt, which runs a program instead of a harness." }
         harnessVersion: { type: string }
-        model: { type: string, description: "The model the harness reported using; absent when it reported none (D-105)." }
-        effort: { type: string, description: "The effort the harness reported using; absent when it reported none (D-105)." }
+        model: { type: string, description: "The model the harness reported using; absent when it reported none." }
+        effort: { type: string, description: "The effort the harness reported using; absent when it reported none." }
         configuredModel: { type: string, description: "The model the task asked for, default when it set none. Never the one used." }
         configuredEffort: { type: string, description: "The effort the task asked for, default when it set none. Never the one used." }
         startedAt: { type: string, format: date-time }
@@ -1200,7 +1200,7 @@ components:
       description: >-
         What the harness reported of the attempt's token use: the count so far while it runs, the final one when it ends.
         The cost is stamped when the attempt ends — the harness's own figure, or an estimate from the adapter's dated table
-        of API list prices — so a later table never reprices it. Numbers and enums only; the desktop words them (D-099).
+        of API list prices — so a later table never reprices it. Numbers and enums only; the desktop words them.
         Absent when the attempt started no harness process; older records have none.
       required: [status, models]
       properties:
@@ -1297,13 +1297,13 @@ components:
         startedAt: { type: string, format: date-time }
         endedAt: { type: string, format: date-time }
         harness: { type: string, description: "The harness of the current or last attempt; empty for a script task." }
-        model: { type: string, description: "The model the current or last attempt's harness reported using; absent when it reported none (D-105)." }
+        model: { type: string, description: "The model the current or last attempt's harness reported using; absent when it reported none." }
         attemptCount: { type: integer }
         currentStep:
           type: string
           description: >-
-            The latest step; no percentage is invented (FS-008 FR-009). The daemon's own step is in en-US, beside its
-            currentStepKey; the agent's and a tool's have none.
+            The latest step; no percentage is invented. The daemon's own step is in en-US, beside its currentStepKey;
+            the agent's and a tool's have none.
         currentStepKey: { $ref: "#/components/schemas/MessageKey" }
         currentStepParams: { $ref: "#/components/schemas/MessageParams" }
         repository: { type: string }
@@ -1351,8 +1351,8 @@ components:
 
     ScriptRun:
       description: >-
-        The program a script task's execution ran, as it ran, redacted like the raw output; absent for every other type
-        (FS-013 FR-011). A script execution has one attempt, with no harness.
+        The program a script task's execution ran, as it ran, redacted like the raw output; absent for every other type.
+        A script execution has one attempt, with no harness.
       type: object
       required: [program, workingDirectory]
       properties:
@@ -1367,7 +1367,7 @@ components:
         signal: { type: string, description: "The signal that ended the program, such as SIGKILL; absent when it exited by itself." }
         process:
           type: object
-          description: The program's process group while it runs, so a restarted daemon ends what it left (FS-013 FR-010).
+          description: The program's process group while it runs, so a restarted daemon ends what it left.
           required: [group, leaderStart, boot]
           properties:
             group: { type: integer }
@@ -1419,7 +1419,7 @@ components:
       required: [waiting, upcoming, workItems]
       properties:
         waiting:
-          description: Firings waiting for their task's running execution (at most one per task, D-072).
+          description: Firings waiting for their task's running execution (at most one per task).
           type: array
           items: { $ref: "#/components/schemas/ExecutionSummary" }
         upcoming:
@@ -1479,9 +1479,9 @@ components:
         allowedFolders:
           description: >-
             Folders, beside the user's home folder and the mounted volumes, where a task's workspace, its repositories'
-            local paths, and a custom profile's writable paths may lead (D-113, FS-009 FR-014). Absolute, or starting
-            with ~; none may be the home folder or contain it, nor lie inside HarmFlow's data directory, ~/Library, or a
-            hidden folder at the top of the home folder.
+            local paths, and a custom profile's writable paths may lead. Absolute, or starting with ~; none may be the
+            home folder or contain it, nor lie inside HarmFlow's data directory, ~/Library, or a hidden folder at the
+            top of the home folder.
           type: array
           items: { type: string }
         onboardingCompleted: { type: boolean }

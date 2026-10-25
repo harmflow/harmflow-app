@@ -53,8 +53,8 @@ func errorAt(r *ValidationResult, path string) string {
 	return ""
 }
 
-// D-113, FS-009 FR-014, AC-005: a path that lets a harness write is checked once expanded and resolved, whatever the
-// task's profile; one outside the allowed area, or in a place no harness may write, is an error naming the field.
+// A path that lets a harness write is checked once expanded and resolved, whatever the task's profile; one outside the
+// allowed area, or in a place no harness may write, is an error naming the field.
 func TestTaskPathsAreChecked(t *testing.T) {
 	e := newEnv(t)
 	home := e.app.Paths().UserHome
@@ -105,8 +105,8 @@ func TestTaskPathsAreChecked(t *testing.T) {
 	}
 }
 
-// FS-013 FR-003, FR-004 (D-113): a script's program is a name looked up on PATH or an absolute path, never a relative
-// one, and its working directory is absolute; neither is held to the area, since the program runs with the user's rights.
+// A script's program is a name looked up on PATH or an absolute path, never a relative one, and its working directory
+// is absolute; neither is held to the area, since the program runs with the user's rights.
 func TestScriptProgramAndWorkingDirectoryForm(t *testing.T) {
 	e := newEnv(t)
 	const cmd, interp, wd = "/spec/script/command/0", "/spec/script/inline/interpreter/0", "/spec/script/workingDirectory"
@@ -142,8 +142,8 @@ func appErrorKey(err error) (string, string) {
 	return ae.Code, ae.Key
 }
 
-// FS-009 FR-014, AC-005: a change of Settings that would put a saved task's path outside the rule is refused, naming
-// the task, and so is an allowed folder in a place no harness may write; nothing is saved.
+// A change of Settings that would put a saved task's path outside the rule is refused, naming the task, and so is an
+// allowed folder in a place no harness may write; nothing is saved.
 func TestSettingsChangeThatBreaksATaskIsRefused(t *testing.T) {
 	e := newEnv(t)
 	home := e.app.Paths().UserHome
@@ -191,8 +191,8 @@ func TestSettingsChangeThatBreaksATaskIsRefused(t *testing.T) {
 	}
 }
 
-// FS-009 FR-014, AC-014: a task file written outside the dashboard loads as invalid when a path breaks the rule, and
-// an execution checks its task's paths again before its harness starts, so a symlink retargeted after saving fails it.
+// A task file written outside the dashboard loads as invalid when a path breaks the rule, and an execution checks its
+// task's paths again before its harness starts, so a symlink retargeted after saving fails it.
 func TestSavedTaskOutsideTheRuleDoesNotRun(t *testing.T) {
 	e := newEnv(t)
 	home := e.app.Paths().UserHome

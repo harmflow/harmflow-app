@@ -7,7 +7,7 @@ import (
 )
 
 // The App starts goroutines: its loops, each execution and its progress ticker, and harness detection. None may outlive
-// the test that started it (D-132).
+// the test that started it.
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m)
 }

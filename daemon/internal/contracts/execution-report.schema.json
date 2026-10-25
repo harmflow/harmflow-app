@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harmflow.com/schemas/v1alpha1/execution-report.schema.json",
   "title": "HarmFlow execution report",
-  "description": "The operational checkpoint a harness session leaves in its execution directory. HarmFlow implements no task behavior (D-064): the session's agents and skills write this report, and the daemon only records it. report.json holds the final outcome; progress.jsonl holds one progress line per step, read while the session runs.",
+  "description": "The operational checkpoint a harness session leaves in its execution directory. HarmFlow implements no task behavior: the session's agents and skills write this report, and the daemon only records it. report.json holds the final outcome; progress.jsonl holds one progress line per step, read while the session runs.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -13,7 +13,7 @@
     },
     "summary": { "type": "string", "maxLength": 8000 },
     "lastOperation": {
-      "description": "The last external operation applied — a push, a pull-request creation — used to reconcile a later attempt (D-089).",
+      "description": "The last external operation applied — a push, a pull-request creation — used to reconcile a later attempt.",
       "type": "string",
       "maxLength": 500
     },

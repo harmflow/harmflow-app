@@ -189,10 +189,10 @@ describe("screens", () => {
     expect(html).toContain("org/core-banking");
     expect(html).toContain("Trocando de harness");
     expect(html).toContain("Fila de execução (4)");
-    expect(html).not.toMatch(/\d+%/); // no invented progress percentage (FS-008 FR-009)
+    expect(html).not.toMatch(/\d+%/); // no invented progress percentage
   });
 
-  it("lists in the queue the work items waiting to be resumed or retried (FS-008 FR-004)", () => {
+  it("lists in the queue the work items waiting to be resumed or retried", () => {
     const html = renderToString(<ExecutionsScreen selectedId={null} onSelect={() => {}} onGoToTasks={() => {}} onSeeHistory={() => {}} />);
     expect(html).toContain("Draft PR with failing tests");
     expect(html).toContain("Para retomar");
@@ -211,7 +211,7 @@ describe("screens", () => {
     expect(renderToString(<OnboardingScreen onFinish={() => {}} onCreateTask={() => {}} onImport={() => {}} />)).toContain("Boas-vindas");
   });
 
-  it("lists the allowed folders of Settings beside the path variables (D-113, FS-009 FR-014)", () => {
+  it("lists the allowed folders of Settings beside the path variables", () => {
     const html = renderToString(<SettingsScreen />);
     expect(html).toContain("Pastas permitidas");
     expect(html).toContain('value="/srv/repos"');
@@ -263,7 +263,7 @@ describe("screens", () => {
     }
   });
 
-  it("shows the harness's capture attempt by attempt, saying when its start is left out (FS-008 FR-008)", () => {
+  it("shows the harness's capture attempt by attempt, saying when its start is left out", () => {
     const MB = 1024 * 1024;
     const html = renderToString(
       <RawCaptures
@@ -285,7 +285,7 @@ describe("screens", () => {
     expect(renderToString(<RawCaptures output={empty} />)).toContain("Nenhuma saída capturada ainda.");
   });
 
-  it("shows the daemon's validation errors in the interface's language (FS-012 FR-005)", () => {
+  it("shows the daemon's validation errors in the interface's language", () => {
     const html = renderToString(
       <ValidationPanel
         validation={{
@@ -302,7 +302,7 @@ describe("screens", () => {
     expect(html).toContain("agent output, untouched");
   });
 
-  it("shows a harness whose first check runs as checking, in its card, its details, and the task editor (FS-004 AC-011)", () => {
+  it("shows a harness whose first check runs as checking, in its card, its details, and the task editor", () => {
     const checking: Harness = {
       id: "codex",
       name: "Codex",
@@ -330,7 +330,7 @@ describe("screens", () => {
     expect(form).toContain("Codex — Verificando…");
   });
 
-  it("shows a harness's diagnostic and an execution's error in the interface's language (FS-012 FR-005)", () => {
+  it("shows a harness's diagnostic and an execution's error in the interface's language", () => {
     const signedOut: Harness = {
       ...harness,
       authentication: "invalid",
@@ -361,7 +361,7 @@ describe("screens", () => {
     }
   });
 
-  it("reads a failed execution's notice with its reason in the interface's language (FS-012 FR-005)", () => {
+  it("reads a failed execution's notice with its reason in the interface's language", () => {
     const failed: Notification = {
       id: "n2",
       createdAt: "2026-10-20T19:05:00-03:00",
@@ -383,14 +383,14 @@ describe("screens", () => {
     }
   });
 
-  it("asks for repositories only for the GitHub type (FS-001 FR-008)", () => {
+  it("asks for repositories only for the GitHub type", () => {
     const form = (doc: Record<string, unknown>) =>
       renderToString(<TaskForm doc={doc} onChange={() => {}} mode="create" harnesses={[harness]} errorPaths={new Set()} />);
     expect(form(newTaskDocument("github-issue-implementation", undefined, "A"))).toContain("Repositórios");
     expect(form(newTaskDocument("general", undefined, "B"))).not.toContain("Repositórios");
   });
 
-  it("asks a script task for its program, and for no prompt, agents, or harness (FS-013 FR-013, AC-013)", () => {
+  it("asks a script task for its program, and for no prompt, agents, or harness", () => {
     const html = renderToString(
       <TaskForm doc={newTaskDocument("script", undefined, "Auditoria")} onChange={() => {}} mode="create" harnesses={[harness]} errorPaths={new Set()} />,
     );
@@ -403,9 +403,8 @@ describe("screens", () => {
   });
 });
 
-// FS-003 FR-003, AC-005: the card's Cancel sends the same single cancel as the detail's, and a finished execution's
-// card cannot cancel it.
-describe("the executions screen's cards (FS-003 AC-005)", () => {
+// The card's Cancel sends the same single cancel as the detail's, and a finished execution's card cannot cancel it.
+describe("the executions screen's cards", () => {
   let root: Root | undefined;
   let host: HTMLElement | undefined;
 

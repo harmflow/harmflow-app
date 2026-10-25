@@ -32,7 +32,7 @@ func tokenStore(p app.Paths) (ports.SecretStore, string) {
 
 // startupToken reads the local API token from store, and makes one only on a first start, when store holds none. A
 // read that fails otherwise is retried after each of tokenRetries, then returned: the token never moves to another
-// store and is never replaced by a start (FS-009 FR-011, FR-013).
+// store and is never replaced by a start.
 func startupToken(store ports.SecretStore, leftover string, logger *log.Logger, sleep func(time.Duration)) (string, error) {
 	token, err := store.Get()
 	for _, wait := range tokenRetries {

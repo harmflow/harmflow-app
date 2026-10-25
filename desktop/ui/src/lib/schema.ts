@@ -1,5 +1,5 @@
 // Reads defaults and closed sets straight from contracts/schemas/task.schema.json, so the form never keeps a copy of
-// them (D-091, D-094). Validation itself is the daemon's: the form, the YAML editor, and import share it.
+// them. Validation itself is the daemon's: the form, the YAML editor, and import share it.
 import taskSchema from "../../../../contracts/schemas/task.schema.json";
 
 type SchemaNode = {

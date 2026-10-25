@@ -41,7 +41,7 @@ func TestMain(m *testing.M) {
 		time.Sleep(10 * time.Minute)
 		os.Exit(0)
 	}
-	// The readers of a process's output are goroutines; none may outlive the test that started it (D-132).
+	// The readers of a process's output are goroutines; none may outlive the test that started it.
 	goleak.VerifyTestMain(m)
 }
 
@@ -53,7 +53,7 @@ func writePid(path string, pid int) error {
 	return os.Rename(path+".tmp", path)
 }
 
-// FS-003 AC-007: cancelling ends the whole process tree after the grace period, even a child that ignores SIGTERM.
+// Cancelling ends the whole process tree after the grace period, even a child that ignores SIGTERM.
 func TestStopKillsTheProcessTree(t *testing.T) {
 	pidFile := t.TempDir() + "/child.pid"
 	script := `trap '' TERM; sh -c 'trap "" TERM; sleep 300' & echo $! > ` + pidFile + `; echo started; wait`
@@ -112,8 +112,8 @@ func TestRawGetsOneWriteAtATime(t *testing.T) {
 	}
 }
 
-// FS-013 FR-008, D-112: every line of both streams is recorded at one point, so each stream keeps its order and the
-// raw capture holds the lines in the order the callbacks got them.
+// Every line of both streams is recorded at one point, so each stream keeps its order and the raw capture holds the
+// lines in the order the callbacks got them.
 func TestStreamsAreRecordedInOneOrder(t *testing.T) {
 	const n = 500
 	script := `i=0; while [ $i -lt ` + strconv.Itoa(n) + ` ]; do echo out $i; echo err $i >&2; i=$((i+1)); done`
@@ -148,7 +148,7 @@ func TestStreamsAreRecordedInOneOrder(t *testing.T) {
 }
 
 // A probe returns once its timeout ends even when a child of the command keeps its output open, as the native binary
-// an npm wrapper starts can; otherwise a harness's check would never end (FS-004 FR-006).
+// an npm wrapper starts can; otherwise a harness's check would never end.
 func TestOutputReturnsWhenAChildKeepsThePipeOpen(t *testing.T) {
 	pidFile := t.TempDir() + "/child.pid"
 	t.Cleanup(func() {
@@ -324,8 +324,8 @@ func endedOne(ended []Ended, pid int) (Ended, bool) {
 	return Ended{}, false
 }
 
-// FS-003 AC-007: a descendant that left the group and the session, ignores SIGTERM, and redirects its output is ended,
-// though the harness exits on SIGTERM first. The snapshot taken before SIGTERM, while its parent ran, keeps it.
+// A descendant that left the group and the session, ignores SIGTERM, and redirects its output is ended, though the
+// harness exits on SIGTERM first. The snapshot taken before SIGTERM, while its parent ran, keeps it.
 func TestStopEndsADescendantThatLeftTheGroup(t *testing.T) {
 	needProcessTable(t)
 	pidFile := t.TempDir() + "/escaped.pid"
@@ -355,9 +355,9 @@ func TestStopEndsADescendantThatLeftTheGroup(t *testing.T) {
 	}
 }
 
-// FS-003 AC-007: a descendant that daemonized with a double fork, so launchd adopted it before the cancel, is found by
-// the execution's id in its environment, and ended. The test binary stands in for it: unlike an Apple platform
-// binary's, its environment can be read.
+// A descendant that daemonized with a double fork, so launchd adopted it before the cancel, is found by the execution's
+// id in its environment, and ended. The test binary stands in for it: unlike an Apple platform binary's, its
+// environment can be read.
 func TestStopEndsADaemonThatCarriesTheExecutionID(t *testing.T) {
 	needProcessTable(t)
 	id := executionID(t)
@@ -382,8 +382,8 @@ func TestStopEndsADaemonThatCarriesTheExecutionID(t *testing.T) {
 	}
 }
 
-// FS-003 BR-003: a process outside the tree that carries another execution's id keeps running, even one whose id
-// begins with this execution's. This execution's own daemon shows that the scan ran.
+// A process outside the tree that carries another execution's id keeps running, even one whose id begins with this
+// execution's. This execution's own daemon shows that the scan ran.
 func TestStopLeavesAnotherExecutionsProcess(t *testing.T) {
 	needProcessTable(t)
 	id := executionID(t)
@@ -424,10 +424,10 @@ func TestStopLeavesAnotherExecutionsProcess(t *testing.T) {
 	}
 }
 
-// FS-003 FR-005, AC-007: a process that keeps the harness's stdout, and that the search for the execution's processes
-// cannot find, holds up Wait only up to outputDelay after a cancel. It daemonizes with a double fork, so launchd adopts
-// it, and clears the execution's id before it becomes an Apple platform binary: macOS hides such a binary's
-// environment only while System Integrity Protection is on, which a CI host may turn off.
+// A process that keeps the harness's stdout, and that the search for the execution's processes cannot find, holds up
+// Wait only up to outputDelay after a cancel. It daemonizes with a double fork, so launchd adopts it, and clears the
+// execution's id before it becomes an Apple platform binary: macOS hides such a binary's environment only while System
+// Integrity Protection is on, which a CI host may turn off.
 func TestWaitIsBoundedWhileAStrayKeepsTheOutput(t *testing.T) {
 	needProcessTable(t)
 	pidFile := t.TempDir() + "/stray.pid"

@@ -59,7 +59,7 @@ func (a *App) itemLocked(taskID, key string) *domain.WorkItem {
 	return w
 }
 
-// trackWorkItem records the item a session selected, so an interruption can be counted against it (D-089).
+// trackWorkItem records the item a session selected, so an interruption can be counted against it.
 func (a *App) trackWorkItem(taskID, key, title, repo, executionID string) {
 	if key == "" {
 		return
@@ -91,7 +91,7 @@ func (a *App) applyWorkItem(taskID string, r domain.WorkItemResult, executionID 
 	a.saveLedger()
 }
 
-// failWorkItem returns an item that failed operationally to the queue, until its retry limit (FS-007 FR-009, FR-011).
+// failWorkItem returns an item that failed operationally to the queue, until its retry limit.
 func (a *App) failWorkItem(taskID, key, executionID, lastOperation string, limits domain.WorkItemLimits) {
 	a.mu.Lock()
 	a.itemLocked(taskID, key).ApplyInterruption(executionID, lastOperation, limits, a.now())
@@ -100,7 +100,7 @@ func (a *App) failWorkItem(taskID, key, executionID, lastOperation string, limit
 }
 
 // recover marks every execution a crash or restart left active as interrupted: it is never continued, and its work
-// item is resumed in a later cycle (FS-003 FR-010). Waiting firings stay queued; startQueued then drops each one whose
+// item is resumed in a later cycle. Waiting firings stay queued; startQueued then drops each one whose
 // task was disabled or deleted while the daemon was down.
 func (a *App) recover(ctx context.Context) error {
 	all, err := a.d.Executions.LoadAll()

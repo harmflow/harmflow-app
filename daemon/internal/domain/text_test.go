@@ -53,8 +53,8 @@ func TestTextNestsAnotherText(t *testing.T) {
 	}
 }
 
-// FS-012 FR-005: every key the daemon writes is one the contract declares, so the desktop has a text for it, and the
-// contract declares no key the daemon never writes.
+// Every key the daemon writes is one the contract declares, so the desktop has a text for it, and the contract declares
+// no key the daemon never writes.
 func TestMessageKeysMatchTheContract(t *testing.T) {
 	used := keysInSource(t, "../..")
 	data, err := os.ReadFile("../../../contracts/api/openapi.yaml")

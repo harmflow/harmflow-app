@@ -36,7 +36,7 @@ describe("buildTimeline", () => {
     expect(items[0].completed?.ok).toBe(false);
   });
 
-  it("shows the daemon's messages in the interface's language, the agent's and tools' as they are (FS-012 FR-005)", async () => {
+  it("shows the daemon's messages in the interface's language, the agent's and tools' as they are", async () => {
     await i18n.changeLanguage("pt-BR");
     try {
       const items = buildTimeline([
@@ -77,7 +77,7 @@ describe("buildTimeline", () => {
     expect(items.map((i) => i.tone)).toEqual(["magenta", "warning"]);
   });
 
-  it("shows a run on an untested harness version as a warning naming the version (FS-004 FR-008, AC-009)", () => {
+  it("shows a run on an untested harness version as a warning naming the version", () => {
     const [item] = buildTimeline([
       ev("harness.version_untested", {
         severity: "warning",
