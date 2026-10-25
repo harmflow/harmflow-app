@@ -2,6 +2,8 @@ module github.com/harmflow/harmflow-app/daemon
 
 go 1.26.0
 
+toolchain go1.26.10
+
 require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	golang.org/x/sys v0.49.0
