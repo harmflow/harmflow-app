@@ -15,7 +15,7 @@ Never cite a record of the private documentation repository — a specification,
 ADR, or decision — by ID, link, or path, and never reference its issues. This holds for code, comments, test names,
 schemas, commits, issues, and pull requests. Describe the behavior in plain words; a neutral term such as "the
 specification" or "a decision" is fine. The private documentation links the public issue or pull request, never the
-reverse. Older code still carries such IDs until they are removed: never add one, and drop any in lines you change.
+reverse.
 
 ## Go code
 
