@@ -75,13 +75,14 @@ export const enUS = {
     lastUpdate: "Last update: {{time}}",
     lostHint:
       "The connection to the daemon was lost. Executions keep running in the daemon; the dashboard reconnects and replays the events it missed.",
-    commitMismatch: "This dashboard was built from {{desktop}}, but the daemon was built from {{daemon}}.",
-    restartDaemon: "Restart daemon",
-    restartingDaemon: "Restarting daemon…",
-    restartBlocked: "Restart paused because executions are running. The current daemon is still running.",
-    restartFailed: "Could not restart the daemon: {{message}}",
     versionMismatch:
       "The daemon runs version {{daemon}} and this dashboard version {{desktop}}. Reinstall HarmFlow so both match.",
+    commitMismatch:
+      "This dashboard was built from commit {{desktop}} and the daemon from commit {{daemon}}. Restart the daemon to run this dashboard's build.",
+    restartDaemon: "Restart daemon",
+    restartingDaemon: "Restarting…",
+    restartRefused: "Executions are running, so the daemon kept running. Restart it once they end.",
+    restartFailed: "The daemon could not be restarted: {{message}}",
   },
   header: {
     newTask: "New task",

@@ -7,6 +7,7 @@ export interface DaemonStatus {
   address?: string;
   pid?: number;
   version?: string;
+  /** The commit the daemon was built from; absent for a build without git information. */
   commit?: string;
   builtAt?: string;
   startedAt?: string;
@@ -32,19 +33,9 @@ export const native = {
     return invoke<DaemonStatus>("daemon_status");
   },
 
-  async startDaemon(): Promise<DaemonStatus> {
-    return invoke<DaemonStatus>("daemon_start");
-  },
-
-  /** Waits for a requested stop to finish before daemon_start checks whether it needs to spawn a process. */
-  async waitForDaemonStop(): Promise<void> {
-    if (!isTauri()) return;
-    for (let attempt = 0; attempt < 40; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      const status = await invoke<DaemonStatus>("daemon_status");
-      if (!status.running) return;
-    }
-    throw new Error("the daemon did not stop within 10 seconds");
+  /** Starts this bundle's daemon when none answers. `replacing`, the pid of a daemon asked to stop, exits first. */
+  async startDaemon(replacing?: number): Promise<DaemonStatus> {
+    return invoke<DaemonStatus>("daemon_start", { replacing });
   },
 
   async setTrayEnabled(enabled: boolean): Promise<void> {

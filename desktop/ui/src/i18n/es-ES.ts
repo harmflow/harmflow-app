@@ -75,13 +75,14 @@ export const esES: Resources = {
     lastUpdate: "Última actualización: {{time}}",
     lostHint:
       "Se perdió la conexión con el daemon. Las ejecuciones siguen en el daemon; el panel se reconecta y reproduce los eventos que perdió.",
-    commitMismatch: "Este panel se compiló desde {{desktop}}, pero el daemon se compiló desde {{daemon}}.",
-    restartDaemon: "Reiniciar daemon",
-    restartingDaemon: "Reiniciando daemon…",
-    restartBlocked: "El reinicio se detuvo porque hay ejecuciones en curso. El daemon actual sigue funcionando.",
-    restartFailed: "No se pudo reiniciar el daemon: {{message}}",
     versionMismatch:
       "El daemon ejecuta la versión {{daemon}} y este panel la versión {{desktop}}. Reinstala HarmFlow para que coincidan.",
+    commitMismatch:
+      "Este panel se compiló desde el commit {{desktop}} y el daemon desde el commit {{daemon}}. Reinicia el daemon para usar la compilación de este panel.",
+    restartDaemon: "Reiniciar el daemon",
+    restartingDaemon: "Reiniciando…",
+    restartRefused: "Hay ejecuciones en curso, así que el daemon siguió funcionando. Reinícialo cuando terminen.",
+    restartFailed: "No se pudo reiniciar el daemon: {{message}}",
   },
   header: {
     newTask: "Nueva tarea",

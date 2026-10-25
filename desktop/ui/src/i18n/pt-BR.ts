@@ -75,13 +75,14 @@ export const ptBR: Resources = {
     lastUpdate: "Última atualização: {{time}}",
     lostHint:
       "A conexão com o daemon caiu. As execuções continuam no daemon; o painel reconecta e reproduz os eventos que perdeu.",
-    commitMismatch: "Este painel foi compilado a partir de {{desktop}}, mas o daemon foi compilado a partir de {{daemon}}.",
-    restartDaemon: "Reiniciar o daemon",
-    restartingDaemon: "Reiniciando o daemon…",
-    restartBlocked: "O reinício foi pausado porque há execuções em andamento. O daemon atual continua ativo.",
-    restartFailed: "Não foi possível reiniciar o daemon: {{message}}",
     versionMismatch:
       "O daemon está na versão {{daemon}} e este painel na versão {{desktop}}. Reinstale o HarmFlow para que as duas coincidam.",
+    commitMismatch:
+      "Este painel foi compilado do commit {{desktop}} e o daemon do commit {{daemon}}. Reinicie o daemon para usar a compilação deste painel.",
+    restartDaemon: "Reiniciar o daemon",
+    restartingDaemon: "Reiniciando…",
+    restartRefused: "Há execuções em andamento, então o daemon continuou rodando. Reinicie-o quando elas terminarem.",
+    restartFailed: "Não foi possível reiniciar o daemon: {{message}}",
   },
   header: {
     newTask: "Nova tarefa",

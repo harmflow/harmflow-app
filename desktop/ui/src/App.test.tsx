@@ -767,6 +767,25 @@ describe("zoom", () => {
   });
 });
 
+describe("daemon restart", () => {
+  it("keeps the shell while the daemon restarts, and shows the daemon-down screen once it is down for good", async () => {
+    // The daemon-down screen shows inside the desktop shell alone.
+    native.available = true;
+    localStorage.setItem("harmflow.onboarded", "1");
+    patchStateForTests({ daemonRunning: false, daemonRestart: "restarting" });
+    try {
+      await launch();
+      expect(host!.querySelector(".app")).not.toBeNull();
+      expect(host!.querySelector(".daemon-down")).toBeNull();
+      await act(async () => patchStateForTests({ daemonRestart: "idle" }));
+      expect(host!.querySelector(".daemon-down")).not.toBeNull();
+    } finally {
+      native.available = false;
+      patchStateForTests({ daemonRestart: "idle" });
+    }
+  });
+});
+
 describe("render errors", () => {
   let logged: MockInstance<typeof console.error>;
 
