@@ -133,7 +133,7 @@ update-app: ## Bring the local app to the latest main, install it to ~/Applicati
 
 .PHONY: test-packaging
 test-packaging: ## Tests of the packaging scripts
-	packaging/macos/update-app_test.sh
+	packaging/macos/update-app-test.sh
 
 .PHONY: clean
 clean: ## Remove build output

@@ -13,7 +13,7 @@ set -euo pipefail
 readonly LABEL=com.harmflow.daemon
 readonly KEYCHAIN_SERVICE=com.harmflow.local-api
 readonly KEYCHAIN_ACCOUNT=token
-# Launch Services' own tool; update-app_test.sh replaces it with a fake.
+# Launch Services' own tool; update-app-test.sh replaces it with a fake.
 lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 
 say() { printf 'update-app: %s\n' "$*"; }
@@ -363,5 +363,5 @@ main() {
 	return $status
 }
 
-# Sourced, as update-app_test.sh does, it only defines its functions.
+# Sourced, as update-app-test.sh does, it only defines its functions.
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then main "$@"; fi
