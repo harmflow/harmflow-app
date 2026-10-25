@@ -5,7 +5,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import i18n from "../i18n";
-import { ImportDialog } from "./TasksScreen";
+import { ImportDialog } from "./ImportDialog";
 
 const daemon = vi.hoisted(() => ({ answers: new Map<string, unknown>(), requests: [] as string[] }));
 vi.mock("../api/transport", () => ({

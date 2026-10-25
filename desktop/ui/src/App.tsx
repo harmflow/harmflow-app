@@ -9,10 +9,11 @@ import { applyLanguage } from "./i18n";
 import { storeZoom, storedZoom, zoomKey, zoomed } from "./lib/zoom";
 import { ExecutionsScreen } from "./screens/ExecutionsScreen";
 import { HistoryScreen } from "./screens/HistoryScreen";
+import { ImportDialog } from "./screens/ImportDialog";
 import { DaemonDownScreen, OnboardingScreen } from "./screens/OnboardingScreen";
 import { OverviewScreen } from "./screens/OverviewScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
-import { ImportDialog, TasksScreen, TemplatePicker, type TaskView } from "./screens/TasksScreen";
+import { TasksScreen, TemplatePicker, type TaskView } from "./screens/TasksScreen";
 import { setNotificationHandler, startSync, useStore } from "./state/store";
 
 const ONBOARDED_KEY = "harmflow.onboarded";
