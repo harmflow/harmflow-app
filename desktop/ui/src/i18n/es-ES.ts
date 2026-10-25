@@ -432,6 +432,7 @@ export const esES: Resources = {
     task_path_refused: "se rechaza {{field}} de esta tarea: {{detail}}",
     script_write_failed: "escribiendo el script inline: {{detail}}",
     process_ended: "se terminó {{executable}} (pid {{pid}}), que estaba fuera del grupo de procesos",
+    process_left_ended: "se terminó {{executable}} (pid {{pid}}), que el harness o el programa dejó en ejecución",
     detection_running: "la detección está en curso",
     harness_manual_path_invalid: "la ruta definida a mano no existe o no es un archivo",
     claude_not_found: "no se encontró claude en el PATH ni en las ubicaciones de instalación habituales",

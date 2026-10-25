@@ -838,6 +838,35 @@ func TestFailureLeavesTheOthersRunning(t *testing.T) {
 	}
 }
 
+// A harness that exits on its own keeps the outcome its exit gives, though a cancel comes while the process it left
+// running, which ignores SIGTERM, is ended over the grace period; that process is gone once the execution ends.
+func TestHarnessExitKeepsItsOutcomeThroughACancel(t *testing.T) {
+	e := newEnv(t)
+	e.create("late", "  execution:\n    cancelGraceSeconds: 2\n")
+	dir := t.TempDir()
+	e.claude.setScript(func(ports.RunRequest) string {
+		return fmt.Sprintf("(trap '' TERM; exec sleep 600) >/dev/null 2>&1 & echo $! > %[1]s/child; "+
+			"echo $$ > %[1]s/harness; echo 'END ok'", dir)
+	})
+	r, err := e.app.RunTask("late")
+	if err != nil || r.Outcome != "started" {
+		t.Fatalf("run late: %v %+v", err, r)
+	}
+	child := waitForPid(t, filepath.Join(dir, "child"))
+	waitReaped(t, waitForPid(t, filepath.Join(dir, "harness")))
+	if err := e.app.CancelExecution(r.ExecutionID); err != nil {
+		t.Fatal(err)
+	}
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	e.idle("late")
+	if len(x.Attempts) != 1 || x.Attempts[0].Outcome != domain.AttemptSucceeded {
+		t.Errorf("attempts %+v", x.Attempts)
+	}
+	if alive(child) {
+		t.Errorf("the background child %d survived the harness's exit", child)
+	}
+}
+
 // An execution cancelled or dropped while it is still queued never runs, even when its task was already claimed for
 // it: fire and startQueued claim the task before the executor leaves queued.
 func TestCancelBeforeItStarts(t *testing.T) {
