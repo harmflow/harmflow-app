@@ -164,7 +164,10 @@ export const actions = {
   async refreshSettings() {
     const [settings, diagnostics] = await Promise.all([settle(api.settings()), settle(api.diagnostics())]);
     setState((s) => ({ settings: settings ?? s.settings, diagnostics: diagnostics ?? s.diagnostics }));
-    if (settings) void native.setTrayEnabled(settings.trayEnabled);
+    if (settings) {
+      void native.setTrayEnabled(settings.trayEnabled);
+      void native.setKeepTrayOnQuit(settings.keepTrayOnQuit);
+    }
     return settings;
   },
 

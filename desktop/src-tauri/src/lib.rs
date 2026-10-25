@@ -78,6 +78,31 @@ fn set_tray_enabled(app: tauri::AppHandle, state: Shared<'_>, enabled: bool) {
     tray::set_visible(&app, enabled);
 }
 
+/// Whether ⌘Q keeps HarmFlow in the menu bar; the interface sends it with the tray's after each settings refresh.
+#[tauri::command]
+fn set_keep_tray_on_quit(state: Shared<'_>, keep: bool) {
+    state.set_keep_tray_on_quit(keep);
+}
+
+/// Reads the stored tray choices once at start. The window can show on the interface's readiness before its first
+/// settings refresh, and a ⌘Q pressed then already follows them. A daemon not running yet leaves them to the interface.
+fn read_tray_settings(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<Arc<AppState>>().inner().clone();
+        let res = state.daemon.request("GET", "/settings", None).await;
+        if res.status != 200 {
+            return;
+        }
+        if let Some(enabled) = res.body.get("trayEnabled").and_then(Value::as_bool) {
+            state.set_tray_enabled(enabled);
+            tray::set_visible(&app, enabled);
+        }
+        if let Some(keep) = res.body.get("keepTrayOnQuit").and_then(Value::as_bool) {
+            state.set_keep_tray_on_quit(keep);
+        }
+    });
+}
+
 /// Tray texts in the interface's language: idle, active ({{count}}), open, quit, stop, stopTitle, stopConfirm,
 /// stopConfirmRunning ({{count}}), stopOk, cancel; and the app menu's settings.
 #[tauri::command]
@@ -138,6 +163,7 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_menu(menu::build(app.handle())?)?;
             tray::create(app.handle())?;
+            read_tray_settings(app.handle().clone());
             notice::listen(app.handle())?;
             sse::spawn(app.handle().clone());
             tray::schedule_refresh(app.handle().clone());
@@ -165,6 +191,7 @@ pub fn run() {
             daemon_status,
             daemon_start,
             set_tray_enabled,
+            set_keep_tray_on_quit,
             set_tray_labels,
             interface_ready,
             write_text_file,
@@ -185,7 +212,8 @@ pub fn run() {
         // The Dock icon or a reopen brings the hidden window back.
         #[cfg(target_os = "macos")]
         RunEvent::Reopen { .. } => window::show_main(app),
-        // Closing the last window ends only the interface when the tray is disabled; with the tray, the app stays.
+        // Closing the last window ends only the interface when the tray is disabled; with the tray, the app stays. The
+        // app menu's Quit and the tray's Quit interface exit with a code, which this lets through.
         RunEvent::ExitRequested { api, code, .. } => {
             if code.is_none() && app.state::<Arc<AppState>>().tray_enabled() {
                 api.prevent_exit();
