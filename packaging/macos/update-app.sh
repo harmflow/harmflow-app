@@ -6,13 +6,16 @@
 # only through that directory's run/daemon.json, never by process name, and stops it through the local API without
 # force, so it never interrupts an execution nor touches another directory's daemon. The daemon and the window it
 # restarts run from the installed copy, which it replaces only once both have stopped; OPEN=1 starts them also when
-# they did not run.
+# they did not run. It skips make app when the build is already of the pulled commit, unless FORCE_BUILD=1, and WAIT=1
+# waits for running executions to end, up to WAIT_TIMEOUT seconds, where it would refuse (harmflow-app#189).
 
 set -euo pipefail
 
 readonly LABEL=com.harmflow.daemon
 readonly KEYCHAIN_SERVICE=com.harmflow.local-api
 readonly KEYCHAIN_ACCOUNT=token
+# How often WAIT=1 asks the daemon how many executions run, and says it.
+readonly POLL_SECONDS=5
 # Launch Services' own tool; update-app-test.sh replaces it with a fake.
 lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 
@@ -77,6 +80,76 @@ find_daemon() {
 	[[ $(api GET /health) == 200 ]] ||
 		die "daemon pid $p in $runtime does not answer at $addr; nothing was changed. See $home/logs/daemon.log"
 	pid=$p
+}
+
+# stats_running prints how many executions run now, as GET /stats counts them, or fails when the daemon does not answer.
+# The daemon refuses a stop without force by the same count.
+stats_running() {
+	[[ $(api GET /stats) == 200 ]] || return 1
+	local running
+	running=$(json_get "$tmp/body" running)
+	[[ $running =~ ^[0-9]+$ ]] || return 1
+	printf '%s' "$running"
+}
+
+# warn_running says, before the build, that the daemon it finds runs executions, so a refusal to stop is not news only
+# once the build is over.
+warn_running() {
+	local running
+	find_daemon || return 0
+	if ! running=$(stats_running); then
+		say "the daemon did not answer GET /stats; building without knowing whether executions run"
+	elif ((running > 0)); then
+		if [[ ${WAIT:-} == 1 ]]; then
+			say "executions running: $running; WAIT=1 waits for them to end after the build"
+		else
+			say "executions running: $running; the restart will be refused unless they end before the build does." \
+				"make update-app WAIT=1 waits for them"
+		fi
+	fi
+}
+
+# build_app runs make app, in a make of its own so its COMMIT is read after the pull, unless the build is already of
+# $commit: make app writes the commit beside the bundle, HarmFlow.app.commit, once the bundle is complete, and a tree
+# with changes is refused before this, so the commit names the whole source. FORCE_BUILD=1 builds anyway.
+build_app() {
+	if [[ ${FORCE_BUILD:-} != 1 && -x $built/Contents/MacOS/harmflowd && -f $built.commit ]] &&
+		[[ $(tr -d '[:space:]' <"$built.commit") == "$commit" ]]; then
+		say "$built is already a build of $commit; skipping make app (FORCE_BUILD=1 builds anyway)"
+		return
+	fi
+	say "building $commit with make app"
+	"${MAKE:-make}" -C "$root" app || die "make app failed; the window and the daemon were left as they were"
+}
+
+# stop_daemon asks the daemon to stop, never with force. While executions run it refuses, and so does the update,
+# unless WAIT=1: then it says every POLL_SECONDS how many run, and asks again once none does, so one that starts in
+# between is waited for too, never cancelled. It gives up after $wait_timeout seconds with the same refusal.
+stop_daemon() {
+	local deadline=$((SECONDS + wait_timeout)) running
+	local refused="nothing was stopped and $installed was left as it was; the new build is at $built, not running"
+	while :; do
+		case $(api POST /daemon/stop '{}') in
+		202) return 0 ;;
+		409)
+			[[ $(json_get "$tmp/body" error.code) == executions_running ]] ||
+				die "the daemon refused to stop: $(cat "$tmp/body"). Nothing was stopped"
+			;;
+		*) die "the daemon refused to stop: $(cat "$tmp/body"). Nothing was stopped" ;;
+		esac
+		[[ ${WAIT:-} == 1 ]] ||
+			die "executions are running, so $refused. Run make update-app again when they end, or" \
+				"make update-app WAIT=1 to wait for them"
+		while :; do
+			((SECONDS < deadline)) ||
+				die "executions are still running after WAIT_TIMEOUT=${wait_timeout}s, so $refused." \
+					"Run make update-app again when they end"
+			running=$(stats_running) || die "the daemon did not answer GET /stats while waiting; nothing was stopped"
+			((running > 0)) || break
+			say "executions running: $running; waiting for them to end"
+			sleep "$POLL_SECONDS"
+		done
+	done
 }
 
 # window_pids prints the pids of the harmflow-desktop processes whose executable is the installed copy's or this
@@ -280,6 +353,9 @@ main() {
 	default_home="$HOME/Library/Application Support/HarmFlow"
 	home="${HARMFLOW_HOME:-$default_home}"
 	runtime="$home/run/daemon.json"
+	wait_timeout=${WAIT_TIMEOUT:-3600}
+	[[ $wait_timeout =~ ^[1-9][0-9]*$ ]] ||
+		die "WAIT_TIMEOUT must be a whole number of seconds, not $wait_timeout; nothing was changed"
 	tmp=$(mktemp -d)
 	staging=''
 	trap 'rm -rf "$tmp" ${staging:+"$staging"}' EXIT
@@ -300,9 +376,9 @@ main() {
 	if [[ $commit == "$before" ]]; then say "main is up to date at $commit"; else say "main fast-forwarded from $before to $commit"; fi
 	rerun_if_changed "$before" "$@"
 
-	# 2. Build, in a make of its own, so its COMMIT is read after the pull.
-	say "building $commit with make app"
-	"${MAKE:-make}" -C "$root" app || die "make app failed; the window and the daemon were left as they were"
+	# 2. Build, unless the build is already of this commit, after saying whether the stop will meet executions.
+	warn_running
+	build_app
 
 	# 3. What runs now.
 	local daemon_was='' window_was old_pid=''
@@ -325,14 +401,7 @@ main() {
 
 	# 5. Stop the daemon, never with force, before the window, so a refusal leaves both running.
 	if [[ -n $daemon_was ]]; then
-		case $(api POST /daemon/stop '{}') in
-		202) ;;
-		409)
-			die "executions are running, so nothing was stopped and $installed was left as it was." \
-				"Run make update-app again when they end"
-			;;
-		*) die "the daemon refused to stop: $(cat "$tmp/body"). Nothing was stopped" ;;
-		esac
+		stop_daemon
 		wait_gone "$old_pid" 30 || die "daemon pid $old_pid did not exit within 30 seconds. See $home/logs/daemon.log"
 		say "daemon pid $old_pid stopped"
 	fi

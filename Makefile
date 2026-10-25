@@ -12,6 +12,9 @@ BUILT_AT := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 TRIPLE := $(shell rustc -vV 2>/dev/null | sed -n 's/^host: //p')
 DEV_HOME := $(CURDIR)/.harmflow-dev/home
 SIDECAR := desktop/src-tauri/binaries/harmflowd-$(TRIPLE)
+# The commit of the app bundle, which make update-app reads to skip a build of the commit it pulled. make app deletes it
+# before building and writes it once the build succeeds, so it never vouches for a bundle a failed build left half made.
+APP_STAMP := desktop/src-tauri/target.noindex/release/bundle/macos/HarmFlow.app.commit
 LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuiltAt=$(BUILT_AT)
 COVERAGE := $(CURDIR)/build/coverage
 # The shell's coverage floors, in percent; COVERAGE.md holds the reading they come from.
@@ -121,12 +124,14 @@ dev-desktop: sidecar ## Run the desktop shell against the development daemon
 
 .PHONY: app
 app: sidecar ## Build HarmFlow.app and the DMG (unsigned until the Developer ID exists)
+	@rm -f $(APP_STAMP)
 	cd desktop && pnpm tauri build
+	@printf '%s\n' '$(COMMIT)' >$(APP_STAMP)
 	@echo "Bundles in desktop/src-tauri/target.noindex/release/bundle/"
 
 # No prerequisite and no $(MAKE) here: the script pulls, then builds in a make of its own, whose COMMIT is read after
-# the pull. A $(MAKE) in the recipe would also run it under make -n. OPEN=1 and INSTALL_DIR reach it through the
-# environment, as make exports the variables of its command line.
+# the pull. A $(MAKE) in the recipe would also run it under make -n. OPEN=1, INSTALL_DIR, FORCE_BUILD=1, WAIT=1, and
+# WAIT_TIMEOUT reach it through the environment, as make exports the variables of its command line.
 .PHONY: update-app
 update-app: ## Bring the local app to the latest main, install it to ~/Applications, and restart what was running
 	@packaging/macos/update-app.sh
