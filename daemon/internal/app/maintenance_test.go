@@ -45,19 +45,31 @@ func (w *workspaces) git(args ...string) string {
 // worktree adds a linked worktree on its own branch at <workspace>/<task>/<name>, as hf-github-worktree §2 does.
 func (w *workspaces) worktree(task, name string) string {
 	w.t.Helper()
+	return w.worktreeIn(filepath.Join(w.app.d.Paths.Workspace, task), name)
+}
+
+// worktreeIn adds a linked worktree on its own branch at <dir>/<name>, as hf-github-worktree §2 does in a task's
+// custom workspace dir.
+func (w *workspaces) worktreeIn(dir, name string) string {
+	w.t.Helper()
 	w.branches++
-	p := filepath.Join(w.app.d.Paths.Workspace, task, name)
+	p := filepath.Join(dir, name)
 	w.git("-C", w.repo, "worktree", "add", "-q", "-b", fmt.Sprintf("harmflow/%d-test", w.branches), p)
 	return p
 }
 
-// ended records an execution of task that ended with status at the current time.
+// ended records an execution of task that ended with status at the current time, in the daemon's workspace.
 func (w *workspaces) ended(task string, status domain.ExecutionStatus, report ...domain.WorkItemResult) *domain.Execution {
+	return w.endedIn(task, filepath.Join(w.app.d.Paths.Workspace, task), status, report...)
+}
+
+// endedIn is ended for an execution whose workspace was dir, as prepare records a custom path the task named.
+func (w *workspaces) endedIn(task, dir string, status domain.ExecutionStatus, report ...domain.WorkItemResult) *domain.Execution {
 	now := w.clock.Now()
 	x := domain.NewExecution(domain.TaskDocument{Metadata: domain.TaskMetadata{ID: task}}, domain.TriggerManual, nil, now)
 	x.Status = status
 	x.EndedAt = &now
-	x.WorkspacePath = filepath.Join(w.app.d.Paths.Workspace, task)
+	x.WorkspacePath = dir
 	x.WorkItems = append([]domain.WorkItemResult{}, report...)
 	w.app.mu.Lock()
 	w.app.executions[x.ID] = x
@@ -115,10 +127,16 @@ func (w *workspaces) gone(res CleanResult, p string) {
 	if !slices.Contains(res.Removed, p) {
 		w.t.Errorf("%s is not listed as removed: %v", p, res.Removed)
 	}
-	rel, _ := filepath.Rel(w.app.d.Paths.Workspace, p)
-	if list := w.git("-C", w.repo, "worktree", "list", "--porcelain"); strings.Contains(list, rel) {
-		w.t.Errorf("Git still lists the worktree %s:\n%s", rel, list)
+	// Git lists the worktree by its resolved path, which on macOS starts with /private where p starts with /var.
+	tail := filepath.Join(filepath.Base(filepath.Dir(p)), filepath.Base(p))
+	if list := w.git("-C", w.repo, "worktree", "list", "--porcelain"); strings.Contains(list, tail+"\n") {
+		w.t.Errorf("Git still lists the worktree %s:\n%s", p, list)
 	}
+}
+
+// listed reports whether res names p as removed or kept.
+func listed(res CleanResult, p string) bool {
+	return slices.Contains(res.Removed, p) || slices.ContainsFunc(res.Kept, func(k KeptPath) bool { return k.Path == p })
 }
 
 // A cancelled execution leaves no report, so its worktree is tied to it through the ledger's work item and the path the
@@ -238,5 +256,131 @@ func TestCleanKeepsWorktreesItCannotAttribute(t *testing.T) {
 	}
 	if len(res.Removed) != 0 {
 		t.Errorf("removed %v", res.Removed)
+	}
+}
+
+// A task's custom workspace holds its worktrees directly, with no task folder; the clean-up judges them there as it
+// does in the daemon's workspace.
+func TestCleanRemovesEndedWorktreesInACustomWorkspace(t *testing.T) {
+	w := newWorkspaces(t)
+	w.create("custom", "")
+	root := t.TempDir()
+	closed := w.worktreeIn(root, "r-1")
+	w.reported("custom", "o/r#1", "closed", w.endedIn("custom", root, domain.StatusCompleted))
+	cancelled := w.worktreeIn(root, "r-2")
+	w.selected("custom", "o/r#2", w.endedIn("custom", root, domain.StatusCancelled))
+	failed := w.worktreeIn(root, "r-3")
+	f := w.endedIn("custom", root, domain.StatusFailed)
+	w.selected("custom", "o/r#3", f)
+	w.app.failWorkItem("custom", "o/r#3", f.ID, "", defaultLimits)
+	draft := w.worktreeIn(root, "r-4")
+	w.reported("custom", "o/r#4", "completed", w.endedIn("custom", root, domain.StatusCompleted))
+
+	res := w.app.CleanWorkspaces()
+	w.gone(res, closed)
+	w.present(res, cancelled, "until its execution's log expires")
+	w.present(res, failed, "until its execution's log expires")
+	w.present(res, draft, "draft pull request is still in progress")
+
+	w.expireLogs()
+	res = w.app.CleanWorkspaces()
+	w.gone(res, cancelled)
+	w.gone(res, failed)
+	w.present(res, draft, "draft pull request is still in progress")
+	if listed(res, root) {
+		t.Errorf("the custom workspace %s is listed: %+v", root, res)
+	}
+}
+
+// A custom workspace is the user's folder: the clean-up never removes it, not even empty once its task is deleted.
+func TestCleanKeepsTheCustomWorkspaceOfADeletedTask(t *testing.T) {
+	w := newWorkspaces(t)
+	w.create("gone", "")
+	root := t.TempDir()
+	p := w.worktreeIn(root, "r-5")
+	w.reported("gone", "o/r#5", "closed", w.endedIn("gone", root, domain.StatusCompleted))
+	if _, err := w.app.DeleteTask("gone"); err != nil {
+		t.Fatal(err)
+	}
+
+	res := w.app.CleanWorkspaces()
+	w.gone(res, p)
+	if _, err := os.Stat(root); err != nil || slices.Contains(res.Removed, root) {
+		t.Errorf("the custom workspace %s was removed (%v): %v", root, err, res.Removed)
+	}
+}
+
+// In a custom workspace the clean-up removes nothing it cannot tie to a work item, and reads its entries one level
+// deep: a directory there is never taken for a task's folder of worktrees.
+func TestCleanKeepsWhatItCannotAttributeInACustomWorkspace(t *testing.T) {
+	w := newWorkspaces(t)
+	w.create("custom", "")
+	root := t.TempDir()
+	w.endedIn("custom", root, domain.StatusCancelled) // no work item was ever selected
+	stray := w.worktreeIn(root, "r-6")
+	own := w.worktreeIn(root, "scratch")
+	notes := filepath.Join(root, "notes")
+	nested := w.worktreeIn(notes, "r-7")
+	w.reported("custom", "o/r#7", "closed", w.endedIn("custom", root, domain.StatusCompleted))
+	w.expireLogs()
+
+	res := w.app.CleanWorkspaces()
+	for _, p := range []string{stray, own, notes} {
+		w.present(res, p, "no record of its work item")
+	}
+	if _, err := os.Stat(nested); err != nil || listed(res, nested) {
+		t.Errorf("the clean-up read %s, inside a directory of the workspace (%v): %+v", nested, err, res)
+	}
+	if len(res.Removed) != 0 {
+		t.Errorf("removed %v", res.Removed)
+	}
+}
+
+// Tasks that share a custom workspace each have their worktrees judged by their own work items, and a running task
+// keeps its own.
+func TestCleanJudgesEachWorktreeOfASharedCustomWorkspaceByItsItem(t *testing.T) {
+	w := newWorkspaces(t)
+	root := t.TempDir()
+	for _, task := range []string{"merger", "drafter", "busy"} {
+		w.create(task, "")
+	}
+	closed := w.worktreeIn(root, "r-8")
+	w.reported("merger", "o/r#8", "closed", w.endedIn("merger", root, domain.StatusCompleted))
+	draft := w.worktreeIn(root, "r-9")
+	w.reported("drafter", "o/r#9", "completed", w.endedIn("drafter", root, domain.StatusCompleted))
+	inUse := w.worktreeIn(root, "r-10")
+	w.reported("busy", "o/r#10", "closed", w.endedIn("busy", root, domain.StatusCompleted))
+	done := make(chan struct{})
+	close(done)
+	w.app.mu.Lock()
+	w.app.running["busy"] = &runHandle{done: done}
+	w.app.mu.Unlock()
+	t.Cleanup(func() {
+		w.app.mu.Lock()
+		delete(w.app.running, "busy")
+		w.app.mu.Unlock()
+	})
+
+	res := w.app.CleanWorkspaces()
+	w.gone(res, closed)
+	w.present(res, draft, "draft pull request is still in progress")
+	w.present(res, inUse, "the task is running")
+}
+
+// A script's working directory is not a workspace: the worktree skill never runs there, so the clean-up never reads it.
+func TestCleanSkipsAScriptsWorkingDirectory(t *testing.T) {
+	w := newWorkspaces(t)
+	wd := t.TempDir()
+	sub := filepath.Join(wd, "project")
+	if err := os.Mkdir(sub, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	x := w.endedIn("script", wd, domain.StatusCompleted)
+	w.app.mu.Lock()
+	x.Script = &domain.ScriptRun{WorkingDirectory: wd}
+	w.app.mu.Unlock()
+
+	if res := w.app.CleanWorkspaces(); listed(res, sub) {
+		t.Errorf("CleanWorkspaces() read the script's working directory: %+v", res)
 	}
 }
