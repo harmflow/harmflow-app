@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -77,18 +78,16 @@ type CleanResult struct {
 	Kept    []KeptPath `json:"kept"`
 }
 
-// CleanWorkspaces removes the worktrees no longer needed. A worktree is tied to its work item
-// through the path hf-github-worktree §2 gives it, <workspace>/<repo-name>-<issue-number>, or the worktreePath a
-// report named; it is removed only when that item reads closed in the ledger, or when the item's last execution was
-// cancelled, failed (a timeout included), or interrupted and its log has expired. Every other worktree is kept: those
-// of running tasks, of completed and needs_attention items, and any HarmFlow cannot tie to a work item, whether or
-// not its task still exists.
+// CleanWorkspaces removes the worktrees no longer needed, in the daemon's workspace and in each custom workspace an
+// execution recorded. A worktree is tied to its work item through the path hf-github-worktree §2 gives it,
+// <workspace>/<repo-name>-<issue-number>, or the worktreePath a report named; it is removed only when that item reads
+// closed in the ledger, or when the item's last execution was cancelled, failed (a timeout included), or interrupted
+// and its log has expired. Every other worktree is kept: those of running tasks, of completed and needs_attention
+// items, and any HarmFlow cannot tie to a work item, whether or not its task still exists. A custom workspace is the
+// user's folder, shared by every task that names it: its entries are read as worktrees, one level deep, and the folder
+// itself is never removed.
 func (a *App) CleanWorkspaces() CleanResult {
 	res := CleanResult{Removed: []string{}, Kept: []KeptPath{}}
-	taskDirs, err := os.ReadDir(a.d.Paths.Workspace)
-	if err != nil {
-		return res
-	}
 	a.mu.Lock()
 	running := map[string]bool{}
 	for id := range a.running {
@@ -99,7 +98,9 @@ func (a *App) CleanWorkspaces() CleanResult {
 		exists[id] = true
 	}
 	fates := a.worktreeFatesLocked()
+	custom := a.customWorkspacesLocked()
 	a.mu.Unlock()
+	taskDirs, _ := os.ReadDir(a.d.Paths.Workspace) // a workspace that cannot be read has nothing this pass can clean
 	for _, td := range taskDirs {
 		if !td.IsDir() {
 			continue
@@ -109,33 +110,64 @@ func (a *App) CleanWorkspaces() CleanResult {
 			res.Kept = append(res.Kept, KeptPath{taskDir, "the task is running"})
 			continue
 		}
-		entries, _ := os.ReadDir(taskDir) // a directory that cannot be read has nothing this pass can clean
-		for _, en := range entries {
-			if !en.IsDir() {
-				continue
-			}
-			p := filepath.Join(taskDir, en.Name())
-			fate, known := fates[worktreeKey(p)]
-			switch {
-			case !known:
-				res.Kept = append(res.Kept, KeptPath{p, "HarmFlow has no record of its work item"})
-			case !fate.remove:
-				res.Kept = append(res.Kept, KeptPath{p, fate.reason})
-			case !isWorktree(p):
-				res.Kept = append(res.Kept, KeptPath{p, "not a Git worktree HarmFlow created"})
-			default:
-				removeWorktree(p)
-				if os.RemoveAll(p) == nil {
-					res.Removed = append(res.Removed, p)
-				}
-			}
-		}
+		res.clean(taskDir, fates)
 		// A deleted task's directory goes once nothing is left in it; os.Remove never removes a non-empty one.
 		if !exists[td.Name()] && os.Remove(taskDir) == nil {
 			res.Removed = append(res.Removed, taskDir)
 		}
 	}
+	for _, dir := range custom {
+		res.clean(dir, fates)
+	}
 	return res
+}
+
+// clean removes each worktree directly in the workspace dir whose fate is removal, and lists every other directory
+// there as kept, with its reason.
+func (res *CleanResult) clean(dir string, fates map[string]worktreeFate) {
+	entries, _ := os.ReadDir(dir) // a directory that cannot be read has nothing this pass can clean
+	for _, en := range entries {
+		if !en.IsDir() {
+			continue
+		}
+		p := filepath.Join(dir, en.Name())
+		fate, known := fates[worktreeKey(p)]
+		switch {
+		case !known:
+			res.Kept = append(res.Kept, KeptPath{p, "HarmFlow has no record of its work item"})
+		case !fate.remove:
+			res.Kept = append(res.Kept, KeptPath{p, fate.reason})
+		case !isWorktree(p):
+			res.Kept = append(res.Kept, KeptPath{p, "not a Git worktree HarmFlow created"})
+		default:
+			removeWorktree(p)
+			if os.RemoveAll(p) == nil {
+				res.Removed = append(res.Removed, p)
+			}
+		}
+	}
+}
+
+// customWorkspacesLocked lists, sorted and once each, the workspaces outside the daemon's own that executions
+// recorded: the custom paths their tasks named. A script's working directory is not one; the worktree skill never runs
+// there, and it is the user's home folder by default.
+func (a *App) customWorkspacesLocked() []string {
+	own := filepath.Clean(a.d.Paths.Workspace)
+	seen := map[string]bool{}
+	var dirs []string
+	for _, x := range a.executions {
+		if x.WorkspacePath == "" || x.Script != nil {
+			continue
+		}
+		p := filepath.Clean(x.WorkspacePath)
+		if filepath.Dir(p) == own || seen[worktreeKey(p)] {
+			continue
+		}
+		seen[worktreeKey(p)] = true
+		dirs = append(dirs, p)
+	}
+	slices.Sort(dirs)
+	return dirs
 }
 
 // worktreeFate is what the clean-up does with one worktree, and why it keeps it.
@@ -146,7 +178,8 @@ type worktreeFate struct {
 
 // worktreeFatesLocked decides, from the ledger, the fate of each worktree HarmFlow can tie to a work item, keyed by
 // worktreeKey. The path hf-github-worktree §2 derives from an item decides first; a worktreePath a report named
-// only adds a path no item derives. Where two claims meet, keeping wins.
+// only adds a path no item derives. Where two claims meet, keeping wins. A running task keeps its items' worktrees,
+// wherever its workspace is: its session may be reusing one.
 func (a *App) worktreeFatesLocked() map[string]worktreeFate {
 	fates := map[string]worktreeFate{}
 	claim := func(m map[string]worktreeFate, p string, f worktreeFate) {
@@ -156,18 +189,23 @@ func (a *App) worktreeFatesLocked() map[string]worktreeFate {
 		}
 		m[k] = f
 	}
+	fateIn := func(taskID string, item *domain.WorkItem) worktreeFate {
+		if _, ok := a.running[taskID]; ok {
+			return worktreeFate{reason: "the task is running"}
+		}
+		return fateOf(item, a.executions[item.LastExecutionID])
+	}
 	for taskID, items := range a.ledger {
 		for key, item := range items {
 			name, ok := worktreeName(key)
 			if !ok {
 				continue
 			}
-			x := a.executions[item.LastExecutionID]
 			dir := filepath.Join(a.d.Paths.Workspace, taskID)
-			if x != nil && x.WorkspacePath != "" {
+			if x := a.executions[item.LastExecutionID]; x != nil && x.WorkspacePath != "" {
 				dir = x.WorkspacePath
 			}
-			claim(fates, filepath.Join(dir, name), fateOf(item, x))
+			claim(fates, filepath.Join(dir, name), fateIn(taskID, item))
 		}
 	}
 	reported := map[string]worktreeFate{}
@@ -178,7 +216,7 @@ func (a *App) worktreeFatesLocked() map[string]worktreeFate {
 			}
 			f := worktreeFate{reason: "HarmFlow has no record of its work item"}
 			if item := a.ledger[x.TaskID][w.Key]; item != nil {
-				f = fateOf(item, a.executions[item.LastExecutionID])
+				f = fateIn(x.TaskID, item)
 			}
 			claim(reported, w.WorktreePath, f)
 		}
