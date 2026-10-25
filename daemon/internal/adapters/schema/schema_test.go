@@ -231,7 +231,8 @@ func TestEventTypesHaveOneSource(t *testing.T) {
 
 // The effective definition the daemon returns, every default filled in, is a valid task: for
 // one that sets every field of its type, beside a fallback and a repository that leave theirs to the defaults, and for
-// one that sets only what it must. The daemon reads the file into a TaskDocument and returns Effective() as JSON.
+// one that sets only what it must, of a harness type and of the script type. The daemon reads the file into a
+// TaskDocument and returns Effective() as JSON.
 func TestEffectiveDocumentValidates(t *testing.T) {
 	const full = `apiVersion: harmflow/v1alpha1
 kind: Task
@@ -303,8 +304,63 @@ spec:
     delivery:
       testRepairAttempts: 1
 `
+	const fullScript = `apiVersion: harmflow/v1alpha1
+kind: Task
+metadata:
+  id: every-script-field
+  name: Every script field
+  description: Sets every field a script task takes.
+spec:
+  enabled: false
+  type: script
+  schedule:
+    interval: 2h
+    timezone: Europe/Lisbon
+    missedRun:
+      policy: skip
+  concurrency:
+    overlappingRuns: skip
+  permissions:
+    profile: custom
+    restrictToWorkspace: false
+    network: deny
+    custom:
+      allowedTools: [Read]
+      deniedTools: [Bash]
+      writablePaths: [~/work/out]
+  execution:
+    timeoutMinutes: 5
+    cancelGraceSeconds: 10
+    rateLimit:
+      maxRetries: 2
+      initialWaitSeconds: 30
+      maxWaitSeconds: 600
+  notifications:
+    native:
+      enabled: false
+      events: [execution.failed]
+  script:
+    command: [/usr/bin/env, echo, hi]
+    workingDirectory: ~/work
+    environment:
+      GREETING: hi
+    systems: [macos, linux]
+`
+	const inlineScript = `apiVersion: harmflow/v1alpha1
+kind: Task
+metadata:
+  id: inline-script
+  name: Inline script
+spec:
+  type: script
+  script:
+    inline:
+      interpreter: [/bin/sh, -e]
+      source: echo hi
+`
 	v, _ := New()
-	for name, text := range map[string]string{"every field": full, "the minimal task": valid} {
+	for name, text := range map[string]string{"every field": full, "the minimal task": valid,
+		"every script field": fullScript, "the inline script": inlineScript} {
 		doc, node, _ := ParseYAML([]byte(text))
 		if issues := v.ValidateTask(doc, node); len(issues) > 0 {
 			t.Fatalf("%s is not a valid task: %+v", name, issues)
