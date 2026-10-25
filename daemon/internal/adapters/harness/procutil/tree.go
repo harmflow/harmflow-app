@@ -220,7 +220,22 @@ func (e *ender) protected(table map[int]procInfo) map[int]bool {
 // died first could run its next command, such as one that reports success, before its own signal came. Each process
 // found outside the group gets it next.
 func (e *ender) signal(sig syscall.Signal) {
+	// The group's members found running just before its signal get it, though one may die of it, and be reaped, before
+	// the loop below reads it again.
+	var members []*target
+	if e.group {
+		for id, t := range e.found {
+			if p, ok := processInfo(id.pid); ok && p.start == id.start && !p.zombie && p.pgid == e.tree.Group {
+				members = append(members, t)
+			}
+		}
+	}
 	grouped := e.group && syscall.Kill(-e.tree.Group, sig) == nil
+	if grouped {
+		for _, t := range members {
+			t.signalled = true
+		}
+	}
 	for id, t := range e.found {
 		if t.unsignalled {
 			continue
