@@ -14,13 +14,14 @@ import (
 	"time"
 )
 
-// The queue's fixtures live in this repository on GitHub: three open issues labelled queue-test, the oldest of them
-// linked by an unmanaged draft pull request. A session is stopped as soon as the daemon has tracked the issue it
+// The queue's fixtures live in harmflow/harmflow-sandbox, a private repository kept for tests that need a real one, so
+// they stay out of this repository's tracker: three open issues labelled queue-test, the oldest of them linked by an
+// unmanaged draft pull request. A session is stopped as soon as the daemon has tracked the issue it
 // selects, and its clone has no push URL, so no branch of its reaches GitHub and no pull request can come from one. A
 // session that once outran the stop pushed a branch and opened a pull request for a fixture, which then counted as
 // linked.
 const (
-	queueRepo  = "harmflow/harmflow-app"
+	queueRepo  = "harmflow/harmflow-sandbox"
 	queueLabel = "queue-test"
 )
 
@@ -124,7 +125,7 @@ func shallowClone(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir := filepath.Join(parent, "harmflow-app")
+	dir := filepath.Join(parent, filepath.Base(queueRepo))
 	if out, err := exec.Command("git", "clone", "--quiet", "--depth", "1", "https://github.com/"+queueRepo, dir).CombinedOutput(); err != nil {
 		t.Fatalf("git clone: %v\n%s", err, out)
 	}
