@@ -1,7 +1,7 @@
 // The dashboard's view of the daemon. The daemon decides and the dashboard asks: everything here is fetched from the
 // local API or derived from its events, and recovered after any reconnection.
 import { useSyncExternalStore } from "react";
-import { api } from "../api/client";
+import { ApiError, api } from "../api/client";
 import { native } from "../api/native";
 import { transport, type ConnectionState } from "../api/transport";
 import type {
@@ -49,9 +49,14 @@ export interface State {
   appCommit: string;
   /** When the interface was built, in ISO 8601; empty without a build time. */
   appBuiltAt: string;
+  /** Where the latest request to restart the daemon on this window's build stands; idle without one. */
+  daemonRestart: DaemonRestart;
   /** The latest event that asked the interface to show something: a navigation target. */
   navigation?: { executionId?: string; screen?: string; nonce: number };
 }
+
+/** "refused": the daemon had executions running, so it was left running. */
+export type DaemonRestart = "idle" | "restarting" | "refused";
 
 const MAX_EVENTS_PER_EXECUTION = 5000;
 
@@ -73,6 +78,7 @@ let state: State = {
   appVersion: __APP_VERSION__,
   appCommit: __APP_COMMIT__,
   appBuiltAt: __APP_BUILT_AT__,
+  daemonRestart: "idle",
 };
 
 const listeners = new Set<() => void>();
@@ -195,6 +201,31 @@ export const actions = {
       actions.refreshCatalog(),
       actions.refreshNotifications(),
     ]);
+  },
+
+  /**
+   * Replaces the daemon with this bundle's: asks it to stop without force, then starts this bundle's harmflowd once its
+   * process exits. A daemon with executions running refuses and keeps running; nothing asks it again with force.
+   * Only a click calls this: another window or `make update-app` may own the daemon. Other failures are thrown.
+   */
+  async restartDaemon() {
+    if (state.daemonRestart === "restarting") return;
+    const pid = state.health?.pid;
+    setState({ daemonRestart: "restarting" });
+    try {
+      await api.stopDaemon(false);
+    } catch (err) {
+      const refused = err instanceof ApiError && err.status === 409;
+      setState({ daemonRestart: refused ? "refused" : "idle" });
+      if (refused) return;
+      throw err;
+    }
+    try {
+      await native.startDaemon(pid);
+      await actions.refreshAll();
+    } finally {
+      setState({ daemonRestart: "idle" });
+    }
   },
 
   async loadExecution(id: string) {

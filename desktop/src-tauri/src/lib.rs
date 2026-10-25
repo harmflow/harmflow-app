@@ -49,9 +49,13 @@ async fn daemon_status(state: Shared<'_>) -> Result<DaemonStatus, String> {
     Ok(state.daemon.status().await)
 }
 
-/// Starts the bundled daemon when none answers, then waits until it does.
+/// Starts the bundled daemon when none answers, then waits until it does. `replacing` is the pid of a daemon asked to
+/// stop, whose process exits first.
 #[tauri::command]
-async fn daemon_start(state: Shared<'_>) -> Result<DaemonStatus, String> {
+async fn daemon_start(state: Shared<'_>, replacing: Option<u32>) -> Result<DaemonStatus, String> {
+    if let Some(pid) = replacing {
+        daemon::wait_gone(pid, Duration::from_secs(30)).await?;
+    }
     let current = state.daemon.status().await;
     if current.running {
         return Ok(current);

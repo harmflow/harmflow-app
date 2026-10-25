@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { ApiError, api } from "../api/client";
+import { api } from "../api/client";
 import { native } from "../api/native";
 import type { Notification } from "../api/types";
 import { translateNested } from "../lib/daemonText";
@@ -9,29 +9,10 @@ import { formatBytes, formatNumber, formatRelative, formatTime } from "../lib/fo
 import { useNow } from "../lib/hooks";
 import { actions, useStore } from "../state/store";
 import { HarnessMark, Icon, Logo, type IconName } from "./Icon";
+import { toast } from "./toast";
 import { Banner, Button, Gauge, IconButton, cx } from "./ui";
 
 export type Screen = "overview" | "executions" | "tasks" | "history" | "settings";
-
-function withoutDirtySuffix(commit: string): string {
-  return commit.endsWith("-dirty") ? commit.slice(0, -"-dirty".length) : commit;
-}
-
-/** A dirty checkout is still the same build when its underlying commit is unchanged. */
-export function daemonBuildMismatch(appCommit?: string, daemonCommit?: string): boolean {
-  if (!appCommit || !daemonCommit) return false;
-  const app = withoutDirtySuffix(appCommit);
-  const daemon = withoutDirtySuffix(daemonCommit);
-  return Boolean(app && daemon && app !== daemon);
-}
-
-/** Stops the attached daemon safely, waits for its process to exit, and starts this bundle's daemon. */
-export async function restartDaemon(): Promise<void> {
-  await api.stopDaemon(false);
-  await native.waitForDaemonStop();
-  await native.startDaemon();
-  await actions.refreshAll();
-}
 
 const NAV: Array<{ key: Screen; icon: IconName }> = [
   { key: "overview", icon: "grid" },
@@ -201,6 +182,20 @@ export function Sidebar({
   );
 }
 
+/**
+ * Whether the window and the daemon come from different commits. A "-dirty" suffix is no difference when the hashes
+ * are otherwise equal, and a build without git information, whose commit is empty, differs from none.
+ */
+export function commitsDiffer(appCommit?: string, daemonCommit?: string): boolean {
+  if (!appCommit || !daemonCommit) return false;
+  const clean = (commit: string) => commit.replace(/-dirty$/, "");
+  return clean(appCommit) !== clean(daemonCommit);
+}
+
+/**
+ * The topbar. When the window and the daemon come from different commits, a banner names both and offers to restart
+ * the daemon on the window's build; only that click restarts it.
+ */
 export function Header({
   screen,
   onNewTask,
@@ -218,27 +213,17 @@ export function Header({
   const health = useStore((s) => s.health);
   const appVersion = useStore((s) => s.appVersion);
   const appCommit = useStore((s) => s.appCommit);
-  const commitMismatch = daemonBuildMismatch(appCommit, health?.commit);
-  const versionMismatch = Boolean(health && health.version !== appVersion);
-  const [restarting, setRestarting] = useState(false);
-  const [restartError, setRestartError] = useState<string | null>(null);
+  const restart = useStore((s) => s.daemonRestart);
+  const daemonCommit = health?.commit ?? "";
+  const commitMismatch = commitsDiffer(appCommit, daemonCommit);
+  const mismatch = health && health.version !== appVersion;
   const { tipped, tooltip, hide } = useTooltip(tipBelow);
 
-  const onRestartDaemon = async () => {
-    if (restarting || !native.available) return;
-    setRestarting(true);
-    setRestartError(null);
+  const restartDaemon = async () => {
     try {
-      await restartDaemon();
+      await actions.restartDaemon();
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        setRestartError(t("connection.restartBlocked"));
-      } else {
-        const message = err instanceof Error ? err.message : String(err);
-        setRestartError(t("connection.restartFailed", { message }));
-      }
-    } finally {
-      setRestarting(false);
+      toast(t("connection.restartFailed", { message: err instanceof Error ? err.message : String(err) }), "danger");
     }
   };
 
@@ -285,20 +270,20 @@ export function Header({
             icon="alert"
             actions={
               native.available ? (
-                <Button variant="secondary" size="sm" icon="refresh" disabled={restarting} onClick={() => void onRestartDaemon()}>
-                  {restarting ? t("connection.restartingDaemon") : t("connection.restartDaemon")}
+                <Button variant="secondary" size="sm" icon="refresh" disabled={restart === "restarting"} onClick={() => void restartDaemon()}>
+                  {restart === "restarting" ? t("connection.restartingDaemon") : t("connection.restartDaemon")}
                 </Button>
-              ) : undefined
+              ) : null
             }
           >
-            <div>{t("connection.commitMismatch", { daemon: health?.commit ?? "", desktop: appCommit })}</div>
-            {restartError ? <div className="muted">{restartError}</div> : null}
+            <div>{t("connection.commitMismatch", { daemon: daemonCommit, desktop: appCommit })}</div>
+            {restart === "refused" ? <div>{t("connection.restartRefused")}</div> : null}
           </Banner>
         </div>
-      ) : versionMismatch ? (
+      ) : mismatch ? (
         <div className="topbar__banner">
           <Banner tone="warning" icon="alert">
-            {t("connection.versionMismatch", { daemon: health?.version ?? "", desktop: appVersion })}
+            {t("connection.versionMismatch", { daemon: health.version, desktop: appVersion })}
           </Banner>
         </div>
       ) : null}

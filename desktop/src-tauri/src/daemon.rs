@@ -80,20 +80,6 @@ fn read_token(home: &Path, store: Option<&str>) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-fn status_from_health(body: &Value, address: Option<String>) -> DaemonStatus {
-    let get = |key: &str| body.get(key).and_then(Value::as_str).map(str::to_string);
-    DaemonStatus {
-        running: true,
-        address,
-        pid: body.get("pid").and_then(Value::as_u64).map(|p| p as u32),
-        version: get("version"),
-        commit: get("commit"),
-        built_at: get("builtAt"),
-        started_at: get("startedAt"),
-        error: None,
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct DaemonStatus {
@@ -104,6 +90,7 @@ pub struct DaemonStatus {
     pub pid: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// The commit the daemon was built from, as GET /health gives it; absent for a build without git information.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub commit: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -112,6 +99,21 @@ pub struct DaemonStatus {
     pub started_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+/// The status of a daemon that answered GET /health with `body`.
+fn status_from_health(body: &Value, address: Option<String>) -> DaemonStatus {
+    let get = |k: &str| body.get(k).and_then(Value::as_str).map(str::to_string);
+    DaemonStatus {
+        running: true,
+        address,
+        pid: body.get("pid").and_then(Value::as_u64).map(|p| p as u32),
+        version: get("version"),
+        commit: get("commit"),
+        built_at: get("builtAt"),
+        started_at: get("startedAt"),
+        error: None,
+    }
 }
 
 /// One response of the local API, as the webview receives it.
@@ -317,6 +319,36 @@ fn spawn_detached(bin: &Path, home: Option<&OsStr>) -> Result<Child, String> {
     cmd.spawn().map_err(|e| format!("{}: {e}", bin.display()))
 }
 
+/// Waits up to `limit` for process `pid` to exit. A daemon asked to stop closes its API before it exits and frees its
+/// data directory, so a harmflowd started in between finds the directory taken and exits.
+pub async fn wait_gone(pid: u32, limit: Duration) -> Result<(), String> {
+    let deadline = tokio::time::Instant::now() + limit;
+    while !process_gone(pid)? {
+        if tokio::time::Instant::now() >= deadline {
+            return Err(format!(
+                "daemon pid {pid} did not exit within {} seconds; see logs/daemon.log in the HarmFlow folder",
+                limit.as_secs()
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    Ok(())
+}
+
+/// Whether process `pid` has exited: `ps` lists no such process, or lists a zombie, which an exited daemon stays while
+/// the app that started it never waits for it.
+fn process_gone(pid: u32) -> Result<bool, String> {
+    let out = Command::new("/bin/ps")
+        .args(["-o", "stat=", "-p", &pid.to_string()])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .map_err(|e| format!("ps: {e}"))?;
+    let stat = String::from_utf8_lossy(&out.stdout);
+    let stat = stat.trim();
+    Ok(stat.is_empty() || stat.starts_with('Z'))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -353,17 +385,45 @@ mod tests {
     }
 
     #[test]
-    fn health_status_keeps_build_identity() {
+    fn health_status_keeps_the_build_identity() {
         let body = serde_json::json!({
+            "status": "ok",
             "pid": 7,
             "version": "0.1.0",
-            "commit": "abc1234-dirty",
-            "builtAt": "2026-10-20T10:00:00Z",
-            "startedAt": "2026-10-20T10:00:00Z"
+            "commit": "13bd5f9-dirty",
+            "builtAt": "2026-10-23T10:00:00Z",
+            "startedAt": "2026-10-23T10:00:05Z"
         });
         let status = status_from_health(&body, Some("127.0.0.1:4321".into()));
-        assert_eq!(status.commit.as_deref(), Some("abc1234-dirty"));
-        assert_eq!(status.built_at.as_deref(), Some("2026-10-20T10:00:00Z"));
+        assert!(status.running);
+        assert_eq!(status.pid, Some(7));
+        assert_eq!(status.commit.as_deref(), Some("13bd5f9-dirty"));
+        assert_eq!(status.built_at.as_deref(), Some("2026-10-23T10:00:00Z"));
+        let json = serde_json::to_value(&status).unwrap();
+        assert_eq!(json["commit"], "13bd5f9-dirty");
+        assert_eq!(json["builtAt"], "2026-10-23T10:00:00Z");
+
+        // A daemon built without git information or a build time sends neither, and the status leaves both out.
+        let bare = status_from_health(&serde_json::json!({ "pid": 7, "version": "0.1.0" }), None);
+        assert_eq!((bare.commit, bare.built_at), (None, None));
+    }
+
+    /// The wait for a stopped daemon ends once its process exits, also while it is a zombie its parent never waited
+    /// for, and gives up on one that keeps running.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_wait_for_a_daemon_ends_when_its_process_exits() {
+        let mut child = Command::new("/bin/sleep").arg("60").spawn().unwrap();
+        let pid = child.id();
+        let refused = wait_gone(pid, Duration::from_millis(300)).await;
+        child.kill().unwrap();
+        let after_kill = wait_gone(pid, Duration::from_secs(5)).await;
+        let zombie = process_gone(pid);
+        child.wait().unwrap();
+        assert!(refused.is_err_and(|e| e.contains(&format!("daemon pid {pid} did not exit"))));
+        assert_eq!(after_kill, Ok(()));
+        assert_eq!(zombie, Ok(true), "an unreaped process counts as gone");
+        assert_eq!(process_gone(pid), Ok(true));
     }
 
     /// The daemon `daemon_start` launches leads a process group of its own, apart from the app's. The stand-in for

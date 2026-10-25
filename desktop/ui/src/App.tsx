@@ -58,6 +58,7 @@ export function App() {
 
   const settings = useStore((s) => s.settings);
   const daemonRunning = useStore((s) => s.daemonRunning);
+  const restarting = useStore((s) => s.daemonRestart === "restarting");
   const navigation = useStore((s) => s.navigation);
 
   useEffect(() => {
@@ -159,7 +160,8 @@ export function App() {
 
   const onboarding =
     !onboardingDismissed && ((settings && !settings.onboardingCompleted) || (daemonRunning === false && !wasOnboarded()));
-  const daemonDown = !onboarding && native.available && daemonRunning === false;
+  // A daemon being restarted is down for a moment: the shell stays, with the topbar saying so.
+  const daemonDown = !onboarding && native.available && daemonRunning === false && !restarting;
   const shell = !onboarding && !daemonDown;
 
   // ⌘B collapses and expands the sidebar, and ⌘N opens the template picker as the topbar's New task does, from
