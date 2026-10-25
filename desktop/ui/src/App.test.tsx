@@ -13,7 +13,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root as ReactRoot } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { native } from "./api/native";
-import type { Settings, Task, TaskSummary } from "./api/types";
+import type { Harness, Settings, Task, TaskSummary } from "./api/types";
 import { Root } from "./App";
 import { rootOptions } from "./components/ErrorBoundary";
 import { YamlEditor } from "./components/YamlEditor";
@@ -452,6 +452,73 @@ describe("settings from the app menu", () => {
   });
 });
 
+// Settings shows one section at a time, picked from its list (harmflow-app#251).
+describe("settings sections", () => {
+  const title = () => host!.querySelector(".topbar__title")!.textContent;
+  const breadcrumb = () => host!.querySelector(".breadcrumb")!.textContent;
+  const open = () => host!.querySelector(".settings__title")?.textContent ?? null;
+  const item = (name: string) => [...host!.querySelectorAll<HTMLButtonElement>(".settings-nav__item")].find((b) => b.textContent === name)!;
+
+  it("opens a section from the list, marks it, and names it in the breadcrumb", async () => {
+    await launch();
+    await act(async () => navButton("Settings").click());
+    expect(open()).toBe("General");
+    expect(breadcrumb()).toBe(">_ settings / general");
+
+    await act(async () => item("Storage").click());
+    expect(title()).toBe("Settings");
+    expect(open()).toBe("Storage");
+    expect(breadcrumb()).toBe(">_ settings / storage");
+    expect(item("Storage").getAttribute("aria-current")).toBe("page");
+    expect(item("General").getAttribute("aria-current")).toBeNull();
+    expect([...host!.querySelectorAll(".settings__section .panel__title")].map((h) => h.textContent)).toEqual(["Logs", "Workspaces", "Directories"]);
+
+    await act(async () => item("Installed agents").click());
+    expect(breadcrumb()).toBe(">_ settings / installed agents");
+    await act(async () => void i18n.changeLanguage("pt-BR"));
+    try {
+      expect(breadcrumb()).toBe(">_ configurações / agentes instalados");
+    } finally {
+      await act(async () => void i18n.changeLanguage("en-US"));
+    }
+  });
+
+  it("opens on General after a launch, and later on the section last open, from the sidebar, the More menu, and ⌘,", async () => {
+    await launch();
+    await act(async () => navButton("Settings").click());
+    expect(open()).toBe("General");
+    await act(async () => item("Security").click());
+
+    await act(async () => navButton("History").click());
+    await act(async () => navButton("Settings").click());
+    expect(open()).toBe("Security");
+
+    await act(async () => navButton("History").click());
+    await act(async () => host!.querySelector<HTMLButtonElement>('button[aria-label="More actions"]')!.click());
+    await act(async () => [...host!.querySelectorAll<HTMLButtonElement>(".popover button")].find((b) => b.textContent === "Open settings")!.click());
+    expect(open()).toBe("Security");
+
+    await act(async () => navButton("History").click());
+    await act(async () => actions.navigate({ screen: "settings" }));
+    expect(open()).toBe("Security");
+
+    // The choice is not kept between launches.
+    quit();
+    await launch();
+    await act(async () => navButton("Settings").click());
+    expect(open()).toBe("General");
+  });
+
+  it("opens a section a target names, such as About", async () => {
+    await launch();
+    await act(async () => actions.navigate({ screen: "settings", section: "about" }));
+    expect(title()).toBe("Settings");
+    expect(open()).toBe("About");
+    await act(async () => actions.navigate({ screen: "settings", section: "nowhere" }));
+    expect(open()).toBe("About");
+  });
+});
+
 describe("save", () => {
   it("leaves ⌘S alone outside the task editor, and the editor takes it", async () => {
     await launch();
@@ -671,6 +738,108 @@ describe("unsaved changes", () => {
     } finally {
       patchStateForTests({ tasks: [], tasksLoaded: false });
     }
+  });
+
+  // The three settings that keep a draft until confirmed, each made to hold one in its section.
+  const drafts: Array<{ draft: string; section: string; hold: () => Promise<void>; held: () => string | null }> = [
+    {
+      draft: "the log retention period (Apply)",
+      section: "Storage",
+      hold: () => type(host!.querySelector<HTMLInputElement>("#settings-retention")!, "7"),
+      held: () => host!.querySelector<HTMLInputElement>("#settings-retention")!.value,
+    },
+    {
+      draft: "the path variables (Save)",
+      section: "Paths",
+      hold: async () => {
+        await click(button(host!, "Add variable"));
+        await type(host!.querySelector<HTMLInputElement>(".grid-var input")!, "REPOS");
+      },
+      held: () => host!.querySelector<HTMLInputElement>(".grid-var input")?.value ?? null,
+    },
+    {
+      draft: "the allowed folders (Save)",
+      section: "Paths",
+      hold: async () => {
+        await click(button(host!, "Add folder"));
+        await type(host!.querySelector<HTMLInputElement>(".grid-folder input")!, "/srv/repos");
+      },
+      held: () => host!.querySelector<HTMLInputElement>(".grid-folder input")?.value ?? null,
+    },
+    {
+      draft: "a harness's path set by hand (its Save)",
+      section: "Installed agents",
+      hold: async () => {
+        await click(button(host!, "Set path"));
+        await type(host!.querySelector<HTMLInputElement>(".inventory .inline-form input")!, "/opt/claude/bin/claude");
+      },
+      held: () => host!.querySelector<HTMLInputElement>(".inventory .inline-form input")?.value ?? null,
+    },
+  ];
+
+  it.each(drafts)("asks before leaving $section with $draft, keeps it on Cancel, and drops it on Discard", async ({ section, hold, held }) => {
+    const harness: Harness = {
+      id: "claude-code",
+      name: "Claude Code",
+      detected: true,
+      path: "/opt/homebrew/bin/claude",
+      pathSource: "path",
+      installations: ["/opt/homebrew/bin/claude"],
+      authentication: "valid",
+      readiness: "ready",
+      models: [],
+      efforts: [],
+      lastCheckedAt: "2026-10-20T19:00:00-03:00",
+    };
+    patchStateForTests({ harnesses: [harness] });
+    const item = (name: string) => [...host!.querySelectorAll<HTMLButtonElement>(".settings-nav__item")].find((b) => b.textContent === name)!;
+    const open = () => host!.querySelector(".settings__title")!.textContent;
+    try {
+      await launch();
+      await click(navButton("Settings"));
+      await click(item(section));
+      const before = held();
+      await hold();
+      const draft = held();
+      expect(draft).not.toBe(before);
+
+      // Declined, from another section and from another screen: the section stays open with the draft as it was.
+      confirm.mockResolvedValue(false);
+      await click(item("General"));
+      expect(confirm).toHaveBeenLastCalledWith(
+        "Leaving this section discards the changes that were not saved or applied.",
+        "Discard unsaved changes?",
+        "Discard",
+        "Cancel",
+      );
+      await click(navButton("History"));
+      expect(asked()).toBe(2);
+      expect(title()).toBe("Settings");
+      expect(open()).toBe(section);
+      expect(held()).toBe(draft);
+
+      // Confirmed: the draft is gone, and so is the question.
+      confirm.mockResolvedValue(true);
+      await click(item("General"));
+      expect(asked()).toBe(3);
+      expect(open()).toBe("General");
+      await click(item(section));
+      expect(held()).toBe(before);
+      await click(navButton("History"));
+      expect(asked()).toBe(3);
+      expect(title()).toBe("History");
+    } finally {
+      patchStateForTests({ harnesses: [] });
+    }
+  });
+
+  it("asks nothing for a section without a draft, nor for Settings while it is open", async () => {
+    await launch();
+    await click(navButton("Settings"));
+    await click([...host!.querySelectorAll<HTMLButtonElement>(".settings-nav__item")].find((b) => b.textContent === "Storage")!);
+    await click(navButton("Settings"));
+    await click(navButton("History"));
+    expect(asked()).toBe(0);
   });
 
   it("reports the user's YAML edits alone, not the text its value puts in place", async () => {

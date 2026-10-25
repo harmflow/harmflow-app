@@ -19,3 +19,15 @@ export function useDebounced<T>(value: T, delayMs: number): T {
   }, [value, delayMs]);
   return debounced;
 }
+
+/** Receives, under a key of the setting's own, whether a setting keeps a draft: a value changed and not yet confirmed. */
+export type DraftReport = (key: string, held: boolean) => void;
+
+/** Reports whether a setting holds a draft, and that it holds none once the setting is gone. `report` must be stable. */
+export function useDraft(report: DraftReport | undefined, key: string, held: boolean) {
+  useEffect(() => {
+    if (!report) return;
+    report(key, held);
+    return () => report(key, false);
+  }, [report, key, held]);
+}

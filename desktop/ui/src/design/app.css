@@ -3360,26 +3360,151 @@ button.queue-item:hover,
   padding: var(--hf-space-3);
 }
 
-/* ---------- Overview and settings ---------- */
+/* ---------- Overview ---------- */
 
-.overview-grid,
-.settings-grid {
+.overview-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--hf-space-4);
   align-items: start;
 }
 
-.overview-grid__wide,
-.settings-grid__wide {
+.overview-grid__wide {
   grid-column: 1 / -1;
 }
 
 @media (max-width: 1100px) {
-  .overview-grid,
-  .settings-grid {
+  .overview-grid {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* ---------- Settings: a list of the sections, and the open one beside it ---------- */
+
+.settings {
+  display: grid;
+  grid-template-columns: 216px minmax(0, 760px);
+  align-items: start;
+  gap: var(--hf-space-5);
+}
+
+/* Below 640px of content box, set from the screen's width in SettingsScreen, the list keeps only its icons */
+.settings--icons {
+  grid-template-columns: auto minmax(0, 760px);
+  gap: var(--hf-space-4);
+}
+
+.settings-nav {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--hf-space-1);
+  padding: var(--hf-space-2);
+  border: 1px solid var(--hf-color-border);
+  border-radius: var(--hf-radius-lg);
+  background: var(--hf-gradient-panel);
+  box-shadow: var(--hf-shadow-panel);
+}
+
+.settings-nav__group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-nav__group + .settings-nav__group {
+  margin-top: var(--hf-space-2);
+}
+
+.settings-nav__heading {
+  padding: var(--hf-space-1) var(--hf-space-3) 2px;
+  color: var(--hf-color-text-faint);
+  font-family: var(--hf-font-mono);
+  font-size: var(--hf-font-size-2xs);
+  letter-spacing: var(--hf-letter-spacing-label);
+  text-transform: uppercase;
+}
+
+.settings-nav__item {
+  padding: 8px var(--hf-space-3);
+  font-size: var(--hf-font-size-sm);
+}
+
+.settings-nav__divider {
+  width: 100%;
+  margin: var(--hf-space-2) 0;
+  border: 0;
+  border-top: 1px solid var(--hf-color-border);
+}
+
+.settings--icons .settings-nav__item {
+  justify-content: center;
+  padding: 9px;
+}
+
+.settings--icons .settings-nav__group + .settings-nav__group {
+  padding-top: var(--hf-space-2);
+  border-top: 1px solid var(--hf-color-border);
+}
+
+.settings__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--hf-space-4);
+  min-width: 0;
+}
+
+.settings__title {
+  font-size: var(--hf-font-size-xl);
+  font-weight: var(--hf-font-weight-semibold);
+}
+
+/* The section is 760px at most: one card per row reads better than two */
+.settings .inventory-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* A setting: label and hint on the left, control on the right; the control wraps under the label when both don't fit */
+.setting-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--hf-space-2) var(--hf-space-4);
+  padding: var(--hf-space-3) 0;
+  border-top: 1px dashed rgba(var(--hf-rgb-line), 0.1);
+}
+
+.setting-row:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.setting-row:last-child {
+  padding-bottom: 0;
+}
+
+.setting-row__text {
+  display: flex;
+  flex: 1 1 260px;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.setting-row__label {
+  font-size: var(--hf-font-size-sm);
+  font-weight: var(--hf-font-weight-medium);
+}
+
+.setting-row__control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--hf-space-2);
+  max-width: 100%;
+  min-width: 0;
 }
 
 .state-pair {

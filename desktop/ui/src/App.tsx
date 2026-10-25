@@ -12,7 +12,7 @@ import { HistoryScreen } from "./screens/HistoryScreen";
 import { ImportDialog } from "./screens/ImportDialog";
 import { DaemonDownScreen, OnboardingScreen } from "./screens/OnboardingScreen";
 import { OverviewScreen } from "./screens/OverviewScreen";
-import { SettingsScreen } from "./screens/SettingsScreen";
+import { SettingsScreen, isSettingsSection, type SettingsSection } from "./screens/SettingsScreen";
 import { TasksScreen, TemplatePicker, type TaskView } from "./screens/TasksScreen";
 import { actions, setNotificationHandler, startSync, useStore } from "./state/store";
 
@@ -45,8 +45,10 @@ export function Root() {
 }
 
 export function App() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [screen, setScreen] = useState<Screen>("executions");
+  // Settings opens on General the first time after a launch, and later on the section last open; never kept longer.
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
   const [selectedExecution, setSelectedExecution] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState<string | null>(null);
   const [taskView, setTaskView] = useState<TaskView>({ kind: "list" });
@@ -141,11 +143,23 @@ export function App() {
       setSelectedExecution(id);
     });
 
-  const navigate = (s: Screen) =>
+  // Settings, on the section asked for, or the one last open. Opening what is already open changes nothing, so it asks
+  // nothing either.
+  const openSettings = (section: SettingsSection = settingsSection) => {
+    if (screen === "settings" && section === settingsSection) return;
+    leave(() => {
+      setScreen("settings");
+      setSettingsSection(section);
+    });
+  };
+
+  const navigate = (s: Screen) => {
+    if (s === "settings") return openSettings();
     leave(() => {
       setScreen(s);
       if (s === "tasks") setTaskView({ kind: "list" });
     });
+  };
 
   const onboarding =
     !onboardingDismissed && ((settings && !settings.onboardingCompleted) || (daemonRunning === false && !wasOnboarded()));
@@ -160,14 +174,15 @@ export function App() {
   useEffect(() => {
     if (!navigation) return;
     actions.clearNavigation();
-    const { executionId, screen: target } = navigation;
+    const { executionId, screen: target, section } = navigation;
     if (executionId) {
       leave(() => {
         setScreen("executions");
         setSelectedExecution(executionId);
       });
     } else if (target && shell && !document.querySelector('[aria-modal="true"]')) {
-      leave(() => setScreen(target as Screen));
+      if (target === "settings") openSettings(isSettingsSection(section) ? section : undefined);
+      else leave(() => setScreen(target as Screen));
     }
   }, [navigation]);
 
@@ -240,7 +255,13 @@ export function App() {
       <div className="app__backdrop" aria-hidden="true" />
       <Sidebar screen={screen} onNavigate={navigate} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
       <main className="app__content">
-        <Header screen={screen} onNewTask={() => setPicker(true)} onNavigate={navigate} onOpenExecution={openExecution} />
+        <Header
+          screen={screen}
+          crumb={screen === "settings" ? t(`settings.sections.${settingsSection}`).toLocaleLowerCase(i18n.language) : undefined}
+          onNewTask={() => setPicker(true)}
+          onNavigate={navigate}
+          onOpenExecution={openExecution}
+        />
         <ScreenBoundary key={screen}>
           {screen === "executions" ? (
             <ExecutionsScreen
@@ -264,7 +285,7 @@ export function App() {
             <TasksScreen view={taskView} onView={setTaskView} onOpenExecution={openExecution} onLeaveCheck={holdLeaveCheck} />
           ) : null}
           {screen === "history" ? <HistoryScreen openId={historyOpen} onOpen={setHistoryOpen} /> : null}
-          {screen === "settings" ? <SettingsScreen /> : null}
+          {screen === "settings" ? <SettingsScreen section={settingsSection} onSection={openSettings} onLeaveCheck={holdLeaveCheck} /> : null}
         </ScreenBoundary>
       </main>
       {picker ? (

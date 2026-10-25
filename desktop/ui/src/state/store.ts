@@ -51,9 +51,12 @@ export interface State {
   appBuiltAt: string;
   /** Where the latest request to restart the daemon on this window's build stands; idle without one. */
   daemonRestart: DaemonRestart;
-  /** The latest event that asked the interface to show something: a navigation target. */
-  navigation?: { executionId?: string; screen?: string; nonce: number };
+  /** The latest event that asked the interface to show something: a navigation target, a Settings section included. */
+  navigation?: NavigationTarget & { nonce: number };
 }
+
+/** What the interface is asked to show: an execution, or a screen, with a section of Settings when it names one. */
+export type NavigationTarget = { executionId?: string; screen?: string; section?: string };
 
 /** "refused": the daemon had executions running, so it was left running. */
 export type DaemonRestart = "idle" | "restarting" | "refused";
@@ -252,7 +255,7 @@ export const actions = {
     }
   },
 
-  navigate(target: { executionId?: string; screen?: string }) {
+  navigate(target: NavigationTarget) {
     setState({ navigation: { ...target, nonce: Date.now() } });
   },
 
