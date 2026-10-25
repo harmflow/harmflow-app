@@ -1107,6 +1107,11 @@ export interface components {
             /** @default true */
             trayEnabled: boolean;
             /**
+             * @description While the tray is shown, ⌘Q and Quit in the app menu only hide the dashboard, as closing its window does. Quit from the Dock, logging out, and the tray's own Quit still end the desktop.
+             * @default false
+             */
+            keepTrayOnQuit: boolean;
+            /**
              * @default all
              * @enum {string}
              */
@@ -1136,6 +1141,7 @@ export interface components {
             /** @enum {string} */
             language?: "pt-BR" | "en-US" | "es-ES" | "system";
             trayEnabled?: boolean;
+            keepTrayOnQuit?: boolean;
             /** @enum {string} */
             notificationLevel?: "all" | "failures_and_attention" | "none";
             logRetentionDays?: number;

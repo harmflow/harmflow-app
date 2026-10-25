@@ -10,9 +10,12 @@ import (
 
 // Settings are the preferences the dashboard changes.
 type Settings struct {
-	SchemaVersion     string            `json:"schemaVersion"`
-	Language          string            `json:"language"`
-	TrayEnabled       bool              `json:"trayEnabled"`
+	SchemaVersion string `json:"schemaVersion"`
+	Language      string `json:"language"`
+	TrayEnabled   bool   `json:"trayEnabled"`
+	// KeepTrayOnQuit makes ⌘Q, and Quit in the app menu, only hide the dashboard while the tray is shown, as closing
+	// the window does. Off by default.
+	KeepTrayOnQuit    bool              `json:"keepTrayOnQuit"`
 	NotificationLevel string            `json:"notificationLevel"`
 	LogRetentionDays  int               `json:"logRetentionDays"`
 	Theme             string            `json:"theme"`
@@ -42,6 +45,7 @@ type SettingsView struct {
 type SettingsPatch struct {
 	Language            *string           `json:"language"`
 	TrayEnabled         *bool             `json:"trayEnabled"`
+	KeepTrayOnQuit      *bool             `json:"keepTrayOnQuit"`
 	NotificationLevel   *string           `json:"notificationLevel"`
 	LogRetentionDays    *int              `json:"logRetentionDays"`
 	Autostart           *bool             `json:"autostart"`
@@ -141,6 +145,9 @@ func (a *App) UpdateSettings(p SettingsPatch) (SettingsView, error) {
 	}
 	if p.TrayEnabled != nil {
 		s.TrayEnabled = *p.TrayEnabled
+	}
+	if p.KeepTrayOnQuit != nil {
+		s.KeepTrayOnQuit = *p.KeepTrayOnQuit
 	}
 	if p.NotificationLevel != nil {
 		s.NotificationLevel = *p.NotificationLevel

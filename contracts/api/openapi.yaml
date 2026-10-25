@@ -1458,11 +1458,17 @@ components:
 
     Settings:
       type: object
-      required: [language, trayEnabled, notificationLevel, logRetentionDays, autostart, pathVariables, allowedFolders,
-        onboardingCompleted]
+      required: [language, trayEnabled, keepTrayOnQuit, notificationLevel, logRetentionDays, autostart, pathVariables,
+        allowedFolders, onboardingCompleted]
       properties:
         language: { type: string, enum: [pt-BR, en-US, es-ES, system] }
         trayEnabled: { type: boolean, default: true }
+        keepTrayOnQuit:
+          description: >-
+            While the tray is shown, ⌘Q and Quit in the app menu only hide the dashboard, as closing its window does.
+            Quit from the Dock, logging out, and the tray's own Quit still end the desktop.
+          type: boolean
+          default: false
         notificationLevel: { type: string, enum: [all, failures_and_attention, none], default: all }
         logRetentionDays: { type: integer, minimum: 1, maximum: 3650, default: 30 }
         theme: { type: string, enum: [harmflow-dark], default: harmflow-dark }
@@ -1492,6 +1498,7 @@ components:
       properties:
         language: { type: string, enum: [pt-BR, en-US, es-ES, system] }
         trayEnabled: { type: boolean }
+        keepTrayOnQuit: { type: boolean }
         notificationLevel: { type: string, enum: [all, failures_and_attention, none] }
         logRetentionDays: { type: integer, minimum: 1, maximum: 3650 }
         autostart: { type: boolean }
