@@ -31,6 +31,7 @@ const (
 	EventHarnessExited           = "harness.exited"
 	EventHarnessQuotaExhausted   = "harness.quota_exhausted"
 	EventHarnessRateLimited      = "harness.rate_limited"
+	EventHarnessNetworkWaiting   = "harness.network_waiting"
 	EventHarnessUnavailable      = "harness.unavailable"
 	EventHarnessSwitched         = "harness.switched"
 	EventHarnessNoAlternative    = "harness.no_alternative"

@@ -22,7 +22,7 @@
     "type": { "$ref": "#/$defs/eventType" },
     "severity": { "type": "string", "enum": ["debug", "info", "warning", "error"] },
     "message": {
-      "description": "Short text: the daemon's own in en-US, beside its messageKey, or the agent's text, tool output, and a script's output in their original language, which are never translated. The dashboard translates the label of the type. A script.output event carries one line of the program's output, with its stream in payload.stream: stdout or stderr.",
+      "description": "Short text: the daemon's own in en-US, beside its messageKey, or the agent's text, tool output, and a script's output in their original language, which are never translated. The dashboard translates the label of the type. A script.output event carries one line of the program's output, with its stream in payload.stream: stdout or stderr. A harness.network_waiting event carries the harness's own notice that it cannot reach its provider and waits for the network, once for each stretch of such notices.",
       "type": "string"
     },
     "messageKey": {
@@ -71,6 +71,7 @@
         "harness.exited",
         "harness.quota_exhausted",
         "harness.rate_limited",
+        "harness.network_waiting",
         "harness.unavailable",
         "harness.switched",
         "harness.no_alternative",

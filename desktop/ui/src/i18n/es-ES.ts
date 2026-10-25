@@ -193,6 +193,7 @@ export const esES: Resources = {
       exited: "Harness finalizado",
       quota_exhausted: "Cuota del harness agotada",
       rate_limited: "Límite de frecuencia; esperando para reintentar",
+      network_waiting: "Esperando la red",
       unavailable: "Harness no disponible",
       switched: "Cambiando de harness",
       no_alternative: "Ningún harness alternativo disponible",

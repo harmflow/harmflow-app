@@ -193,6 +193,7 @@ export const enUS = {
       exited: "Harness exited",
       quota_exhausted: "Harness quota exhausted",
       rate_limited: "Rate limited; waiting to retry",
+      network_waiting: "Waiting for the network",
       unavailable: "Harness unavailable",
       switched: "Switching harness",
       no_alternative: "No alternative harness available",

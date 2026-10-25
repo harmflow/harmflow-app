@@ -91,6 +91,12 @@ describe("buildTimeline", () => {
     expect(item.detail ?? item.title).toContain("0.999.0");
   });
 
+  it("shows a harness's wait for the network as a warning quoting the harness", () => {
+    const notice = "Reconnecting... waiting for network (Connection failed: error sending request)";
+    const [item] = buildTimeline([ev("harness.network_waiting", { severity: "warning", message: notice })]);
+    expect(item).toMatchObject({ tone: "warning", icon: "alert", labelKey: "eventTypes.harness.network_waiting", detail: notice });
+  });
+
   it("drops duplicates delivered twice by replay and live stream", () => {
     const e = ev("execution.started");
     expect(buildTimeline([e, e])).toHaveLength(1);

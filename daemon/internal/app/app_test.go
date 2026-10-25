@@ -168,18 +168,28 @@ func (f *fakeHarness) holding() bool {
 }
 
 // fakeParser also reads "USAGE <input tokens>", the usage so far, which is final once the attempt ends well, and
-// "CMD <command>", a shell command the session ran to success. Any other line is the agent's message, and the last one
-// is what a quota end reports as its final text, as the real adapters do.
+// "CMD <command>", a shell command the session ran to success. "WAIT network" is a wait for the network, as Codex
+// prints one again and again without exiting: the first of a stretch is an event, and a timeout that ends a wait is a
+// network failure. Any other line is the agent's message, and the last one is what a quota end reports as its final
+// text, as the real adapters do.
 type fakeParser struct {
 	last     string
 	text     string
 	input    int64
 	tools    int
+	waiting  bool   // the last line was a wait for the network
 	finished func() // the executor calls Finish once the process has exited and its output is drained
 }
 
 func (p *fakeParser) Line(b []byte) []ports.HarnessEvent {
 	s := string(b)
+	wasWaiting := p.waiting
+	if p.waiting = s == "WAIT network"; p.waiting {
+		if wasWaiting {
+			return nil
+		}
+		return []ports.HarnessEvent{{Kind: ports.HarnessNetworkWait, Message: "Reconnecting... waiting for network"}}
+	}
 	if strings.HasPrefix(s, "END ") {
 		p.last = strings.TrimPrefix(s, "END ")
 		return nil
@@ -217,6 +227,8 @@ func (p *fakeParser) Finish(exit int, _ string, timedOut, cancelled bool) domain
 	switch {
 	case cancelled:
 		return domain.AttemptEnd{Class: domain.ClassCancelled, Usage: p.usage(domain.UsagePartial)}
+	case timedOut && p.waiting:
+		return domain.AttemptEnd{Class: domain.ClassNetwork, Error: domain.Text{Message: "Reconnecting... waiting for network"}}
 	case timedOut:
 		return domain.AttemptEnd{Class: domain.ClassTimeout}
 	}
@@ -925,6 +937,52 @@ func TestNetworkFailureRecordedWithoutFailover(t *testing.T) {
 	}
 	if err != nil || len(saved.Attempts) != 1 || saved.Attempts[0].Outcome != domain.AttemptNetworkFailed {
 		t.Errorf("the record on disk lacks the network outcome (%v):\n%s", err, data)
+	}
+}
+
+// harmflow-app#250: a Codex that cannot reach its provider waits for the network until the execution's timeout ends
+// it. The attempt records a network failure, the timeline shows the wait once, the execution fails for its timeout, and
+// no failover follows, even with a fallback configured.
+func TestNetworkWaitUntilTheTimeout(t *testing.T) {
+	e := newEnv(t, func(e *env) { e.timeoutUnit = time.Second })
+	doc := strings.Replace(taskYAML("waiting", "    fallback:\n      candidates:\n        - provider: claude-code\n"+
+		"  execution:\n    timeoutMinutes: 2\n    cancelGraceSeconds: 1\n"), "provider: claude-code", "provider: codex", 1)
+	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: doc}); err != nil {
+		t.Fatal(err)
+	}
+	e.codex.setScript(func(ports.RunRequest) string {
+		return "echo 'WAIT network'; echo 'WAIT network'; echo 'WAIT network'; sleep 30"
+	})
+	r, _ := e.app.RunTask("waiting")
+	x := e.wait(r.ExecutionID, domain.StatusFailed)
+	if x.ErrorKey != "execution_timed_out" {
+		t.Errorf("the execution failed with %q (%s), want execution_timed_out", x.ErrorKey, x.ErrorMessage)
+	}
+	if len(x.Attempts) != 1 || x.Attempts[0].Harness != domain.HarnessCodex ||
+		x.Attempts[0].Outcome != domain.AttemptNetworkFailed || x.HarnessSwitches != 0 {
+		t.Fatalf("attempts %+v, %d switches", x.Attempts, x.HarnessSwitches)
+	}
+	e.claude.mu.Lock()
+	prompts := len(e.claude.prompts)
+	e.claude.mu.Unlock()
+	if prompts != 0 {
+		t.Errorf("Claude Code got %d prompts", prompts)
+	}
+	events, _, _ := e.app.ExecutionEvents(r.ExecutionID, 0, 0)
+	waits := 0
+	for _, ev := range events {
+		switch ev.Type {
+		case domain.EventHarnessSwitched:
+			t.Errorf("a %s event followed the wait for the network", ev.Type)
+		case domain.EventHarnessNetworkWaiting:
+			waits++
+			if ev.Severity != domain.SeverityWarning || ev.Message != "Reconnecting... waiting for network" {
+				t.Errorf("the wait's event: %+v", ev)
+			}
+		}
+	}
+	if waits != 1 {
+		t.Errorf("%d %s events, want 1", waits, domain.EventHarnessNetworkWaiting)
 	}
 }
 

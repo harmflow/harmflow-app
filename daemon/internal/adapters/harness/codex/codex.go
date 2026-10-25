@@ -502,6 +502,7 @@ type parser struct {
 	reported    bool // a turn reported its usage
 	tokens      domain.Tokens
 	prices      domain.PriceTable // what prices the usage; Prices when it holds none
+	waiting     bool              // the last line Codex printed was a wait for the network
 }
 
 var _ ports.OutputParser = (*parser)(nil)
@@ -551,8 +552,13 @@ func (p *parser) Line(raw []byte) []ports.HarnessEvent {
 		return nil
 	}
 	if err := json.Unmarshal(raw, &l); err != nil {
+		p.waiting = false
 		return []ports.HarnessEvent{{Kind: ports.HarnessWarning, Message: classify.Truncate(string(raw), 2000)}}
 	}
+	// Codex repeats the wait every few seconds and never exits while it lasts: only the first line of a stretch is an
+	// event, and any other line ends the stretch.
+	wasWaiting := p.waiting
+	p.waiting = l.Type == "error" && networkWaitRe.MatchString(l.Message)
 	switch l.Type {
 	case "thread.started":
 		p.sessionID = l.ThreadID
@@ -574,6 +580,9 @@ func (p *parser) Line(raw []byte) []ports.HarnessEvent {
 		}
 	case "error":
 		p.failure = firstNonEmpty(l.Message, p.failure)
+		if p.waiting && !wasWaiting {
+			return []ports.HarnessEvent{{Kind: ports.HarnessNetworkWait, Message: classify.Truncate(l.Message, 2000)}}
+		}
 	case "item.started", "item.updated", "item.completed":
 		if l.Item == nil {
 			return nil
@@ -646,6 +655,11 @@ var patterns = classify.Patterns{
 	Network:     regexp.MustCompile(`(?i)(stream disconnected|error sending request|connection (refused|reset)|dns error|timed out connecting)`),
 }
 
+// networkWaitRe is the notice of a Codex that cannot reach its provider and waits for the network, as Codex 0.163.0
+// prints it: "Reconnecting... waiting for network (Connection failed: error sending request)". Its numbered retries,
+// "Reconnecting... 2/5", are not a wait: Codex exits once they run out.
+var networkWaitRe = regexp.MustCompile(`(?i)^reconnecting\b.*\bwaiting for network\b`)
+
 // usage is the turns' tokens, priced at the table once the attempt ends.
 func (p *parser) usage(ended bool) *domain.Usage {
 	if !p.reported {
@@ -664,6 +678,10 @@ func (p *parser) Finish(exitCode int, stderrTail string, timedOut, cancelled boo
 	switch {
 	case cancelled:
 		end.Class, end.Error = domain.ClassCancelled, domain.T("execution_cancelled", "cancelled")
+		return end
+	case timedOut && p.waiting:
+		// Codex never exits while it waits for the network, so the timeout ends the wait: the network is the cause.
+		end.Class, end.Error = domain.ClassNetwork, domain.Text{Message: classify.Tail(eventlog.Redact(p.failure), 2000)}
 		return end
 	case timedOut:
 		end.Class, end.Error = domain.ClassTimeout, domain.T("execution_timed_out", "the execution timeout elapsed")
