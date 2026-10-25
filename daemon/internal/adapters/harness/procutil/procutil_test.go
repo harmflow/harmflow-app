@@ -471,6 +471,11 @@ func TestWaitEndsWhatTheHarnessLeftRunning(t *testing.T) {
 	p := startShell(t, `sleep 300 >/dev/null 2>&1 & echo $! > "$1"; echo done`, testEnv(), executionID(t), nil, pidFile)
 	<-p.Done()
 	left := waitForPid(t, nil, pidFile)
+	// The shell writes $! once it has forked, before the child runs sleep, and Wait keeps the name it first finds.
+	waitFor(t, "the background process to run sleep", func() bool {
+		info, ok := processInfo(left.pid)
+		return ok && info.start == left.start && info.name == "sleep"
+	})
 	p.Wait(context.Background(), 300*time.Millisecond)
 	if running(left) {
 		t.Errorf("the background process %d the harness left survived Wait", left.pid)
