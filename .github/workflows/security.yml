@@ -1,9 +1,11 @@
 # Reads, every week, what reaches the repository between changes, whatever changed: gitleaks over the whole history,
-# every branch and tag included, and the audits of every part's dependencies, so a new advisory against a dependency
-# nobody touched still fails a run. CI runs the same checks on each change, scoped to it.
+# every branch and tag included, the audits of every part's dependencies, so a new advisory against a dependency nobody
+# touched still fails a run, and whether the Go toolchain is the newest patch of its minor, which Dependabot does not
+# raise. CI runs the same scan and audits on each change, scoped to it.
 #
 # The audits run on macOS, the MVP's only platform, so govulncheck reads the daemon as it is built for it. gitleaks
-# reads the history, not a build, and runs on Linux. Actions are pinned as in ci.yml, to the same commits.
+# reads the history and the toolchain check the Go module proxy, neither a build, so both run on Linux. Actions are
+# pinned as in ci.yml, to the same commits.
 name: Security
 
 on:
@@ -15,6 +17,7 @@ on:
     paths:
       - .github/workflows/security.yml
       - .github/scripts/install-gitleaks.sh
+      - .github/scripts/go-toolchain.sh
       - .gitleaks.toml
 
 permissions:
@@ -59,3 +62,16 @@ jobs:
       # -k runs every audit when one fails, so a run names everything it found.
       - name: Vulnerabilities
         run: make -k audit
+
+  toolchain:
+    name: Go toolchain is current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The go command reads the proxy here and builds nothing, so there is nothing to cache.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: daemon/go.mod
+          cache: false
+      # A failure names the patch to move to: make go-toolchain raises both go.mod files to it.
+      - run: make check-go-toolchain
