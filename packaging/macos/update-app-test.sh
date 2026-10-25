@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Tests of update-app.sh's launch-agent check and install, with a fake launchctl and a fake agent plist in a home
-# directory of its own, so nothing reaches the user's launchd session or ~/Applications (harmflow-app#188).
+# directory of its own, so nothing reaches the user's launchd session or ~/Applications (harmflow-app#188), and of its
+# build skip and wait for executions, with a fake make and a fake local API (harmflow-app#189).
 # `make test-packaging` runs it.
 
 set -euo pipefail
@@ -219,6 +220,169 @@ export UPDATE_APP_RERUN_FROM=$before
 out=$(rerun_if_changed "$before"; echo "went on") || fail "rerun_if_changed failed: $out"
 [[ $out == "went on" ]] || fail "ran again: $out"
 unset UPDATE_APP_RERUN_FROM
+
+# fake_make makes $MAKE a script that logs its arguments to $work/make; fake_build STAMP leaves a build in $built and,
+# unless STAMP is empty, the commit make app writes beside it.
+fake_make() {
+	MAKE=$work/bin/make
+	printf '#!/bin/sh\necho "$*" >>"%s"\n' "$work/make" >"$MAKE"
+	chmod +x "$MAKE"
+}
+fake_build() {
+	mkdir -p "$built/Contents/MacOS"
+	printf '#!/bin/sh\n' >"$built/Contents/MacOS/harmflowd"
+	chmod +x "$built/Contents/MacOS/harmflowd"
+	[[ -z $1 ]] || printf '%s\n' "$1" >"$built.commit"
+}
+
+setup "a build of the pulled commit is not built again"
+fake_make
+fake_build "$commit"
+unset FORCE_BUILD
+out=$(build_app 2>&1) || fail "build_app failed: $out"
+[[ ! -e $work/make ]] || fail "ran make: $(cat "$work/make")"
+[[ $out == *"already a build of $commit; skipping make app"* ]] || fail "does not say it skips: $out"
+
+setup "FORCE_BUILD=1 builds a build of the pulled commit again"
+fake_make
+fake_build "$commit"
+out=$(FORCE_BUILD=1 build_app 2>&1) || fail "build_app failed: $out"
+[[ $(cat "$work/make" 2>&1) == "-C $root app" ]] || fail "did not run make app: $out"
+
+for stamp in 1234abc "$commit-dirty" ''; do
+	setup "a build stamped '$stamp' is built again"
+	fake_make
+	fake_build "$stamp"
+	out=$(build_app 2>&1) || fail "build_app failed: $out"
+	[[ $(cat "$work/make" 2>&1) == "-C $root app" ]] || fail "did not run make app: $out"
+done
+
+setup "a stamp without a bundle is built again"
+fake_make
+mkdir -p "${built%/*}"
+printf '%s\n' "$commit" >"$built.commit"
+out=$(build_app 2>&1) || fail "build_app failed: $out"
+[[ $(cat "$work/make" 2>&1) == "-C $root app" ]] || fail "did not run make app: $out"
+
+# From here on, api answers from $work/responses, one "STATUS BODY" line per call, and logs each call to $work/calls;
+# sleep only moves SECONDS on, so a wait takes no time.
+fake_api() {
+	printf '%s\n' "$@" >"$work/responses"
+	: >"$work/calls"
+}
+api() {
+	printf '%s\n' "$*" >>"$work/calls"
+	local next
+	next=$(head -n 1 "$work/responses")
+	tail -n +2 "$work/responses" >"$work/responses.next"
+	mv "$work/responses.next" "$work/responses"
+	printf '%s' "${next#* }" >"$tmp/body"
+	printf '%s' "${next%% *}"
+}
+sleep() { SECONDS=$((SECONDS + ${1%.*})); }
+busy='409 {"error": {"code": "executions_running", "text": "1 executions are running"}}'
+stats() { printf '200 {"running": %s, "queued": 0}' "$1"; }
+
+# stop runs stop_daemon in a subshell, since a refusal exits; it sets rc and out.
+stop() {
+	rc=0
+	out=$(stop_daemon 2>&1) || rc=$?
+}
+
+setup "a daemon with no execution stops at once"
+wait_timeout=3600
+unset WAIT
+fake_api '202 {"ok": true}'
+stop
+[[ $rc == 0 ]] || fail "rc $rc: $out"
+[[ $(cat "$work/calls") == "POST /daemon/stop {}" ]] || fail "calls:"$'\n'"$(cat "$work/calls")"
+
+setup "without WAIT=1 running executions refuse the update, built but not running"
+wait_timeout=3600
+unset WAIT
+fake_api "$busy"
+stop
+[[ $rc == 1 ]] || fail "rc $rc, want the refusal's 1"
+[[ $out == *"nothing was stopped and $installed was left as it was"* ]] || fail "does not say nothing stopped: $out"
+[[ $out == *"the new build is at $built, not running"* ]] || fail "does not say the build is not running: $out"
+[[ $out == *"make update-app WAIT=1"* ]] || fail "gives no WAIT=1 hint: $out"
+[[ $(cat "$work/calls") == "POST /daemon/stop {}" ]] || fail "calls:"$'\n'"$(cat "$work/calls")"
+
+setup "WAIT=1 says the count while executions run and stops once they end"
+wait_timeout=3600
+WAIT=1
+fake_api "$busy" "$(stats 2)" "$(stats 1)" "$(stats 0)" '202 {"ok": true}'
+stop
+[[ $rc == 0 ]] || fail "rc $rc: $out"
+[[ $out == *"executions running: 2; waiting"*"executions running: 1; waiting"* ]] || fail "does not say the count: $out"
+want="POST /daemon/stop {}
+GET /stats
+GET /stats
+GET /stats
+POST /daemon/stop {}"
+[[ $(cat "$work/calls") == "$want" ]] || fail "calls:"$'\n'"$(cat "$work/calls")"
+
+setup "WAIT=1 waits for an execution that starts between the count and the stop, never forcing"
+wait_timeout=3600
+WAIT=1
+fake_api "$busy" "$(stats 0)" "$busy" "$(stats 1)" "$(stats 0)" '202 {"ok": true}'
+stop
+[[ $rc == 0 ]] || fail "rc $rc: $out"
+[[ $(grep -c '^POST /daemon/stop {}$' "$work/calls") == 3 ]] || fail "calls:"$'\n'"$(cat "$work/calls")"
+[[ $(grep -c force "$work/calls") == 0 ]] || fail "asked for force:"$'\n'"$(cat "$work/calls")"
+
+setup "WAIT=1 gives up after WAIT_TIMEOUT with the refusal"
+wait_timeout=12
+WAIT=1
+fake_api "$busy" "$(stats 1)" "$(stats 1)" "$(stats 1)" "$(stats 1)" "$(stats 1)"
+stop
+[[ $rc == 1 ]] || fail "rc $rc, want 1"
+[[ $out == *"still running after WAIT_TIMEOUT=12s"* ]] || fail "does not say it timed out: $out"
+[[ $out == *"nothing was stopped and $installed was left as it was; the new build is at $built, not running"* ]] ||
+	fail "does not give the refusal: $out"
+# Polls at 0, 5, and 10 seconds; at 15 the deadline of 12 has passed.
+[[ $(grep -c '^GET /stats$' "$work/calls") == 3 ]] || fail "calls:"$'\n'"$(cat "$work/calls")"
+
+setup "WAIT=1 does not wait out a refusal for another reason"
+wait_timeout=3600
+WAIT=1
+fake_api '409 {"error": {"code": "conflict", "text": "something else"}}'
+stop
+[[ $rc == 1 && $out == *"the daemon refused to stop"*"something else"* ]] || fail "rc $rc: $out"
+[[ $(cat "$work/calls") == "POST /daemon/stop {}" ]] || fail "calls:"$'\n'"$(cat "$work/calls")"
+
+setup "WAIT=1 stops waiting when the daemon no longer answers"
+wait_timeout=3600
+WAIT=1
+fake_api "$busy" '000 '
+stop
+[[ $rc == 1 && $out == *"did not answer GET /stats while waiting; nothing was stopped"* ]] || fail "rc $rc: $out"
+
+# warned runs warn_running with a daemon found, in a subshell; it sets out.
+warned() {
+	out=$(
+		find_daemon() { :; }
+		warn_running 2>&1
+	) || fail "warn_running failed: $out"
+}
+
+setup "running executions are named before the build, with the WAIT=1 hint"
+unset WAIT
+fake_api "$(stats 2)"
+warned
+[[ $out == *"executions running: 2; the restart will be refused unless they end"*"WAIT=1"* ]] || fail "$out"
+
+setup "with WAIT=1 running executions are named before the build as waited for"
+WAIT=1
+fake_api "$(stats 2)"
+warned
+[[ $out == *"executions running: 2; WAIT=1 waits for them to end after the build"* ]] || fail "$out"
+
+setup "no running execution says nothing before the build"
+unset WAIT
+fake_api "$(stats 0)"
+warned
+[[ -z $out ]] || fail "said: $out"
 
 if ((failures > 0)); then
 	printf '%d failed\n' "$failures" >&2

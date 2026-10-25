@@ -129,8 +129,8 @@ in its own pull request and is reviewed on its own.
 | `make dev-desktop` | Run the desktop shell against that daemon |
 | `make generate` | Refresh the copies generated from `contracts/`; `make check-generated` fails when one is stale |
 | `make app` | Build `HarmFlow.app` and the DMG, unsigned |
-| `make update-app` | On `main`, fast-forward, run `make app`, and install the build to `~/Applications/HarmFlow.app` (`INSTALL_DIR` changes the directory), then restart from it the daemon and the window that were running; `OPEN=1` starts them also when they did not run. Refused while executions run (see [`packaging/`](packaging/README.md#updating-the-local-app)) |
-| `make test-packaging` | Test `make update-app`'s launch-agent check and install |
+| `make update-app` | On `main`, fast-forward, run `make app` unless the build is already of that commit (`FORCE_BUILD=1` builds anyway), and install the build to `~/Applications/HarmFlow.app` (`INSTALL_DIR` changes the directory), then restart from it the daemon and the window that were running; `OPEN=1` starts them also when they did not run. Refused while executions run; `WAIT=1` waits for them to end instead (see [`packaging/`](packaging/README.md#updating-the-local-app)) |
+| `make test-packaging` | Test `make update-app`'s launch-agent check, install, build skip, and wait |
 | `make icons` | Render every app and tray icon from the SVGs in `desktop/src-tauri/icons/source` |
 
 Three environment variables change where the daemon keeps its data and its token:
