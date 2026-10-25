@@ -23,7 +23,7 @@ const defaultRejectionWindow = time.Minute
 // maxLoggedPath bounds the path an entry holds: under a forbidden Host or Origin, it is any text the caller sent.
 const maxLoggedPath = 256
 
-// rejections records the requests guard rejects in daemon.log (FS-009 FR-003): the first at once, then at most one
+// rejections records the requests guard rejects in daemon.log: the first at once, then at most one
 // entry per reason per rejection window, counting the requests it stands for, so a flood cannot grow the log without
 // bound. An entry names the last request's method and path, never its headers or query, so never the token it
 // presented.

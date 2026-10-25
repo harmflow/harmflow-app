@@ -11,7 +11,7 @@ func minimalTask() TaskDocument {
 		Spec: TaskSpec{Type: TypeGeneral, Prompt: "p", Harness: HarnessSelection{Preferred: HarnessProfile{Provider: HarnessClaudeCode}}}}
 }
 
-// FS-001 AC-014: a task that sets nothing uses every default of D-082; one that sets a timeout keeps it.
+// A task that sets nothing uses every default; one that sets a timeout keeps it.
 func TestEffectiveDefaults(t *testing.T) {
 	e := minimalTask().Effective()
 	s := e.Spec
@@ -54,8 +54,8 @@ func TestEffectiveDefaults(t *testing.T) {
 	}
 }
 
-// FS-004 FR-004, AC-005: a preferred or fallback profile that sets no model or effort reads default for both, which
-// leaves each harness its own; a value a profile sets is kept.
+// A preferred or fallback profile that sets no model or effort reads default for both, which leaves each harness its
+// own; a value a profile sets is kept.
 func TestProfilesReadDefaults(t *testing.T) {
 	d := minimalTask()
 	d.Spec.Harness.Fallback = &FallbackPolicy{Candidates: []HarnessProfile{{Provider: HarnessCodex},
@@ -73,8 +73,8 @@ func TestProfilesReadDefaults(t *testing.T) {
 	}
 }
 
-// FS-011 FR-002, FS-005 FR-001 and FR-009: an empty list of notified events or failover triggers is a choice and stays
-// empty; only an absent one takes the default.
+// An empty list of notified events or failover triggers is a choice and stays empty; only an absent one takes the
+// default.
 func TestEffectiveKeepsEmptyLists(t *testing.T) {
 	d := minimalTask()
 	d.Spec.Harness.Fallback = &FallbackPolicy{On: []string{}}
@@ -95,7 +95,7 @@ func TestEffectiveKeepsEmptyLists(t *testing.T) {
 	}
 }
 
-// D-067: quota and an unavailable harness fail over; rate limits retry; network, timeouts, and task errors never do.
+// Quota and an unavailable harness fail over; rate limits retry; network, timeouts, and task errors never do.
 func TestDecideAfterAttempt(t *testing.T) {
 	base := FailoverInput{FallbackOn: []string{FallbackOnQuota, FallbackOnUnavailable}, HasNextCandidate: true,
 		MaxSwitches: 1, MaxRateRetries: 5}
@@ -132,7 +132,7 @@ func TestDecideAfterAttempt(t *testing.T) {
 	}
 }
 
-// D-082: the harness's indicated wait, otherwise 1 minute doubling up to 15.
+// The harness's indicated wait, otherwise 1 minute doubling up to 15.
 func TestRateLimitWait(t *testing.T) {
 	m := time.Minute
 	want := []time.Duration{m, 2 * m, 4 * m, 8 * m, 15 * m, 15 * m}
@@ -168,8 +168,8 @@ func TestLifecycleTransitions(t *testing.T) {
 	}
 }
 
-// D-105: a record of schema 1 kept the configured model and effort as the used ones, so they read as configured and
-// the used ones as not reported; a current record is left as it is.
+// A record of schema 1 kept the configured model and effort as the used ones, so they read as configured and the used
+// ones as not reported; a current record is left as it is.
 func TestUpgradeMovesConfiguredValues(t *testing.T) {
 	x := Execution{SchemaVersion: "1", Model: "default",
 		Attempts: []Attempt{{Number: 1, Harness: HarnessClaudeCode, Model: "sonnet", Effort: "high"}}}
@@ -186,7 +186,7 @@ func TestUpgradeMovesConfiguredValues(t *testing.T) {
 	}
 }
 
-// FS-007 FR-006, FR-011, FS-003 AC-013: past the limits an item needs a human.
+// Past the limits an item needs a human.
 func TestWorkItemLimits(t *testing.T) {
 	limits := WorkItemLimits{MaxResumeAttempts: 3, MaxFailedRetries: 3}
 	w := &WorkItem{Key: "o/r#1"}

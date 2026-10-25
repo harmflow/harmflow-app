@@ -8,7 +8,7 @@ import (
 )
 
 // logEnded names on the execution's log, by pid and executable, each process that ending the execution ended outside
-// the process group of its harness or program, which a signal to the group would have missed (FS-003 FR-005).
+// the process group of its harness or program, which a signal to the group would have missed.
 func (r *run) logEnded(ended []procutil.Ended) {
 	for _, e := range ended {
 		if !e.OutsideGroup {

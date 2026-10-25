@@ -93,7 +93,7 @@ type ModelUsage struct {
 }
 
 // Usage is an attempt's token use as its harness reported it, and its cost, stamped when the attempt ended. The daemon
-// records numbers and enums only; the desktop words them (D-099).
+// records numbers and enums only; the desktop words them.
 type Usage struct {
 	Status      UsageStatus  `json:"status"`
 	ModelSource string       `json:"modelSource,omitempty"`

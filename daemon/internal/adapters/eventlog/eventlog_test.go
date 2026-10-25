@@ -24,7 +24,7 @@ func TestRedact(t *testing.T) {
 	}
 
 	// Passwords, cookies, and session values are masked where a key and its separator name them; the same words in
-	// ordinary text, or inside another word, are left as they are (FS-001 FR-006, FS-009 FR-005).
+	// ordinary text, or inside another word, are left as they are.
 	for _, c := range []struct{ in, want string }{
 		{"Sign in with password: hunter2 today", "Sign in with password: [REDACTED] today"},
 		{"PASSWORD=hunter2", "PASSWORD=[REDACTED]"},
@@ -68,7 +68,7 @@ func TestRedact(t *testing.T) {
 }
 
 // The agent's and the harness's text reaches the daemon as structs, so every string in one is redacted in place, however
-// deep it sits; numbers, times, and unexported fields are left alone (FS-009 FR-005, FR-007).
+// deep it sits; numbers, times, and unexported fields are left alone.
 func TestRedactFields(t *testing.T) {
 	token := "ghp_" + strings.Repeat("a", 36)
 	type kind string
@@ -130,7 +130,7 @@ func TestAppendRedactsParams(t *testing.T) {
 	}
 }
 
-// FS-008 FR-008: an attempt's capture reads back redacted, its end from the start of a line when it is too long.
+// An attempt's capture reads back redacted, its end from the start of a line when it is too long.
 func TestReadRaw(t *testing.T) {
 	l, err := New(t.TempDir(), time.Now)
 	if err != nil {
@@ -185,7 +185,7 @@ func TestReadRaw(t *testing.T) {
 	}
 }
 
-// FS-008 FR-007: one JSONL per execution, replay after an id, and live delivery with a backlog after an id.
+// One JSONL per execution, replay after an id, and live delivery with a backlog after an id.
 func TestAppendReplaySubscribe(t *testing.T) {
 	dir := t.TempDir()
 	l, err := New(dir, time.Now)

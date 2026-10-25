@@ -32,7 +32,7 @@ export interface paths {
         put?: never;
         /**
          * Stop the daemon
-         * @description Refused with 409 while executions run, unless force is set; the desktop asks for confirmation first (FS-010 FR-008).
+         * @description Refused with 409 while executions run, unless force is set; the desktop asks for confirmation first.
          */
         post: operations["stopDaemon"];
         delete?: never;
@@ -82,7 +82,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Detected harnesses and their capabilities (FS-004 FR-007) */
+        /** Detected harnesses and their capabilities */
         get: operations["listHarnesses"];
         put?: never;
         post?: never;
@@ -119,7 +119,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Choose an installation or set a path by hand (FS-004 FR-001) */
+        /** Choose an installation or set a path by hand */
         put: operations["setHarnessPath"];
         post?: never;
         delete?: never;
@@ -152,7 +152,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Agents and skills a task can cite, built in or the user's (D-092) */
+        /** Agents and skills a task can cite, built in or the user's */
         get: operations["getCatalog"];
         put?: never;
         post?: never;
@@ -227,13 +227,13 @@ export interface paths {
         get: operations["getTask"];
         /**
          * Update a task
-         * @description baseRevision must be the revision the edit started from; a file changed meanwhile is a conflict, never a silent overwrite (FS-001 FR-005).
+         * @description baseRevision must be the revision the edit started from; a file changed meanwhile is a conflict, never a silent overwrite.
          */
         put: operations["updateTask"];
         post?: never;
         /**
          * Delete a task
-         * @description A running task is deleted once its execution finishes (D-083); its execution records stay.
+         * @description A running task is deleted once its execution finishes; its execution records stay.
          */
         delete: operations["deleteTask"];
         options?: never;
@@ -309,7 +309,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Disable a task; a running execution finishes normally (D-083) */
+        /** Disable a task; a running execution finishes normally */
         post: operations["disableTask"];
         delete?: never;
         options?: never;
@@ -326,7 +326,7 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** Portable YAML, with no secrets, logs, or state (FS-001 FR-006) */
+        /** Portable YAML, with no secrets, logs, or state */
         get: operations["exportTask"];
         put?: never;
         post?: never;
@@ -345,7 +345,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** The next occurrences of a schedule, in its time zone (FS-002 FR-002) */
+        /** The next occurrences of a schedule, in its time zone */
         post: operations["previewSchedule"];
         delete?: never;
         options?: never;
@@ -400,7 +400,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Cancel one execution; the others continue (FS-003 FR-004) */
+        /** Cancel one execution; the others continue */
         post: operations["cancelExecution"];
         delete?: never;
         options?: never;
@@ -437,7 +437,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * The harness's raw output, one capture per attempt, redacted (FS-008 FR-008)
+         * The harness's raw output, one capture per attempt, redacted
          * @description What the CLI printed on stdout and stderr, as the daemon captured it, with secrets masked. Each capture is the
          *     end of its attempt's output, at most `limit` bytes, starting at a line. While the execution runs the captures
          *     grow; ask again for a live view.
@@ -515,7 +515,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Replace the API token (D-090); the response is the last one the old token authorizes */
+        /** Replace the API token; the response is the last one the old token authorizes */
         post: operations["rotateToken"];
         delete?: never;
         options?: never;
@@ -532,7 +532,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Remove the worktrees no longer needed (D-073, FS-010 FR-010) */
+        /** Remove the worktrees no longer needed */
         post: operations["cleanWorkspaces"];
         delete?: never;
         options?: never;
@@ -577,7 +577,7 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
-         * @description Names a text the daemon writes for the user. The desktop shows it in the interface's language, filling it with its params; the message beside it is the same text in en-US, shown for a key the desktop does not know (FS-012 FR-005). The agent's text, tool output, and a tool's own error get no key and stay as they are. A text is a message with messageKey and params, or a field such as errorMessage with errorKey and errorParams.
+         * @description Names a text the daemon writes for the user. The desktop shows it in the interface's language, filling it with its params; the message beside it is the same text in en-US, shown for a key the desktop does not know. The agent's text, tool output, and a tool's own error get no key and stay as they are. A text is a message with messageKey and params, or a field such as errorMessage with errorKey and errorParams.
          * @enum {string}
          */
         MessageKey: "host_forbidden" | "origin_forbidden" | "token_required" | "route_not_found" | "body_not_json" | "task_not_found" | "execution_not_found" | "harness_not_found" | "task_exists" | "task_file_exists" | "base_revision_required" | "task_changed_on_disk" | "task_invalid" | "task_disabled" | "task_being_deleted" | "daemon_stopping" | "execution_ended" | "executions_running" | "harness_path_not_absolute" | "harness_path_not_executable" | "settings_language_invalid" | "settings_notification_level_invalid" | "settings_log_retention_invalid" | "settings_path_variable_invalid" | "settings_allowed_folder_invalid" | "settings_change_breaks_task" | "harness_not_identified" | "yaml_syntax" | "document_empty" | "document_not_json" | "document_not_representable" | "task_input_missing" | "schema_type" | "schema_const" | "schema_enum" | "schema_required" | "schema_additional_properties" | "schema_pattern" | "schema_min_length" | "schema_max_length" | "schema_minimum" | "schema_maximum" | "schema_min_items" | "schema_unique_items" | "schema_not" | "schema_false" | "id_immutable" | "type_immutable" | "id_file_mismatch" | "task_file_invalid" | "task_file_error" | "schedule_missing" | "schedule_empty" | "schedule_cron_and_interval" | "timezone_unknown" | "interval_invalid" | "interval_unit_invalid" | "cron_seconds" | "cron_field_count" | "cron_step_invalid" | "cron_value_invalid" | "cron_value_out_of_range" | "harness_unknown" | "claude_model_unknown" | "claude_effort_unsupported" | "claude_effort_invalid" | "codex_model_unknown" | "codex_effort_invalid" | "codex_profile_unchecked" | "harness_not_detected" | "harness_not_ready" | "agent_not_found" | "skill_not_found" | "agent_missing" | "skill_missing" | "fallback_agent_missing" | "fallback_skill_missing" | "fallback_repeats_preferred" | "path_variable_unterminated" | "path_variable_undefined" | "path_not_absolute" | "path_forbidden_home" | "path_forbidden_place" | "path_outside_allowed_area" | "script_program_relative" | "script_working_directory_relative" | "local_path_missing" | "script_system_not_declared" | "script_program_not_found" | "script_working_directory_missing" | "script_imported_disabled" | "restriction_claude_shell_workspace" | "restriction_claude_shell_network" | "restriction_codex_tool_lists" | "restriction_script_unenforced" | "script_leftovers_ended" | "harness_version_untested" | "harness_version_unknown" | "repository_unprotected" | "report_not_json" | "report_schema_invalid" | "step_checking_harness" | "step_preparing_workspace" | "step_starting_harness" | "step_switching_harness" | "step_waiting_rate_limit" | "step_preparing_program" | "step_running_program" | "attempt_first" | "attempt_rate_limit_retry" | "attempt_failover" | "daemon_started" | "daemon_signal" | "daemon_stop_requested" | "local_api_stopped" | "task_delete_pending" | "task_changed_externally" | "task_changed_externally_invalid" | "task_removed_externally" | "task_was_disabled" | "task_was_deleted" | "task_file_removed" | "task_gone" | "firing_queued" | "firing_coalesced" | "firing_skipped" | "firings_missed_catch_up" | "firings_missed_skipped" | "cancel_requested" | "cancelled_before_start" | "execution_cancelled" | "execution_timed_out" | "execution_status" | "daemon_stopped_execution" | "execution_dir_failed" | "workspace_create_failed" | "repository_path_missing" | "context_write_failed" | "harness_started" | "harness_session" | "harness_exited" | "harness_exit_code" | "harness_start_failed" | "harness_ended_with_error" | "harness_unavailable" | "harness_unavailable_readiness" | "harness_rate_limited" | "harness_quota_exhausted" | "harness_switched" | "no_alternative_harness" | "no_alternative_harness_detail" | "skill_delivery_failed" | "agent_delivery_failed" | "tool_succeeded" | "tool_failed" | "tests_failed" | "script_started" | "script_exit_code" | "script_signaled" | "script_start_failed" | "script_write_failed" | "process_ended" | "task_path_refused" | "detection_running" | "harness_manual_path_invalid" | "claude_not_found" | "codex_not_found" | "git_not_found" | "gh_not_found" | "command_failed" | "harness_feature_missing" | "harness_version_below_minimum" | "claude_not_signed_in" | "not_signed_in" | "authentication_unverified" | "gh_auth_problem";
@@ -657,7 +657,7 @@ export interface components {
             };
         };
         /**
-         * @description FS-004 FR-006. checking while a harness's first check runs; a later check keeps the previous state (D-102).
+         * @description checking while a harness's first check runs; a later check keeps the previous state.
          * @enum {string}
          */
         ReadinessState: "checking" | "not_installed" | "installed" | "version_identified" | "authenticated" | "ready" | "not_ready";
@@ -687,7 +687,7 @@ export interface components {
             efforts: string[];
             /** @enum {string} */
             capabilitySource?: "reported" | "verified" | "declared";
-            /** @description The native controls the installed version offers (D-068). */
+            /** @description The native controls the installed version offers. */
             enforceableControls?: string[];
             /** Format: date-time */
             lastCheckedAt: string;
@@ -835,9 +835,9 @@ export interface components {
             /** @description Empty for a script task's attempt, which runs a program instead of a harness. */
             harness: string;
             harnessVersion?: string;
-            /** @description The model the harness reported using; absent when it reported none (D-105). */
+            /** @description The model the harness reported using; absent when it reported none. */
             model?: string;
-            /** @description The effort the harness reported using; absent when it reported none (D-105). */
+            /** @description The effort the harness reported using; absent when it reported none. */
             effort?: string;
             /** @description The model the task asked for, default when it set none. Never the one used. */
             configuredModel: string;
@@ -865,7 +865,7 @@ export interface components {
             /** @description HarmFlow's session context the attempt sent with the prompt, composed for that attempt and redacted like the raw output. Absent on older records. */
             sessionContext?: string;
         };
-        /** @description What the harness reported of the attempt's token use: the count so far while it runs, the final one when it ends. The cost is stamped when the attempt ends — the harness's own figure, or an estimate from the adapter's dated table of API list prices — so a later table never reprices it. Numbers and enums only; the desktop words them (D-099). Absent when the attempt started no harness process; older records have none. */
+        /** @description What the harness reported of the attempt's token use: the count so far while it runs, the final one when it ends. The cost is stamped when the attempt ends — the harness's own figure, or an estimate from the adapter's dated table of API list prices — so a later table never reprices it. Numbers and enums only; the desktop words them. Absent when the attempt started no harness process; older records have none. */
         AttemptUsage: {
             /**
              * @description reported: the harness's final count. partial: the count so far, without the harness's final line, so output tokens are unknown and there is no cost. not_reported: the harness reported no usage, which is not zero.
@@ -958,10 +958,10 @@ export interface components {
             endedAt?: string;
             /** @description The harness of the current or last attempt; empty for a script task. */
             harness: string;
-            /** @description The model the current or last attempt's harness reported using; absent when it reported none (D-105). */
+            /** @description The model the current or last attempt's harness reported using; absent when it reported none. */
             model?: string;
             attemptCount?: number;
-            /** @description The latest step; no percentage is invented (FS-008 FR-009). The daemon's own step is in en-US, beside its currentStepKey; the agent's and a tool's have none. */
+            /** @description The latest step; no percentage is invented. The daemon's own step is in en-US, beside its currentStepKey; the agent's and a tool's have none. */
             currentStep?: string;
             currentStepKey?: components["schemas"]["MessageKey"];
             currentStepParams?: components["schemas"]["MessageParams"];
@@ -1007,7 +1007,7 @@ export interface components {
             logExpired?: boolean;
             script?: components["schemas"]["ScriptRun"];
         };
-        /** @description The program a script task's execution ran, as it ran, redacted like the raw output; absent for every other type (FS-013 FR-011). A script execution has one attempt, with no harness. */
+        /** @description The program a script task's execution ran, as it ran, redacted like the raw output; absent for every other type. A script execution has one attempt, with no harness. */
         ScriptRun: {
             /** @description The argument list, started with no shell. */
             command?: string[];
@@ -1028,7 +1028,7 @@ export interface components {
             exitCode?: number;
             /** @description The signal that ended the program, such as SIGKILL; absent when it exited by itself. */
             signal?: string;
-            /** @description The program's process group while it runs, so a restarted daemon ends what it left (FS-013 FR-010). */
+            /** @description The program's process group while it runs, so a restarted daemon ends what it left. */
             process?: {
                 group: number;
                 leaderStart: string;
@@ -1072,7 +1072,7 @@ export interface components {
             };
         };
         Queue: {
-            /** @description Firings waiting for their task's running execution (at most one per task, D-072). */
+            /** @description Firings waiting for their task's running execution (at most one per task). */
             waiting: components["schemas"]["ExecutionSummary"][];
             upcoming: {
                 taskId: string;
@@ -1128,7 +1128,7 @@ export interface components {
             pathVariables: {
                 [key: string]: string;
             };
-            /** @description Folders, beside the user's home folder and the mounted volumes, where a task's workspace, its repositories' local paths, and a custom profile's writable paths may lead (D-113, FS-009 FR-014). Absolute, or starting with ~; none may be the home folder or contain it, nor lie inside HarmFlow's data directory, ~/Library, or a hidden folder at the top of the home folder. */
+            /** @description Folders, beside the user's home folder and the mounted volumes, where a task's workspace, its repositories' local paths, and a custom profile's writable paths may lead. Absolute, or starting with ~; none may be the home folder or contain it, nor lie inside HarmFlow's data directory, ~/Library, or a hidden folder at the top of the home folder. */
             allowedFolders: string[];
             onboardingCompleted: boolean;
         };
@@ -1362,7 +1362,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description Absolute path of the CLI, an executable file whose --version output names the harness (D-113); null returns to automatic detection. */
+                    /** @description Absolute path of the CLI, an executable file whose --version output names the harness; null returns to automatic detection. */
                     path?: string | null;
                 };
             };
@@ -1508,7 +1508,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The imported task; warnings name the agents and skills this machine lacks (FS-001 FR-018). */
+            /** @description The imported task; warnings name the agents and skills this machine lacks. */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -1837,7 +1837,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Events in order; logExpired is true when retention removed the log (D-073). */
+            /** @description Events in order; logExpired is true when retention removed the log. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1866,7 +1866,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description One capture per attempt, in order; logExpired is true when retention removed them (D-073). */
+            /** @description One capture per attempt, in order; logExpired is true when retention removed them. */
             200: {
                 headers: {
                     [name: string]: unknown;

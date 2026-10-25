@@ -46,9 +46,9 @@ esac
 	return path
 }
 
-// FS-004 FR-006, FR-008 (harmflow-app#71): what the probes could not establish reads unknown, never a known state. A
-// sign-in is invalid only when the CLI says it is signed out; a probe that is killed, as one is at its timeout, or that
-// fails otherwise leaves the harness ready with a diagnostic, and the first execution proves the sign-in.
+// harmflow-app#71: what the probes could not establish reads unknown, never a known state. A sign-in is invalid only
+// when the CLI says it is signed out; a probe that is killed, as one is at its timeout, or that fails otherwise leaves
+// the harness ready with a diagnostic, and the first execution proves the sign-in.
 func TestDetectReadsOnlyWhatTheProbesEstablish(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
 	version, signedIn := `echo "codex-cli 0.163.0"`, `echo "Logged in using ChatGPT" >&2`
@@ -105,7 +105,7 @@ func TestParseSuccess(t *testing.T) {
 	if started != 1 || done != 1 || changed != 1 || msgs != 1 || warnings != 1 {
 		t.Errorf("events: started %d done %d changed %d messages %d warnings %d", started, done, changed, msgs, warnings)
 	}
-	// thread.started names the thread only: the attempt's model and effort read not reported (D-105).
+	// thread.started names the thread only: the attempt's model and effort read not reported.
 	if e := events[0]; e.Kind != ports.HarnessStarted || e.SessionID == "" || e.Model != "" || e.Effort != "" {
 		t.Errorf("start: %+v", e)
 	}
@@ -115,8 +115,8 @@ func TestParseSuccess(t *testing.T) {
 	}
 }
 
-// FS-009 FR-005: the CLI's error is redacted before the 2000-character tail cuts it; cut first, a secret would keep
-// part of itself, too little to match its pattern.
+// The CLI's error is redacted before the 2000-character tail cuts it; cut first, a secret would keep part of itself,
+// too little to match its pattern.
 func TestFinishRedactsBeforeTheTail(t *testing.T) {
 	token := "ghp_" + strings.Repeat("a", 36)
 	end := (&parser{}).Finish(2, "Error: "+token+" "+strings.Repeat("y", 1969), false, false)
@@ -197,7 +197,7 @@ func TestParseRateLimit(t *testing.T) {
 	}
 }
 
-// D-068: Codex's sandbox enforces the workspace and the network; per-tool lists it cannot enforce are named.
+// Codex's sandbox enforces the workspace and the network; per-tool lists it cannot enforce are named.
 func TestPrepareSandbox(t *testing.T) {
 	a := &Adapter{Home: t.TempDir()}
 	info := ports.HarnessInfo{Path: "/bin/codex", Features: map[string]bool{"--add-dir": true, "--ephemeral": true}}
@@ -237,8 +237,8 @@ func TestPrepareSandbox(t *testing.T) {
 	}
 }
 
-// FS-004 FR-004, AC-005: a task that sets no model or effort, or sets default, passes Codex no model and no reasoning
-// effort, so those of Codex's own configuration apply. TestPrepareSandbox shows a set model and effort reaching it.
+// A task that sets no model or effort, or sets default, passes Codex no model and no reasoning effort, so those of
+// Codex's own configuration apply. TestPrepareSandbox shows a set model and effort reaching it.
 func TestPrepareLeavesTheDefaultsToCodex(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
 	a := &Adapter{Home: t.TempDir()}
@@ -264,7 +264,7 @@ func TestPrepareLeavesTheDefaultsToCodex(t *testing.T) {
 	}
 }
 
-// D-092: built-ins are read from copies in the execution's directory, never from the app; the user's own items stay put.
+// Built-ins are read from copies in the execution's directory, never from the app; the user's own items stay put.
 func TestPrepareDeliversBuiltins(t *testing.T) {
 	root := t.TempDir()
 	skill := filepath.Join(root, "skills", "hf-x")
@@ -410,8 +410,8 @@ func TestModelsFromCache(t *testing.T) {
 	}
 }
 
-// FS-004 FR-005: with no readable models cache, Codex's capabilities are only declared, so a model or effort other
-// than default cannot be checked and says so; with the cache, it is checked as before and nothing warns.
+// With no readable models cache, Codex's capabilities are only declared, so a model or effort other than default
+// cannot be checked and says so; with the cache, it is checked as before and nothing warns.
 func TestProfileWarningWithoutTheModelsCache(t *testing.T) {
 	codexHome := t.TempDir()
 	t.Setenv("CODEX_HOME", codexHome)
@@ -454,9 +454,9 @@ func TestProfileWarningWithoutTheModelsCache(t *testing.T) {
 	}
 }
 
-// D-113, FS-004 FR-001: a harness is a file whose --version names it. Discovery skips one that does not and takes the
-// next location; a path set by hand that does not is installed but not ready, saying why; Identify refuses both it and
-// a file that cannot be executed.
+// A harness is a file whose --version names it. Discovery skips one that does not and takes the next location; a path
+// set by hand that does not is installed but not ready, saying why; Identify refuses both it and a file that cannot be
+// executed.
 func TestDetectSkipsAFileThatIsNotCodex(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
 	impostor := filepath.Join(t.TempDir(), "codex")

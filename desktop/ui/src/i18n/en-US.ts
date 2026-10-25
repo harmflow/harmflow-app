@@ -1,5 +1,5 @@
 // en-US is the reference resource: pt-BR and es-ES are typed against it, so a missing key fails the type check.
-// Agent text, tool output, and raw logs are never translated (FS-012 FR-005); only these interface texts are.
+// Agent text, tool output, and raw logs are never translated; only these interface texts are.
 export const enUS = {
   app: {
     name: "HarmFlow",

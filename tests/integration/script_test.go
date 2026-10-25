@@ -11,8 +11,8 @@ import (
 	"time"
 )
 
-// Script tasks run a program of the user's instead of a harness session (FS-013). These run the real harmflowd and
-// real programs, across the daemon's process boundary.
+// Script tasks run a program of the user's instead of a harness session. These run the real harmflowd and real
+// programs, across the daemon's process boundary.
 
 func scriptTask(id, body string) string {
 	return fmt.Sprintf(`apiVersion: harmflow/v1alpha1
@@ -74,8 +74,8 @@ func gone(pid int) bool {
 	return false
 }
 
-// FS-013 AC-001 to AC-003, AC-006, AC-008, AC-012, AC-016: a script task is created and imported over the API, runs
-// its program with no shell and no harness, ends by its exit status, and keeps its output marked and redacted.
+// A script task is created and imported over the API, runs its program with no shell and no harness, ends by its exit
+// status, and keeps its output marked and redacted.
 func TestScriptTaskOverTheAPI(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	token := "ghp_" + strings.Repeat("b", 36)
@@ -102,8 +102,8 @@ func TestScriptTaskOverTheAPI(t *testing.T) {
 	if attempts := x["attempts"].([]any); len(attempts) != 1 || attempts[0].(map[string]any)["harness"] != "" {
 		t.Errorf("attempts %v", attempts)
 	}
-	// D-112: each stream keeps its own order, and the events hold the lines in the raw capture's order. Across the two
-	// streams the order is the one they arrived in, which nothing here fixes.
+	// Each stream keeps its own order, and the events hold the lines in the raw capture's order. Across the two streams
+	// the order is the one they arrived in, which nothing here fixes.
 	lines := d.outputLines(id)
 	streams := map[string][]string{}
 	var order []string
@@ -139,7 +139,7 @@ func TestScriptTaskOverTheAPI(t *testing.T) {
 	}
 }
 
-// FS-013 AC-009: cancelling a script execution ends its program and the child it started in the background.
+// Cancelling a script execution ends its program and the child it started in the background.
 func TestScriptCancelEndsItsProcesses(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	dir := t.TempDir()
@@ -156,8 +156,8 @@ func TestScriptCancelEndsItsProcesses(t *testing.T) {
 	}
 }
 
-// FS-013 AC-011: a daemon killed while a script runs leaves the program running in its own group; started again, it
-// marks the execution interrupted and ends what the program left.
+// A daemon killed while a script runs leaves the program running in its own group; started again, it marks the
+// execution interrupted and ends what the program left.
 func TestRestartEndsWhatTheScriptLeft(t *testing.T) {
 	home, dir := t.TempDir(), t.TempDir()
 	d := startDaemon(t, home)

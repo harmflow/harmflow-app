@@ -1,6 +1,6 @@
 // Package httpapi is the local API (contracts/api/openapi.yaml): HTTP on 127.0.0.1 with an SSE stream. Every
 // request carries the per-installation token; a Host that is not loopback (DNS rebinding) or an Origin that is a web
-// page (CSRF) is rejected (D-090, FS-009 FR-005).
+// page (CSRF) is rejected.
 package httpapi
 
 import (
@@ -144,7 +144,7 @@ func (s *Server) Handler() http.Handler {
 }
 
 // guard enforces the Host and Origin checks and the bearer token on every route, the SSE stream included, and records
-// each request it rejects (FS-009 FR-003).
+// each request it rejects.
 func (s *Server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host, _, err := net.SplitHostPort(r.Host)

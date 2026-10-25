@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// FS-004 FR-005: Codex's models cache is read from the daemon's CODEX_HOME, <home>/codex. Without it, a save with a
-// Codex model the daemon cannot check goes through, with a warning at the profile's path; once the cache is there, the
-// same model is refused.
+// Codex's models cache is read from the daemon's CODEX_HOME, <home>/codex. Without it, a save with a Codex model the
+// daemon cannot check goes through, with a warning at the profile's path; once the cache is there, the same model is
+// refused.
 func TestUncheckedCodexModelSavesWithAWarning(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	created := d.call("POST", "/tasks", map[string]any{"yaml": task("pick", "Do it.", "")}, 201)

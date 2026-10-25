@@ -1,5 +1,5 @@
 //! The dashboard window. With the tray enabled, closing it only hides it, and the app leaves the Dock while hidden;
-//! the daemon never stops with it (FS-010 FR-004, FR-005).
+//! the daemon never stops with it.
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;

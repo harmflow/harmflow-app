@@ -471,8 +471,8 @@ body:has([aria-modal="true"]) .tooltip {
   grid-column: 1 / -1;
 }
 
-/* Zoomed to 125% or more (D-110), the window is narrower in CSS pixels than the layout was drawn for: the titles take
-   the first row, and the status and the actions share the second. */
+/* Zoomed to 125% or more, the window is narrower in CSS pixels than the layout was drawn for: the titles take the first
+   row, and the status and the actions share the second. */
 @media (max-width: 960px) {
   .topbar {
     grid-template-columns: minmax(0, 1fr) auto;
@@ -744,7 +744,7 @@ body:has([aria-modal="true"]) .tooltip {
   color: var(--hf-color-danger);
 }
 
-/* No taller than the room the window leaves below the bell, short of 380 pixels when zoomed in (D-110). */
+/* No taller than the room the window leaves below the bell, short of 380 pixels when zoomed in. */
 .notice-list {
   max-height: min(380px, calc(100vh - 280px));
   overflow-y: auto;
@@ -888,7 +888,7 @@ body:has([aria-modal="true"]) .tooltip {
   overflow: hidden;
 }
 
-/* A table wider than the screen, as when zoomed in (D-110), scrolls sideways under a footer that stays in view. */
+/* A table wider than the screen, as when zoomed in, scrolls sideways under a footer that stays in view. */
 .table__scroll {
   overflow-x: auto;
 }
@@ -1849,7 +1849,7 @@ li:last-child .tl-item__rail::before {
   color: var(--hf-color-text-faint);
 }
 
-/* A script's output, each line marked with its stream (FS-013 FR-008). */
+/* A script's output, each line marked with its stream. */
 .script-line__stream {
   display: inline-block;
   min-width: 3.5ch;
@@ -1953,7 +1953,7 @@ li:last-child .tl-item__rail::before {
   margin-bottom: var(--hf-space-2);
 }
 
-/* The prompt and session context an attempt sent, collapsed until asked for (FS-008 FR-008). */
+/* The prompt and session context an attempt sent, collapsed until asked for. */
 .attempt__input {
   display: grid;
   margin-top: var(--hf-space-2);
@@ -1995,7 +1995,7 @@ li:last-child .tl-item__rail::before {
   justify-content: space-between;
 }
 
-/* Chat tab: each attempt's prompt, then the agent's messages, as plain text with their line breaks (FS-008 FR-013). */
+/* Chat tab: each attempt's prompt, then the agent's messages, as plain text with their line breaks. */
 .chat {
   display: grid;
   gap: var(--hf-space-4);
@@ -2249,8 +2249,8 @@ li:last-child .tl-item__rail::before {
   gap: 2px;
 }
 
-/* Zoomed to 125% or more (D-110), the tiles and the legend take two columns, and the estimate drops to the size of the
-   other figures: "US$ 0,0049" keeps its space unbroken. */
+/* Zoomed to 125% or more, the tiles and the legend take two columns, and the estimate drops to the size of the other
+   figures: "US$ 0,0049" keeps its space unbroken. */
 @media (max-width: 960px) {
   .costs__tiles {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2507,7 +2507,7 @@ button.queue-item:hover,
   text-overflow: ellipsis;
 }
 
-/* The time goes to a line of its own when the item is narrow, as when zoomed in (D-110). */
+/* The time goes to a line of its own when the item is narrow, as when zoomed in. */
 .queue-item__when {
   display: flex;
   flex-wrap: wrap;
@@ -3194,7 +3194,7 @@ button.queue-item:hover,
   gap: var(--hf-space-3);
 }
 
-/* The actions move below the task's name and details when the row cannot hold both, as when zoomed in (D-110). */
+/* The actions move below the task's name and details when the row cannot hold both, as when zoomed in. */
 .task-row {
   display: flex;
   flex-wrap: wrap;
@@ -3618,8 +3618,8 @@ button.queue-item:hover,
 
 /* ---------- Onboarding and daemon down ---------- */
 
-/* The card centres by its margins, not by align-items: a card taller than the window, as when zoomed in (D-110),
-   then starts at the top and scrolls, where centring would push its top out of reach. */
+/* The card centres by its margins, not by align-items: a card taller than the window, as when zoomed in, then starts at
+   the top and scrolls, where centring would push its top out of reach. */
 .onboarding,
 .daemon-down {
   display: flex;

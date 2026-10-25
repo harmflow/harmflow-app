@@ -1,5 +1,5 @@
-// Package tools reports Git and the GitHub CLI, which the built-in GitHub skills use with the user's own login
-// (FS-006 FR-002). HarmFlow never installs or signs in to them.
+// Package tools reports Git and the GitHub CLI, which the built-in GitHub skills use with the user's own login.
+// HarmFlow never installs or signs in to them.
 package tools
 
 import (

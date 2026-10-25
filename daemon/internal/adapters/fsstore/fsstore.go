@@ -1,5 +1,5 @@
 // Package fsstore keeps task YAML, operational JSON state, and execution records on the file system, with atomic
-// writes: a temporary file in the same directory, synced, then renamed over the target (ADR-007, FS-001 FR-007).
+// writes: a temporary file in the same directory, synced, then renamed over the target.
 package fsstore
 
 import (
@@ -18,7 +18,7 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
-// WritePoint names a step of WriteAtomic where a crash test holds a write, to kill the process there (FS-001 AC-009).
+// WritePoint names a step of WriteAtomic where a crash test holds a write, to kill the process there.
 type WritePoint string
 
 const (
@@ -243,7 +243,7 @@ func (s *State) Save(name string, v any) error {
 	return WriteAtomic(filepath.Join(s.dir, name+".json"), append(data, '\n'), 0o600)
 }
 
-// Executions is the ExecutionRepository: one JSON record per execution, kept with no time limit (D-073).
+// Executions is the ExecutionRepository: one JSON record per execution, kept with no time limit.
 type Executions struct {
 	dir string
 }

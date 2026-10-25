@@ -106,7 +106,7 @@ describe("costs", () => {
     const a = attemptCost(codexRun(undefined, ""));
     expect(a.source).toBe("unpriced");
     expect(a.modelSource).toBeUndefined();
-    // Codex reported no model, and the configured default never stands in for one (D-105).
+    // Codex reported no model, and the configured default never stands in for one.
     expect(a.model).toBeUndefined();
     expect(a.cost).toBeUndefined();
     expect(a.tokens?.cacheRead).toBe(135680);

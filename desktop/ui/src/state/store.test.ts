@@ -1,6 +1,6 @@
 // Follows the daemon's event stream as the dashboard does, against a stand-in for the daemon's local API: when a
 // harness's check ends, the inventory is read again, once for a burst of checks, and never detected again, which
-// would announce another check (FS-004 FR-007, AC-011).
+// would announce another check.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StreamHandlers } from "../api/transport";
 import type { HarmflowEvent, Harness } from "../api/types";
@@ -58,7 +58,7 @@ describe("event stream", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it("reads the inventory again when a harness's check ends, without detecting again (FS-004 AC-011)", async () => {
+  it("reads the inventory again when a harness's check ends, without detecting again", async () => {
     startSync();
     await vi.advanceTimersByTimeAsync(0);
     daemon.requests.length = 0;

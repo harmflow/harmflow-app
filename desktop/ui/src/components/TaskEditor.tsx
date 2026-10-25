@@ -1,5 +1,5 @@
 // Creating and editing a task through the form or the YAML editor. Both are views of one definition, validated by the
-// one schema the daemon applies (FS-001 FR-002, FR-011); the daemon is the only writer (FR-004).
+// one schema the daemon applies; the daemon is the only writer.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ApiError, api } from "../api/client";

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harmflow.com/schemas/v1alpha1/event.schema.json",
   "title": "HarmFlow event",
-  "description": "A normalized event, as written to one JSONL file per execution and delivered on the SSE stream (ADR-004, ADR-007). Event types are object.action in snake_case (D-094).",
+  "description": "A normalized event, as written to one JSONL file per execution and delivered on the SSE stream. Event types are object.action in snake_case.",
   "type": "object",
   "additionalProperties": false,
   "required": ["id", "schemaVersion", "timestamp", "type", "severity"],
@@ -22,11 +22,11 @@
     "type": { "$ref": "#/$defs/eventType" },
     "severity": { "type": "string", "enum": ["debug", "info", "warning", "error"] },
     "message": {
-      "description": "Short text: the daemon's own in en-US, beside its messageKey, or the agent's text, tool output, and a script's output in their original language, which are never translated (FS-012 FR-005). The dashboard translates the label of the type. A script.output event carries one line of the program's output, with its stream in payload.stream: stdout or stderr (FS-013 FR-008).",
+      "description": "Short text: the daemon's own in en-US, beside its messageKey, or the agent's text, tool output, and a script's output in their original language, which are never translated. The dashboard translates the label of the type. A script.output event carries one line of the program's output, with its stream in payload.stream: stdout or stderr.",
       "type": "string"
     },
     "messageKey": {
-      "description": "One of MessageKey in contracts/api/openapi.yaml: the dashboard shows the message in the interface's language from it and params (D-099).",
+      "description": "One of MessageKey in contracts/api/openapi.yaml: the dashboard shows the message in the interface's language from it and params.",
       "type": "string",
       "pattern": "^[a-z][a-z0-9_]*$"
     },
@@ -36,7 +36,7 @@
       "additionalProperties": { "type": "string" }
     },
     "payload": {
-      "description": "An error in the payload is a text too: error in en-US, with errorKey and errorParams beside it. A harness.checked event, sent when a harness's check ends, carries the readiness found in payload.readiness, and no message (D-102).",
+      "description": "An error in the payload is a text too: error in en-US, with errorKey and errorParams beside it. A harness.checked event, sent when a harness's check ends, carries the readiness found in payload.readiness, and no message.",
       "type": "object"
     }
   },

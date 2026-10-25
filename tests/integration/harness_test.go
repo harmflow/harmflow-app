@@ -21,8 +21,8 @@ func (d *daemon) harness(id string) map[string]any {
 	return nil
 }
 
-// FS-004 FR-006 (harmflow-app#71): a sign-in the probe could not establish reads unknown, not signed out. The harness is
-// ready with a diagnostic, and a task on it starts, so the first execution proves the sign-in.
+// harmflow-app#71: a sign-in the probe could not establish reads unknown, not signed out. The harness is ready with a
+// diagnostic, and a task on it starts, so the first execution proves the sign-in.
 func TestUnknownSignInIsReady(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	path := standInClaude(t, `auth) echo '{"loggedIn": true}'; exit 0 ;;`,
@@ -43,8 +43,8 @@ func TestUnknownSignInIsReady(t *testing.T) {
 	}
 }
 
-// FS-004 FR-008 (harmflow-app#71): a version the probe could not read is unknown, never supported. The harness runs,
-// and each execution records that its version is unknown, as one on an untested newer version does.
+// harmflow-app#71: a version the probe could not read is unknown, never supported. The harness runs, and each execution
+// records that its version is unknown, as one on an untested newer version does.
 func TestUnknownVersionRunsWithAWarning(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	path := standInClaude(t, `--version) echo "2.1.239 (Claude Code)"; exit 0 ;;`,

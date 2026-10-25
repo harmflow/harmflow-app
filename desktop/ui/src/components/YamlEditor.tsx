@@ -1,5 +1,5 @@
-// The advanced YAML editor of a task (FS-001 FR-002). It edits text only; validation is the daemon's, the same as the
-// form's and the import's.
+// The advanced YAML editor of a task. It edits text only; validation is the daemon's, the same as the form's and the
+// import's.
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { yaml } from "@codemirror/lang-yaml";
 import { HighlightStyle, bracketMatching, indentOnInput, syntaxHighlighting } from "@codemirror/language";

@@ -1,6 +1,6 @@
 // Package procutil runs one harness process in its own process group, streams its stdout line by line, keeps the
 // tail of its stderr, and on cancellation ends every process the harness started, inside its group or not: a graceful
-// SIGTERM, then SIGKILL after the grace period, so no orphan survives (FS-003 FR-005).
+// SIGTERM, then SIGKILL after the grace period, so no orphan survives.
 package procutil
 
 import (
@@ -23,7 +23,7 @@ import (
 
 // outputDelay bounds the wait for the end of the process's output once the process has exited. A process it left
 // running outside its group can keep the pipes open; past the bound, the output is taken as ended, so the execution
-// ends, frees its task, and lets the daemon stop (FS-003 FR-005).
+// ends, frees its task, and lets the daemon stop.
 const outputDelay = 2 * time.Second
 
 // Process is a started invocation, in a process group of its own, with its exit status and the tail of its stderr.
@@ -46,8 +46,8 @@ func Start(inv ports.Invocation, raw io.Writer, onLine func([]byte)) (*Process, 
 
 // StartLines is Start with stderr read line by line too: onStderr, when given, receives each stderr line, and the
 // tail is still kept. One goroutine records every line, so raw and the callbacks hold the lines in one order: each
-// stream's own, and across the two the order they arrived (FS-013 FR-008, D-112). The process counts as done once
-// both streams are drained and recorded, or once outputDelay has passed since it exited.
+// stream's own, and across the two the order they arrived. The process counts as done once both streams are drained
+// and recorded, or once outputDelay has passed since it exited.
 func StartLines(inv ports.Invocation, raw io.Writer, onStdout, onStderr func([]byte)) (*Process, error) {
 	cmd := exec.Command(inv.Path, inv.Args...)
 	cmd.Dir = inv.Dir
@@ -370,8 +370,8 @@ func Executable(path string) bool {
 }
 
 // IdentifyHarness checks that path is the harness named harness: an executable file whose --version output, which it
-// returns, names it as names says, where cli is the command's own name (D-113, FS-004 FR-001). A file that prints a
-// harness's name passes: this catches a wrong file, not an impostor.
+// returns, names it as names says, where cli is the command's own name. A file that prints a harness's name passes:
+// this catches a wrong file, not an impostor.
 func IdentifyHarness(ctx context.Context, env []string, path, harness, cli string, names func(string) bool) (string, error) {
 	if !Executable(path) {
 		return "", domain.TextErr("harness_path_not_executable", "no executable file at {{path}}", "path", path)

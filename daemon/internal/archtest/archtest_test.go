@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-// TestImportRules checks every production file of the daemon against the rules (ADR-001). Each failure names the file,
-// the import, and the rule it breaks; an allowlist entry that matches no import fails too, so the list only shrinks.
+// TestImportRules checks every production file of the daemon against the rules. Each failure names the file, the
+// import, and the rule it breaks; an allowlist entry that matches no import fails too, so the list only shrinks.
 func TestImportRules(t *testing.T) {
 	root := filepath.Join("..", "..")
 	module, err := modulePath(filepath.Join(root, "go.mod"))

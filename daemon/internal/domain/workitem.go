@@ -3,8 +3,8 @@ package domain
 import "time"
 
 // WorkItemStatus is the daemon's view of a task's work item, built from the reports its sessions leave. The daemon
-// never discovers or selects work itself (D-064); it keeps the history the skills read to skip processed items and to
-// apply the retry and resume limits.
+// never discovers or selects work itself; it keeps the history the skills read to skip processed items and to apply
+// the retry and resume limits.
 type WorkItemStatus string
 
 // The statuses of a work item, as WorkItem in contracts/api/openapi.yaml names them.
@@ -34,14 +34,14 @@ type WorkItem struct {
 	UpdatedAt       time.Time      `json:"updatedAt"`
 }
 
-// Limits of a task's work items (D-082).
+// Limits of a task's work items.
 type WorkItemLimits struct {
 	MaxResumeAttempts int
 	MaxFailedRetries  int
 }
 
 // ApplyResult folds one execution's result for the item into the ledger entry. A failure counts toward the retry
-// limit, a resumption toward the resume limit; past either, the item needs a human (FS-007 FR-006, FR-011).
+// limit, a resumption toward the resume limit; past either, the item needs a human.
 func (w *WorkItem) ApplyResult(r WorkItemResult, executionID string, limits WorkItemLimits, now time.Time) {
 	if r.Title != "" {
 		w.Title = r.Title
@@ -76,14 +76,14 @@ func (w *WorkItem) ApplyResult(r WorkItemResult, executionID string, limits Work
 	default:
 		w.Status = WorkItemCompleted
 		if w.TestsStatus == "failed" {
-			// a draft PR with failing tests stays eligible for resumption (D-032, FS-007 FR-003)
+			// a draft PR with failing tests stays eligible for resumption
 			w.Status = WorkItemInProgress
 		}
 	}
 	w.enforceLimits(limits)
 }
 
-// ApplyInterruption counts an interruption as an operational failure (D-089).
+// ApplyInterruption counts an interruption as an operational failure.
 func (w *WorkItem) ApplyInterruption(executionID, lastOperation string, limits WorkItemLimits, now time.Time) {
 	w.Failures++
 	w.Status = WorkItemFailed

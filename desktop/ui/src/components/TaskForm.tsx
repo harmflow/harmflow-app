@@ -1,5 +1,5 @@
-// The visual form of a task (FS-001 FR-001): the fields common to every task, then the parameters of its type
-// (FR-008). Each field writes into the task document; a cleared field is removed so its default applies (D-082).
+// The visual form of a task: the fields common to every task, then the parameters of its type. Each field writes into
+// the task document; a cleared field is removed so its default applies.
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
@@ -90,7 +90,7 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
 
   const type = get<string>(["spec", "type"]) ?? "general";
   const isGithub = type === "github-issue-implementation";
-  // A script task runs a program instead of a harness session: no prompt, agents, skills, or harness (FS-013 FR-013).
+  // A script task runs a program instead of a harness session: no prompt, agents, skills, or harness.
   const isScript = type === "script";
 
   const setName = (name: string) => {
@@ -122,7 +122,7 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
           <TextArea rows={2} value={get<string>(["metadata", "description"]) ?? ""} onChange={(e) => set(["metadata", "description"], e.target.value)} />
         </Field>
         <div className="grid-2">
-          {/* The type is chosen in the template picker and fixed from then on (FS-001 FR-020). */}
+          {/* The type is chosen in the template picker and fixed from then on. */}
           <Field label={t("tasks.fields.type")} error={err(["spec", "type"])}>
             <TextInput value={t(`tasks.types.${type}` as never, { defaultValue: type }) as string} disabled />
           </Field>
@@ -307,7 +307,7 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
 
 type SetFn = (path: Path, value: unknown) => void;
 
-/** A script task's program, in either form, its working directory, environment, and systems (FS-013 FR-003, FR-004, FR-014). */
+/** A script task's program, in either form, its working directory, environment, and systems. */
 function ScriptFields({ doc, onChange, set, err }: { doc: Doc; onChange: (doc: Doc) => void; set: SetFn; err: (path: Path) => string | undefined }) {
   const { t } = useTranslation();
   const kind = programKind(doc);
@@ -376,7 +376,7 @@ function ScriptFields({ doc, onChange, set, err }: { doc: Doc; onChange: (doc: D
   );
 }
 
-/** An argument list, one argument per line, kept as typed: spaces inside an argument are its own (FS-013 FR-003). */
+/** An argument list, one argument per line, kept as typed: spaces inside an argument are its own. */
 function ArgsArea({ value, onValue, rows, placeholder }: { value: unknown; onValue: (v: string[] | undefined) => void; rows: number; placeholder?: string }) {
   const [text, setText] = useState(listToLines(value));
   useEffect(() => {

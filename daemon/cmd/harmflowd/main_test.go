@@ -125,7 +125,7 @@ func TestHoldsBuiltinSkill(t *testing.T) {
 	}
 }
 
-// run serves the local API on a goroutine; none may outlive the test that started it (D-132).
+// run serves the local API on a goroutine; none may outlive the test that started it.
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m)
 }

@@ -1,4 +1,4 @@
-// Locale-aware formatting of dates, times, durations, and sizes (FS-012 FR-006).
+// Locale-aware formatting of dates, times, durations, and sizes.
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;

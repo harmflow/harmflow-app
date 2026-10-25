@@ -1,8 +1,7 @@
 //! Finding, reaching, and starting the HarmFlow daemon.
 //!
 //! The daemon writes its address to a runtime file only the user can read and keeps the API token in the
-//! Keychain (D-090). The desktop reads both and holds the token here, in the Rust core, so it never reaches the
-//! webview (FS-009 FR-005).
+//! Keychain. The desktop reads both and holds the token here, in the Rust core, so it never reaches the webview.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -285,7 +284,7 @@ fn target_triple() -> &'static str {
     }
 }
 
-/// Starts the daemon detached in its own process group, so it outlives the window and the app (FS-010 FR-004).
+/// Starts the daemon detached in its own process group, so it outlives the window and the app.
 pub fn spawn_daemon() -> Result<(), String> {
     let bin = daemon_binary().ok_or_else(|| "the harmflowd binary was not found".to_string())?;
     let home = std::env::var_os("HARMFLOW_HOME").filter(|v| !v.is_empty());
@@ -343,8 +342,8 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// The daemon `daemon_start` launches leads a process group of its own, apart from the app's (FS-010 FR-004). The
-    /// stand-in for harmflowd comes as a path, so no process-wide variable is touched.
+    /// The daemon `daemon_start` launches leads a process group of its own, apart from the app's. The stand-in for
+    /// harmflowd comes as a path, so no process-wide variable is touched.
     #[cfg(unix)]
     #[test]
     fn daemon_starts_in_its_own_process_group() {
@@ -409,9 +408,8 @@ mod tests {
         assert!(out.status.success(), "security {}: {}", args[0], String::from_utf8_lossy(&out.stderr));
     }
 
-    /// FS-009 FR-011: the desktop reads the token the daemon keeps in the Keychain, the item of service
-    /// com.harmflow.local-api and account token, written by the same security CLI. A throwaway keychain holds it, never
-    /// the login keychain (#79).
+    /// The desktop reads the token the daemon keeps in the Keychain, the item of service com.harmflow.local-api and
+    /// account token, written by the same security CLI. A throwaway keychain holds it, never the login keychain (#79).
     #[cfg(target_os = "macos")]
     #[test]
     fn token_is_read_from_the_keychain() {

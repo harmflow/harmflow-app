@@ -2,7 +2,7 @@ package domain
 
 import "time"
 
-// Event types of contracts/schemas/event.schema.json (D-094).
+// Event types of contracts/schemas/event.schema.json.
 const (
 	EventDaemonStarted           = "daemon.started"
 	EventDaemonStopping          = "daemon.stopping"
@@ -70,9 +70,8 @@ const (
 // EventSchemaVersion is the schemaVersion of every event, the const of contracts/schemas/event.schema.json.
 const EventSchemaVersion = "1"
 
-// Event is a normalized event (architecture/event-model.md). Agent text and tool output keep their original
-// language; the dashboard translates the label of Type, and a message the daemon wrote from its MessageKey and
-// Params (FS-012 FR-005).
+// Event is a normalized event. Agent text and tool output keep their original language; the dashboard translates the
+// label of Type, and a message the daemon wrote from its MessageKey and Params.
 type Event struct {
 	ID            int64             `json:"id"`
 	SchemaVersion string            `json:"schemaVersion"`

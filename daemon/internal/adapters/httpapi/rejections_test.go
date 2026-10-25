@@ -127,8 +127,8 @@ func status(reason string) int {
 	return 403
 }
 
-// FS-009 FR-003, AC-003: thousands of rejected requests add at most one entry per reason per minute, each with the
-// count of the requests it stands for; an accepted request adds none.
+// Thousands of rejected requests add at most one entry per reason per minute, each with the count of the requests it
+// stands for; an accepted request adds none.
 func TestAFloodOfRejectionsIsBounded(t *testing.T) {
 	clock := &fakeClock{now: time.Date(2026, 10, 22, 8, 0, 0, 0, time.UTC)}
 	start := clock.Now().Format(time.RFC3339)

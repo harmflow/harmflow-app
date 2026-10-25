@@ -1,6 +1,6 @@
-//! The live event stream (ADR-004): one SSE connection to the daemon, forwarded to the webview as Tauri events.
-//! It reconnects on its own and resumes after the last event id it delivered, so nothing is lost while the window is
-//! closed or the daemon restarts (FS-008 FR-003, FR-007).
+//! The live event stream: one SSE connection to the daemon, forwarded to the webview as Tauri events. It reconnects
+//! on its own and resumes after the last event id it delivered, so nothing is lost while the window is closed or the
+//! daemon restarts.
 
 use std::sync::Arc;
 use std::time::Duration;

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Prints one part's coverage reading as Markdown, for the run summary of the nightly Coverage workflow, beside the
-# floors that hold it (ADR-015), and writes the part's HTML report into build/coverage. It reads what
+# floors that hold it, and writes the part's HTML report into build/coverage. It reads what
 # `make coverage-daemon` or `make coverage-desktop` left, from the data the floors use: the checker's table for the
 # daemon, desktop/ui/coverage/coverage-summary.json for the interface, and cargo llvm-cov's JSON summary for the
 # shell. Ratios are truncated to two decimals and computed from the counts; no figure is added up. It fails on no

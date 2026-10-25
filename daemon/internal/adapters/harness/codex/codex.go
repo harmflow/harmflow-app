@@ -1,6 +1,6 @@
 // Package codex is the HarnessRunner adapter of the OpenAI Codex CLI: `codex exec --json`, with the permission
-// profile translated to Codex's own sandbox modes (D-068). Codex has no session plugin mechanism, so built-in
-// agents and skills are delivered as files of the execution and named in the session's instructions (D-092).
+// profile translated to Codex's own sandbox modes. Codex has no session plugin mechanism, so built-in agents and
+// skills are delivered as files of the execution and named in the session's instructions.
 package codex
 
 import (
@@ -94,7 +94,7 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 	candidates := found
 	switch {
 	case manualPath != "":
-		// A path set by hand is offered with the installations found, once (FS-004 FR-001).
+		// A path set by hand is offered with the installations found, once.
 		if !slices.Contains(found, manualPath) {
 			info.Installations = append(info.Installations, manualPath)
 		}
@@ -109,7 +109,7 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 			"codex was not found on PATH, in Codex.app, or in the usual install locations"))
 		return info
 	}
-	// Discovery takes the first file that names Codex, skipping one that does not (D-113, FS-004 FR-001).
+	// Discovery takes the first file that names Codex, skipping one that does not.
 	out, chosen, err := a.firstIdentified(ctx, candidates)
 	info.Installation, info.Path = chosen, chosen
 	if manualPath == "" {
@@ -186,7 +186,7 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 // identifies reports whether the output of --version names Codex, as "codex-cli 0.163.0" does.
 func identifies(out string) bool { return strings.Contains(strings.ToLower(out), "codex") }
 
-// Identify checks that path is an executable file whose --version output names Codex (D-113, FS-004 FR-001).
+// Identify checks that path is an executable file whose --version output names Codex.
 func (a *Adapter) Identify(ctx context.Context, path string) error {
 	_, err := procutil.IdentifyHarness(ctx, a.Env, path, Name, "codex", identifies)
 	return err
@@ -678,7 +678,7 @@ func (p *parser) Finish(exitCode int, stderrTail string, timedOut, cancelled boo
 			"code", strconv.Itoa(exitCode))
 		text = end.Error.Message
 	} else {
-		// Redacted before the tail cuts it, so no secret is cut short of its pattern (FS-009 FR-005).
+		// Redacted before the tail cuts it, so no secret is cut short of its pattern.
 		end.Error = domain.Text{Message: classify.Tail(eventlog.Redact(text), 2000)}
 	}
 	end.Class = patterns.Text(text)

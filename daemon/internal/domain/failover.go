@@ -2,8 +2,8 @@ package domain
 
 import "time"
 
-// ErrorClass is what an adapter observed when an attempt ended (FS-005 FR-004). Adapters classify from real
-// signals only; anything they cannot tell apart is ClassTaskError or ClassUnknown, never quota.
+// ErrorClass is what an adapter observed when an attempt ended. Adapters classify from real signals only; anything
+// they cannot tell apart is ClassTaskError or ClassUnknown, never quota.
 type ErrorClass string
 
 // The classes of an attempt's end; ClassNone is an attempt that ended with no error.
@@ -55,8 +55,8 @@ type FailoverInput struct {
 	MaxRateRetries   int
 }
 
-// DecideAfterAttempt applies D-067: quota and an unavailable harness fail over along the chain, a temporary rate
-// limit retries on the same harness, and network failures, timeouts, and task errors never fail over.
+// DecideAfterAttempt applies the failover rule: quota and an unavailable harness fail over along the chain, a
+// temporary rate limit retries on the same harness, and network failures, timeouts, and task errors never fail over.
 func DecideAfterAttempt(in FailoverInput) Action {
 	switch in.End.Class {
 	case ClassNone:
@@ -84,7 +84,7 @@ func DecideAfterAttempt(in FailoverInput) Action {
 }
 
 // RateLimitWait returns the wait before retry n (0-based): the time the harness indicated, otherwise the initial
-// wait doubling up to the maximum (D-082).
+// wait doubling up to the maximum.
 func RateLimitWait(n int, indicated, initial, max time.Duration) time.Duration {
 	if indicated > 0 {
 		if indicated > max {

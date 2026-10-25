@@ -1,5 +1,5 @@
 // The notices name their execution where the shell looks for it on a click (desktop/src-tauri/src/notice.rs), and the
-// zoom reaches the web view as its scale (D-110).
+// zoom reaches the web view as its scale.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { native } from "./native";
 

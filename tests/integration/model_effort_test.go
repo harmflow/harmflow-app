@@ -114,10 +114,10 @@ func checkConfigured(t *testing.T, what string, at map[string]any, model, effort
 	}
 }
 
-// FS-004 FR-004, AC-005: a task that sets no model or effort runs Claude Code with neither --model nor --effort, so the
-// CLI's own defaults apply, and its attempt keeps default for both. One that sets model sonnet and effort high runs it
-// with --model sonnet and --effort high, and its attempt keeps them. The attempt's model is the one the harness reports
-// (D-105), whichever was configured.
+// A task that sets no model or effort runs Claude Code with neither --model nor --effort, so the CLI's own defaults
+// apply, and its attempt keeps default for both. One that sets model sonnet and effort high runs it with --model sonnet
+// and --effort high, and its attempt keeps them. The attempt's model is the one the harness reports, whichever was
+// configured.
 func TestModelAndEffortReachTheHarness(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	d.call("PUT", "/harnesses/claude-code", map[string]any{"path": recordingStandIn(t, "fake-claude", "claude")}, 200)
@@ -142,9 +142,9 @@ func TestModelAndEffortReachTheHarness(t *testing.T) {
 	}
 }
 
-// FS-004 FR-005, AC-006: saving a task checks its model and effort with the real adapters, against Codex's models cache
-// and Claude Code's --help. An unsupported value is refused with 422 at the profile's path, and the task file keeps its
-// bytes: nothing is saved in its place. A supported change is saved, and the next execution runs with it.
+// Saving a task checks its model and effort with the real adapters, against Codex's models cache and Claude Code's
+// --help. An unsupported value is refused with 422 at the profile's path, and the task file keeps its bytes: nothing is
+// saved in its place. A supported change is saved, and the next execution runs with it.
 func TestChangedProfileIsValidatedAndAppliedNextRun(t *testing.T) {
 	home := t.TempDir()
 	// The daemon's CODEX_HOME is <home>/codex. Its cache offers one model, which accepts the efforts low and high.

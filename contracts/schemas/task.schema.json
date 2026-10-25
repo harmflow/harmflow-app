@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harmflow.com/schemas/v1alpha1/task.schema.json",
   "title": "HarmFlow task",
-  "description": "One general-purpose automation, stored as one YAML file per task (D-070). Keys are camelCase, closed-set values snake_case, identifiers of named things kebab-case (D-094). Defaults are those of D-082.",
+  "description": "One general-purpose automation, stored as one YAML file per task. Keys are camelCase, closed-set values snake_case, identifiers of named things kebab-case.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -54,7 +54,7 @@
       }
     },
     "taskType": {
-      "description": "github-issue-implementation takes repositories (FS-006, FS-007); general takes no type parameters (D-060); script runs a program of the user's instead of a harness session (FS-013).",
+      "description": "github-issue-implementation takes repositories; general takes no type parameters; script runs a program of the user's instead of a harness session.",
       "type": "string",
       "enum": [
         "github-issue-implementation",
@@ -63,7 +63,7 @@
       ]
     },
     "spec": {
-      "description": "Every type but script needs a prompt and a harness; a script task takes neither, nor agents, skills, or a workspace (FS-013 FR-002).",
+      "description": "Every type but script needs a prompt and a harness; a script task takes neither, nor agents, skills, or a workspace.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -78,7 +78,7 @@
           "$ref": "#/$defs/taskType"
         },
         "prompt": {
-          "description": "The instructions given to the harness at the start of each execution (D-066).",
+          "description": "The instructions given to the harness at the start of each execution.",
           "type": "string",
           "minLength": 1
         },
@@ -210,7 +210,7 @@
       }
     },
     "schedule": {
-      "description": "A 5-field cron expression or a simple interval, never both; no seconds field (D-071). A task with no schedule runs only by manual trigger.",
+      "description": "A 5-field cron expression or a simple interval, never both; no seconds field. A task with no schedule runs only by manual trigger.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -251,7 +251,7 @@
       }
     },
     "concurrency": {
-      "description": "One execution per task (D-023). A firing that arrives while the task runs waits or is skipped (D-072).",
+      "description": "One execution per task. A firing that arrives while the task runs waits or is skipped.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -289,7 +289,7 @@
           "default": "default"
         },
         "effort": {
-          "description": "A reasoning effort the installed harness accepts; default leaves the harness's own default. Translated per adapter (ADR-009).",
+          "description": "A reasoning effort the installed harness accepts; default leaves the harness's own default. Translated per adapter.",
           "type": "string",
           "minLength": 1,
           "default": "default"
@@ -311,7 +311,7 @@
           "additionalProperties": false,
           "properties": {
             "on": {
-              "description": "What triggers a failover (D-067). Rate limits retry on the same harness.",
+              "description": "What triggers a failover. Rate limits retry on the same harness.",
               "type": "array",
               "items": {
                 "type": "string",
@@ -343,7 +343,7 @@
       }
     },
     "permissions": {
-      "description": "Translated to each harness's native controls (D-068); a restriction a harness cannot enforce runs with a policy.unenforced warning.",
+      "description": "Translated to each harness's native controls; a restriction a harness cannot enforce runs with a policy.unenforced warning.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -389,7 +389,7 @@
               "uniqueItems": true
             },
             "writablePaths": {
-              "description": "Each takes ~ and ${VARIABLE}, and must lead inside the home folder, a mounted volume, or an allowed folder of Settings, and into no place a harness may not write (D-113, FS-009 FR-014).",
+              "description": "Each takes ~ and ${VARIABLE}, and must lead inside the home folder, a mounted volume, or an allowed folder of Settings, and into no place a harness may not write.",
               "type": "array",
               "items": {
                 "type": "string",
@@ -406,7 +406,7 @@
       "additionalProperties": false,
       "properties": {
         "timeoutMinutes": {
-          "description": "Covers the whole execution, shared by all its attempts (D-067).",
+          "description": "Covers the whole execution, shared by all its attempts.",
           "type": "integer",
           "minimum": 1,
           "maximum": 1440,
@@ -445,7 +445,7 @@
       }
     },
     "notifiableEvent": {
-      "description": "Event types a task may be notified about; the names of event.schema.json (D-094).",
+      "description": "Event types a task may be notified about; the names of event.schema.json.",
       "type": "string",
       "enum": [
         "execution.started",
@@ -515,7 +515,7 @@
       }
     },
     "githubIssueImplementation": {
-      "description": "Parameters of the github-issue-implementation type. Which issues are eligible is written in the prompt; there is no filter syntax (D-093).",
+      "description": "Parameters of the github-issue-implementation type. Which issues are eligible is written in the prompt; there is no filter syntax.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -591,7 +591,7 @@
       }
     },
     "argumentList": {
-      "description": "A program and its arguments, started with no shell, so no argument is expanded or split. The program, first, is a name looked up on the PATH of its environment or an absolute path, never a relative one, and alone takes ~ and ${VARIABLE} (D-113).",
+      "description": "A program and its arguments, started with no shell, so no argument is expanded or split. The program, first, is a name looked up on the PATH of its environment or an absolute path, never a relative one, and alone takes ~ and ${VARIABLE}.",
       "type": "array",
       "prefixItems": [
         {
@@ -605,7 +605,7 @@
       "minItems": 1
     },
     "script": {
-      "description": "Parameters of the script type: either command, started directly with no shell, or inline, a script run through its interpreter, never both (FS-013 FR-003).",
+      "description": "Parameters of the script type: either command, started directly with no shell, or inline, a script run through its interpreter, never both.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -649,7 +649,7 @@
           }
         },
         "systems": {
-          "description": "The operating systems the task runs on; every system when absent (FS-013 FR-014).",
+          "description": "The operating systems the task runs on; every system when absent.",
           "type": "array",
           "items": {
             "type": "string",

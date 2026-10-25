@@ -74,9 +74,9 @@ func uncheckedAt(warnings []domain.Warning, path string) bool {
 	return false
 }
 
-// FS-004 FR-005: with no readable models cache, a Codex model or effort other than default is saved, as the preferred
-// harness and as a fallback, with a warning at the profile's path that it was not checked; a default profile saves
-// with no such warning. With the cache, an unknown model or effort is refused as before.
+// With no readable models cache, a Codex model or effort other than default is saved, as the preferred harness and as
+// a fallback, with a warning at the profile's path that it was not checked; a default profile saves with no such
+// warning. With the cache, an unknown model or effort is refused as before.
 func TestUncheckedCodexProfileSavesWithAWarning(t *testing.T) {
 	a, codexHome := newCodexApp(t)
 	saved, err := a.CreateTask(t.Context(), TaskInput{YAML: codexTaskYAML("pick", "      model: no-such-model\n      effort: ultra\n")})

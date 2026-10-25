@@ -1,5 +1,5 @@
 // The task form edits the task document itself, field by field. A field the user clears is removed, so the document —
-// and the YAML the daemon writes from it — holds only what the user set; defaults stay implicit (D-082).
+// and the YAML the daemon writes from it — holds only what the user set; defaults stay implicit.
 import type { Catalog } from "../api/types";
 
 export type Doc = Record<string, unknown>;
@@ -108,7 +108,7 @@ export function newTaskDocument(kind: TemplateKind, catalog: Catalog | undefined
   };
 }
 
-/** Which form a script task's program takes: an argument list, or an inline script (FS-013 FR-003). */
+/** Which form a script task's program takes: an argument list, or an inline script. */
 export function programKind(doc: Doc): "command" | "inline" {
   return getIn(doc, ["spec", "script", "inline"]) !== undefined ? "inline" : "command";
 }

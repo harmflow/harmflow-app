@@ -226,7 +226,7 @@ export function Gauge({ label, value, max, text }: { label: string; value?: numb
   );
 }
 
-/** An indeterminate activity line: work is happening, with no invented percentage (FS-008 FR-009). */
+/** An indeterminate activity line: work is happening, with no invented percentage. */
 export function ScanBar({ active, tone = "cyan" }: { active: boolean; tone?: Tone }) {
   return (
     <div className={cx("scanbar", active && "scanbar--active", `scanbar--${tone}`)} aria-hidden="true">

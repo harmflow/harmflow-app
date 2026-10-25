@@ -9,7 +9,7 @@ import (
 )
 
 // Notification is a notice for the user. The daemon only records and emits it; the tray process of the desktop shows
-// it natively, and one nobody could show is held as unread until the dashboard opens (D-074).
+// it natively, and one nobody could show is held as unread until the dashboard opens.
 type Notification struct {
 	ID          string            `json:"id"`
 	CreatedAt   time.Time         `json:"createdAt"`
@@ -23,7 +23,7 @@ type Notification struct {
 	Params      map[string]string `json:"params"`
 }
 
-// maxNotifications is the size read notices are trimmed to; unread ones are never trimmed (FS-011 FR-005).
+// maxNotifications is the size read notices are trimmed to; unread ones are never trimmed.
 const maxNotifications = 500
 
 // failureEvents pass the "failures and attention only" level.
@@ -38,7 +38,7 @@ var reasonParam = map[string]string{
 	domain.EventHarnessUnavailable: "reason", domain.EventHarnessNoAlternative: "reason",
 }
 
-// notifiable maps an emitted event to the notifiable event a task chooses (FS-011 FR-002).
+// notifiable maps an emitted event to the notifiable event a task chooses.
 func notifiable(e domain.Event) string {
 	switch e.Type {
 	case domain.EventExecutionStarted, domain.EventExecutionCompleted, domain.EventExecutionFailed,
@@ -52,9 +52,9 @@ func notifiable(e domain.Event) string {
 	return ""
 }
 
-// notifyFor creates a notice when the event is one the task chose and the global level lets it through (D-074). An
+// notifyFor creates a notice when the event is one the task chose and the global level lets it through. An
 // event of a running execution comes with the definition it started with, so an edit, a new name included, applies from
-// the next execution (D-083); any other event reads the current one. The global level is a setting, not part of the
+// the next execution; any other event reads the current one. The global level is a setting, not part of the
 // task, and applies at once.
 func (a *App) notifyFor(e domain.Event, started *domain.TaskDocument) {
 	kind := notifiable(e)
@@ -131,7 +131,7 @@ func (a *App) notifyFor(e domain.Event, started *domain.TaskDocument) {
 }
 
 // trimNotifications drops the oldest read notices of a newest-first list until it is back within maxNotifications. It
-// stops when no read notice is left, so a list of unread notices stays above the cap and none is lost (FS-011 FR-005).
+// stops when no read notice is left, so a list of unread notices stays above the cap and none is lost.
 func trimNotifications(list []Notification) []Notification {
 	excess := len(list) - maxNotifications
 	if excess <= 0 {
@@ -152,7 +152,7 @@ func trimNotifications(list []Notification) []Notification {
 	return out
 }
 
-// englishNotice is the en-US fallback; the desktop translates from eventType and params (FS-012 FR-005).
+// englishNotice is the en-US fallback; the desktop translates from eventType and params.
 func englishNotice(kind, task string, p map[string]string) (string, string) {
 	switch kind {
 	case domain.EventExecutionStarted:

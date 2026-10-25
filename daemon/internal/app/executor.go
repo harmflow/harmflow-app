@@ -23,7 +23,7 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
-// run is the state of one execution while it runs. Its definition is the snapshot taken when it started (D-083).
+// run is the state of one execution while it runs. Its definition is the snapshot taken when it started.
 type run struct {
 	a        *App
 	x        *domain.Execution
@@ -90,7 +90,7 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 	deadline := now.Add(timeout)
 	// The timeout runs on real time; the record shows it on the daemon's clock. An execution outlives whatever fired it
 	// (an API request, a tick of the scheduler), so its context starts from none of theirs: it ends by its timeout, or by
-	// its handle's cancel, which cancellation and Stop call (D-089).
+	// its handle's cancel, which cancellation and Stop call.
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	a.mu.Lock()
@@ -112,7 +112,7 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 		return
 	}
 	if def.IsScript() {
-		// A program of the user's, with no harness to check or fail over to (FS-013).
+		// A program of the user's, with no harness to check or fail over to.
 		if !r.setStatus(domain.StatusPreparing, domain.T("step_preparing_program", "Preparing the program")) {
 			return
 		}
@@ -139,7 +139,7 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 	if status == "" {
 		status, reason = r.outcomeFromReport()
 	} else if r.daemonStopping() && !r.cancelRequested() {
-		// A daemon that stops never continues the execution: it is interrupted (D-089).
+		// A daemon that stops never continues the execution: it is interrupted.
 		status, reason = domain.StatusInterrupted, daemonStopped()
 	}
 	r.finish(status, reason)
@@ -182,7 +182,7 @@ func (r *run) started() *domain.TaskDocument {
 
 // save persists the record, at most every second unless forced. What recovery reads from the record, the work item and
 // the last operation, is saved at once, before the event that logs it, so a crash never leaves the record behind the
-// log (FS-003 FR-010, FR-011).
+// log.
 func (r *run) save(force bool) {
 	r.saveMu.Lock()
 	defer r.saveMu.Unlock()
@@ -239,7 +239,7 @@ func (r *run) prepare() error {
 		return domain.TextErr("execution_dir_failed", "creating the execution directory: {{detail}}", "detail", err.Error())
 	}
 	// The paths are checked again as the execution starts, and the harness gets them resolved, so a symlink retargeted
-	// after saving neither leads out nor differs from what was checked (FS-009 FR-014).
+	// after saving neither leads out nor differs from what was checked.
 	pe := a.currentPathEnv()
 	if issues := a.taskPathIssues(r.def, pe); len(issues) > 0 {
 		return &domain.TextError{Text: refusedPath(issues[0])}
@@ -300,7 +300,7 @@ type previousAttempt struct {
 }
 
 // writeContext gives the session the task's parameters and history: what the skills need to skip processed work,
-// resume, and reconcile (D-069, D-089).
+// resume, and reconcile.
 func (r *run) writeContext(prev []previousAttempt) error {
 	a := r.a
 	a.mu.Lock()
@@ -374,9 +374,9 @@ func (r *run) repositoryPaths() map[string]string {
 }
 
 // attempts runs the harness chain: quota exhaustion and an unavailable harness switch to the next profile, a rate
-// limit retries on the same one, and everything shares the execution's one timeout (D-067). start runs once, when the
-// first harness of the chain is found ready, and is given that harness, so an execution with none ready never starts
-// (FS-004 FR-003). It returns a terminal status when the attempts themselves decide it, or "" when the report decides.
+// limit retries on the same one, and everything shares the execution's one timeout. start runs once, when the first
+// harness of the chain is found ready, and is given that harness, so an execution with none ready never starts. It
+// returns a terminal status when the attempts themselves decide it, or "" when the report decides.
 func (r *run) attempts(ctx context.Context, start func(harness string) error) (domain.ExecutionStatus, domain.Text) {
 	a := r.a
 	chain, invalid := r.chain()
@@ -397,7 +397,7 @@ func (r *run) attempts(ctx context.Context, start func(harness string) error) (d
 		}
 		profile := chain[idx]
 		ad := a.adapters[profile.Provider]
-		info := a.detect(ctx, profile.Provider) // revalidate before every attempt (FS-004 FR-003)
+		info := a.detect(ctx, profile.Provider) // revalidate before every attempt
 		var end domain.AttemptEnd
 		if !info.Ready() {
 			end = domain.AttemptEnd{Class: domain.ClassHarnessUnavailable, Error: unavailableText(ad, info)}
@@ -514,7 +514,7 @@ func (r *run) quotaExhausted(ad ports.HarnessAdapter, harness string, end domain
 		"{{harness}} exhausted its quota", "harness", ad.Name())))
 }
 
-// chain returns the preferred profile and the fallbacks that can load the task's agents and skills (D-092).
+// chain returns the preferred profile and the fallbacks that can load the task's agents and skills.
 func (r *run) chain() ([]domain.HarnessProfile, []domain.Text) {
 	profiles := r.def.Profiles()
 	out := []domain.HarnessProfile{profiles[0]}
@@ -562,7 +562,7 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 	a.mu.Lock()
 	n := len(r.x.Attempts) + 1
 	r.attempt = n
-	// The model and effort used stay unreported until the harness reports them (D-105).
+	// The model and effort used stay unreported until the harness reports them.
 	at := domain.Attempt{Number: n, Harness: p.Provider, HarnessVersion: info.Version, ConfiguredModel: p.Model,
 		ConfiguredEffort: p.Effort, StartedAt: now, Outcome: domain.AttemptRunning}
 	at.SetReason(reason)
@@ -578,7 +578,7 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 		WorkDir: r.work, AdditionalDirs: r.extra, Permissions: r.permissions(), ExecutionDir: r.dir,
 		Env: r.env(),
 	}
-	// Recorded before Prepare, so a running attempt, and one whose harness never started, shows its input (FS-008 FR-010).
+	// Recorded before Prepare, so a running attempt, and one whose harness never started, shows its input.
 	a.mu.Lock()
 	if at := r.x.CurrentAttempt(); at != nil {
 		at.Prompt, at.SessionContext = eventlog.Redact(req.Prompt), eventlog.Redact(req.Context)
@@ -833,7 +833,7 @@ func (r *run) env() []string {
 }
 
 // onHarnessEvent turns the adapter's observations into events, commands, and changed files. They are the harness's
-// text, redacted before any of it is kept or trimmed (FS-009 FR-005, FR-007).
+// text, redacted before any of it is kept or trimmed.
 func (r *run) onHarnessEvent(he ports.HarnessEvent) {
 	eventlog.RedactFields(&he)
 	a := r.a
@@ -845,7 +845,7 @@ func (r *run) onHarnessEvent(he ports.HarnessEvent) {
 			if he.SessionID != "" {
 				at.SessionID = he.SessionID
 			}
-			// Only the harness's own report says what was used; the configured values stay apart (D-105).
+			// Only the harness's own report says what was used; the configured values stay apart.
 			if he.Model != "" {
 				at.Model, r.x.Model = he.Model, he.Model
 			}
@@ -1116,7 +1116,7 @@ func (r *run) applyReport(rep *domain.ExecutionReport) {
 		case domain.WarningRepositoryUnprotected:
 			code, eventType = domain.WarningRepositoryUnprotected, domain.EventRepositoryUnprotected
 		case domain.WarningConflictingActivity:
-			// The conflict is only logged; the work goes on (FS-006 FR-015).
+			// The conflict is only logged; the work goes on.
 			code, eventType = domain.WarningConflictingActivity, domain.EventWorkItemConflicting
 		}
 		r.warn(domain.Warning{Code: code, Subject: w.Repository, Text: domain.Text{Message: w.Message}},
@@ -1231,7 +1231,7 @@ func (r *run) limitsOrDefault() domain.WorkItemLimits {
 }
 
 // CancelExecution records the intention durably and ends the execution's process tree after the grace period; no
-// other execution is affected (FS-003 FR-004, FR-005).
+// other execution is affected.
 func (a *App) CancelExecution(id string) error {
 	a.mu.Lock()
 	x, ok := a.executions[id]
@@ -1274,7 +1274,7 @@ func (a *App) CancelExecution(id string) error {
 	return nil
 }
 
-// daemonStopped is why an execution the daemon did not finish was interrupted (D-089).
+// daemonStopped is why an execution the daemon did not finish was interrupted.
 func daemonStopped() domain.Text {
 	return domain.T("daemon_stopped_execution", "the daemon stopped before the execution finished")
 }

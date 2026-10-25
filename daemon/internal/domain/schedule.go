@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Rule computes the firings of a schedule (D-071): a 5-field cron expression in the task's IANA time zone, or a
+// Rule computes the firings of a schedule: a 5-field cron expression in the task's IANA time zone, or a
 // simple interval. Granularity is the minute; there is no seconds field.
 type Rule interface {
 	// Next returns the first firing strictly after the given instant.
@@ -14,7 +14,7 @@ type Rule interface {
 	String() string
 }
 
-// ParseSchedule builds the rule of a schedule. A schedule with no time zone uses the system's (FS-002 FR-007).
+// ParseSchedule builds the rule of a schedule. A schedule with no time zone uses the system's.
 func ParseSchedule(s Schedule, system *time.Location) (Rule, error) {
 	loc := system
 	if s.Timezone != "" {
@@ -101,7 +101,7 @@ var monthNames = map[string]int{"JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5
 	"SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12}
 var dayNames = map[string]int{"SUN": 0, "MON": 1, "TUE": 2, "WED": 3, "THU": 4, "FRI": 5, "SAT": 6}
 
-// ParseCron parses a 5-field expression; an expression with a seconds field is rejected (FS-002 FR-009).
+// ParseCron parses a 5-field expression; an expression with a seconds field is rejected.
 func ParseCron(expr string, loc *time.Location) (*CronRule, error) {
 	text := strings.TrimSpace(expr)
 	if m, ok := cronMacros[strings.ToLower(text)]; ok {
@@ -251,7 +251,7 @@ func (r *CronRule) matchDay(t time.Time) bool {
 }
 
 // Next walks wall-clock minutes in the rule's location. A local time skipped by a daylight-saving change fires at
-// the next valid time; a local time that occurs twice fires once, at its first occurrence (FS-002 FR-008).
+// the next valid time; a local time that occurs twice fires once, at its first occurrence.
 func (r *CronRule) Next(after time.Time) time.Time {
 	start := civilOf(after.In(r.loc)).asUTC().Add(time.Minute)
 	c := start

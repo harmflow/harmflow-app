@@ -1,4 +1,4 @@
-// Package ports declares the output ports the use cases depend on (architecture/daemon-structure.md). Every vendor,
+// Package ports declares the output ports the use cases depend on. Every vendor,
 // tool, and operating-system detail lives behind one of them, in an adapter.
 package ports
 
@@ -10,13 +10,13 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 )
 
-// Clock is injectable so the scheduler can be tested without waiting (ADR-001).
+// Clock is injectable so the scheduler can be tested without waiting.
 type Clock interface {
 	Now() time.Time
 }
 
 // WakeMonitor tells the scheduler when the machine last woke from sleep or hibernation, so a firing due while it was
-// suspended follows the missed-run policy however soon it wakes (FS-002 FR-004). Tests replace it, as they do Clock.
+// suspended follows the missed-run policy however soon it wakes. Tests replace it, as they do Clock.
 type WakeMonitor interface {
 	// LastWake is when the machine was last seen awake after a suspension; zero when none was seen.
 	LastWake() time.Time
@@ -31,7 +31,7 @@ type TaskFile struct {
 	ModTime  time.Time
 }
 
-// TaskRepository holds task YAML files; the daemon is their only writer (FS-001 FR-004).
+// TaskRepository holds task YAML files; the daemon is their only writer.
 type TaskRepository interface {
 	List() ([]TaskFile, error)
 	Get(id string) (TaskFile, error)
@@ -41,19 +41,19 @@ type TaskRepository interface {
 	Dir() string
 }
 
-// StateStore persists operational state as versioned JSON, written atomically (ADR-007).
+// StateStore persists operational state as versioned JSON, written atomically.
 type StateStore interface {
 	Load(name string, v any) (bool, error)
 	Save(name string, v any) error
 }
 
-// ExecutionRepository keeps execution records with no time limit (D-073).
+// ExecutionRepository keeps execution records with no time limit.
 type ExecutionRepository interface {
 	Save(x *domain.Execution) error
 	LoadAll() ([]*domain.Execution, error)
 }
 
-// EventLog writes one JSONL file per execution and publishes every event live (ADR-004, ADR-007).
+// EventLog writes one JSONL file per execution and publishes every event live.
 type EventLog interface {
 	Append(e domain.Event) domain.Event
 	Replay(executionID string, after int64, limit int) ([]domain.Event, bool, error)
@@ -72,14 +72,14 @@ type RawCapture struct {
 	Text   string
 }
 
-// SecretStore keeps the local API token in the operating system's credential store (D-090).
+// SecretStore keeps the local API token in the operating system's credential store.
 type SecretStore interface {
 	Get() (string, error)
 	Set(token string) error
 	Kind() string
 }
 
-// HostServiceManager enables and disables the daemon's start with the user's session (D-008, D-062).
+// HostServiceManager enables and disables the daemon's start with the user's session.
 type HostServiceManager interface {
 	Enabled() bool
 	Enable(executable string, args []string, env map[string]string) error
@@ -88,7 +88,7 @@ type HostServiceManager interface {
 	Location() string
 }
 
-// HarnessInfo is what detection found (FS-004 FR-006, FR-007).
+// HarnessInfo is what detection found.
 type HarnessInfo struct {
 	ID                  string            `json:"id"`
 	Name                string            `json:"name"`
@@ -112,7 +112,7 @@ type HarnessInfo struct {
 	Features            map[string]bool   `json:"-"`
 }
 
-// SetDiagnostic records what is wrong with the harness; Diagnostic is the en-US text (FS-012 FR-005).
+// SetDiagnostic records what is wrong with the harness; Diagnostic is the en-US text.
 func (h *HarnessInfo) SetDiagnostic(t domain.Text) {
 	h.Diagnostic, h.DiagnosticKey, h.DiagnosticParams = t.Message, t.Key, t.Params
 }
@@ -131,7 +131,7 @@ type ModelInfo struct {
 // Ready reports whether an execution may start on the harness.
 func (h HarnessInfo) Ready() bool { return h.Readiness == "ready" }
 
-// Resolved agent or skill, delivered to the harness (D-092).
+// Resolved agent or skill, delivered to the harness.
 type ResolvedItem struct {
 	Name        string
 	Kind        string // agent or skill
@@ -158,7 +158,7 @@ type RunRequest struct {
 	Env            []string
 }
 
-// Restriction is one declared restriction and whether the harness enforces it (D-068). Text says how; the user sees
+// Restriction is one declared restriction and whether the harness enforces it. Text says how; the user sees
 // it only for a restriction not enforced, so only those texts carry a key.
 type Restriction struct {
 	Name     string
@@ -175,7 +175,7 @@ type Invocation struct {
 	Stdin        string
 	Restrictions []Restriction
 	// ExecutionID is the value of HARMFLOW_EXECUTION_ID in Env. Ending the process also ends every process that still
-	// carries it, wherever it moved; empty, only the process's own tree is ended (FS-003 FR-005).
+	// carries it, wherever it moved; empty, only the process's own tree is ended.
 	ExecutionID string
 }
 
@@ -221,7 +221,7 @@ type OutputParser interface {
 	Finish(exitCode int, stderrTail string, timedOut, cancelled bool) domain.AttemptEnd
 }
 
-// HarnessAdapter is the HarnessRunner port of one harness (ADR-009): detect, declare capabilities, run
+// HarnessAdapter is the HarnessRunner port of one harness: detect, declare capabilities, run
 // non-interactively, capture events, and recognize quota failure. Cancellation is the executor's, by process group.
 type HarnessAdapter interface {
 	ID() string
@@ -235,13 +235,13 @@ type HarnessAdapter interface {
 }
 
 // HarnessIdentifier is a HarnessAdapter that tells whether a file is its harness: an executable file whose --version
-// output names it (D-113, FS-004 FR-001).
+// output names it.
 type HarnessIdentifier interface {
 	Identify(ctx context.Context, path string) error
 }
 
 // ProfileWarner is a HarnessAdapter whose capabilities cannot always check a model and effort: ProfileWarning says so,
-// and the save keeps them with that warning (FS-004 FR-005).
+// and the save keeps them with that warning.
 type ProfileWarner interface {
 	ProfileWarning(info HarnessInfo, model, effort string) (domain.Text, bool)
 }
@@ -268,7 +268,7 @@ type ToolInfo struct {
 	DiagnosticParams map[string]string `json:"diagnosticParams,omitempty"`
 }
 
-// SetDiagnostic records what is wrong with the tool; Diagnostic is the en-US text (FS-012 FR-005).
+// SetDiagnostic records what is wrong with the tool; Diagnostic is the en-US text.
 func (t *ToolInfo) SetDiagnostic(text domain.Text) {
 	t.Diagnostic, t.DiagnosticKey, t.DiagnosticParams = text.Message, text.Key, text.Params
 }

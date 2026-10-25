@@ -1,6 +1,6 @@
 // Package claudecode is the HarnessRunner adapter of the Claude Code CLI. It uses the installed CLI and its login
-// as they are (D-018, D-019): `claude -p` with stream-json output, built-in skills delivered per execution as a
-// session-only plugin (--plugin-dir), and the permission profile translated to Claude Code's own controls (D-068).
+// as they are: `claude -p` with stream-json output, built-in skills delivered per execution as a session-only
+// plugin (--plugin-dir), and the permission profile translated to Claude Code's own controls.
 package claudecode
 
 import (
@@ -29,14 +29,14 @@ const (
 	ID = domain.HarnessClaudeCode
 	// Name is the harness's display name.
 	Name = "Claude Code"
-	// MinVersion is the oldest release line HarmFlow supports; an older CLI is not ready (D-078, D-115).
+	// MinVersion is the oldest release line HarmFlow supports; an older CLI is not ready.
 	MinVersion = "2.0"
 	// TestedMinor is the newest release line HarmFlow was tested with: every patch in it runs as supported, and a newer
-	// line runs with a warning (D-078, D-115).
+	// line runs with a warning.
 	TestedMinor = "2.1"
 )
 
-// Features the adapter needs from the CLI; a version without them is not ready (D-078).
+// Features the adapter needs from the CLI; a version without them is not ready.
 var requiredFlags = []string{"--print", "--output-format", "--permission-mode", "--allowedTools", "--append-system-prompt"}
 
 var declaredModels = []string{domain.DefaultModel, "fable", "opus", "sonnet", "haiku"}
@@ -98,7 +98,7 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 	candidates := found
 	switch {
 	case manualPath != "":
-		// A path set by hand is offered with the installations found, once (FS-004 FR-001).
+		// A path set by hand is offered with the installations found, once.
 		if !slices.Contains(found, manualPath) {
 			info.Installations = append(info.Installations, manualPath)
 		}
@@ -112,7 +112,7 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 		info.SetDiagnostic(domain.T("claude_not_found", "claude was not found on PATH or in the usual install locations"))
 		return info
 	}
-	// Discovery takes the first file that names Claude Code, skipping one that does not (D-113, FS-004 FR-001).
+	// Discovery takes the first file that names Claude Code, skipping one that does not.
 	out, chosen, err := a.firstIdentified(ctx, candidates)
 	info.Installation, info.Path = chosen, chosen
 	if manualPath == "" {
@@ -752,7 +752,7 @@ func (p *parser) Finish(exitCode int, stderrTail string, timedOut, cancelled boo
 			"code", strconv.Itoa(exitCode))
 		text = end.Error.Message
 	} else {
-		// Redacted before the tail cuts it, so no secret is cut short of its pattern (FS-009 FR-005).
+		// Redacted before the tail cuts it, so no secret is cut short of its pattern.
 		end.Error = domain.Text{Message: classify.Tail(eventlog.Redact(text), 2000)}
 	}
 	end.Class = patterns.Text(text)
@@ -855,7 +855,7 @@ func compareVersions(a, b string) int {
 // identifies reports whether the output of --version names Claude Code, as "2.1.239 (Claude Code)" does.
 func identifies(out string) bool { return strings.Contains(out, "Claude Code") }
 
-// Identify checks that path is an executable file whose --version output names Claude Code (D-113, FS-004 FR-001).
+// Identify checks that path is an executable file whose --version output names Claude Code.
 func (a *Adapter) Identify(ctx context.Context, path string) error {
 	_, err := procutil.IdentifyHarness(ctx, a.Env, path, Name, "claude", identifies)
 	return err

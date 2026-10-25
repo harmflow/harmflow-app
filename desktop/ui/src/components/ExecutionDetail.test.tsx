@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-// Drives the execution detail in a DOM, against a stand-in for the daemon's local API: every view FS-008 FR-008 asks
-// for, and the raw output read from the daemon's route, again while the execution runs (FS-008 FR-008, AC-008).
+// Drives the execution detail in a DOM, against a stand-in for the daemon's local API: every view the specification
+// asks for, and the raw output read from the daemon's route, again while the execution runs.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -42,7 +42,7 @@ const base: Execution = {
   harness: "codex",
   repository: "org/core-banking",
   workItem: "org/core-banking#123",
-  // Claude Code reports its model; Codex reports none, and neither its effort (D-105).
+  // Claude Code reports its model; Codex reports none, and neither its effort.
   attempts: [
     { number: 1, harness: "claude-code", model: "claude-sonnet-4-5", configuredModel: "default", configuredEffort: "high", startedAt: started, endedAt: started, outcome: "quota_exhausted" },
     { number: 2, harness: "codex", configuredModel: "default", configuredEffort: "high", startedAt: started, endedAt: ended, outcome: "succeeded" },
@@ -121,7 +121,7 @@ async function choose(label: string): Promise<string> {
 }
 
 describe("execution detail", () => {
-  it("offers every view FR-008 names, the raw output as the daemon redacted it (FS-008 AC-008)", async () => {
+  it("offers every view the specification names, the raw output as the daemon redacted it", async () => {
     // The daemon redacts the capture before serving it; itest › TestRawOutputRedacted checks that side.
     await open(
       completed,
@@ -165,7 +165,7 @@ describe("execution detail", () => {
     for (const shown of ["Attempt 1", "Claude Code", "Attempt 2", "Codex"]) expect(attempts).toContain(shown);
   });
 
-  it("names the model and effort each attempt's harness reported, and the rest as not reported (FS-005 AC-008)", async () => {
+  it("names the model and effort each attempt's harness reported, and the rest as not reported", async () => {
     await open(completed, [], capture());
     await choose("Attempts");
     const [claude, codex] = [...host!.querySelectorAll(".attempt")].map((li) => li.textContent ?? "");
@@ -193,7 +193,7 @@ describe("execution detail", () => {
     }
   });
 
-  it("shows a failover's switch events in its timeline, in order, each with its own tone (FS-005 AC-008)", async () => {
+  it("shows a failover's switch events in its timeline, in order, each with its own tone", async () => {
     // A quota failover's events as the daemon emits them, in the order itest › TestFailoverAcrossHarnesses reads.
     const failedOver: Execution = { ...completed, id: "exec-failed-over" };
     const on = { executionId: failedOver.id };
@@ -251,7 +251,7 @@ describe("execution detail", () => {
     ]);
   });
 
-  it("shows the daemon's texts in the interface's language, and the agent's and harness's as they are (FS-012 AC-005)", async () => {
+  it("shows the daemon's texts in the interface's language, and the agent's and harness's as they are", async () => {
     await i18n.changeLanguage("pt-BR");
     try {
       // It failed before any result: the Results tab still shows why.
@@ -316,7 +316,7 @@ describe("execution detail", () => {
     }
   });
 
-  it("shows a conflict the agent met as a warning above the timeline, in it, and in the results (FS-006 AC-015)", async () => {
+  it("shows a conflict the agent met as a warning above the timeline, in it, and in the results", async () => {
     const said = "someone pushed to feature/123-agent; rebased and continued";
     await open(
       { ...completed, id: "exec-conflict", warnings: [{ code: "conflicting_activity", message: said, subject: "org/core-banking" }] },
@@ -394,7 +394,7 @@ describe("execution detail", () => {
   });
 
   // The daemon redacts the input before recording it; app › TestAttemptKeepsItsInput checks that side.
-  it("shows the prompt and the session context each attempt sent, collapsed, and says when a record has none (FS-008 AC-013)", async () => {
+  it("shows the prompt and the session context each attempt sent, collapsed, and says when a record has none", async () => {
     const prompt = "Fix the issue, then push with [REDACTED].";
     const context = "This session is run by HarmFlow, a local scheduler.\nWorkspace: /workspaces/core-banking\n";
     const sent: Execution = {
@@ -433,13 +433,13 @@ describe("execution detail", () => {
     expect(await choose("Costs")).toContain("No token usage for this execution");
   });
 
-  // FS-008 AC-012: a completed failover from Claude Code to Codex whose attempts both reported their usage.
-  it("shows a failover's costs, the CLI's and the table's, each with its source, and their sum (FS-008 AC-012)", async () => {
+  // A completed failover from Claude Code to Codex whose attempts both reported their usage.
+  it("shows a failover's costs, the CLI's and the table's, each with its source, and their sum", async () => {
     const haiku = { input: 1, cacheWriteShort: 1.25, cacheWriteLong: 2, cacheRead: 0.1, output: 5 };
     const terra = { input: 2, cacheWriteShort: 2.5, cacheWriteLong: 5, cacheRead: 0.2, output: 12 };
     const failover: Execution = {
       ...completed,
-      id: "exec-ac-012",
+      id: "exec-failover-costs",
       attempts: [
         {
           ...base.attempts[0],
@@ -513,8 +513,8 @@ describe("execution detail", () => {
     expect(receiptTotal).not.toContain("unpriced");
   });
 
-  // FS-008 FR-012: while an attempt runs, its tokens so far and no cost; the cost the attempt ended with, once it ends.
-  it("shows a running attempt's tokens so far without a cost, and its cost once it ends (FS-008 FR-012)", async () => {
+  // While an attempt runs, its tokens so far and no cost; the cost the attempt ended with, once it ends.
+  it("shows a running attempt's tokens so far without a cost, and its cost once it ends", async () => {
     const tokens = (input: number, cacheWriteLong: number, cacheRead: number, output: number) => ({ input, cacheWriteShort: 0, cacheWriteLong, cacheRead, output });
     const attempt = { ...base.attempts[0], outcome: "running" as const, endedAt: undefined };
     const running: Execution = {
@@ -566,7 +566,7 @@ describe("execution detail", () => {
     for (const shown of ["866", "$0.0364", "reported by Claude Code"]) expect(row()).toContain(shown);
   });
 
-  it("reads the raw output from the daemon's route again every 2 s while the execution runs (FS-008 FR-008)", async () => {
+  it("reads the raw output from the daemon's route again every 2 s while the execution runs", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     const live: Execution = { ...base, id: "exec-live" };
     const route = `GET /executions/${live.id}/output`;
@@ -704,9 +704,9 @@ describe("the events timeline from the keyboard", () => {
   });
 });
 
-// FS-008 FR-013: a harness task's conversation alone — each attempt's prompt, then the agent messages it received — read
-// only, and the view its detail opens on.
-describe("the chat view (FS-008 FR-013)", () => {
+// A harness task's conversation alone — each attempt's prompt, then the agent messages it received — read only, and
+// the view its detail opens on.
+describe("the chat view", () => {
   const at = (minute: number) => `2026-10-21T09:${String(minute).padStart(2, "0")}:00Z`;
   const context = "This session is run by HarmFlow, a local scheduler.\nWorkspace: /workspaces/core-banking\n";
 
@@ -722,7 +722,7 @@ describe("the chat view (FS-008 FR-013)", () => {
     }));
   const notes = () => [...host!.querySelectorAll(".chat__note")].map((n) => n.textContent);
 
-  it("opens on the chat view: each attempt's prompt, then its agent messages, each with its time, and nothing else (FS-008 AC-014)", async () => {
+  it("opens on the chat view: each attempt's prompt, then its agent messages, each with its time, and nothing else", async () => {
     const x: Execution = {
       ...completed,
       id: "exec-chat",
@@ -788,7 +788,7 @@ describe("the chat view (FS-008 FR-013)", () => {
     expect(daemon.requests).not.toContain(`GET /executions/${x.id}/output`);
   });
 
-  it("shows the prompt and the messages as plain text, their line breaks kept and nothing in them read as markup (FS-008 FR-013)", async () => {
+  it("shows the prompt and the messages as plain text, their line breaks kept and nothing in them read as markup", async () => {
     const prompt = "# Task\nFix **the bug** in <code>auth</code>.\n{{token}} $t(app.name)";
     const said = "Done:\n- [x] tests\n<b>not bold</b> <img src=x onerror=alert(1)> `code`";
     const x: Execution = { ...completed, id: "exec-chat-plain", attempts: [{ ...base.attempts[0], prompt }] };
@@ -799,7 +799,7 @@ describe("the chat view (FS-008 FR-013)", () => {
     expect(texts.map((e) => e.children.length)).toEqual([0, 0]);
   });
 
-  it("says an attempt from a record older than its prompt sent one not recorded (FS-008 FR-013)", async () => {
+  it("says an attempt from a record older than its prompt sent one not recorded", async () => {
     const x: Execution = { ...completed, id: "exec-chat-older", attempts: [base.attempts[0]] };
     await open(x, [event(1, "harness.message", { executionId: x.id, attempt: 1, harness: "claude-code", timestamp: at(1), message: "Hello." })], capture());
     expect(conversation()).toEqual([
@@ -813,14 +813,14 @@ describe("the chat view (FS-008 FR-013)", () => {
     ]);
   });
 
-  it("shows an empty state before any attempt (FS-008 FR-013)", async () => {
+  it("shows an empty state before any attempt", async () => {
     const queued: Execution = { ...base, id: "exec-chat-queued", status: "queued", startedAt: undefined, attempts: [], commands: [] };
     await open(queued, [event(1, "execution.created", { executionId: queued.id })], capture());
     expect(selectedTab()).toBe("Chat(0)");
     expect(body()).toBe("No attempts yet.");
   });
 
-  it("adds an agent message at the end of the running attempt's conversation as it arrives, with no reload (FS-008 AC-015)", async () => {
+  it("adds an agent message at the end of the running attempt's conversation as it arrives, with no reload", async () => {
     const attempt = { ...base.attempts[0], startedAt: at(0), endedAt: undefined, outcome: "running" as const, prompt: "Implement org/core-banking#123." };
     const running: Execution = { ...base, id: "exec-chat-live", harness: "claude-code", attempts: [attempt] };
     const one = { executionId: running.id, attempt: 1, harness: "claude-code" };
@@ -863,7 +863,7 @@ describe("the chat view (FS-008 FR-013)", () => {
     ]);
   });
 
-  it("keeps each attempt's prompt once the log has expired, and says the agent's messages left with it (FS-008 AC-016)", async () => {
+  it("keeps each attempt's prompt once the log has expired, and says the agent's messages left with it", async () => {
     const x: Execution = {
       ...completed,
       id: "exec-chat-expired",
@@ -883,9 +883,9 @@ describe("the chat view (FS-008 FR-013)", () => {
   });
 });
 
-// FS-003 FR-003, AC-005: the detail offers Cancel on a running or queued execution, and nothing that writes to the
+// The detail offers Cancel on a running or queued execution, and nothing that writes to the
 // agent; across every tab, the one request that is not a read is that cancel.
-describe("observe and cancel, no conversation (FS-003 AC-005)", () => {
+describe("observe and cancel, no conversation", () => {
   // Toggles that change only the view, such as the timeline's follow checkbox, are not text boxes.
   const editable = () =>
     [...host!.querySelectorAll<HTMLElement>("input, textarea, select, [contenteditable], [role='textbox']")]
@@ -958,7 +958,7 @@ describe("observe and cancel, no conversation (FS-003 AC-005)", () => {
   );
 });
 
-describe("a script task's execution (FS-013 FR-012, AC-012)", () => {
+describe("a script task's execution", () => {
   const script: Execution = {
     ...completed,
     id: "exec-script",
@@ -1019,7 +1019,7 @@ describe("a script task's execution (FS-013 FR-012, AC-012)", () => {
     }
   });
 
-  it("offers no chat view and opens on its events timeline (FS-008 AC-017)", async () => {
+  it("offers no chat view and opens on its events timeline", async () => {
     const x: Execution = { ...script, id: "exec-script-no-chat" };
     await open(x, lines, capture("audit\n"));
     const tabs = [...host!.querySelectorAll('[role="tab"]')].map((b) => b.textContent ?? "");
@@ -1030,7 +1030,7 @@ describe("a script task's execution (FS-013 FR-012, AC-012)", () => {
   });
 
   // ExecutionsScreen and HistoryScreen keep one detail mounted as the selection changes.
-  it("opens another execution on its own first tab, Events for a script after a harness task's Chat (FS-008 AC-017)", async () => {
+  it("opens another execution on its own first tab, Events for a script after a harness task's Chat", async () => {
     const prompted = (id: string): Execution => ({ ...completed, id, attempts: [{ ...base.attempts[0], prompt: "Implement org/core-banking#123." }] });
     const [first, second, other] = [prompted("exec-switch-first"), prompted("exec-switch-second"), { ...script, id: "exec-switch-script" }];
     for (const x of [second, other]) {

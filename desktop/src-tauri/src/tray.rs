@@ -1,5 +1,5 @@
-//! The menu-bar tray (FS-010 FR-005, FR-006, FR-008). Its icon changes only while an execution actually runs — queued
-//! work and idleness never change it (D-041) — and it lists the running executions and a protected daemon stop.
+//! The menu-bar tray. Its icon changes only while an execution actually runs — queued work and idleness never change
+//! it — and it lists the running executions and a protected daemon stop.
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -134,7 +134,7 @@ fn on_menu<R: Runtime>(app: &AppHandle<R>, id: &str) {
     }
 }
 
-/// Stopping the daemon is its own command, and asks first when executions run (FS-010 FR-008).
+/// Stopping the daemon is its own command, and asks first when executions run.
 fn confirm_stop<R: Runtime>(app: &AppHandle<R>) {
     let state = app.state::<Arc<AppState>>().inner().clone();
     let count = state.tray_running.lock().map(|r| r.len()).unwrap_or(0);

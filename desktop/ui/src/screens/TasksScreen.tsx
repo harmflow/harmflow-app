@@ -1,5 +1,5 @@
-// The task list and its commands (FS-001 FR-001, FR-006): create, edit, duplicate, enable, disable, run, export,
-// import, and delete — every one carried out by the daemon.
+// The task list and its commands: create, edit, duplicate, enable, disable, run, export, import, and delete — every one
+// carried out by the daemon.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ApiError, api } from "../api/client";
@@ -133,7 +133,7 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
   // A script task runs a program with the user's rights: its program is shown before anything is saved, and the
-  // daemon saves it disabled (FS-013 SEC-001).
+  // daemon saves it disabled.
   const [script, setScript] = useState<{ yaml: string; doc: Record<string, unknown> } | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 

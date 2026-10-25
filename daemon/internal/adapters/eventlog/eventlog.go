@@ -1,5 +1,5 @@
 // Package eventlog writes one JSONL file per execution, keeps a buffer of recent events for SSE replay, and
-// publishes every event to live subscribers (ADR-004, ADR-007). Secrets are redacted before anything is written.
+// publishes every event to live subscribers. Secrets are redacted before anything is written.
 package eventlog
 
 import (
@@ -145,8 +145,7 @@ func isTerminal(t string) bool {
 
 func (l *Log) path(executionID string) string { return filepath.Join(l.dir, executionID+".jsonl") }
 
-// Replay returns the stored events of an execution after an id; expired is true when the log was deleted by
-// retention (D-073).
+// Replay returns the stored events of an execution after an id; expired is true when the log was deleted by retention.
 func (l *Log) Replay(executionID string, after int64, limit int) ([]domain.Event, bool, error) {
 	l.mu.Lock()
 	if f, ok := l.files[executionID]; ok {
@@ -260,7 +259,7 @@ func (l *Log) ReadRaw(executionID string, attempt int, limit int64) (ports.RawCa
 	return ports.RawCapture{Size: size, Offset: offset, Text: Redact(string(data))}, nil
 }
 
-// DeleteLog removes an execution's JSONL and raw output; the execution record is kept (D-073).
+// DeleteLog removes an execution's JSONL and raw output; the execution record is kept.
 func (l *Log) DeleteLog(executionID string) error {
 	l.Close(executionID)
 	err1 := os.Remove(l.path(executionID))
@@ -331,7 +330,7 @@ var secretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(\b(?:sessionid|session|sid)\b[ \t]*[:=][ \t]*["']?)[^\s"'\\;&,]+`),
 }
 
-// Redact masks credentials in text written to logs and events (FS-009 FR-005).
+// Redact masks credentials in text written to logs and events.
 func Redact(s string) string {
 	if s == "" {
 		return s
@@ -397,7 +396,7 @@ func redactParams(m map[string]string) map[string]string {
 // RedactFields redacts, in place, every string reachable from ptr — through struct fields, slices, arrays, maps,
 // pointers, and interfaces — and reports whether any changed. The agent's and the harness's text reaches the daemon as
 // such values; redacted as they arrive, nothing the daemon keeps or relays from them holds a credential, and a field
-// trimmed later cannot cut a secret short of its pattern (FS-009 FR-005, FR-007). Unexported fields are left alone,
+// trimmed later cannot cut a secret short of its pattern. Unexported fields are left alone,
 // and the values must hold no pointer cycle.
 func RedactFields(ptr any) bool {
 	v := reflect.ValueOf(ptr)

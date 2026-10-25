@@ -1,5 +1,5 @@
 // Package classify tells apart the ways a harness attempt can end, from text the CLI actually printed. It errs
-// toward ClassTaskError: a failover is triggered only by reliable evidence (FS-005 FR-004).
+// toward ClassTaskError: a failover is triggered only by reliable evidence.
 package classify
 
 import (

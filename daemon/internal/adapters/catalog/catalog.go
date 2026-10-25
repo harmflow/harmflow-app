@@ -1,4 +1,4 @@
-// Package catalog reads agents and skills in the HarmFlow format (D-092): a skill is a folder with a SKILL.md, an
+// Package catalog reads agents and skills in the HarmFlow format: a skill is a folder with a SKILL.md, an
 // agent is a Markdown file with a front-matter header. Built-in ones ship with HarmFlow under the hf- prefix.
 package catalog
 
@@ -130,7 +130,7 @@ func firstLine(s string) string {
 }
 
 // CopyTree copies a skill folder or an agent file into an execution's directory, so the built-ins are delivered
-// per execution without touching the user's harness configuration (D-092).
+// per execution without touching the user's harness configuration.
 func CopyTree(src, dst string) error {
 	info, err := os.Stat(src)
 	if err != nil {

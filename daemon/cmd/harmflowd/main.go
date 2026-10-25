@@ -1,5 +1,5 @@
 // Command harmflowd is the HarmFlow daemon: the scheduler, the executions, and the local API. It runs without the
-// dashboard (ADR-001) and stops nothing when the dashboard closes.
+// dashboard and stops nothing when the dashboard closes.
 package main
 
 import (
@@ -35,7 +35,7 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
-// Version is set at build time; desktop and daemon always ship at the same version (D-080).
+// Version is set at build time; desktop and daemon always ship at the same version.
 var Version = "0.1.0"
 
 // Commit is set at build time by make, which reads it from git also in a git worktree, where go build stamps none.
@@ -193,7 +193,7 @@ func run(homeFlag, builtinsFlag string, port int) error {
 	return nil
 }
 
-// writeRuntime publishes the address in a file only the user can read (D-090).
+// writeRuntime publishes the address in a file only the user can read.
 func writeRuntime(path string, srv *httpapi.Server, store string) error {
 	// A map of strings and ints always marshals.
 	data, _ := json.MarshalIndent(map[string]any{
@@ -318,7 +318,7 @@ func holdsBuiltinSkill(dir string) bool {
 }
 
 // userPath is the PATH harnesses and tools need: the user's login-shell PATH when it can be read, the daemon's own,
-// and the usual install locations. A user service starts with a minimal PATH (ADR-009).
+// and the usual install locations. A user service starts with a minimal PATH.
 func userPath(home string) string {
 	var parts []string
 	shell := os.Getenv("SHELL")

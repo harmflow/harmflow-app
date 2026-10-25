@@ -1,5 +1,5 @@
 // Typed handles on the CSS custom properties of tokens.css, for the few places that style from TypeScript
-// (inline SVG charts, gauges). Values stay in tokens.css so a theme replaces them in one place (FS-012 FR-007).
+// (inline SVG charts, gauges). Values stay in tokens.css so a theme replaces them in one place.
 
 export const color = {
   cyan: "var(--hf-color-cyan)",

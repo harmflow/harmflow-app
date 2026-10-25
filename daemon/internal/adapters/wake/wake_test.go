@@ -17,7 +17,7 @@ func (c *clocks) read() (time.Time, time.Duration) { return c.wall, c.mono }
 func (c *clocks) awake(d time.Duration)  { c.wall, c.mono = c.wall.Add(d), c.mono+d }
 func (c *clocks) asleep(d time.Duration) { c.wall = c.wall.Add(d) }
 
-// FS-002 FR-004: a gap between the wall clock and the monotonic one is a suspension; a slow check, slewing, and a
+// A gap between the wall clock and the monotonic one is a suspension; a slow check, slewing, and a
 // clock set back are not.
 func TestSuspensionIsTheGapBetweenClocks(t *testing.T) {
 	c := &clocks{wall: time.Date(2026, 10, 20, 8, 0, 0, 0, time.UTC)}

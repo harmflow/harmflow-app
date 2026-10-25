@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// ExecutionStatus is a state of architecture/execution-lifecycle.md.
+// ExecutionStatus is a state of an execution's lifecycle.
 type ExecutionStatus string
 
 // The statuses of an execution, as ExecutionStatus in contracts/api/openapi.yaml names them.
@@ -60,7 +60,7 @@ func (s ExecutionStatus) CanTransition(to ExecutionStatus) error {
 }
 
 // Trigger is what fired an execution: a run by hand, the schedule, or one catch-up for the firings missed while the
-// daemon or the machine was unavailable (D-071).
+// daemon or the machine was unavailable.
 type Trigger string
 
 // The triggers of an execution, as Trigger in contracts/api/openapi.yaml names them.
@@ -89,7 +89,7 @@ const (
 )
 
 // Attempt is one harness process. Model and Effort are what the harness reported using, empty when it reported
-// nothing; the configured ones, default when the task set none, are kept apart and never stand in for them (D-105).
+// nothing; the configured ones, default when the task set none, are kept apart and never stand in for them.
 type Attempt struct {
 	Number           int               `json:"number"`
 	Harness          string            `json:"harness"`
@@ -112,12 +112,12 @@ type Attempt struct {
 	// Usage is what the harness reported of its token use, as it runs and when it ends; absent when it reported none.
 	Usage *Usage `json:"usage,omitempty"`
 	// Prompt and SessionContext are what the attempt sent the harness, redacted like the raw output, since the task can
-	// be edited afterwards and the context is composed per attempt (FS-008 FR-010, D-104); older records have neither.
+	// be edited afterwards and the context is composed per attempt; older records have neither.
 	Prompt         string `json:"prompt,omitempty"`
 	SessionContext string `json:"sessionContext,omitempty"`
 }
 
-// SetError records why the attempt ended; ErrorMessage is the en-US text (FS-012 FR-005).
+// SetError records why the attempt ended; ErrorMessage is the en-US text.
 func (a *Attempt) SetError(t Text) {
 	a.ErrorMessage, a.ErrorKey, a.ErrorParams = t.Message, t.Key, t.Params
 }
@@ -194,7 +194,7 @@ type CommandRecord struct {
 	Attempt   int        `json:"attempt"`
 }
 
-// Execution is one concrete attempt to carry out a task; the record is kept with no time limit (D-073).
+// Execution is one concrete attempt to carry out a task; the record is kept with no time limit.
 type Execution struct {
 	SchemaVersion      string            `json:"schemaVersion"`
 	ID                 string            `json:"id"`
@@ -233,12 +233,12 @@ type Execution struct {
 	ChangedFiles       []string          `json:"changedFiles"`
 	Commands           []CommandRecord   `json:"commands"`
 	LogExpired         bool              `json:"logExpired,omitempty"`
-	// Script is the program a script task's execution ran, as it ran; absent for every other type (FS-013 FR-011).
+	// Script is the program a script task's execution ran, as it ran; absent for every other type.
 	Script *ScriptRun `json:"script,omitempty"`
 }
 
 // ScriptRun is the program of a script execution as it ran, redacted like the raw output, so a later edit of the task
-// never changes what an older execution shows (FS-013 FR-011).
+// never changes what an older execution shows.
 type ScriptRun struct {
 	Command          []string          `json:"command,omitempty"`
 	Interpreter      []string          `json:"interpreter,omitempty"`
@@ -250,7 +250,7 @@ type ScriptRun struct {
 	ExitCode         *int              `json:"exitCode,omitempty"`
 	Signal           string            `json:"signal,omitempty"`
 	// Process identifies the program's process group, so a daemon that restarts after a crash can end what it left
-	// running, and nothing else (FS-013 FR-010).
+	// running, and nothing else.
 	Process *ProcessIdentity `json:"process,omitempty"`
 }
 
@@ -266,7 +266,7 @@ type ProcessIdentity struct {
 const ExecutionSchemaVersion = "2"
 
 // Upgrade reads a record of an older schema as the current one. In schema 1, an attempt's model and effort were the
-// configured ones, so they move to ConfiguredModel and ConfiguredEffort, and the used ones read not reported (D-105).
+// configured ones, so they move to ConfiguredModel and ConfiguredEffort, and the used ones read not reported.
 func (x *Execution) Upgrade() {
 	if x.SchemaVersion == "1" {
 		for i := range x.Attempts {
@@ -312,7 +312,7 @@ func (x *Execution) SetStep(t Text) {
 	x.CurrentStep, x.CurrentStepKey, x.CurrentStepParams = t.Message, t.Key, t.Params
 }
 
-// SetError records why the execution ended; ErrorMessage is the en-US text (FS-012 FR-005).
+// SetError records why the execution ended; ErrorMessage is the en-US text.
 func (x *Execution) SetError(t Text) {
 	x.ErrorMessage, x.ErrorKey, x.ErrorParams = t.Message, t.Key, t.Params
 }

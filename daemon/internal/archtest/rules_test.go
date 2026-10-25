@@ -1,6 +1,6 @@
-// Package archtest holds the daemon's import rules as a test, in the spirit of ArchUnit: the hexagonal layers of
-// ADR-001 and the daemon structure's constraints, checked over every production file of daemon/internal/ and
-// daemon/cmd/. It has no production file, so it is a package no rule needs to cover.
+// Package archtest holds the daemon's import rules as a test, in the spirit of ArchUnit: the hexagonal layers and the
+// daemon structure's constraints, checked over every production file of daemon/internal/ and daemon/cmd/. It has no
+// production file, so it is a package no rule needs to cover.
 package archtest
 
 import (

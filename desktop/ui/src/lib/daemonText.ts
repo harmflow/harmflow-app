@@ -1,5 +1,5 @@
 // The daemon writes every text for the user in en-US, with a messageKey and params; the interface shows it in its own
-// language, and keeps the daemon's text for a key it has no translation of (FS-012 FR-005).
+// language, and keeps the daemon's text for a key it has no translation of.
 import type { HarmflowEvent, MessageKey, MessageParams } from "../api/types";
 import i18n from "../i18n";
 import type { enUS } from "../i18n/en-US";

@@ -1,8 +1,7 @@
 // @vitest-environment happy-dom
-// The installed-agents inventory shows every field a check found (FS-004 FR-007; harmflow-app#68). A ready harness
-// whose version or sign-in detection could not establish is shown in a warning tone, with what is unknown (FS-004
-// FR-006, FR-008; harmflow-app#71). Each installation is offered as a choice, driven in a DOM against a stand-in for
-// the daemon's local API (FS-004 FR-001, AC-002; harmflow-app#70).
+// The installed-agents inventory shows every field a check found (harmflow-app#68). A ready harness whose version or
+// sign-in detection could not establish is shown in a warning tone, with what is unknown (harmflow-app#71). Each
+// installation is offered as a choice, driven in a DOM against a stand-in for the daemon's local API (harmflow-app#70).
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
@@ -114,7 +113,7 @@ describe("HarnessInventory", () => {
     diagnosticParams: { harness: "Claude Code", feature: "--permission-mode" },
   };
 
-  it("shows every field of a detected, signed-in harness (FS-004 FR-007, AC-008; harmflow-app#68)", () => {
+  it("shows every field of a detected, signed-in harness (harmflow-app#68)", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-10-22T09:05:00Z"));
     try {
@@ -135,7 +134,7 @@ describe("HarnessInventory", () => {
     }
   });
 
-  it("labels a version newer than the tested ones (FS-004 FR-008, AC-009; harmflow-app#68)", () => {
+  it("labels a version newer than the tested ones (harmflow-app#68)", () => {
     const shown = rows(renderToString(<HarnessInventory harness={{ ...ready, version: "0.999.0", versionSupport: "untested_newer" }} locale="en-US" />));
     expect(shown[i18n.t("harness.version")]).toBe(`0.999.0 · ${i18n.t("harness.versionSupport.untested_newer")}`);
   });

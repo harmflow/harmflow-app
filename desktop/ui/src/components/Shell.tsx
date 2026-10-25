@@ -402,7 +402,7 @@ function MenuItem({ icon, children, onClick, tone }: { icon: IconName; children:
   );
 }
 
-/** The harness a task or an execution runs on; a script task runs a program instead, and says so (FS-013). */
+/** The harness a task or an execution runs on; a script task runs a program instead, and says so. */
 export function HarnessLabel({ harness, model, taskType }: { harness?: string; model?: string; taskType?: string }) {
   const { t } = useTranslation();
   if (!harness && taskType === "script") {

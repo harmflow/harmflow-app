@@ -1,4 +1,4 @@
-// The dashboard's zoom (D-110): its fixed steps, the keys that move it, and the level kept between launches. The
+// The dashboard's zoom: its fixed steps, the keys that move it, and the level kept between launches. The
 // desktop keeps the level, not the daemon's settings: it belongs to the window and its display.
 
 /** The steps, in percent. 150 is the cap until the layout is checked at narrower widths. */

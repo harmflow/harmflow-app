@@ -1,4 +1,4 @@
-// Package wake sees the machine wake from sleep or hibernation (FS-002 FR-004). While the machine is suspended its
+// Package wake sees the machine wake from sleep or hibernation. While the machine is suspended its
 // wall clock keeps time, and the monotonic clock Go reads stops: on macOS that clock is mach_absolute_time, which
 // does not advance during sleep (Go 1.24's runtime, darwin/arm64 and darwin/amd64). A suspension shows as a gap
 // opening between the two clocks; a slow check opens none, since both advance while the machine is awake.

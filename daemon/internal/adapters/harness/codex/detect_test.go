@@ -36,8 +36,8 @@ func standInAt(t *testing.T, dir, version, login string) string {
 
 const signedIn = `echo "Logged in using ChatGPT" >&2`
 
-// FS-004 FR-001, AC-001 (harmflow-app#68): detection searches PATH, then the known locations, and keeps every
-// installation it finds in that order. The first is the one used, and its source says where it was found.
+// harmflow-app#68: detection searches PATH, then the known locations, and keeps every installation it finds in that
+// order. The first is the one used, and its source says where it was found.
 func TestDetectOnPathAndInKnownLocations(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
 	cases := []struct {
@@ -75,8 +75,7 @@ func TestDetectOnPathAndInKnownLocations(t *testing.T) {
 	}
 }
 
-// FS-004 FR-006, AC-007 (harmflow-app#68): each step of detection has its readiness, and the path detection found is
-// absolute.
+// harmflow-app#68: each step of detection has its readiness, and the path detection found is absolute.
 func TestDetectReadinessAtEachStep(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
 	version, signedOut := `echo "codex-cli 0.163.0"`, `echo "Not logged in" >&2; exit 1`
@@ -135,8 +134,8 @@ func TestKnownLocationsDefault(t *testing.T) {
 	}
 }
 
-// FS-004 FR-001, AC-002 (harmflow-app#70): a path set by hand is offered with the installations detection found, once,
-// and it is the one in use.
+// harmflow-app#70: a path set by hand is offered with the installations detection found, once, and it is the one in
+// use.
 func TestDetectOffersThePathSetByHand(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
 	pathDir, knownDir := tempDir(t), tempDir(t)

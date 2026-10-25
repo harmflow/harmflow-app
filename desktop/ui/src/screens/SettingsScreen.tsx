@@ -1,5 +1,5 @@
-// Settings (FS-010 FR-009, FR-010; FS-011 FR-006; FS-012 FR-001, FR-002): language, the daemon and its autostart,
-// notifications, storage, the installed agents, path variables, local API security, and directories.
+// Settings: language, the daemon and its autostart, notifications, storage, the installed agents, path variables,
+// local API security, and directories.
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
@@ -54,7 +54,7 @@ export function SettingsScreen() {
 
   const setAutostart = async (enabled: boolean) => {
     const next = await patch({ autostart: enabled });
-    // The tray process starts at login with the daemon, so notifications work with no window open (D-074).
+    // The tray process starts at login with the daemon, so notifications work with no window open.
     if (next) await native.setLoginItem(enabled && next.trayEnabled).catch(() => undefined);
   };
 
@@ -336,7 +336,7 @@ function PathVariables({ value, onSave }: { value: Record<string, string>; onSav
   );
 }
 
-// The folders, beside the home folder and the mounted volumes, where a task's paths may lead (D-113, FS-009 FR-014).
+// The folders, beside the home folder and the mounted volumes, where a task's paths may lead.
 // The daemon refuses one where no harness may write, and a change that would leave a saved task outside them.
 function AllowedFolders({ value, onSave }: { value: string[]; onSave: (v: string[]) => void }) {
   const { t } = useTranslation();

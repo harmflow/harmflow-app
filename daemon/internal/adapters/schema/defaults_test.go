@@ -40,12 +40,12 @@ spec:
         localPath: /src/app
 `
 
-// FS-001 FR-007, FR-012: the defaults task.schema.json documents are the ones the daemon applies. Every property with a
-// default, found by following the schema's $refs, gets that value from TaskDocument.Effective when a task leaves it
-// out, so a default changed on one side only fails here, naming its key.
+// The defaults task.schema.json documents are the ones the daemon applies. Every property with a default, found by
+// following the schema's $refs, gets that value from TaskDocument.Effective when a task leaves it out, so a default
+// changed on one side only fails here, naming its key.
 func TestSchemaDefaultsAreTheDaemons(t *testing.T) {
 	defaults := collectDefaults(t, contracts.TaskSchema)
-	// The walk reaches the defaults D-082 does not hold, through $refs and list items.
+	// The walk also reaches the defaults beyond the decided default values, through $refs and list items.
 	for _, p := range []string{
 		"/spec/enabled", "/spec/permissions/profile", "/spec/permissions/restrictToWorkspace", "/spec/permissions/network",
 		"/spec/concurrency/overlappingRuns", "/spec/schedule/missedRun/policy", "/spec/harness/fallback/on",

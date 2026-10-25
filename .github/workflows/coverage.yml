@@ -1,7 +1,7 @@
 # Reads the coverage of main every night and shows it in the run's summary, each reading beside its floor, so a floor
-# with room to rise is seen without a reading by hand. It is a view beside the ratchet of ADR-015, never the check: the
+# with room to rise is seen without a reading by hand. It is a view beside the coverage ratchet, never the check: the
 # floors stay held by the CI jobs that run the tests, and nothing here fails on a figure (HOLD_FLOORS=). A job fails
-# only when a test does. Like CI, every job runs on macOS, the MVP's only platform (D-091).
+# only when a test does. Like CI, every job runs on macOS, the MVP's only platform.
 #
 # Actions are pinned as in ci.yml, to the same commits.
 name: Coverage

@@ -9,7 +9,7 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 )
 
-// ExecutionSummary is the row of an execution in lists; no progress percentage is invented (FS-008 FR-009).
+// ExecutionSummary is the row of an execution in lists; no progress percentage is invented.
 type ExecutionSummary struct {
 	ID                string                 `json:"id"`
 	TaskID            string                 `json:"taskId"`
@@ -150,7 +150,7 @@ func (a *App) GetExecution(id string) (ExecutionView, error) {
 	}, nil
 }
 
-// ExecutionOutput is what the harness printed, attempt by attempt, as captured and redacted (FS-008 FR-008).
+// ExecutionOutput is what the harness printed, attempt by attempt, as captured and redacted.
 type ExecutionOutput struct {
 	Attempts   []AttemptOutput `json:"attempts"`
 	LogExpired bool            `json:"logExpired"`
@@ -281,7 +281,7 @@ type QueueView struct {
 }
 
 // Queue is what waits: firings waiting for their task, the next scheduled firings, and the work items the task's
-// sessions reported (FS-008 FR-004).
+// sessions reported.
 func (a *App) Queue() QueueView {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -314,7 +314,7 @@ func (a *App) Queue() QueueView {
 	return q
 }
 
-// Diagnostics lists the directories and the local API's address (FS-010 FR-009).
+// Diagnostics lists the directories and the local API's address.
 type Diagnostics struct {
 	Version      string `json:"version"`
 	Address      string `json:"address"`

@@ -1,4 +1,4 @@
-// Every execution, newest first, kept with no time limit (FS-008 FR-004, FR-010). Opening one replays its stored
+// Every execution, newest first, kept with no time limit. Opening one replays its stored
 // events, or says its log expired.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";

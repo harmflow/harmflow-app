@@ -10,7 +10,7 @@ import (
 )
 
 // scheduleState is what survives a restart for each task: the rule it was computed from, the next firing, and the
-// last processed one (FS-002 FR-006).
+// last processed one.
 type scheduleState struct {
 	Rule        string     `json:"rule"`
 	Timezone    string     `json:"timezone,omitempty"`
@@ -18,9 +18,9 @@ type scheduleState struct {
 	LastFiredAt *time.Time `json:"lastFiredAt,omitempty"`
 }
 
-// firingRecord is what became of one firing the scheduler processed, kept so no firing is lost silently (FS-002
-// FR-006). For a catch-up, ScheduledFor is the first missed time and Missed how many misfires it covers; Policy is the
-// missed-run policy a misfire followed. A skipped firing says why, as a text the desktop translates.
+// firingRecord is what became of one firing the scheduler processed, kept so no firing is lost silently. For a
+// catch-up, ScheduledFor is the first missed time and Missed how many misfires it covers; Policy is the missed-run
+// policy a misfire followed. A skipped firing says why, as a text the desktop translates.
 type firingRecord struct {
 	ScheduledFor time.Time         `json:"scheduledFor"`
 	ProcessedAt  time.Time         `json:"processedAt"`
@@ -88,9 +88,9 @@ func (a *App) saveSchedule() {
 	}
 }
 
-// rescheduleTask recomputes the next firing when the schedule changed, at once (D-083, FS-002 FR-010). An unchanged
+// rescheduleTask recomputes the next firing when the schedule changed, at once. An unchanged
 // schedule keeps its pending firing, so a restart still sees the misfire. A file that fails validation keeps the
-// schedule of its last valid definition, so its firings come due and are recorded as skipped (FS-002 FR-006).
+// schedule of its last valid definition, so its firings come due and are recorded as skipped.
 func (a *App) rescheduleTask(id string) {
 	a.mu.Lock()
 	e := a.tasks[id]
@@ -154,7 +154,7 @@ type dueFiring struct {
 
 // Tick fires every due task. A firing scheduled while the daemon or the machine was unavailable is a misfire, however
 // late it is; so is one later than MisfireAfter. All misfires coalesce into one catch-up or are skipped, per the
-// task's policy (D-071). Every firing it processes is recorded with what became of it (FS-002 FR-006).
+// task's policy. Every firing it processes is recorded with what became of it.
 func (a *App) Tick() {
 	a.tickMu.Lock()
 	defer a.tickMu.Unlock()
@@ -165,7 +165,7 @@ func (a *App) Tick() {
 	a.mu.Lock()
 	woke := wake.After(a.unavailableUntil)
 	if woke {
-		a.unavailableUntil = wake // the machine slept until then (FS-002 FR-004)
+		a.unavailableUntil = wake // the machine slept until then
 	}
 	if !a.accepting {
 		a.mu.Unlock()
@@ -251,7 +251,7 @@ func (a *App) Tick() {
 }
 
 // heldBack says why a due firing of a task that cannot fire now is skipped: it is being deleted, its file fails
-// validation, or it is disabled (D-083).
+// validation, or it is disabled.
 func heldBack(e *taskEntry) (domain.Text, bool) {
 	switch {
 	case e.deletePending:
@@ -323,7 +323,7 @@ type FiringResult struct {
 	cause  string
 }
 
-// RunTask is the manual trigger (FS-002 FR-001).
+// RunTask is the manual trigger.
 func (a *App) RunTask(id string) (FiringResult, error) {
 	e, err := a.entry(id)
 	if err != nil {
@@ -348,7 +348,7 @@ func (a *App) RunTask(id string) (FiringResult, error) {
 }
 
 // fire starts an execution, or applies the overlap policy when the task is running: one firing waits and later
-// ones coalesce into it, or the firing is skipped and logged (D-072).
+// ones coalesce into it, or the firing is skipped and logged.
 func (a *App) fire(taskID string, trigger domain.Trigger, scheduledFor *time.Time) (FiringResult, error) {
 	a.mu.Lock()
 	e := a.tasks[taskID]
@@ -359,7 +359,7 @@ func (a *App) fire(taskID string, trigger domain.Trigger, scheduledFor *time.Tim
 	doc := e.doc
 	if !doc.RunsOn(a.d.OS) {
 		// Every firing — scheduled, catch-up, or by hand — passes here, so a script task never runs on a system it does
-		// not declare (FS-013 FR-014).
+		// not declare.
 		a.mu.Unlock()
 		text := a.systemsText(doc)
 		if trigger == domain.TriggerManual {
@@ -430,16 +430,16 @@ func (a *App) fire(taskID string, trigger domain.Trigger, scheduledFor *time.Tim
 	return FiringResult{Outcome: "started", ExecutionID: x.ID}, nil
 }
 
-// claimLocked marks a task as running; the per-task exclusion of D-023.
+// claimLocked marks a task as running: the per-task exclusion.
 func (a *App) claimLocked(taskID string) *runHandle {
 	h := &runHandle{done: make(chan struct{})}
 	a.running[taskID] = h
 	return h
 }
 
-// startQueued starts the waiting firing of each task that is free, with the definition current now (D-083). A firing
+// startQueued starts the waiting firing of each task that is free, with the definition current now. A firing
 // whose task is disabled or gone never starts: it is dropped, however the change arrived, even while the daemon was
-// down (FS-001 FR-015, FS-003 FR-007).
+// down.
 func (a *App) startQueued() {
 	a.mu.Lock()
 	var start []*domain.Execution
@@ -483,7 +483,7 @@ type droppedFiring struct {
 	reason domain.Text
 }
 
-// dropQueued cancels the waiting firing of a task that was disabled or deleted (D-083).
+// dropQueued cancels the waiting firing of a task that was disabled or deleted.
 func (a *App) dropQueued(taskID string, reason domain.Text) {
 	a.mu.Lock()
 	drops := a.dropQueuedLocked(taskID, reason)
@@ -513,7 +513,7 @@ func (a *App) announceDropped(drops []droppedFiring) {
 	}
 }
 
-// SchedulePreview lists the next occurrences in the schedule's time zone (FS-002 FR-002).
+// SchedulePreview lists the next occurrences in the schedule's time zone.
 // SchedulePreview carries an invalid schedule's error as a text the desktop translates: Error is the en-US one.
 type SchedulePreview struct {
 	Occurrences []time.Time       `json:"occurrences"`

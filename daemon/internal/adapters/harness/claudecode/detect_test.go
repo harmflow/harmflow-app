@@ -33,8 +33,8 @@ func standInAt(t *testing.T, dir, version string) string {
 	return path
 }
 
-// FS-004 FR-001, AC-001 (harmflow-app#68): detection searches PATH, then the known locations, and keeps every
-// installation it finds in that order. The first is the one used, and its source says where it was found.
+// harmflow-app#68: detection searches PATH, then the known locations, and keeps every installation it finds in that
+// order. The first is the one used, and its source says where it was found.
 func TestDetectOnPathAndInKnownLocations(t *testing.T) {
 	cases := []struct {
 		name              string
@@ -71,8 +71,7 @@ func TestDetectOnPathAndInKnownLocations(t *testing.T) {
 	}
 }
 
-// FS-004 FR-006, AC-007 (harmflow-app#68): each step of detection has its readiness, and the path detection found is
-// absolute.
+// harmflow-app#68: each step of detection has its readiness, and the path detection found is absolute.
 func TestDetectReadinessAtEachStep(t *testing.T) {
 	signedIn, signedOut := `echo '{"loggedIn": true}'`, `echo '{"loggedIn": false, "authMethod": "none"}'; exit 1`
 	version := `echo "2.1.239 (Claude Code)"`
@@ -116,8 +115,7 @@ func TestDetectReadinessAtEachStep(t *testing.T) {
 	}
 }
 
-// FS-004 FR-006 (harmflow-app#68): a symlinked installation, as a package manager links one, is used by the path it
-// resolves to.
+// harmflow-app#68: a symlinked installation, as a package manager links one, is used by the path it resolves to.
 func TestDetectResolvesASymlinkedPath(t *testing.T) {
 	targetDir, pathDir := tempDir(t), tempDir(t)
 	resolved := standInAt(t, targetDir, "2.1.239")
@@ -152,8 +150,8 @@ func TestKnownLocationsDefault(t *testing.T) {
 	}
 }
 
-// FS-004 FR-001, AC-002 (harmflow-app#70): a path set by hand is offered with the installations detection found, once,
-// and it is the one in use: installation names it as it was set, and path is where it resolves to.
+// harmflow-app#70: a path set by hand is offered with the installations detection found, once, and it is the one in
+// use: installation names it as it was set, and path is where it resolves to.
 func TestDetectOffersThePathSetByHand(t *testing.T) {
 	pathDir, knownDir := tempDir(t), tempDir(t)
 	onPath, atKnown := standInAt(t, pathDir, "2.1.239"), standInAt(t, knownDir, "2.1.200")

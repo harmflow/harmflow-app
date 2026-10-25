@@ -26,9 +26,9 @@ case "$1" in
 esac
 `
 
-// FS-004 FR-001, AC-001 (harmflow-app#68): with Claude Code installed and Codex nowhere, the inventory shows where
-// Claude Code is and at which version, and Codex as not installed with the reason. The real adapters search only the
-// test's directories, and detection writes nothing under the user's home.
+// harmflow-app#68: with Claude Code installed and Codex nowhere, the inventory shows where Claude Code is and at which
+// version, and Codex as not installed with the reason. The real adapters search only the test's directories, and
+// detection writes nothing under the user's home.
 func TestInventoryReportsWhatIsInstalled(t *testing.T) {
 	userHome, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {

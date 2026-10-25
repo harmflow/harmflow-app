@@ -1,5 +1,5 @@
-//! Clicks on the native notices (FS-011 FR-003). The interface sends the notices, naming the execution each concerns;
-//! the click is handled here, since only the shell can bring back the window while it is hidden.
+//! Clicks on the native notices. The interface sends the notices, naming the execution each concerns; the click is
+//! handled here, since only the shell can bring back the window while it is hidden.
 
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_notification::{ActionPerformed, NotificationExt};
