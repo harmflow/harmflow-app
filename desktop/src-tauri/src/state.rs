@@ -21,7 +21,7 @@ pub struct AppState {
     last_event_id: AtomicU64,
     tray_enabled: AtomicBool,
     pub tray_running: Mutex<Vec<ActiveExecution>>,
-    /// Tray texts in the interface's language, sent by the webview; English until it does.
+    /// The tray's and the app menu's texts in the interface's language, sent by the webview; English until it does.
     pub tray_labels: Mutex<HashMap<String, String>>,
     pub tray_refresh_pending: AtomicBool,
     /// Started with `--hidden`, as a login item: only a reopen or the tray shows the window.

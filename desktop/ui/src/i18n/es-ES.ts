@@ -1110,6 +1110,9 @@ export const esES: Resources = {
     quit: "Salir de la interfaz",
     stop: "Detener el daemon…",
   },
+  menu: {
+    settings: "Ajustes…",
+  },
   gauges: {
     cpu: "CPU",
     ram: "RAM",

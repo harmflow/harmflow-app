@@ -252,6 +252,11 @@ export const actions = {
   navigate(target: { executionId?: string; screen?: string }) {
     setState({ navigation: { ...target, nonce: Date.now() } });
   },
+
+  /** Drops the navigation target once the interface took or ignored it, so it never fires later. */
+  clearNavigation() {
+    setState({ navigation: undefined });
+  },
 };
 
 function mergeEvents(held: HarmflowEvent[], incoming: HarmflowEvent[]): HarmflowEvent[] {
