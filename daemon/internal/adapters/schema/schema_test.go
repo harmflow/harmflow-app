@@ -573,6 +573,27 @@ func TestSchedulesAreExclusive(t *testing.T) {
 	}
 }
 
+// A cron is 5 fields or one of the seven macros, in lowercase; another macro, or one in another case, is refused at
+// the cron.
+func TestCronMacros(t *testing.T) {
+	v, _ := New()
+	withCron := func(cron string) string { return valid + "  schedule:\n    cron: \"" + cron + "\"\n" }
+	for _, cron := range []string{"0 9 * * 1-5", "@yearly", "@annually", "@monthly", "@weekly", "@daily", "@midnight",
+		"@hourly", " @daily "} {
+		doc, node, _ := ParseYAML([]byte(withCron(cron)))
+		if issues := v.ValidateTask(doc, node); len(issues) > 0 {
+			t.Errorf("ValidateTask(cron %q) = %+v, want no issue", cron, issues)
+		}
+	}
+	for _, cron := range []string{"@reboot", "@DAILY", "@Daily", "@daily *", "0 9 * *"} {
+		doc, node, _ := ParseYAML([]byte(withCron(cron)))
+		issues := v.ValidateTask(doc, node)
+		if len(issues) != 1 || issues[0].Key != "schema_pattern" || issues[0].Path != "/spec/schedule/cron" {
+			t.Errorf("ValidateTask(cron %q) = %+v, want schema_pattern at /spec/schedule/cron", cron, issues)
+		}
+	}
+}
+
 // A schema error carries a key and params the desktop translates, beside its en-US text.
 func TestSchemaErrorsAreTranslatable(t *testing.T) {
 	v, _ := New()

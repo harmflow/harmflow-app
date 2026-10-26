@@ -95,8 +95,35 @@ func TestCronFields(t *testing.T) {
 	if !next.Equal(time.Date(2026, 10, 25, 0, 0, 0, 0, time.UTC)) {
 		t.Errorf("dom or dow: got %v", next)
 	}
-	if m, _ := ParseCron("@daily", time.UTC); m.Next(time.Date(2026, 1, 1, 5, 0, 0, 0, time.UTC)).Day() != 2 {
-		t.Error("@daily")
+	// The seven macros, in lowercase, fire as the expressions they stand for.
+	from := time.Date(2026, 1, 1, 5, 30, 0, 0, time.UTC) // a Thursday
+	for _, c := range []struct {
+		macro string
+		want  time.Time
+	}{
+		{"@yearly", time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)},
+		{"@annually", time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)},
+		{"@monthly", time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)},
+		{"@weekly", time.Date(2026, 1, 4, 0, 0, 0, 0, time.UTC)}, // Sunday
+		{"@daily", time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)},
+		{"@midnight", time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)},
+		{"@hourly", time.Date(2026, 1, 1, 6, 0, 0, 0, time.UTC)},
+	} {
+		m, err := ParseCron(c.macro, time.UTC)
+		if err != nil {
+			t.Errorf("ParseCron(%q) = %v, want it accepted", c.macro, err)
+			continue
+		}
+		if got := m.Next(from); !got.Equal(c.want) {
+			t.Errorf("ParseCron(%q).Next(%v) = %v, want %v", c.macro, from, got, c.want)
+		}
+	}
+	// A macro in another case, or one cron has but a schedule does not, is a single field.
+	for _, bad := range []string{"@DAILY", "@Daily", "@reboot"} {
+		_, err := ParseCron(bad, time.UTC)
+		if err == nil || TextOf(err).Key != "cron_field_count" {
+			t.Errorf("ParseCron(%q) = %v, want cron_field_count", bad, err)
+		}
 	}
 }
 

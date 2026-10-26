@@ -1279,6 +1279,73 @@ func TestScheduleFormatsOnSave(t *testing.T) {
 	}
 }
 
+// The schedule preview and a save agree on each cron macro, on a macro in another case, and on a 5-field expression:
+// both accept it, or both refuse it.
+func TestCronMacrosAgreeOnPreviewAndSave(t *testing.T) {
+	d := startDaemon(t, t.TempDir())
+	for i, c := range []struct {
+		cron     string
+		accepted bool
+	}{
+		{"@yearly", true}, {"@annually", true}, {"@monthly", true}, {"@weekly", true}, {"@daily", true},
+		{"@midnight", true}, {"@hourly", true}, {"@DAILY", false}, {"0 9 * * 1-5", true},
+	} {
+		t.Run(c.cron, func(t *testing.T) {
+			d := d.in(t)
+
+			preview := d.call("POST", "/schedules/preview",
+				map[string]any{"schedule": map[string]any{"cron": c.cron, "timezone": "UTC"}}, 200)
+			occurrences, _ := preview["occurrences"].([]any)
+			previewed := preview["error"] == nil && len(occurrences) > 0
+			status, body := d.request("POST", "/tasks", map[string]any{"yaml": task(fmt.Sprintf("cron-%d", i), "Say hi.",
+				"  enabled: false\n  schedule:\n    cron: \""+c.cron+"\"\n    timezone: UTC\n")}, nil)
+			saved := status == 201
+			if previewed != c.accepted || saved != c.accepted {
+				t.Errorf("cron %q: preview accepted = %v (%v), save status %d (%s); want both accepted = %v",
+					c.cron, previewed, preview, status, body, c.accepted)
+			}
+			if !c.accepted && status != 422 {
+				t.Errorf("cron %q: save status %d, want 422", c.cron, status)
+			}
+		})
+	}
+}
+
+// A task whose cron is @daily is saved, imported, and loaded from its file at start, and each fires next at the coming
+// midnight in its time zone.
+func TestDailyMacroFiresAtMidnight(t *testing.T) {
+	const zone = "America/Sao_Paulo"
+	loc, err := time.LoadLocation(zone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	daily := "  schedule:\n    cron: \"@daily\"\n    timezone: " + zone + "\n"
+	home := t.TempDir()
+	before := time.Now()
+	d := startDaemon(t, home)
+	d.call("POST", "/tasks", map[string]any{"yaml": task("saved", "Say hi.", daily)}, 201)
+	d.call("POST", "/tasks/import", map[string]any{"yaml": task("imported", "Say hi.", daily)}, 201)
+	d.stop()
+	if err := os.WriteFile(filepath.Join(home, "tasks", "loaded.yaml"), []byte(task("loaded", "Say hi.", daily)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d = startDaemon(t, home)
+	after := time.Now()
+	// The midnight that follows an instant, in the task's time zone.
+	midnightAfter := func(at time.Time) time.Time {
+		y, m, day := at.In(loc).Date()
+		return time.Date(y, m, day+1, 0, 0, 0, 0, loc)
+	}
+	for _, id := range []string{"saved", "imported", "loaded"} {
+		got := d.call("GET", "/tasks/"+id, nil, 200)
+		next, err := time.Parse(time.RFC3339, fmt.Sprint(got["nextFireAt"]))
+		// The midnight after the test began, or the one after it if a midnight passed while the test ran.
+		if err != nil || (!next.Equal(midnightAfter(before)) && !next.Equal(midnightAfter(after))) {
+			t.Errorf("%s: next firing %v (%v), want %v in %s", id, got["nextFireAt"], err, midnightAfter(before), zone)
+		}
+	}
+}
+
 type sseEvent struct {
 	ID   int64
 	Type string
