@@ -25,6 +25,7 @@ import (
 
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/eventlog"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/fsstore"
+	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/codex"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/schema"
 	"github.com/harmflow/harmflow-app/daemon/internal/contracts"
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
@@ -67,7 +68,9 @@ func (w *fakeWake) woke(at time.Time) {
 }
 
 // fakeHarness runs /bin/sh with a script the test chooses. The script prints the outcome on its last line:
-// "END ok", "END quota", "END rate", or "END error"; "STARTED <model> <effort>" reports what the session runs with.
+// "END ok", "END quota", "END rate", "END network", "END unavailable" (signed out), or "END error"; "STARTED <model>
+// <effort>" reports what the session runs with. Its user configuration holds the skill user-skill and the agent
+// user-agent, each at a path of its own harness, and the skill review-notes for Claude Code only.
 type fakeHarness struct {
 	id          string
 	mu          sync.Mutex
@@ -111,10 +114,12 @@ func (f *fakeHarness) Detect(ctx context.Context, _ string) ports.HarnessInfo {
 }
 func (f *fakeHarness) ValidateProfile(ports.HarnessInfo, string, string) error { return nil }
 func (f *fakeHarness) UserItem(kind, name string) (ports.ResolvedItem, bool) {
-	if name == "user-skill" && kind == "skill" {
-		return ports.ResolvedItem{Name: name, Kind: kind, Path: "/x"}, true
+	found := kind == "skill" && name == "user-skill" || kind == "agent" && name == "user-agent" ||
+		kind == "skill" && name == "review-notes" && f.id == domain.HarnessClaudeCode
+	if !found {
+		return ports.ResolvedItem{}, false
 	}
-	return ports.ResolvedItem{}, false
+	return ports.ResolvedItem{Name: name, Kind: kind, Path: filepath.Join("/", f.id, kind+"s", name)}, true
 }
 func (f *fakeHarness) UserItems(string) []ports.ResolvedItem { return nil }
 func (f *fakeHarness) Prepare(_ ports.HarnessInfo, req ports.RunRequest) (ports.Invocation, ports.OutputParser, error) {
@@ -242,6 +247,8 @@ func (p *fakeParser) Finish(exit int, _ string, timedOut, cancelled bool) domain
 		return domain.AttemptEnd{Class: domain.ClassRateLimited, Error: domain.Text{Message: "429"}, RetryAfter: 10 * time.Millisecond}
 	case "network":
 		return domain.AttemptEnd{Class: domain.ClassNetwork, Error: domain.Text{Message: "connect ECONNREFUSED 127.0.0.1:443"}}
+	case "unavailable":
+		return domain.AttemptEnd{Class: domain.ClassHarnessUnavailable, Error: domain.Text{Message: "Not logged in"}}
 	}
 	return domain.AttemptEnd{Class: domain.ClassTaskError, Error: domain.Text{Message: fmt.Sprintf("exit %d", exit)}}
 }
@@ -1015,6 +1022,352 @@ func TestNetworkWaitUntilTheTimeout(t *testing.T) {
 	}
 }
 
+// requests keeps what a fake harness received for each attempt, leaving out validation's policy check, which prepares
+// with no prompt.
+type requests struct {
+	mu   sync.Mutex
+	sent []ports.RunRequest
+}
+
+func (q *requests) add(req ports.RunRequest) {
+	if req.Prompt == "" {
+		return
+	}
+	q.mu.Lock()
+	q.sent = append(q.sent, req)
+	q.mu.Unlock()
+}
+
+func (q *requests) all() []ports.RunRequest {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return slices.Clone(q.sent)
+}
+
+// promptCount is how many attempts the harness was prepared for.
+func (f *fakeHarness) promptCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.prompts)
+}
+
+// eventCounts counts an execution's logged events by type, and keeps the last one of each.
+func (e *env) eventCounts(executionID string) (map[string]int, map[string]domain.Event) {
+	e.t.Helper()
+	events, _, err := e.app.ExecutionEvents(executionID, 0, 0)
+	if err != nil {
+		e.t.Fatalf("ExecutionEvents(%s): %v", executionID, err)
+	}
+	counts, last := map[string]int{}, map[string]domain.Event{}
+	for _, ev := range events {
+		counts[ev.Type]++
+		last[ev.Type] = ev
+	}
+	return counts, last
+}
+
+const codexFallback = "    fallback:\n      candidates:\n        - provider: codex\n"
+
+// harmflow-app#215: Claude Code exhausts its quota and Codex, its only fallback, is not ready. The execution fails,
+// never completes, says that no alternative was available and why, and notifies the user natively. The executor checks
+// a harness only as it is about to run it, so the quota is recorded as a switch first (HarnessSwitches 1 and a
+// harness.switched event); Codex is then found not ready, and the reason the execution gives is Codex's, unavailable,
+// while harness.quota_exhausted keeps Claude Code's.
+func TestQuotaWithNoReadyAlternative(t *testing.T) {
+	e := newEnv(t)
+	e.create("stranded", codexFallback)
+	e.codex.mu.Lock()
+	e.codex.unavailable = true
+	e.codex.mu.Unlock()
+	e.claude.setScript(func(ports.RunRequest) string { return "echo 'END quota'" })
+	r, _ := e.app.RunTask("stranded")
+	x := e.wait(r.ExecutionID, domain.StatusFailed)
+	e.idle("stranded") // the notice is decided once the execution has returned
+	if len(x.Attempts) != 1 || x.Attempts[0].Harness != domain.HarnessClaudeCode ||
+		x.Attempts[0].Outcome != domain.AttemptQuotaExhausted || x.HarnessSwitches != 1 {
+		t.Fatalf("attempts %+v, %d switches; want one quota-exhausted Claude Code attempt and 1 switch", x.Attempts,
+			x.HarnessSwitches)
+	}
+	if x.ErrorKey != "no_alternative_harness_detail" || !strings.Contains(x.ErrorMessage, "no alternative harness is available") ||
+		!strings.Contains(x.ErrorMessage, "codex is unavailable: codex is not signed in") {
+		t.Errorf("the execution's error is %q (%s), want no_alternative_harness_detail naming Codex's sign-in",
+			x.ErrorMessage, x.ErrorKey)
+	}
+	if e.codex.promptCount() != 0 {
+		t.Errorf("Codex got %d prompts, want 0", e.codex.promptCount())
+	}
+	counts, last := e.eventCounts(r.ExecutionID)
+	for _, typ := range []string{domain.EventHarnessQuotaExhausted, domain.EventHarnessSwitched,
+		domain.EventHarnessUnavailable, domain.EventHarnessNoAlternative, domain.EventExecutionFailed} {
+		if counts[typ] != 1 {
+			t.Errorf("%d %s events, want 1", counts[typ], typ)
+		}
+	}
+	if counts[domain.EventExecutionCompleted] != 0 {
+		t.Errorf("an execution.completed event was logged")
+	}
+	if ev := last[domain.EventHarnessQuotaExhausted]; ev.Harness != domain.HarnessClaudeCode {
+		t.Errorf("%s names %q, want %s", ev.Type, ev.Harness, domain.HarnessClaudeCode)
+	}
+	if ev := last[domain.EventHarnessUnavailable]; ev.Harness != domain.HarnessCodex {
+		t.Errorf("%s names %q, want %s", ev.Type, ev.Harness, domain.HarnessCodex)
+	}
+	none := last[domain.EventHarnessNoAlternative]
+	if none.Severity != domain.SeverityError || none.Payload["harness"] != domain.HarnessCodex ||
+		none.Payload["reason"] != string(domain.ClassHarnessUnavailable) {
+		t.Errorf("%s = %+v, want an error naming Codex, unavailable", none.Type, none)
+	}
+	var notices []Notification
+	for _, n := range e.app.Notifications(false) {
+		if n.EventType == domain.EventHarnessNoAlternative && n.ExecutionID == r.ExecutionID {
+			notices = append(notices, n)
+		}
+	}
+	if len(notices) != 1 || notices[0].Severity != "error" || notices[0].Body == "" {
+		t.Errorf("notices of %s = %+v, want one error notice", domain.EventHarnessNoAlternative, notices)
+	}
+}
+
+// harmflow-app#215: a Claude Code attempt that ends signed out fails over to Codex, which completes the execution.
+func TestSignedOutDuringAnAttemptFailsOver(t *testing.T) {
+	e := newEnv(t)
+	e.create("signed-out", codexFallback)
+	e.claude.setScript(func(ports.RunRequest) string { return "echo working; echo 'END unavailable'" })
+	e.codex.setScript(func(ports.RunRequest) string { return "echo 'END ok'" })
+	r, _ := e.app.RunTask("signed-out")
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	if len(x.Attempts) != 2 || x.HarnessSwitches != 1 ||
+		x.Attempts[0].Harness != domain.HarnessClaudeCode || x.Attempts[0].Outcome != domain.AttemptHarnessUnavailable ||
+		x.Attempts[1].Harness != domain.HarnessCodex || x.Attempts[1].Outcome != domain.AttemptSucceeded {
+		t.Fatalf("attempts %+v, %d switches; want Claude Code signed out, then Codex succeeding", x.Attempts,
+			x.HarnessSwitches)
+	}
+	counts, last := e.eventCounts(r.ExecutionID)
+	switched := last[domain.EventHarnessSwitched]
+	if counts[domain.EventHarnessSwitched] != 1 || switched.Payload["from"] != domain.HarnessClaudeCode ||
+		switched.Payload["to"] != domain.HarnessCodex || switched.Payload["reason"] != string(domain.ClassHarnessUnavailable) {
+		t.Errorf("%d %s events, the last %+v; want one from Claude Code to Codex for harness_unavailable",
+			counts[domain.EventHarnessSwitched], domain.EventHarnessSwitched, switched)
+	}
+}
+
+// harmflow-app#215: with Codex configured as a fallback, neither an attempt that reaches the execution's timeout nor
+// one that fails with a task error fails over: the execution fails after one attempt, with no harness.switched event.
+func TestNoFailoverOnATimeoutOrATaskError(t *testing.T) {
+	for _, c := range []struct {
+		name, script string
+		outcome      domain.AttemptOutcome
+		key, message string // the execution's error
+	}{
+		{"timeout", "echo working; sleep 30", domain.AttemptTimedOut, "execution_timed_out", "the execution timeout elapsed"},
+		{"task error", "echo working; echo 'END error'", domain.AttemptFailed, "", "exit 0"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t, func(e *env) { e.timeoutUnit = time.Second })
+			e.create("stay", codexFallback+"  execution:\n    timeoutMinutes: 2\n    cancelGraceSeconds: 1\n")
+			e.claude.setScript(func(ports.RunRequest) string { return c.script })
+			e.codex.setScript(func(ports.RunRequest) string { return "echo 'END ok'" })
+			r, _ := e.app.RunTask("stay")
+			x := e.wait(r.ExecutionID, domain.StatusFailed)
+			if len(x.Attempts) != 1 || x.Attempts[0].Harness != domain.HarnessClaudeCode ||
+				x.Attempts[0].Outcome != c.outcome || x.HarnessSwitches != 0 {
+				t.Fatalf("attempts %+v, %d switches; want one Claude Code attempt %s and no switch", x.Attempts,
+					x.HarnessSwitches, c.outcome)
+			}
+			if x.ErrorKey != c.key || x.ErrorMessage != c.message {
+				t.Errorf("the execution's error is %q (%q), want %q (%q)", x.ErrorMessage, x.ErrorKey, c.message, c.key)
+			}
+			if n := e.codex.promptCount(); n != 0 {
+				t.Errorf("Codex got %d prompts, want 0", n)
+			}
+			if counts, _ := e.eventCounts(r.ExecutionID); counts[domain.EventHarnessSwitched] != 0 {
+				t.Errorf("%d %s events, want 0", counts[domain.EventHarnessSwitched], domain.EventHarnessSwitched)
+			}
+		})
+	}
+}
+
+// harmflow-app#215: one timeout covers every attempt of an execution. The first attempt fails over after two thirds of
+// it, and the alternative, which ignores SIGTERM, is stopped when the same timeout elapses, and killed once its grace
+// is over. A timeout started afresh for the alternative would end it at 5/3 of the timeout plus the grace at the
+// earliest, so the bound below, the timeout plus the grace plus less than a third of the timeout, tells the two apart.
+func TestOneTimeoutAcrossAFailover(t *testing.T) {
+	const timeout, grace, slack = 6 * time.Second, time.Second, 1900 * time.Millisecond
+	e := newEnv(t, func(e *env) { e.timeoutUnit = time.Second })
+	e.create("shared", codexFallback+"  execution:\n    timeoutMinutes: 6\n    cancelGraceSeconds: 1\n")
+	dir := t.TempDir()
+	e.claude.setScript(func(ports.RunRequest) string { return "sleep 4; echo 'END quota'" })
+	e.codex.setScript(func(ports.RunRequest) string {
+		return fmt.Sprintf("trap '' TERM; echo $$ > %s/codex; echo working; sleep 30; echo 'END ok'", dir)
+	})
+	began := time.Now()
+	r, _ := e.app.RunTask("shared")
+	x := e.wait(r.ExecutionID, domain.StatusFailed)
+	elapsed := time.Since(began)
+	if len(x.Attempts) != 2 {
+		t.Fatalf("%d attempts %+v, want 2: the quota did not fail over before the timeout", len(x.Attempts), x.Attempts)
+	}
+	if x.ErrorKey != "execution_timed_out" || x.HarnessSwitches != 1 {
+		t.Errorf("the execution failed with %q (%s) after %d switches, want execution_timed_out after 1", x.ErrorMessage,
+			x.ErrorKey, x.HarnessSwitches)
+	}
+	if at := x.Attempts[1]; at.Harness != domain.HarnessCodex || at.Outcome != domain.AttemptTimedOut || at.EndedAt == nil {
+		t.Errorf("Codex's attempt %+v, want it ended, timed out", at)
+	}
+	if elapsed < timeout || elapsed > timeout+grace+slack {
+		t.Errorf("the execution ended after %s, want between %s and %s", elapsed, timeout, timeout+grace+slack)
+	}
+	if pid := waitForPid(t, filepath.Join(dir, "codex")); alive(pid) {
+		t.Errorf("Codex's process %d outlived the execution", pid)
+	}
+}
+
+// harmflow-app#216: after a quota failover from Claude Code, Codex runs with the permissions, work directory, and
+// additional directories of the first attempt, its issue task's repository among them, and its prepared sandbox is
+// workspace-write over the same directories.
+func TestFailoverKeepsThePermissions(t *testing.T) {
+	e := newEnv(t)
+	work := filepath.Join(e.app.Paths().UserHome, "worktree")
+	repo := mkdir(t, filepath.Join(e.app.Paths().UserHome, "repo"))
+	doc := strings.Replace(taskYAML("confined", codexFallback+"  workspace:\n    path: "+work+"\n"+
+		"  permissions:\n    profile: workspace_write\n    restrictToWorkspace: true\n"+
+		fmt.Sprintf("  githubIssueImplementation:\n    repositories:\n      - name: o/r\n        localPath: %q\n", repo)),
+		"type: general", "type: github-issue-implementation", 1)
+	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: doc}); err != nil {
+		t.Fatalf("CreateTask(confined): %v", err)
+	}
+	var q requests
+	e.claude.setScript(func(req ports.RunRequest) string { q.add(req); return "echo 'END quota'" })
+	e.codex.setScript(func(req ports.RunRequest) string { q.add(req); return "echo 'END ok'" })
+	r, _ := e.app.RunTask("confined")
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	sent := q.all()
+	if len(sent) != 2 || len(x.Attempts) != 2 || x.Attempts[1].Harness != domain.HarnessCodex {
+		t.Fatalf("%d requests, attempts %+v; want 2, the second on Codex", len(sent), x.Attempts)
+	}
+	first, second := sent[0], sent[1]
+	if p := first.Permissions; p.Profile != domain.ProfileWorkspaceWrite || p.RestrictToWorkspace == nil ||
+		!*p.RestrictToWorkspace {
+		t.Errorf("the first attempt's permissions %+v, want workspace_write restricted to the workspace", p)
+	}
+	if !reflect.DeepEqual(second.Permissions, first.Permissions) {
+		t.Errorf("the second attempt's permissions %+v, want the first's %+v", second.Permissions, first.Permissions)
+	}
+	resolved, _ := domain.ResolvePath(work)
+	if first.WorkDir != resolved || second.WorkDir != first.WorkDir {
+		t.Errorf("work directories %q and %q, want %q for both", first.WorkDir, second.WorkDir, resolved)
+	}
+	resolvedRepo, _ := domain.ResolvePath(repo)
+	if want := []string{resolvedRepo}; !slices.Equal(first.AdditionalDirs, want) ||
+		!slices.Equal(second.AdditionalDirs, first.AdditionalDirs) {
+		t.Errorf("additional directories %q and %q, want %q for both", first.AdditionalDirs, second.AdditionalDirs, want)
+	}
+	info := ports.HarnessInfo{Path: "codex", Features: map[string]bool{"--add-dir": true}}
+	inv, _, err := (&codex.Adapter{Home: t.TempDir()}).Prepare(info, second)
+	if err != nil {
+		t.Fatalf("codex Prepare(second attempt): %v", err)
+	}
+	args := strings.Join(inv.Args, " ")
+	for _, want := range []string{"--sandbox workspace-write", "--cd " + second.WorkDir, "--add-dir " + resolvedRepo} {
+		if !strings.Contains(args, want) {
+			t.Errorf("codex Prepare(second attempt) args %q, want %q", inv.Args, want)
+		}
+	}
+}
+
+// harmflow-app#216: the first attempt writes a file in the workspace, then exhausts its quota. The second runs in the
+// same directory with the file present, and receives the task's prompt, its agents and skills resolved for Codex, and
+// the summary of the first attempt.
+func TestFailoverKeepsTheWorkspaceAndInput(t *testing.T) {
+	e := newEnv(t)
+	e.create("handover", codexFallback+"  agents: [user-agent]\n  skills: [user-skill, hf-github-draft-pr]\n")
+	var q requests
+	e.claude.setScript(func(req ports.RunRequest) string {
+		q.add(req)
+		return "echo draft > notes.txt; echo 'Wrote notes.txt'; echo 'END quota'"
+	})
+	// Codex succeeds only if it finds the first attempt's file where it runs.
+	e.codex.setScript(func(req ports.RunRequest) string {
+		q.add(req)
+		return `if [ "$(cat notes.txt)" = draft ]; then echo 'END ok'; else echo 'END error'; fi`
+	})
+	r, _ := e.app.RunTask("handover")
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	sent := q.all()
+	if len(sent) != 2 || len(x.Attempts) != 2 || x.Attempts[1].Harness != domain.HarnessCodex {
+		t.Fatalf("%d requests, attempts %+v; want 2, the second on Codex", len(sent), x.Attempts)
+	}
+	first, second := sent[0], sent[1]
+	if second.WorkDir != first.WorkDir || x.WorkspacePath != first.WorkDir {
+		t.Errorf("work directories %q and %q, workspace %q; want one", first.WorkDir, second.WorkDir, x.WorkspacePath)
+	}
+	if data, err := os.ReadFile(filepath.Join(second.WorkDir, "notes.txt")); err != nil || string(data) != "draft\n" {
+		t.Errorf("notes.txt in the second attempt's directory = %q (%v), want the first attempt's draft", data, err)
+	}
+	if second.Prompt != "Do the work of handover." {
+		t.Errorf("the second attempt's prompt %q, want the task's", second.Prompt)
+	}
+	items := func(list []ports.ResolvedItem) []string {
+		var out []string
+		for _, it := range list {
+			out = append(out, it.Kind+" "+it.Name+" "+it.Path)
+		}
+		return out
+	}
+	builtin := filepath.Join(e.app.d.Paths.Builtins, "skills", "hf-github-draft-pr")
+	if got, want := items(second.Agents), []string{"agent user-agent /codex/agents/user-agent"}; !slices.Equal(got, want) {
+		t.Errorf("the second attempt's agents %q, want %q", got, want)
+	}
+	if got, want := items(second.Skills), []string{"skill user-skill /codex/skills/user-skill",
+		"skill hf-github-draft-pr " + builtin}; !slices.Equal(got, want) {
+		t.Errorf("the second attempt's skills %q, want %q", got, want)
+	}
+	if want := "The previous attempt ran on claude-code and ended: quota exhausted. Its last message: Wrote notes.txt"; !strings.Contains(second.Context, want) {
+		t.Errorf("the second attempt's context does not hold %q:\n%s", want, second.Context)
+	}
+}
+
+// harmflow-app#216: a fallback that cannot load the task's skill is not valid. The task saves with a warning that names
+// Codex and the skill, and a run that exhausts Claude Code's quota does not switch to Codex.
+func TestFallbackMissingASkillIsNotValid(t *testing.T) {
+	e := newEnv(t)
+	view, err := e.app.CreateTask(t.Context(), TaskInput{YAML: taskYAML("notes", codexFallback+"  skills: [review-notes]\n")})
+	if err != nil {
+		t.Fatalf("CreateTask(notes): %v", err)
+	}
+	var warned []schema.Issue
+	for _, w := range view.Validation.Warnings {
+		if w.Code == domain.WarningInvalidFallback {
+			warned = append(warned, w)
+		}
+	}
+	want := `codex is not a valid fallback: skill "review-notes" cannot be found for it (the codex configuration)`
+	if len(warned) != 1 || warned[0].Key != "fallback_skill_missing" || warned[0].Message != want ||
+		warned[0].Params["harness"] != domain.HarnessCodex || warned[0].Params["name"] != "review-notes" {
+		t.Fatalf("CreateTask(notes) warnings %+v, want one %s: %s", view.Validation.Warnings,
+			domain.WarningInvalidFallback, want)
+	}
+
+	e.claude.setScript(func(ports.RunRequest) string { return "echo 'END quota'" })
+	r, _ := e.app.RunTask("notes")
+	x := e.wait(r.ExecutionID, domain.StatusFailed)
+	if len(x.Attempts) != 1 || x.HarnessSwitches != 0 || !strings.Contains(x.ErrorMessage, "no alternative") {
+		t.Errorf("attempts %+v, %d switches, error %q; want one attempt failing with no alternative", x.Attempts,
+			x.HarnessSwitches, x.ErrorMessage)
+	}
+	if n := e.codex.promptCount(); n != 0 {
+		t.Errorf("Codex got %d prompts, want 0", n)
+	}
+	if counts, _ := e.eventCounts(r.ExecutionID); counts[domain.EventHarnessSwitched] != 0 {
+		t.Errorf("%d %s events, want 0", counts[domain.EventHarnessSwitched], domain.EventHarnessSwitched)
+	}
+	if !slices.ContainsFunc(x.Warnings, func(w domain.Warning) bool {
+		return w.Code == domain.WarningInvalidFallback && w.Text.Message == want
+	}) {
+		t.Errorf("the execution's warnings %+v, want %s: %s", x.Warnings, domain.WarningInvalidFallback, want)
+	}
+}
+
 // An attempt records the model and effort its harness reported, and says nothing about the ones it did not report;
 // the configured values are kept apart and never stand in for them.
 func TestAttemptRecordsTheReportedModel(t *testing.T) {
@@ -1426,7 +1779,8 @@ func TestSaveWhileTheExecutionChanges(t *testing.T) {
 	<-done
 }
 
-// A harness already unavailable when the task fires is skipped for the fallback.
+// A harness already unavailable when the task fires is skipped for the fallback: the event names it, and the execution
+// starts on the fallback.
 func TestUnavailableStartsOnFallback(t *testing.T) {
 	e := newEnv(t)
 	e.create("unavail", "    fallback:\n      candidates:\n        - provider: codex\n")
@@ -1444,8 +1798,14 @@ func TestUnavailableStartsOnFallback(t *testing.T) {
 		switch ev.Type {
 		case domain.EventHarnessUnavailable:
 			unavailable = i
+			if ev.Harness != domain.HarnessClaudeCode || !strings.Contains(ev.Message, domain.HarnessClaudeCode) {
+				t.Errorf("%s names %q (%q), want %s", ev.Type, ev.Harness, ev.Message, domain.HarnessClaudeCode)
+			}
 		case domain.EventExecutionStarted:
 			started = i
+			if ev.Harness != domain.HarnessCodex {
+				t.Errorf("%s names %q, want %s", ev.Type, ev.Harness, domain.HarnessCodex)
+			}
 		}
 	}
 	if unavailable < 0 {
