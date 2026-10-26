@@ -4,7 +4,8 @@
 // the revision of the last successful save; a refused one keeps the text and shows the daemon's error at its line, the
 // same error a save from the form shows on its field. The stand-in decides which error the daemon gives: that the daemon
 // gives a document and its YAML the same one is itest › TestOneSchemaForEveryEntryPoint's. ⌘S saves as the Save button
-// does, from any focus in the editor (harmflow-app#230).
+// does, from any focus in the editor (harmflow-app#230). A save shows the warnings the daemon gives, such as a fallback
+// that cannot load the task's skill (harmflow-app#216).
 import { EditorView } from "@codemirror/view";
 import { isDeepStrictEqual } from "node:util";
 import { act } from "react";
@@ -100,6 +101,23 @@ const syntaxError: ValidationIssue = {
   params: { detail: "found unexpected end of stream" },
 };
 
+/** A task named REVIEW_NOTES cites a skill only Claude Code has, which its Codex fallback cannot load. */
+const REVIEW_NOTES = "Review notes";
+
+/** The daemon's warning that Codex is not a valid fallback for that task, as the daemon sends it. */
+const fallbackWarning: ValidationIssue = {
+  path: "/spec/harness/fallback/candidates/0",
+  code: "invalid_fallback",
+  message: 'Codex is not a valid fallback: skill "review-notes" cannot be found for it (the Codex configuration)',
+  messageKey: "fallback_skill_missing",
+  params: { name: "review-notes", harness: "Codex", where: "the Codex configuration", source: "harness" },
+};
+const fallbackWarningText =
+  'Invalid fallback: Codex is not a valid fallback: skill "review-notes" cannot be found for it (the Codex configuration) ' +
+  "/spec/harness/fallback/candidates/0";
+
+const warningsFor = (document: Doc) => ((document.metadata as { name: string }).name === REVIEW_NOTES ? [fallbackWarning] : []);
+
 /**
  * The daemon's validation of an input, the same for the editor's live checks, its tab switches, and its saves, so the
  * order the debounced live checks arrive in changes nothing a test reads.
@@ -108,7 +126,7 @@ function validate(input: TaskInput): ValidationResult {
   const document = input.document ?? parse(input.yaml ?? "");
   if (!document) return { valid: false, errors: [syntaxError], warnings: [] };
   const errors = (document.spec as { schedule: { cron: string } }).schedule.cron === BAD_CRON ? [cronError] : [];
-  return { valid: errors.length === 0, errors, warnings: [], document, effective: document, yaml: write(document) };
+  return { valid: errors.length === 0, errors, warnings: warningsFor(document), document, effective: document, yaml: write(document) };
 }
 
 const storedTask = (document: Doc, revision: string): Task => ({
@@ -123,7 +141,7 @@ const storedTask = (document: Doc, revision: string): Task => ({
   effective: document,
   yaml: write(document),
   path: "standup.yaml",
-  validation: { valid: true, errors: [], warnings: [] },
+  validation: { valid: true, errors: [], warnings: warningsFor(document) },
 });
 
 /** Answers the editor's routes; a save the validation passes is stored under the next revision. */
@@ -203,6 +221,8 @@ const cronField = () => field("Cron expression (5 fields)");
 /** The validation panel, and the errors it lists. */
 const panel = () => host!.querySelector(".editor__side .validation")!;
 const errors = () => [...panel().querySelectorAll(".validation__item")].map((li) => li.textContent);
+/** The warnings the editor's side lists. */
+const warnings = () => [...host!.querySelectorAll(".editor__side .validation__item--warning")].map((li) => li.textContent);
 
 const editor = () => EditorView.findFromDOM(host!.querySelector<HTMLElement>(".cm-editor")!)!;
 const yamlText = () => editor().state.doc.toString();
@@ -355,6 +375,18 @@ describe("task editor save from the YAML tab", () => {
     expect(sent("PUT", "/tasks/standup")).toEqual([]);
     expect(onSaved).toHaveBeenCalledExactlyOnceWith(storedTask(taskDoc("Release notes"), "r1"));
     expect(unsaved()).toBeNull();
+  });
+});
+
+describe("task editor warnings", () => {
+  it("shows the daemon's warning that a fallback cannot load the task's skill once the task is saved", async () => {
+    await open("edit");
+    expect(warnings()).toEqual([]);
+    await type(nameField().querySelector("input")!, REVIEW_NOTES);
+    await save();
+    expect(sent("PUT", "/tasks/standup")).toEqual([{ document: taskDoc(REVIEW_NOTES), baseRevision: "r1" }]);
+    expect(toasts("success")).toContain("Saved.");
+    expect(warnings()).toEqual([fallbackWarningText]);
   });
 });
 
