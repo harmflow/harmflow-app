@@ -210,13 +210,14 @@
       }
     },
     "schedule": {
-      "description": "A 5-field cron expression or a simple interval, never both; no seconds field. A task with no schedule runs only by manual trigger.",
+      "description": "A 5-field cron expression, a cron macro, or a simple interval, never both; no seconds field. A task with no schedule runs only by manual trigger.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "cron": {
+          "description": "A 5-field cron expression, or one of the macros @yearly, @annually, @monthly, @weekly, @daily, @midnight, and @hourly, in lowercase.",
           "type": "string",
-          "pattern": "^\\s*\\S+(\\s+\\S+){4}\\s*$"
+          "pattern": "^\\s*(@(yearly|annually|monthly|weekly|daily|midnight|hourly)|\\S+(\\s+\\S+){4})\\s*$"
         },
         "interval": {
           "description": "A whole number of minutes, hours, or days, such as 30m, 2h, or 1d.",

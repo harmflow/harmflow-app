@@ -121,8 +121,8 @@ type Workspace struct {
 	Path string `yaml:"path,omitempty" json:"path,omitempty"`
 }
 
-// Schedule is when a task fires: a 5-field cron expression or an interval, never both, in Timezone or the system's time
-// zone. A task with no schedule runs only by hand.
+// Schedule is when a task fires: a 5-field cron expression, a cron macro, or an interval, never both a cron and an
+// interval, in Timezone or the system's time zone. A task with no schedule runs only by hand.
 type Schedule struct {
 	Cron      string     `yaml:"cron,omitempty" json:"cron,omitempty"`
 	Interval  string     `yaml:"interval,omitempty" json:"interval,omitempty"`

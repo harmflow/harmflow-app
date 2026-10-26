@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-// Rule computes the firings of a schedule: a 5-field cron expression in the task's IANA time zone, or a
-// simple interval. Granularity is the minute; there is no seconds field.
+// Rule computes the firings of a schedule: a 5-field cron expression or a cron macro in the task's IANA time zone, or
+// a simple interval. Granularity is the minute; there is no seconds field.
 type Rule interface {
 	// Next returns the first firing strictly after the given instant.
 	Next(after time.Time) time.Time
@@ -79,7 +79,8 @@ func (r *IntervalRule) Next(after time.Time) time.Time {
 // String implements Rule: the interval as the task wrote it, trimmed.
 func (r *IntervalRule) String() string { return r.text }
 
-// CronRule is a 5-field cron expression evaluated in wall-clock time of its location.
+// CronRule is a 5-field cron expression, or the one a cron macro stands for, evaluated in wall-clock time of its
+// location.
 type CronRule struct {
 	minute, hour, dom, month, dow uint64
 	domStar, dowStar              bool
@@ -87,6 +88,8 @@ type CronRule struct {
 	text                          string
 }
 
+// cronMacros are the macros a schedule may use in place of 5 fields, spelled in lowercase as cron writes them; the
+// task schema's pattern accepts the same spellings.
 var cronMacros = map[string]string{
 	"@yearly":   "0 0 1 1 *",
 	"@annually": "0 0 1 1 *",
@@ -101,10 +104,11 @@ var monthNames = map[string]int{"JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5
 	"SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12}
 var dayNames = map[string]int{"SUN": 0, "MON": 1, "TUE": 2, "WED": 3, "THU": 4, "FRI": 5, "SAT": 6}
 
-// ParseCron parses a 5-field expression; an expression with a seconds field is rejected.
+// ParseCron parses a 5-field expression or a lowercase cron macro, such as @daily; an expression with a seconds field
+// is rejected, and so is a macro in any other case, such as @DAILY.
 func ParseCron(expr string, loc *time.Location) (*CronRule, error) {
 	text := strings.TrimSpace(expr)
-	if m, ok := cronMacros[strings.ToLower(text)]; ok {
+	if m, ok := cronMacros[text]; ok {
 		text = m
 	}
 	fields := strings.Fields(text)
