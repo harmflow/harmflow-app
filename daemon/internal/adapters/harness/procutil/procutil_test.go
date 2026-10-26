@@ -524,3 +524,84 @@ func TestWaitAfterTheHarnessExitedEndsOnlyWhatCarriesTheID(t *testing.T) {
 			stray.pid)
 	}
 }
+
+// A tree a restarted daemon reads back from a record is ended only when its harness is the process the record names: a
+// start time that differs, as a reused pid's would, or none, ends nothing. Once it matches, the harness and the
+// descendant that left its group and session are ended, as a cancellation ends them.
+func TestEndStoredTreeEndsOnlyTheRecordedHarness(t *testing.T) {
+	needProcessTable(t)
+	pidFile := t.TempDir() + "/escaped.pid"
+	script := `perl -e 'use POSIX; POSIX::setsid() or die; open STDOUT, ">/dev/null"; open STDERR, ">/dev/null"; ` +
+		`open F, ">", "$ARGV[0].tmp"; print F $$; close F; rename "$ARGV[0].tmp", $ARGV[0]; ` +
+		`exec "sleep", "300"' "$1" & echo started; wait`
+	p := startShell(t, script, testEnv(), executionID(t), nil, pidFile)
+	escaped := waitForPid(t, p, pidFile)
+	waitFor(t, "the escaped process to run sleep in a session of its own", func() bool {
+		info, ok := processInfo(escaped.pid)
+		return ok && info.name == "sleep" && info.pgid == escaped.pid
+	})
+	tree := p.Tree()
+	if tree.Pid != p.Pid() || tree.Group != p.Pid() || tree.Start.IsZero() {
+		t.Fatalf("Tree() = %+v, want pid and group %d and a start time", tree, p.Pid())
+	}
+	for name, stale := range map[string]Tree{
+		"another start time": {Pid: tree.Pid, Group: tree.Group, Start: tree.Start.Add(time.Microsecond),
+			ExecutionID: tree.ExecutionID},
+		"no start time": {Pid: tree.Pid, Group: tree.Group, ExecutionID: tree.ExecutionID},
+	} {
+		if ended, err := EndStoredTree(t.Context(), stale, 0); err != nil || len(ended) != 0 {
+			t.Errorf("EndStoredTree with %s = %+v, %v; want nothing ended", name, ended, err)
+		}
+	}
+	select {
+	case <-p.Done():
+		t.Fatal("a tree whose record names another process ended the harness")
+	default:
+	}
+	if !running(escaped) {
+		t.Fatal("a tree whose record names another process ended the escaped descendant")
+	}
+
+	ended, err := EndStoredTree(t.Context(), tree, 300*time.Millisecond)
+	if err != nil {
+		t.Fatalf("EndStoredTree: %v", err)
+	}
+	<-p.Done()
+	if running(escaped) {
+		t.Errorf("the descendant %d that left the group survived", escaped.pid)
+	}
+	if e, ok := endedOne(ended, escaped.pid); !ok || e.Executable != "sleep" || !e.OutsideGroup {
+		t.Errorf("ended %+v, want pid %d, sleep, outside the group", ended, escaped.pid)
+	}
+	if e, ok := endedOne(ended, p.Pid()); !ok || e.OutsideGroup {
+		t.Errorf("ended %+v, want the harness %d, in its group", ended, p.Pid())
+	}
+}
+
+// Once the harness has exited, as Claude Code does when a write finds the daemon's end of its output gone, the record's
+// pid names no process and its group is empty. A stored tree still ends what carries the execution's id, which launchd
+// adopted; the test binary stands in for it, as its environment can be read.
+func TestEndStoredTreeAfterTheHarnessExitedEndsWhatCarriesTheID(t *testing.T) {
+	needProcessTable(t)
+	id := executionID(t)
+	daemonFile := t.TempDir() + "/daemon.pid"
+	env := testEnv(executionIDVariable+"="+id, helperVariable+"=daemonize", "PROCUTIL_PIDFILE="+daemonFile)
+	p := startShell(t, `"$1"; echo done`, env, id, nil, os.Args[0])
+	tree := p.Tree()
+	<-p.Done()
+	daemon := waitForPid(t, nil, daemonFile)
+	waitFor(t, "launchd to adopt the daemon", func() bool {
+		info, ok := processInfo(daemon.pid)
+		return ok && info.ppid == 1
+	})
+	ended, err := EndStoredTree(t.Context(), tree, 300*time.Millisecond)
+	if err != nil {
+		t.Fatalf("EndStoredTree: %v", err)
+	}
+	if running(daemon) {
+		t.Errorf("the daemon %d that carries the execution's id survived", daemon.pid)
+	}
+	if e, ok := endedOne(ended, daemon.pid); !ok || !e.OutsideGroup {
+		t.Errorf("ended %+v, want pid %d, outside the group", ended, daemon.pid)
+	}
+}

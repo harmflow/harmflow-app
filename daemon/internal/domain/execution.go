@@ -115,6 +115,18 @@ type Attempt struct {
 	// be edited afterwards and the context is composed per attempt; older records have neither.
 	Prompt         string `json:"prompt,omitempty"`
 	SessionContext string `json:"sessionContext,omitempty"`
+	// Process is the harness process the attempt started, recorded as soon as it starts, so a daemon that restarts after
+	// a crash ends it and what it started, and nothing else; absent when no harness process started, or when its start
+	// time could not be read.
+	Process *HarnessProcess `json:"process,omitempty"`
+}
+
+// HarnessProcess is a harness process as the kernel recorded it when the attempt started it: its pid, the process group
+// it leads, and its start time, so a reused pid is never mistaken for it.
+type HarnessProcess struct {
+	Pid       int       `json:"pid"`
+	Group     int       `json:"group"`
+	StartedAt time.Time `json:"startedAt"`
 }
 
 // SetError records why the attempt ended; ErrorMessage is the en-US text.

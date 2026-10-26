@@ -840,6 +840,7 @@ components:
         - script_write_failed
         - process_ended
         - process_left_ended
+        - process_interrupted_ended
         - task_path_refused
         # Harness and tool diagnostics
         - detection_running
@@ -1195,6 +1196,17 @@ components:
           description: >-
             HarmFlow's session context the attempt sent with the prompt, composed for that attempt and redacted like the
             raw output. Absent on older records.
+        process:
+          type: object
+          description: >-
+            The harness process the attempt started, recorded as soon as it starts: its pid, the process group it leads,
+            and its start time as the kernel recorded it, so a daemon that restarts after a crash ends it and what it
+            started, and nothing else. Absent when no harness process started, and on older records.
+          required: [pid, group, startedAt]
+          properties:
+            pid: { type: integer }
+            group: { type: integer }
+            startedAt: { type: string, format: date-time }
 
     AttemptUsage:
       type: object

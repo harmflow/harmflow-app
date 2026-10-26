@@ -638,6 +638,16 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 		r.endAttempt(end, -1)
 		return end, false
 	}
+	// Saved before anything else, so from here on a crash leaves a record that names the harness for the next daemon to
+	// end.
+	if tree := proc.Tree(); tree.Pid > 1 && !tree.Start.IsZero() {
+		a.mu.Lock()
+		if at := r.x.CurrentAttempt(); at != nil {
+			at.Process = &domain.HarnessProcess{Pid: tree.Pid, Group: tree.Group, StartedAt: tree.Start}
+		}
+		a.mu.Unlock()
+		r.save(true)
+	}
 	r.event(domain.Event{Type: domain.EventHarnessStarted, Harness: p.Provider,
 		Payload: map[string]any{"configuredModel": p.Model, "configuredEffort": p.Effort, "version": info.Version,
 			"pid": proc.Pid(), "reason": reason.Message, "path": info.Path}}.Says(domain.T("harness_started",

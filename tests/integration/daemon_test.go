@@ -2096,15 +2096,42 @@ func waitPs(t *testing.T, pid int, field, want string) {
 	t.Fatalf("process %d: %s is %q, want %q", pid, field, got, want)
 }
 
-// An execution running when the daemon is killed reads interrupted after the restart, with its log.
+// An execution running when the daemon is killed reads interrupted after the restart, with its log. Its harness, in a
+// process group of its own, outlives the daemon; the restart ends it before the execution reads interrupted, with its
+// child in its group and a command in a session of its own, as Claude Code runs a tool command, and the log names each.
 func TestRestartInterrupts(t *testing.T) {
 	home := t.TempDir()
 	d := startDaemon(t, home)
-	d.call("POST", "/tasks", map[string]any{"yaml": task("crash", "SCENARIO=slow", "")}, 201)
+	d.call("POST", "/tasks", map[string]any{"yaml": task("crash", "SCENARIO=session", "  execution:\n    cancelGraceSeconds: 1\n")}, 201)
 	id := d.call("POST", "/tasks/crash/run", nil, 202)["executionId"].(string)
-	d.waitStatus(id, "running")
-	time.Sleep(1500 * time.Millisecond) // let the record reach the disk
+	dir := d.waitStatus(id, "running")["executionDir"].(string)
+	// Whatever the restart leaves, no stand-in outlives the test.
+	killHarnessGroup(t, dir)
+	child := readPid(t, filepath.Join(dir, "child.pid"))
+	session := readPid(t, filepath.Join(dir, "session.pid"))
+	waitPs(t, session, "ucomm", "sleep")
+	// The record names the harness as soon as it starts.
+	var harness int
+	for deadline := time.Now().Add(15 * time.Second); harness == 0 && time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		var rec struct {
+			Attempts []struct {
+				Process *struct {
+					Pid int `json:"pid"`
+				} `json:"process"`
+			} `json:"attempts"`
+		}
+		data, err := os.ReadFile(filepath.Join(home, "state", "executions", id+".json"))
+		if err == nil && json.Unmarshal(data, &rec) == nil && len(rec.Attempts) == 1 && rec.Attempts[0].Process != nil {
+			harness = rec.Attempts[0].Process.Pid
+		}
+	}
+	if harness == 0 {
+		t.Fatal("the record on disk never named the harness process")
+	}
 	d.kill()
+	if gone(harness) {
+		t.Fatalf("the harness %d ended with the daemon, so the restart had nothing to end", harness)
+	}
 	d2 := startDaemon(t, home)
 	x := d2.call("GET", "/executions/"+id, nil, 200)
 	if x["status"] != "interrupted" {
@@ -2113,6 +2140,30 @@ func TestRestartInterrupts(t *testing.T) {
 	events := d2.call("GET", "/executions/"+id+"/events", nil, 200)
 	if events["logExpired"] == true || len(events["events"].([]any)) == 0 {
 		t.Error("the attempt's log was lost")
+	}
+	ended := map[int]bool{}
+	started := 0
+	for _, raw := range events["events"].([]any) {
+		ev := raw.(map[string]any)
+		p, _ := ev["payload"].(map[string]any)
+		pid, _ := p["pid"].(float64)
+		switch {
+		case ev["type"] == "harness.started":
+			started = int(pid)
+		case ev["type"] == "process.ended" && ev["messageKey"] == "process_interrupted_ended":
+			ended[int(pid)] = true
+		}
+	}
+	if started != harness {
+		t.Errorf("the record names the harness %d, harness.started %d", harness, started)
+	}
+	for name, pid := range map[string]int{"harness": harness, "child in its group": child, "command in a session": session} {
+		if !gone(pid) {
+			t.Errorf("the %s, %d, survived the restart", name, pid)
+		}
+		if !ended[pid] {
+			t.Errorf("the log does not name the %s, %d, as ended", name, pid)
+		}
 	}
 	// The task can run again right away.
 	run := d2.call("POST", "/tasks/crash/run", nil, 202)

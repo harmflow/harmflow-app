@@ -3906,6 +3906,63 @@ func TestRecoveryAfterACrashMatchesTheLog(t *testing.T) {
 	}
 }
 
+// A harness still running when the daemon crashed is ended once a daemon starts again, before the execution reads
+// interrupted: the harness the attempt's record names, its child in its group, and a command in a session of its own,
+// as Claude Code runs a tool command. The record names the harness from the moment it started, and the log names each
+// process ended, ahead of the interruption.
+func TestRecoveryEndsTheHarnessACrashLeft(t *testing.T) {
+	e := newEnv(t)
+	e.create("crashed", "")
+	// macOS has no setsid command; Perl's POSIX::setsid stands in for it.
+	e.claude.setScript(func(ports.RunRequest) string {
+		return `D="$HARMFLOW_EXECUTION_DIR"
+sleep 300 & echo $! > "$D/child.pid"
+perl -e 'use POSIX; POSIX::setsid() or die; open STDOUT, ">/dev/null"; open STDERR, ">/dev/null"; ` +
+			`open F, ">", "$ARGV[0].tmp"; print F $$; close F; rename "$ARGV[0].tmp", $ARGV[0]; exec "sleep", "300"' "$D/session.pid" &
+until [ -s "$D/session.pid" ]; do sleep 0.05; done
+printf '%s\n' '{"type":"step.started","message":"Holding"}' >> "$D/progress.jsonl"
+wait`
+	})
+	rec, id := e.crashAt("crashed", func(ev domain.Event) bool { return ev.Message == "Holding" })
+
+	x, err := rec.app.GetExecution(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if x.Status != domain.StatusInterrupted || len(x.Attempts) != 1 || x.Attempts[0].Process == nil {
+		t.Fatalf("recovered execution: %s, attempts %+v; want interrupted, one attempt naming its process", x.Status,
+			x.Attempts)
+	}
+	harness := x.Attempts[0].Process.Pid
+	child := waitForPid(t, filepath.Join(x.ExecutionDir, "child.pid"))
+	session := waitForPid(t, filepath.Join(x.ExecutionDir, "session.pid"))
+	events, _, _ := rec.app.ExecutionEvents(id, 0, 0)
+	ended := map[int]int{} // the index in the log of each process ended
+	started, interrupted := 0, -1
+	for i, ev := range events {
+		pid, _ := strconv.Atoi(fmt.Sprint(ev.Payload["pid"]))
+		switch {
+		case ev.Type == domain.EventHarnessStarted:
+			started = pid
+		case ev.Type == domain.EventProcessEnded && ev.MessageKey == "process_interrupted_ended":
+			ended[pid] = i
+		case ev.Type == domain.EventExecutionInterrupted:
+			interrupted = i
+		}
+	}
+	if started != harness {
+		t.Errorf("the record names the harness %d, harness.started %d", harness, started)
+	}
+	for name, pid := range map[string]int{"harness": harness, "child in its group": child, "command in a session": session} {
+		if alive(pid) {
+			t.Errorf("the %s, %d, survived the restart", name, pid)
+		}
+		if i, ok := ended[pid]; !ok || i > interrupted {
+			t.Errorf("the log names the %s, %d, as ended at %d (%v), the interruption at %d", name, pid, i, ok, interrupted)
+		}
+	}
+}
+
 // crashAt runs the task and copies the daemon's home just before the first event crash matches is appended, which is
 // what a crash at that moment leaves on disk. It returns a daemon started over the copy, which recovered it, and the
 // execution's id. The first daemon goes on; what follows never reaches the copy.

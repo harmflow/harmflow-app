@@ -100,8 +100,9 @@ func (a *App) failWorkItem(taskID, key, executionID, lastOperation string, limit
 }
 
 // recover marks every execution a crash or restart left active as interrupted: it is never continued, and its work
-// item is resumed in a later cycle. Waiting firings stay queued; startQueued then drops each one whose
-// task was disabled or deleted while the daemon was down.
+// item is resumed in a later cycle. First it ends the harness that each one's running attempt left, and what that
+// harness started, which the daemon's end does not reach. Waiting firings stay queued; startQueued then drops each one
+// whose task was disabled or deleted while the daemon was down.
 func (a *App) recover(ctx context.Context) error {
 	all, err := a.d.Executions.LoadAll()
 	if err != nil {
@@ -109,6 +110,7 @@ func (a *App) recover(ctx context.Context) error {
 	}
 	now := a.now()
 	var interrupted, redacted []*domain.Execution
+	left := map[string]leftHarness{}
 	a.mu.Lock()
 	for _, x := range all {
 		x.Upgrade()
@@ -131,6 +133,9 @@ func (a *App) recover(ctx context.Context) error {
 		}
 		a.executions[x.ID] = x
 		if x.Status.IsActive() {
+			if at := x.CurrentAttempt(); at != nil && at.EndedAt == nil && at.Process != nil {
+				left[x.ID] = leftHarness{process: *at.Process, attempt: at.Number, harness: at.Harness}
+			}
 			x.Status = domain.StatusInterrupted
 			x.EndedAt = &now
 			x.SetStep(domain.Text{})
@@ -148,6 +153,7 @@ func (a *App) recover(ctx context.Context) error {
 	for _, x := range redacted {
 		a.persistExecution(x)
 	}
+	a.endLeftHarnesses(ctx, interrupted, left)
 	for _, x := range interrupted {
 		a.endLeftovers(ctx, x)
 		a.persistExecution(x)
@@ -161,6 +167,17 @@ func (a *App) recover(ctx context.Context) error {
 			x.ErrorText()))
 	}
 	return nil
+}
+
+// cancelGrace is how long the task gives its processes between SIGTERM and SIGKILL; the default once the task is gone.
+func (a *App) cancelGrace(taskID string) time.Duration {
+	seconds := domain.DefaultCancelGraceSeconds
+	a.mu.Lock()
+	if e := a.tasks[taskID]; e != nil {
+		seconds = *e.doc.Effective().Spec.Execution.CancelGraceSeconds
+	}
+	a.mu.Unlock()
+	return time.Duration(seconds) * time.Second
 }
 
 func (a *App) taskLimits(taskID string) domain.WorkItemLimits {
@@ -178,5 +195,3 @@ func (a *App) taskLimits(taskID string) domain.WorkItemLimits {
 func sortByCreated(xs []*domain.Execution) {
 	sort.Slice(xs, func(i, j int) bool { return xs[i].CreatedAt.Before(xs[j].CreatedAt) })
 }
-
-var _ = time.Second
