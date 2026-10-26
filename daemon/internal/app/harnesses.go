@@ -143,13 +143,26 @@ func (a *App) Tools(ctx context.Context) []ports.ToolInfo {
 	return a.d.Tools.Probe(ctx)
 }
 
-// CatalogEntry is an agent or skill a task can cite.
+// CatalogEntry is an agent or skill a task can cite. An agent whose file reads carries what selecting it copies.
 type CatalogEntry struct {
-	Name        string   `json:"name"`
-	Kind        string   `json:"kind"`
-	Source      string   `json:"source"`
-	Description string   `json:"description,omitempty"`
-	Harnesses   []string `json:"harnesses"`
+	Name        string     `json:"name"`
+	Kind        string     `json:"kind"`
+	Source      string     `json:"source"`
+	Description string     `json:"description,omitempty"`
+	Harnesses   []string   `json:"harnesses"`
+	Copy        *AgentCopy `json:"copy,omitempty"`
+}
+
+// AgentCopy is what selecting an agent copies into a task, the harnesses its model is valid for, the front-matter
+// fields left out, and the hash the task keeps as its origin.
+type AgentCopy struct {
+	Prompt         string   `json:"prompt"`
+	Description    string   `json:"description,omitempty"`
+	Model          string   `json:"model,omitempty"`
+	ModelHarnesses []string `json:"modelHarnesses"`
+	Skills         []string `json:"skills"`
+	OmittedFields  []string `json:"omittedFields"`
+	Hash           string   `json:"hash"`
 }
 
 // TaskTypeInfo is a task type as the editor offers it: the key of its parameters block in a task's spec, nil for a type
@@ -201,7 +214,8 @@ func (a *App) resolveItem(kind, name, harness string) (ports.ResolvedItem, strin
 }
 
 // Catalog lists the built-in agents and skills, offered on every harness, then the user's, each with the harnesses
-// whose configuration holds it, sorted by name; a user's item named with the hf- prefix is left out.
+// whose configuration holds it, sorted by name; a user's item named with the hf- prefix is left out. A user's agent
+// that more than one harness holds is copied from the first of them by name.
 func (a *App) Catalog() Catalog {
 	c := Catalog{Agents: []CatalogEntry{}, Skills: []CatalogEntry{}}
 	all := sortedKeys(a.adapters)
@@ -209,7 +223,7 @@ func (a *App) Catalog() Catalog {
 		entries := map[string]*CatalogEntry{}
 		for _, it := range a.builtinDir().Items(kind) {
 			entries[it.Name] = &CatalogEntry{Name: it.Name, Kind: kind, Source: "builtin", Description: it.Description,
-				Harnesses: all}
+				Harnesses: all, Copy: a.agentCopy(it)}
 		}
 		for _, id := range all {
 			for _, it := range a.adapters[id].UserItems(kind) {
@@ -218,7 +232,8 @@ func (a *App) Catalog() Catalog {
 				}
 				e := entries[it.Name]
 				if e == nil {
-					e = &CatalogEntry{Name: it.Name, Kind: kind, Source: "user", Description: it.Description, Harnesses: []string{}}
+					e = &CatalogEntry{Name: it.Name, Kind: kind, Source: "user", Description: it.Description, Harnesses: []string{},
+						Copy: a.agentCopy(it)}
 					entries[it.Name] = e
 				}
 				e.Harnesses = append(e.Harnesses, id)
@@ -240,4 +255,35 @@ func (a *App) Catalog() Catalog {
 		{ID: domain.TypeScriptTask, ParametersKey: &scriptKey, DefaultAgents: []string{}, DefaultSkills: []string{}},
 	}
 	return c
+}
+
+// agentCopy is what selecting the agent it copies into a task; nil for a skill, or an agent whose file cannot be read.
+func (a *App) agentCopy(it ports.ResolvedItem) *AgentCopy {
+	if it.Kind != "agent" {
+		return nil
+	}
+	ac, err := catalog.ReadAgentCopy(it.Path)
+	if err != nil {
+		return nil
+	}
+	return &AgentCopy{Prompt: ac.Prompt, Description: ac.Description, Model: ac.Model,
+		ModelHarnesses: a.modelHarnesses(ac.Model), Skills: ac.Skills, OmittedFields: ac.Omitted, Hash: ac.Hash}
+}
+
+// modelHarnesses lists the harnesses that accept the model as a task's, as validation checks it with what detection
+// last found; none for an empty model.
+func (a *App) modelHarnesses(model string) []string {
+	out := []string{}
+	if model == "" {
+		return out
+	}
+	for _, id := range sortedKeys(a.adapters) {
+		a.mu.Lock()
+		info := a.inventory[id]
+		a.mu.Unlock()
+		if a.adapters[id].ValidateProfile(info, model, "") == nil {
+			out = append(out, id)
+		}
+	}
+	return out
 }

@@ -387,11 +387,7 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 	if err != nil {
 		return ports.Invocation{}, nil, err
 	}
-	prompt, err := a.instructions(req)
-	if err != nil {
-		return ports.Invocation{}, nil, err
-	}
-	inv := ports.Invocation{Path: info.Path, Args: args, Env: req.Env, Dir: req.WorkDir, Stdin: prompt,
+	inv := ports.Invocation{Path: info.Path, Args: args, Env: req.Env, Dir: req.WorkDir, Stdin: instructions(req),
 		Restrictions: restrictions}
 	p := &parser{model: req.Model, modelSource: domain.ModelFromTask}
 	if req.Model == "" || req.Model == domain.DefaultModel {
@@ -424,9 +420,9 @@ func (a *Adapter) configModel() string {
 	return ""
 }
 
-// deliverBuiltins copies the built-in skills, and the built-in agents other than the main one (whose body the
-// instructions inline), into the execution's directory, and points the request at the copies, so an app update
-// during the execution cannot change what the session reads. The user's own items stay where they are.
+// deliverBuiltins copies the built-in skills and agents into the execution's directory, and points the request at the
+// copies, so an app update during the execution cannot change what the session reads. The user's own items stay where
+// they are.
 func deliverBuiltins(req ports.RunRequest) (ports.RunRequest, error) {
 	dir := filepath.Join(req.ExecutionDir, "codex-builtins")
 	skills := append([]ports.ResolvedItem{}, req.Skills...)
@@ -442,7 +438,7 @@ func deliverBuiltins(req ports.RunRequest) (ports.RunRequest, error) {
 		skills[i].Path = dst
 	}
 	agents := append([]ports.ResolvedItem{}, req.Agents...)
-	for i := 1; i < len(agents); i++ {
+	for i := range agents {
 		if !agents[i].Builtin {
 			continue
 		}
@@ -457,27 +453,21 @@ func deliverBuiltins(req ports.RunRequest) (ports.RunRequest, error) {
 	return req, nil
 }
 
-// instructions composes the session's input: HarmFlow's context, the agent's role, the skills to use, and the task's
-// prompt. Codex reads a skill by opening its SKILL.md, the way it loads its own skills.
-func (a *Adapter) instructions(req ports.RunRequest) (string, error) {
+// instructions composes the session's input: HarmFlow's context, the agents and skills available, and the task's
+// prompt. No agent is inlined as the session's role: the task's prompt carries it. Codex reads a skill by opening its
+// SKILL.md, the way it loads its own skills.
+func instructions(req ports.RunRequest) string {
 	var b strings.Builder
 	if req.Context != "" {
 		b.WriteString(req.Context)
 		b.WriteString("\n\n")
 	}
 	if len(req.Agents) > 0 {
-		main := req.Agents[0]
-		data, err := os.ReadFile(main.Path)
-		if err != nil {
-			return "", domain.TextErr("agent_delivery_failed", "delivering agent {{name}}: {{detail}}",
-				"name", main.Name, "detail", err.Error())
+		b.WriteString("## Agents\n\nThese agents are available as instructions you may follow when their role fits.\n\n")
+		for _, ag := range req.Agents {
+			fmt.Fprintf(&b, "- %s — %s — %s\n", ag.Name, ag.Description, ag.Path)
 		}
-		_, body := catalog.Parse(data)
-		fmt.Fprintf(&b, "## Your role: agent %s\n\n%s\n\n", main.Name, strings.TrimSpace(body))
-		for _, other := range req.Agents[1:] {
-			fmt.Fprintf(&b, "Another agent is available as instructions you may follow when its role fits: %s at %s\n",
-				other.Name, other.Path)
-		}
+		b.WriteString("\n")
 	}
 	if len(req.Skills) > 0 {
 		b.WriteString("## Skills\n\nThese skills apply to this task. Before you act on one, read its SKILL.md in full and follow it.\n\n")
@@ -489,7 +479,7 @@ func (a *Adapter) instructions(req ports.RunRequest) (string, error) {
 	b.WriteString("## Task\n\n")
 	b.WriteString(req.Prompt)
 	b.WriteString("\n")
-	return b.String(), nil
+	return b.String()
 }
 
 type parser struct {

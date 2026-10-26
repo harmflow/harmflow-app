@@ -86,6 +86,7 @@ type TaskSpec struct {
 	Enabled                   *bool                      `yaml:"enabled,omitempty" json:"enabled,omitempty"`
 	Type                      string                     `yaml:"type" json:"type"`
 	Prompt                    string                     `yaml:"prompt,omitempty" json:"prompt,omitempty"`
+	Origin                    *Origin                    `yaml:"origin,omitempty" json:"origin,omitempty"`
 	Agents                    []string                   `yaml:"agents,omitempty" json:"agents,omitempty"`
 	Skills                    []string                   `yaml:"skills,omitempty" json:"skills,omitempty"`
 	Workspace                 *Workspace                 `yaml:"workspace,omitempty" json:"workspace,omitempty"`
@@ -97,6 +98,13 @@ type TaskSpec struct {
 	Notifications             *Notifications             `yaml:"notifications,omitempty" json:"notifications,omitempty"`
 	GitHubIssueImplementation *GitHubIssueImplementation `yaml:"githubIssueImplementation,omitempty" json:"githubIssueImplementation,omitempty"`
 	Script                    *ScriptSpec                `yaml:"script,omitempty" json:"script,omitempty"`
+}
+
+// Origin is the agent a task's prompt was copied from and a hash of what was copied. The task never runs that agent:
+// the origin only lets the editor tell when the agent has changed since.
+type Origin struct {
+	Agent string `yaml:"agent" json:"agent"`
+	Hash  string `yaml:"hash" json:"hash"`
 }
 
 // ScriptSpec is the program a script task runs: Command, an argument list started with no shell, or Inline, a script
@@ -528,6 +536,7 @@ func (d TaskDocument) clone() TaskDocument {
 	c := d
 	s := &c.Spec
 	s.Enabled = clonePtr(s.Enabled)
+	s.Origin = clonePtr(s.Origin)
 	s.Agents = cloneSlice(s.Agents)
 	s.Skills = cloneSlice(s.Skills)
 	if s.Workspace != nil {

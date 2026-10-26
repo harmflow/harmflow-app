@@ -136,7 +136,7 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 	}
 	// Help that cannot be read lists no flags, so each feature reads as missing.
 	help, _, _ := procutil.Output(ctx, 15*time.Second, a.Env, info.Path, "--help")
-	for _, f := range append(requiredFlags, "--plugin-dir", "--effort", "--agents", "--agent", "--add-dir", "--tools",
+	for _, f := range append(requiredFlags, "--plugin-dir", "--effort", "--agents", "--add-dir", "--tools",
 		"--disallowedTools", "--no-session-persistence", "--model") {
 		info.Features[f] = strings.Contains(help, f)
 	}
@@ -286,7 +286,8 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 		args = append(args, "--plugin-dir", dir)
 	}
 
-	// Agents: built-in ones are defined for this session only; a user's agent is loaded from ~/.claude by name.
+	// Agents are subagents only: the session runs as Claude Code's default agent, with the task's prompt. Built-in ones
+	// are defined for this session only; a user's agent is loaded from ~/.claude by name.
 	defs := map[string]map[string]any{}
 	for _, ag := range req.Agents {
 		if !ag.Builtin {
@@ -307,9 +308,6 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 	if len(defs) > 0 {
 		js, _ := json.Marshal(defs) // maps of strings and string slices always marshal
 		args = append(args, "--agents", string(js))
-	}
-	if len(req.Agents) > 0 && info.Features["--agent"] {
-		args = append(args, "--agent", req.Agents[0].Name)
 	}
 
 	perm := req.Permissions

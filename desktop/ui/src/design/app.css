@@ -2913,6 +2913,58 @@ button.queue-item:hover,
   font-size: var(--hf-font-size-xs);
 }
 
+/* The difference between a task's prompt and its agent's current instructions, line by line. */
+.prompt-diff {
+  max-height: 50vh;
+  overflow: auto;
+  margin: 0;
+  padding: var(--hf-space-3);
+  border: 1px solid var(--hf-color-border);
+  border-radius: var(--hf-radius-md);
+  font-size: var(--hf-font-size-xs);
+  white-space: pre-wrap;
+}
+
+.prompt-diff__line {
+  display: block;
+}
+
+.prompt-diff__line--removed {
+  color: var(--hf-color-danger);
+  background: var(--hf-color-danger-soft);
+}
+
+.prompt-diff__line--added {
+  color: var(--hf-color-success);
+  background: var(--hf-color-success-soft);
+}
+
+/* The other fields copying an agent again replaces, each from its value in the task to the agent's. */
+.copy-changes {
+  display: grid;
+  gap: var(--hf-space-2);
+  margin: 0 0 var(--hf-space-3);
+}
+
+.copy-changes__row dt {
+  font-weight: var(--hf-font-weight-semibold);
+}
+
+.copy-changes__row dd {
+  margin: 0;
+  font-size: var(--hf-font-size-xs);
+}
+
+.copy-changes__from {
+  color: var(--hf-color-danger);
+  background: var(--hf-color-danger-soft);
+}
+
+.copy-changes__to {
+  color: var(--hf-color-success);
+  background: var(--hf-color-success-soft);
+}
+
 .inline-actions,
 .inline-form {
   display: flex;

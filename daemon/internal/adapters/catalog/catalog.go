@@ -5,6 +5,9 @@ package catalog
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
@@ -21,29 +24,92 @@ type FrontMatter struct {
 	Description string `yaml:"description"`
 	Tools       any    `yaml:"tools"`
 	Model       string `yaml:"model"`
+	Skills      any    `yaml:"skills"`
 }
 
 // Parse splits a Markdown file into its front matter and body.
 func Parse(content []byte) (FrontMatter, string) {
 	var fm FrontMatter
-	text := string(content)
+	header, body, ok := split(string(content))
+	if !ok {
+		return fm, body
+	}
+	// A front matter that does not parse leaves fm empty: the item is still listed, with no description or tools.
+	_ = yaml.Unmarshal([]byte(header), &fm)
+	return fm, body
+}
+
+// split cuts a Markdown file into its front-matter header and its body; false, with the whole text as the body, when it
+// has no front matter.
+func split(text string) (header, body string, ok bool) {
 	if !strings.HasPrefix(text, "---") {
-		return fm, text
+		return "", text, false
 	}
 	rest := text[3:]
 	end := strings.Index(rest, "\n---")
 	if end < 0 {
-		return fm, text
+		return "", text, false
 	}
-	// A front matter that does not parse leaves fm empty: the item is still listed, with no description or tools.
-	_ = yaml.Unmarshal([]byte(rest[:end]), &fm)
-	body := strings.TrimPrefix(rest[end+4:], "\n")
-	return fm, body
+	return rest[:end], strings.TrimPrefix(rest[end+4:], "\n"), true
+}
+
+// AgentCopy is what selecting an agent copies into a task: its instructions, description, model, and skills. Omitted
+// names the front-matter fields a task has no place for, in the file's order, and Hash is a digest of what is copied,
+// so a task can tell when the agent has changed since.
+type AgentCopy struct {
+	Prompt      string
+	Description string
+	Model       string
+	Skills      []string
+	Omitted     []string
+	Hash        string
+}
+
+// copiedFields are the front-matter fields a task takes from an agent; the name only identifies the agent.
+var copiedFields = map[string]bool{"name": true, "description": true, "model": true, "skills": true}
+
+// ReadAgentCopy reads the agent file at path as a task copies it.
+func ReadAgentCopy(path string) (AgentCopy, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return AgentCopy{}, err
+	}
+	fm, body := Parse(data)
+	c := AgentCopy{Prompt: strings.TrimSpace(body), Description: strings.TrimSpace(fm.Description), Model: fm.Model,
+		Skills: listOf(fm.Skills), Omitted: []string{}}
+	if c.Skills == nil {
+		c.Skills = []string{}
+	}
+	if header, _, ok := split(string(data)); ok {
+		var node yaml.Node
+		// A header that does not parse copies nothing from it, so nothing is left out either.
+		if yaml.Unmarshal([]byte(header), &node) == nil && len(node.Content) == 1 && node.Content[0].Kind == yaml.MappingNode {
+			m := node.Content[0]
+			for i := 0; i+1 < len(m.Content); i += 2 {
+				if k := m.Content[i].Value; !copiedFields[k] {
+					c.Omitted = append(c.Omitted, k)
+				}
+			}
+		}
+	}
+	js, err := json.Marshal(struct {
+		Prompt, Description, Model string
+		Skills                     []string
+	}{c.Prompt, c.Description, c.Model, c.Skills})
+	if err != nil {
+		return AgentCopy{}, err
+	}
+	sum := sha256.Sum256(js)
+	c.Hash = "sha256:" + hex.EncodeToString(sum[:])
+	return c, nil
 }
 
 // ToolList returns the tools of a front matter as a list, from a list or a comma-separated string.
-func (f FrontMatter) ToolList() []string {
-	switch t := f.Tools.(type) {
+func (f FrontMatter) ToolList() []string { return listOf(f.Tools) }
+
+// listOf reads a front-matter field that holds names as a list, from a list or a comma-separated string.
+func listOf(v any) []string {
+	switch t := v.(type) {
 	case string:
 		var out []string
 		for _, s := range strings.Split(t, ",") {

@@ -1020,6 +1020,28 @@ components:
           description: The harnesses that can load it.
           type: array
           items: { type: string }
+        copy:
+          $ref: "#/components/schemas/AgentCopy"
+
+    AgentCopy:
+      description: >-
+        What selecting an agent copies into a task, on an agent whose file reads: its instructions become the task's
+        prompt, its description the task's, its model the task's when the task's harness is among modelHarnesses, and
+        its skills the task's. omittedFields names the front-matter fields a task has no place for. The task keeps hash
+        as its origin, to tell when the agent changes.
+      type: object
+      required: [prompt, modelHarnesses, skills, omittedFields, hash]
+      properties:
+        prompt: { type: string }
+        description: { type: string }
+        model: { type: string }
+        modelHarnesses:
+          description: The harnesses that accept model as a task's.
+          type: array
+          items: { type: string }
+        skills: { type: array, items: { type: string } }
+        omittedFields: { type: array, items: { type: string } }
+        hash: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
 
     Catalog:
       type: object

@@ -82,8 +82,26 @@
           "type": "string",
           "minLength": 1
         },
+        "origin": {
+          "description": "The agent the prompt was copied from, and a hash of what was copied. An origin only: the task never runs that agent, and an agent that no longer exists is not an error.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "agent",
+            "hash"
+          ],
+          "properties": {
+            "agent": {
+              "$ref": "#/$defs/identifier"
+            },
+            "hash": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          }
+        },
         "agents": {
-          "description": "Agents cited by name: built-in ones carry the hf- prefix, the user's live in the harness configuration. The first one is the session's main agent; the others are available to it.",
+          "description": "Agents cited by name: built-in ones carry the hf- prefix, the user's live in the harness configuration. Each one is available to the session as a subagent; none is its main agent.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/identifier"
@@ -143,6 +161,7 @@
             ],
             "properties": {
               "prompt": false,
+              "origin": false,
               "agents": false,
               "skills": false,
               "workspace": false,

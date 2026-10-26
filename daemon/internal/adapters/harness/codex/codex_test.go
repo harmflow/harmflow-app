@@ -345,17 +345,18 @@ func TestPrepareLeavesTheDefaultsToCodex(t *testing.T) {
 	}
 }
 
-// Built-ins are read from copies in the execution's directory, never from the app; the user's own items stay put.
+// Built-ins are read from copies in the execution's directory, never from the app; the user's own items stay put. No
+// agent is inlined as the session's role: each one is listed by name, and the task's prompt carries the role.
 func TestPrepareDeliversBuiltins(t *testing.T) {
 	root := t.TempDir()
 	skill := filepath.Join(root, "skills", "hf-x")
 	_ = os.MkdirAll(filepath.Join(skill, "scripts"), 0o700)
 	_ = os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("---\nname: hf-x\ndescription: d\n---\nbody"), 0o600)
 	_ = os.WriteFile(filepath.Join(skill, "scripts", "run.sh"), []byte("echo hi"), 0o700)
-	main := filepath.Join(root, "agents", "hf-a.md")
+	first := filepath.Join(root, "agents", "hf-a.md")
 	other := filepath.Join(root, "agents", "hf-b.md")
-	_ = os.MkdirAll(filepath.Dir(main), 0o700)
-	_ = os.WriteFile(main, []byte("---\nname: hf-a\ndescription: an agent\n---\nYou implement."), 0o600)
+	_ = os.MkdirAll(filepath.Dir(first), 0o700)
+	_ = os.WriteFile(first, []byte("---\nname: hf-a\ndescription: an agent\n---\nYou implement."), 0o600)
 	_ = os.WriteFile(other, []byte("---\nname: hf-b\ndescription: another\n---\nYou review."), 0o600)
 	userSkill := filepath.Join(t.TempDir(), "skills", "mine")
 	exec := t.TempDir()
@@ -366,24 +367,28 @@ func TestPrepareDeliversBuiltins(t *testing.T) {
 		Permissions: *domain.TaskDocument{}.Effective().Spec.Permissions,
 		Skills: []ports.ResolvedItem{{Name: "hf-x", Kind: "skill", Builtin: true, Path: skill},
 			{Name: "mine", Kind: "skill", Path: userSkill}},
-		Agents: []ports.ResolvedItem{{Name: "hf-a", Kind: "agent", Builtin: true, Path: main},
-			{Name: "hf-b", Kind: "agent", Builtin: true, Path: other}}})
+		Agents: []ports.ResolvedItem{{Name: "hf-a", Kind: "agent", Builtin: true, Path: first, Description: "an agent"},
+			{Name: "hf-b", Kind: "agent", Builtin: true, Path: other, Description: "another"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	delivered := filepath.Join(exec, "codex-builtins")
-	for _, f := range []string{"skills/hf-x/SKILL.md", "skills/hf-x/scripts/run.sh", "agents/hf-b.md"} {
+	for _, f := range []string{"skills/hf-x/SKILL.md", "skills/hf-x/scripts/run.sh", "agents/hf-a.md", "agents/hf-b.md"} {
 		if _, err := os.Stat(filepath.Join(delivered, f)); err != nil {
-			t.Errorf("%s not delivered: %v", f, err)
+			t.Errorf("Prepare delivered no %s: os.Stat = %v, want no error", f, err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(delivered, "agents", "hf-a.md")); err == nil {
-		t.Error("the main agent is inlined in the instructions; it needs no copy")
-	}
-	for _, want := range []string{"You implement.", filepath.Join(delivered, "skills", "hf-x", "SKILL.md"),
-		filepath.Join(delivered, "agents", "hf-b.md"), filepath.Join(userSkill, "SKILL.md")} {
+	for _, want := range []string{filepath.Join(delivered, "skills", "hf-x", "SKILL.md"),
+		"hf-a — an agent — " + filepath.Join(delivered, "agents", "hf-a.md"),
+		"hf-b — another — " + filepath.Join(delivered, "agents", "hf-b.md"), filepath.Join(userSkill, "SKILL.md"),
+		"## Task\n\ndo it\n"} {
 		if !strings.Contains(inv.Stdin, want) {
-			t.Errorf("the instructions lack %q:\n%s", want, inv.Stdin)
+			t.Errorf("Prepare instructions =\n%s\nwant them to contain %q", inv.Stdin, want)
+		}
+	}
+	for _, unwanted := range []string{"You implement.", "Your role"} {
+		if strings.Contains(inv.Stdin, unwanted) {
+			t.Errorf("Prepare instructions =\n%s\nwant no inlined agent, and no %q", inv.Stdin, unwanted)
 		}
 	}
 	if strings.Contains(inv.Stdin, root) {
