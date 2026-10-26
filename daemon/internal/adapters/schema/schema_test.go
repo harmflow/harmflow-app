@@ -594,6 +594,40 @@ func TestCronMacros(t *testing.T) {
 	}
 }
 
+// A task's origin is an agent's name and a sha256 hash, both required; a script task, which has no prompt, has none.
+func TestOrigin(t *testing.T) {
+	v, _ := New()
+	hash := "sha256:" + strings.Repeat("0a", 32)
+	withOrigin := func(origin string) string { return valid + "  origin:\n" + origin }
+	doc, node, _ := ParseYAML([]byte(withOrigin("    agent: reviewer\n    hash: " + hash + "\n")))
+	if issues := v.ValidateTask(doc, node); len(issues) > 0 {
+		t.Errorf("ValidateTask(origin) = %+v, want no issue", issues)
+	}
+	for _, c := range []struct {
+		name, origin string
+	}{
+		{"no hash", "    agent: reviewer\n"},
+		{"no agent", "    hash: " + hash + "\n"},
+		{"another digest", "    agent: reviewer\n    hash: md5:0a0a\n"},
+		{"an unknown key", "    agent: reviewer\n    hash: " + hash + "\n    path: /tmp/reviewer.md\n"},
+		{"a name in caps", "    agent: Reviewer\n    hash: " + hash + "\n"},
+		{"an upper digest", "    agent: reviewer\n    hash: sha256:" + strings.Repeat("0A", 32) + "\n"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			doc, node, _ := ParseYAML([]byte(withOrigin(c.origin)))
+			if issues := v.ValidateTask(doc, node); len(issues) == 0 {
+				t.Errorf("ValidateTask(origin with %s) = no issue, want one", c.name)
+			}
+		})
+	}
+	script := "apiVersion: harmflow/v1alpha1\nkind: Task\nmetadata:\n  id: audit\n  name: Audit\nspec:\n  type: script\n" +
+		"  script:\n    command: [/bin/date]\n  origin:\n    agent: reviewer\n    hash: " + hash + "\n"
+	doc, node, _ = ParseYAML([]byte(script))
+	if issues := v.ValidateTask(doc, node); len(issues) == 0 {
+		t.Error("ValidateTask(script task with an origin) = no issue, want one")
+	}
+}
+
 // A schema error carries a key and params the desktop translates, beside its en-US text.
 func TestSchemaErrorsAreTranslatable(t *testing.T) {
 	v, _ := New()

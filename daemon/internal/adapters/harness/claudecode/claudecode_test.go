@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -163,7 +164,7 @@ func TestParseAuthAndOthers(t *testing.T) {
 // Each profile is translated to Claude Code's own flags, and what they cannot confine is named.
 func TestPrepareTranslatesPermissions(t *testing.T) {
 	a := &Adapter{Home: t.TempDir()}
-	info := ports.HarnessInfo{Path: "/bin/claude", Features: map[string]bool{"--agent": true, "--no-session-persistence": true}}
+	info := ports.HarnessInfo{Path: "/bin/claude", Features: map[string]bool{"--no-session-persistence": true}}
 	perm := domain.TaskDocument{}.Effective().Spec.Permissions
 	exec := t.TempDir()
 
@@ -205,7 +206,8 @@ func TestPrepareTranslatesPermissions(t *testing.T) {
 	}
 }
 
-// Built-in skills are delivered as a plugin of the execution; built-in agents are defined for the session.
+// Built-in skills are delivered as a plugin of the execution; built-in agents are defined for the session, as
+// subagents: no agent is the session's main one, so the task's prompt runs as Claude Code's default agent.
 func TestPrepareDeliversBuiltins(t *testing.T) {
 	root := t.TempDir()
 	skill := filepath.Join(root, "skills", "hf-x")
@@ -216,11 +218,12 @@ func TestPrepareDeliversBuiltins(t *testing.T) {
 	_ = os.WriteFile(agent, []byte("---\nname: hf-a\ndescription: an agent\n---\nYou implement."), 0o600)
 	exec := t.TempDir()
 	a := &Adapter{Home: t.TempDir()}
-	info := ports.HarnessInfo{Path: "/bin/claude", Features: map[string]bool{"--agent": true}}
-	inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", ExecutionDir: exec,
+	info := ports.HarnessInfo{Path: "/bin/claude", Features: map[string]bool{"--agents": true}}
+	inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", ExecutionDir: exec, Prompt: "Review the change.",
 		Permissions: *domain.TaskDocument{}.Effective().Spec.Permissions,
 		Skills:      []ports.ResolvedItem{{Name: "hf-x", Kind: "skill", Builtin: true, Path: skill}},
-		Agents:      []ports.ResolvedItem{{Name: "hf-a", Kind: "agent", Builtin: true, Path: agent}}})
+		Agents: []ports.ResolvedItem{{Name: "hf-a", Kind: "agent", Builtin: true, Path: agent},
+			{Name: "tester", Kind: "agent", Path: filepath.Join(root, "user", "tester.md")}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,9 +231,16 @@ func TestPrepareDeliversBuiltins(t *testing.T) {
 		t.Errorf("skill not delivered: %v", err)
 	}
 	args := strings.Join(inv.Args, " ")
-	if !strings.Contains(args, "--plugin-dir "+filepath.Join(exec, "claude-plugin")) || !strings.Contains(args, "--agent hf-a") ||
+	if !strings.Contains(args, "--plugin-dir "+filepath.Join(exec, "claude-plugin")) ||
 		!strings.Contains(args, `"prompt":"You implement."`) {
-		t.Errorf("args: %s", args)
+		t.Errorf("Prepare args = %s, want --plugin-dir %s and the built-in agent defined with its prompt", args,
+			filepath.Join(exec, "claude-plugin"))
+	}
+	if slices.Contains(inv.Args, "--agent") {
+		t.Errorf("Prepare args = %s, want no --agent", args)
+	}
+	if want := "Review the change."; inv.Stdin != want {
+		t.Errorf("Prepare stdin = %q, want %q, the task's prompt", inv.Stdin, want)
 	}
 	if _, err := os.Stat(filepath.Join(a.Home, ".claude")); err == nil {
 		t.Error("the user's configuration was touched")

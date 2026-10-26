@@ -718,6 +718,18 @@ export interface components {
             description?: string;
             /** @description The harnesses that can load it. */
             harnesses: string[];
+            copy?: components["schemas"]["AgentCopy"];
+        };
+        /** @description What selecting an agent copies into a task, on an agent whose file reads: its instructions become the task's prompt, its description the task's, its model the task's when the task's harness is among modelHarnesses, and its skills the task's. omittedFields names the front-matter fields a task has no place for. The task keeps hash as its origin, to tell when the agent changes. */
+        AgentCopy: {
+            prompt: string;
+            description?: string;
+            model?: string;
+            /** @description The harnesses that accept model as a task's. */
+            modelHarnesses: string[];
+            skills: string[];
+            omittedFields: string[];
+            hash: string;
         };
         Catalog: {
             agents: components["schemas"]["CatalogEntry"][];

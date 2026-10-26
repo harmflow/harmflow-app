@@ -3227,6 +3227,91 @@ func TestDuplicate(t *testing.T) {
 	}
 }
 
+// The catalog carries what selecting an agent copies into a task, the harnesses that accept its model, and the fields
+// it leaves out.
+func TestCatalogCarriesTheAgentCopy(t *testing.T) {
+	e := newEnv(t)
+	agent := "---\nname: hf-reviewer\ndescription: Reviews a change\nmodel: sonnet\ntools: Read\nskills: [hf-github-draft-pr]\n---\nYou review."
+	if err := os.WriteFile(filepath.Join(e.app.d.Paths.Builtins, "agents", "hf-reviewer.md"), []byte(agent), 0o600); err != nil {
+		t.Fatalf("os.WriteFile(hf-reviewer.md) = %v, want no error", err)
+	}
+	var entry *CatalogEntry
+	for _, a := range e.app.Catalog().Agents {
+		if a.Name == "hf-reviewer" {
+			entry = &a
+		}
+	}
+	if entry == nil || entry.Copy == nil {
+		t.Fatalf("Catalog() agent hf-reviewer = %+v, want an entry with a copy", entry)
+	}
+	c := entry.Copy
+	if c.Prompt != "You review." || c.Description != "Reviews a change" || c.Model != "sonnet" ||
+		!slices.Equal(c.Skills, []string{"hf-github-draft-pr"}) || !slices.Equal(c.OmittedFields, []string{"tools"}) ||
+		!strings.HasPrefix(c.Hash, "sha256:") {
+		t.Errorf("Catalog() copy of hf-reviewer = %+v, want prompt %q, description %q, model %q, skills "+
+			"[hf-github-draft-pr], omitted fields [tools], and a sha256 hash", c, "You review.", "Reviews a change", "sonnet")
+	}
+	if want := []string{domain.HarnessClaudeCode, domain.HarnessCodex}; !slices.Equal(c.ModelHarnesses, want) {
+		t.Errorf("Catalog() copy of hf-reviewer: model harnesses = %v, want %v", c.ModelHarnesses, want)
+	}
+	for _, s := range e.app.Catalog().Skills {
+		if s.Copy != nil {
+			t.Errorf("Catalog() skill %s: copy = %+v, want none", s.Name, s.Copy)
+		}
+	}
+}
+
+// A task's origin names the agent its prompt was copied from; it is not a reference, so an agent that no longer exists
+// rejects nothing. Export and import keep the origin as it was.
+func TestOriginSurvivesExportAndImport(t *testing.T) {
+	e := newEnv(t)
+	hash := "sha256:" + strings.Repeat("5e", 32)
+	task := `apiVersion: harmflow/v1alpha1
+kind: Task
+metadata:
+  id: review
+  name: Review
+spec:
+  type: general
+  prompt: You review the change.
+  origin:
+    agent: deleted-reviewer
+    hash: ` + hash + `
+  harness:
+    preferred:
+      provider: claude-code
+`
+	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: task}); err != nil {
+		t.Fatalf("CreateTask(review with the origin of a missing agent) = %v, want no error", err)
+	}
+	exported, err := e.app.ExportTask("review")
+	if err != nil {
+		t.Fatalf("ExportTask(review) = %v, want no error", err)
+	}
+	if !strings.Contains(string(exported), "agent: deleted-reviewer") || !strings.Contains(string(exported), "hash: "+hash) {
+		t.Errorf("ExportTask(review) =\n%s\nwant the origin agent: deleted-reviewer and hash: %s", exported, hash)
+	}
+	if _, err := e.app.ImportTask(t.Context(), string(exported), true); err != nil {
+		t.Fatalf("ImportTask(export of review) = %v, want no error", err)
+	}
+	v, err := e.app.GetTask("review")
+	if err != nil {
+		t.Fatalf("GetTask(review) = %v, want no error", err)
+	}
+	js, _ := json.Marshal(v.Document)
+	var doc struct {
+		Spec struct {
+			Origin *domain.Origin `json:"origin"`
+		} `json:"spec"`
+	}
+	if err := json.Unmarshal(js, &doc); err != nil {
+		t.Fatalf("json.Unmarshal(GetTask(review) document) = %v, want no error", err)
+	}
+	if want := (domain.Origin{Agent: "deleted-reviewer", Hash: hash}); doc.Spec.Origin == nil || *doc.Spec.Origin != want {
+		t.Errorf("GetTask(review) after ImportTask: origin = %+v, want %+v", doc.Spec.Origin, want)
+	}
+}
+
 // An export masks a password, a cookie, and a session value wherever the file holds one — the prompt, the description,
 // or a comment — leaves the words around them, and still validates.
 func TestExportMasksCredentials(t *testing.T) {
