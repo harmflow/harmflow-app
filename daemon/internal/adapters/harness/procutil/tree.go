@@ -1,9 +1,12 @@
 package procutil
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"syscall"
 	"time"
 )
@@ -66,6 +69,37 @@ func EndTree(t Tree, grace time.Duration) []Ended {
 		endGroup(t.Group, grace)
 		return nil
 	}
+	return endTree(t, grace)
+}
+
+// EndStoredTree is EndTree for a tree that a record kept after the daemon that started the harness is gone, as a daemon
+// that restarts after a crash finds it. It finds and ends the processes as EndTree does, but never signals the group
+// alone: it ends nothing unless the record names the harness by its pid and start time, and the system has not
+// restarted since the harness started, so a group whose leader is gone can still only be the harness's. It returns an
+// error when the process table or the system's boot time cannot be read, and then ends nothing.
+func EndStoredTree(ctx context.Context, t Tree, grace time.Duration) ([]Ended, error) {
+	if _, err := processTable(); err != nil {
+		return nil, err
+	}
+	if t.Pid <= 1 || t.Start.IsZero() {
+		return nil, nil
+	}
+	boot, err := bootTime(ctx)
+	if err != nil {
+		return nil, err
+	}
+	booted, err := strconv.ParseInt(boot, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("read the boot time %q: %w", boot, err)
+	}
+	if t.Start.Unix() < booted {
+		return nil, nil
+	}
+	return endTree(t, grace), nil
+}
+
+// endTree is EndTree once the process table can be read and the harness is known by its pid and start time.
+func endTree(t Tree, grace time.Duration) []Ended {
 	e := &ender{tree: t, start: t.Start.UnixMicro(), found: map[ident]*target{}, uid: uint32(os.Getuid())}
 	e.find()
 	e.signal(syscall.SIGTERM)

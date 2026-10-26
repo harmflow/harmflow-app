@@ -290,6 +290,10 @@ func (p *Process) Pid() int {
 	return p.cmd.Process.Pid
 }
 
+// Tree names the process and what it starts, as Stop ends them, for a record to keep: a daemon that restarts after a
+// crash ends them with EndStoredTree. Start is zero when the kernel's start time could not be read.
+func (p *Process) Tree() Tree { return p.tree }
+
 // Stop ends the process and every process it started, with EndTree: SIGTERM, then SIGKILL after the grace period.
 // Once the process has exited on its own, what it ends is what the process left running.
 func (p *Process) Stop(grace time.Duration) {

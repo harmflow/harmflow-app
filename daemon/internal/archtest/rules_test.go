@@ -59,7 +59,7 @@ type allowance struct{ file, imp, reason string }
 // resolved — moving a package, adding a port, or keeping a documented exception — is decided per entry.
 var allowlist = []allowance{
 	{"internal/app/app.go", "internal/adapters/schema", "App holds the task validator, a *schema.Validator"},
-	{"internal/app/ended.go", "internal/adapters/harness/procutil", "logEnded reads procutil.Ended, the processes an execution's end stopped"},
+	{"internal/app/ended.go", "internal/adapters/harness/procutil", "logEnded reads procutil.Ended, the processes an execution's end stopped, and recovery ends what a crash left with procutil.EndStoredTree"},
 	{"internal/app/executor.go", "internal/adapters/eventlog", "an attempt's input and the harness's events are redacted with eventlog.Redact and RedactFields"},
 	{"internal/app/executor.go", "internal/adapters/harness/procutil", "the use case starts the harness with procutil.Start instead of through a port"},
 	{"internal/app/executor.go", "internal/adapters/schema", "the agent's report is parsed with schema.FromJSON"},
