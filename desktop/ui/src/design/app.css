@@ -3023,6 +3023,32 @@ button.queue-item:hover,
   font-size: var(--hf-font-size-xs);
 }
 
+/* The schedule builder: the frequency, its controls, and the expression they write, on one wrapping row. */
+.schedule-builder {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--hf-space-3) var(--hf-space-4);
+  align-items: flex-start;
+}
+
+.schedule-builder > .field {
+  min-width: 140px;
+}
+
+.schedule-expression {
+  display: block;
+  padding: 9px 0;
+  color: var(--hf-color-text);
+  font-size: var(--hf-font-size-sm);
+  white-space: pre;
+}
+
+.schedule-description {
+  margin: 0;
+  color: var(--hf-color-text-muted);
+  font-size: var(--hf-font-size-sm);
+}
+
 .name-picker {
   display: flex;
   flex-direction: column;

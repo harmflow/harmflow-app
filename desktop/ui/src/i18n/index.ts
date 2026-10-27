@@ -14,12 +14,13 @@ export const resources = {
   "es-ES": { translation: esES },
 } as const;
 
-// The daemon's texts are looked up by keys that arrive at run time (lib/daemonText.ts), so they stay out of the typed
-// keys, which would otherwise grow too deep for the type checker.
+// The daemon's texts are looked up by keys that arrive at run time (lib/daemonText.ts), and so are the parts of a cron
+// expression's description (lib/schedule.ts), so they stay out of the typed keys, which would otherwise grow too deep
+// for the type checker.
 declare module "i18next" {
   interface CustomTypeOptions {
     defaultNS: "translation";
-    resources: { translation: Omit<typeof enUS, "messages" | "cronFields" | "itemSource" | "errorClass"> };
+    resources: { translation: Omit<typeof enUS, "messages" | "cronFields" | "cronText" | "itemSource" | "errorClass"> };
   }
 }
 
