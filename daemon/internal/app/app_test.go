@@ -2941,13 +2941,23 @@ func TestWaitingFiringAcrossRestart(t *testing.T) {
 // A harness the daemon's stop ends is interrupted, even when it exits as one that finished. The stand-in answers the
 // stop's SIGTERM with its success line and code 0, as a shell whose child the signal ended first may go on to do.
 func TestStopInterruptsAHarnessThatExitsAsFinished(t *testing.T) {
+	stopHarness(t, `exec perl -e '$| = 1; $SIG{TERM} = sub { print "END ok\n"; exit 0 }; print "working\n"; sleep 30'`, 0)
+}
+
+// A harness the daemon's stop ends with its signal is interrupted by the stop, not failed by its exit code.
+func TestStopInterruptsAHarnessTheSignalEnds(t *testing.T) {
+	stopHarness(t, `exec perl -e '$| = 1; print "working\n"; sleep 30'`, 128+int(syscall.SIGTERM))
+}
+
+// stopHarness runs a task whose harness runs script, and stops the daemon once the harness has printed "working", by
+// then ready for the stop. Before and after a restart, the execution and its one attempt read interrupted, the attempt
+// with the daemon's stop as its error and the exit code it ended with, and so does the attempt's harness.exited event.
+func stopHarness(t *testing.T, script string, exitCode int) {
+	t.Helper()
 	e := newEnv(t)
 	e.create("stopped", "")
-	e.claude.setScript(func(ports.RunRequest) string {
-		return `exec perl -e '$| = 1; $SIG{TERM} = sub { print "END ok\n"; exit 0 }; print "working\n"; sleep 30'`
-	})
+	e.claude.setScript(func(ports.RunRequest) string { return script })
 	r, _ := e.app.RunTask("stopped")
-	// The harness prints its first line once it answers SIGTERM.
 	if !e.poll(10*time.Second, func() bool {
 		events, _, _ := e.app.ExecutionEvents(r.ExecutionID, 0, 0)
 		return slices.ContainsFunc(events, func(ev domain.Event) bool {
@@ -2957,17 +2967,68 @@ func TestStopInterruptsAHarnessThatExitsAsFinished(t *testing.T) {
 		t.Fatal("the harness printed nothing")
 	}
 	e.app.Stop(domain.Text{Message: "test stop"})
+	check := func(when string, e *env) {
+		t.Helper()
+		x, _ := e.app.GetExecution(r.ExecutionID)
+		if x.Status != domain.StatusInterrupted {
+			t.Errorf("%s, the stopped execution is %s, want interrupted", when, x.Status)
+		}
+		if len(x.Attempts) != 1 {
+			t.Fatalf("%s, attempts %+v, want one", when, x.Attempts)
+		}
+		at := x.Attempts[0]
+		if at.Outcome != domain.AttemptInterrupted || at.ErrorKey != "daemon_stopped_execution" {
+			t.Errorf("%s, the attempt reads %s (%s: %q), want interrupted (daemon_stopped_execution)", when, at.Outcome,
+				at.ErrorKey, at.ErrorMessage)
+		}
+		if at.ExitCode == nil {
+			t.Errorf("%s, the attempt recorded no exit code, want %d", when, exitCode)
+		} else if *at.ExitCode != exitCode {
+			t.Errorf("%s, the attempt's exit code is %d, want %d", when, *at.ExitCode, exitCode)
+		}
+		events, _, err := e.app.ExecutionEvents(r.ExecutionID, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var exited []map[string]any
+		for _, ev := range events {
+			if ev.Type == domain.EventHarnessExited {
+				exited = append(exited, ev.Payload)
+			}
+		}
+		if len(exited) != 1 || exited[0]["outcome"] != string(domain.AttemptInterrupted) ||
+			exited[0]["errorKey"] != "daemon_stopped_execution" {
+			t.Errorf("%s, the harness.exited payloads are %v, want one with outcome interrupted and errorKey "+
+				"daemon_stopped_execution", when, exited)
+		}
+	}
+	check("after the stop", e)
+	check("after the restart", e.restart(t))
+}
+
+// A harness that exits on its own keeps the outcome its exit gives, though the daemon begins stopping while the process
+// it left running, which ignores SIGTERM, is ended over the grace period.
+func TestHarnessExitKeepsItsOutcomeThroughAStop(t *testing.T) {
+	e := newEnv(t)
+	e.create("own-exit", "  execution:\n    cancelGraceSeconds: 2\n")
+	dir := t.TempDir()
+	e.claude.setScript(func(ports.RunRequest) string {
+		return fmt.Sprintf("(trap '' TERM; exec sleep 600) >/dev/null 2>&1 & echo $! > %[1]s/child; "+
+			"echo $$ > %[1]s/harness; echo 'END ok'", dir)
+	})
+	r, err := e.app.RunTask("own-exit")
+	if err != nil || r.Outcome != "started" {
+		t.Fatalf("run own-exit: %v %+v", err, r)
+	}
+	waitForPid(t, filepath.Join(dir, "child"))
+	waitReaped(t, waitForPid(t, filepath.Join(dir, "harness")))
+	e.app.Stop(domain.Text{Message: "test stop"})
 	x, _ := e.app.GetExecution(r.ExecutionID)
-	if len(x.Attempts) != 1 || x.Attempts[0].ExitCode == nil || *x.Attempts[0].ExitCode != 0 ||
-		x.Attempts[0].Outcome != domain.AttemptSucceeded {
-		t.Fatalf("attempts %+v, want one whose harness exited with code 0 and its success line", x.Attempts)
+	if len(x.Attempts) != 1 || x.Attempts[0].Outcome != domain.AttemptSucceeded || x.Attempts[0].ErrorKey != "" {
+		t.Errorf("attempts %+v, want one that succeeded", x.Attempts)
 	}
-	if x.Status != domain.StatusInterrupted {
-		t.Errorf("the stopped execution is %s, want interrupted", x.Status)
-	}
-	e = e.restart(t)
-	if x, _ := e.app.GetExecution(r.ExecutionID); x.Status != domain.StatusInterrupted {
-		t.Errorf("after the restart, the stopped execution is %s, want interrupted", x.Status)
+	if x.Status != domain.StatusCompleted {
+		t.Errorf("the execution is %s, want completed", x.Status)
 	}
 }
 
