@@ -84,7 +84,10 @@ export type TemplateKind = "github" | "general" | "script";
 
 const BASE_DOCUMENT = { apiVersion: "harmflow/v1alpha1", kind: "Task" } as const;
 
-/** A new task of a type, with the type's built-in agents, skills, and prompt as the catalog declares them. */
+/**
+ * A new task of a type, with the type's built-in agents and skills as the catalog declares them. The agent the type
+ * selects is copied in by copyTypeAgent.
+ */
 export function newTaskDocument(kind: TemplateKind, catalog: Catalog | undefined, name: string): Doc {
   if (kind === "script") {
     return { ...BASE_DOCUMENT, metadata: { id: slugify(name), name }, spec: { enabled: true, type: "script", script: { command: [""] } } };
@@ -93,7 +96,7 @@ export function newTaskDocument(kind: TemplateKind, catalog: Catalog | undefined
   const spec: Doc = {
     enabled: true,
     type: kind,
-    prompt: type?.defaultPrompt ?? "",
+    prompt: "",
     harness: { preferred: { provider: "claude-code" } },
   };
   if (type?.defaultAgents.length) spec.agents = [...type.defaultAgents];

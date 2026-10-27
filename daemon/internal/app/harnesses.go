@@ -170,13 +170,14 @@ type AgentCopy struct {
 }
 
 // TaskTypeInfo is a task type as the editor offers it: the key of its parameters block in a task's spec, nil for a type
-// with none, and the agents, skills, and prompt a new task of the type starts with.
+// with none, the agents and skills a new task of the type starts with, and the agent it selects, whose copy becomes its
+// prompt.
 type TaskTypeInfo struct {
 	ID            string   `json:"id"`
 	ParametersKey *string  `json:"parametersKey"`
 	DefaultAgents []string `json:"defaultAgents"`
 	DefaultSkills []string `json:"defaultSkills"`
-	DefaultPrompt string   `json:"defaultPrompt,omitempty"`
+	SelectedAgent string   `json:"selectedAgent,omitempty"`
 }
 
 // Catalog is what a task can cite: the agents and skills, built in or the user's, and the task types; Problems are what
@@ -191,15 +192,13 @@ type Catalog struct {
 // BuiltinPrefix starts the name of every built-in agent or skill, and of no user's one HarmFlow lists.
 const BuiltinPrefix = "hf-"
 
-// BuiltinIssueSkills are the built-in skills of the issue implementer, the MVP's only built-in set, which a new GitHub
-// task selects by default and need not keep: the first carries out the task and uses the others.
-var BuiltinIssueSkills = []string{"hf-github-issue-implementer", "hf-github-issue-queue", "hf-github-worktree", "hf-github-draft-pr"}
+// BuiltinIssueAgent is the built-in issue implementer, which a new GitHub task selects by default and need not keep: it
+// carries out the task and uses BuiltinIssueSkills.
+const BuiltinIssueAgent = "hf-github-issue-implementer"
 
-const defaultIssuePrompt = `Use the skill hf-github-issue-implementer.
-Select one open issue labeled agent-ready that is not labeled blocked, oldest first.
-Implement it following the repository's conventions and run its tests.
-Name the work branch harmflow/<issue-number>-<short-slug> and mark the pull request as managed by HarmFlow with the label harmflow.
-Open or update a draft pull request that reports what was implemented, the tests run, what passed and what failed, and what is pending.`
+// BuiltinIssueSkills are the built-in skills of the issue implementer, a new GitHub task's default skills. With
+// BuiltinIssueAgent, they are the MVP's only built-in set.
+var BuiltinIssueSkills = []string{"hf-github-issue-queue", "hf-github-worktree", "hf-github-draft-pr"}
 
 func (a *App) builtinDir() catalog.Dir { return catalog.Dir{Root: a.d.Paths.Builtins, Builtin: true} }
 
@@ -327,7 +326,7 @@ func (a *App) Catalog(ctx context.Context, workspace string) Catalog {
 	key, scriptKey := "github", "script"
 	c.TaskTypes = []TaskTypeInfo{
 		{ID: domain.TypeGitHub, ParametersKey: &key, DefaultAgents: []string{},
-			DefaultSkills: append([]string{}, BuiltinIssueSkills...), DefaultPrompt: defaultIssuePrompt},
+			DefaultSkills: append([]string{}, BuiltinIssueSkills...), SelectedAgent: BuiltinIssueAgent},
 		{ID: domain.TypeGeneral, ParametersKey: nil, DefaultAgents: []string{}, DefaultSkills: []string{}},
 		{ID: domain.TypeScriptTask, ParametersKey: &scriptKey, DefaultAgents: []string{}, DefaultSkills: []string{}},
 	}

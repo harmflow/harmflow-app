@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
-import type { CatalogEntry } from "../api/types";
-import { applyAgentCopy, changedOrigin, clearOrigin, copyChanges, leftOut, lineDiff, originOf, promptEdited, type AgentCopy } from "./agentCopy";
+import type { Catalog, CatalogEntry } from "../api/types";
+import {
+  applyAgentCopy,
+  changedOrigin,
+  clearOrigin,
+  copyChanges,
+  copyTypeAgent,
+  leftOut,
+  lineDiff,
+  originOf,
+  promptEdited,
+  type AgentCopy,
+} from "./agentCopy";
 import type { Doc } from "./taskForm";
 
 const HASH = "sha256:" + "a".repeat(64);
@@ -63,10 +74,29 @@ describe("asking before a copy replaces the prompt", () => {
     expect(promptEdited(edited, agents)).toBe(true);
   });
 
-  it("does not ask for an empty prompt, the type's default, or the agent's copy as it was", () => {
+  it("does not ask for an empty prompt or the agent's copy as it was", () => {
     expect(promptEdited(task(), agents)).toBe(false);
-    expect(promptEdited(task({ prompt: "Use the skill." }), agents, "Use the skill.")).toBe(false);
     expect(promptEdited(applyAgentCopy(task(), "reviewer", reviewer), agents)).toBe(false);
+  });
+});
+
+describe("the agent a type selects", () => {
+  const catalog = (selectedAgent?: string, agents = [entry(reviewer)]): Catalog => ({
+    agents,
+    skills: [],
+    problems: [],
+    taskTypes: [{ id: "general", parametersKey: null, defaultAgents: [], defaultSkills: [], selectedAgent }],
+  });
+
+  it("is copied into a new task of the type, as choosing it does", () => {
+    expect(copyTypeAgent(task(), catalog("reviewer"))).toEqual(applyAgentCopy(task(), "reviewer", reviewer));
+  });
+
+  it("leaves the task as it is when the type selects none, or the catalog has no copy of the agent", () => {
+    expect(copyTypeAgent(task(), catalog())).toEqual(task());
+    expect(copyTypeAgent(task(), catalog("reviewer", []))).toEqual(task());
+    expect(copyTypeAgent(task(), catalog("reviewer", [{ ...entry(reviewer), copy: undefined }]))).toEqual(task());
+    expect(copyTypeAgent(task(), undefined)).toEqual(task());
   });
 });
 
