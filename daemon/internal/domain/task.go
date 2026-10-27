@@ -205,11 +205,14 @@ type CustomPermissions struct {
 }
 
 // ExecutionLimits bounds an execution: a timeout shared by all its attempts, the grace a process gets to end once it is
-// asked to stop, and the retries after a rate limit.
+// asked to stop, whether it may spend extra usage, and the retries after a rate limit.
 type ExecutionLimits struct {
-	TimeoutMinutes     *int       `yaml:"timeoutMinutes,omitempty" json:"timeoutMinutes,omitempty"`
-	CancelGraceSeconds *int       `yaml:"cancelGraceSeconds,omitempty" json:"cancelGraceSeconds,omitempty"`
-	RateLimit          *RateLimit `yaml:"rateLimit,omitempty" json:"rateLimit,omitempty"`
+	TimeoutMinutes     *int `yaml:"timeoutMinutes,omitempty" json:"timeoutMinutes,omitempty"`
+	CancelGraceSeconds *int `yaml:"cancelGraceSeconds,omitempty" json:"cancelGraceSeconds,omitempty"`
+	// AllowExtraUsage lets the execution spend usage billed beyond what its harness's plan includes. A script task, which
+	// runs no harness, does not take it.
+	AllowExtraUsage *bool      `yaml:"allowExtraUsage,omitempty" json:"allowExtraUsage,omitempty"`
+	RateLimit       *RateLimit `yaml:"rateLimit,omitempty" json:"rateLimit,omitempty"`
 }
 
 // RateLimit is how an attempt that hit a rate limit is retried on the same harness: up to MaxRetries times, waiting
@@ -377,6 +380,9 @@ func (d TaskDocument) Effective() TaskDocument {
 	}
 	setDefault(&s.Execution.TimeoutMinutes, DefaultTimeoutMinutes)
 	setDefault(&s.Execution.CancelGraceSeconds, DefaultCancelGraceSeconds)
+	if s.Type != TypeScriptTask {
+		setDefault(&s.Execution.AllowExtraUsage, false)
+	}
 	if s.Execution.RateLimit == nil {
 		s.Execution.RateLimit = &RateLimit{}
 	}
@@ -430,6 +436,13 @@ func (p HarnessProfile) withDefaults() HarnessProfile {
 		p.Effort = DefaultEffort
 	}
 	return p
+}
+
+// AllowsExtraUsage reports whether the task lets its executions spend extra usage; false, the default, when it does not
+// say.
+func (d TaskDocument) AllowsExtraUsage() bool {
+	x := d.Spec.Execution
+	return x != nil && x.AllowExtraUsage != nil && *x.AllowExtraUsage
 }
 
 // Profiles returns the preferred profile followed by the fallback candidates, defaults applied; a script task has none.
@@ -593,7 +606,8 @@ func (d TaskDocument) clone() TaskDocument {
 		s.Permissions = &pc
 	}
 	if x := s.Execution; x != nil {
-		xc := ExecutionLimits{TimeoutMinutes: clonePtr(x.TimeoutMinutes), CancelGraceSeconds: clonePtr(x.CancelGraceSeconds)}
+		xc := ExecutionLimits{TimeoutMinutes: clonePtr(x.TimeoutMinutes), CancelGraceSeconds: clonePtr(x.CancelGraceSeconds),
+			AllowExtraUsage: clonePtr(x.AllowExtraUsage)}
 		if x.RateLimit != nil {
 			xc.RateLimit = &RateLimit{
 				MaxRetries:         clonePtr(x.RateLimit.MaxRetries),
@@ -643,7 +657,7 @@ func (d TaskDocument) clone() TaskDocument {
 
 func ptr[T any](v T) *T { return &v }
 
-func setDefault(p **int, v int) {
+func setDefault[T any](p **T, v T) {
 	if *p == nil {
 		*p = ptr(v)
 	}

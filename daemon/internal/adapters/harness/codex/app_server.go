@@ -196,23 +196,32 @@ func startFailed(err error) error {
 		"detail", err.Error()), true}
 }
 
-// listSkills asks the app server for the skills Codex has in workspace, starting it on first use and again once it
-// broke. The first list after ReloadUserItems carries forceReload.
+// listSkills asks the app server for the skills Codex has in workspace. The first list after ReloadUserItems carries
+// forceReload.
 func (a *Adapter) listSkills(ctx context.Context, info ports.HarnessInfo, workspace string) (skillsList, error) {
 	var list skillsList
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	params := map[string]any{"cwds": []string{workspace}, "forceReload": a.reload}
+	if err := a.callLocked(ctx, info, "skills/list", params, &list); err != nil {
+		return skillsList{}, err
+	}
+	a.reload = false
+	return list, nil
+}
+
+// callLocked sends one request to the app server, starting it on first use and again once it broke; a.mu is held.
+func (a *Adapter) callLocked(ctx context.Context, info ports.HarnessInfo, method string, params, result any) error {
 	if !info.Detected || info.Path == "" {
-		return list, domain.TextErr("harness_not_detected", "{{harness}} was not detected on this machine", "harness", Name)
+		return domain.TextErr("harness_not_detected", "{{harness}} was not detected on this machine", "harness", Name)
 	}
 	if !info.Features["app-server"] {
-		return list, domain.TextErr("codex_app_server_missing", "Codex {{version}} has no app server",
-			"version", info.Version)
+		return domain.TextErr("codex_app_server_missing", "Codex {{version}} has no app server", "version", info.Version)
 	}
 	timeout := a.listTimeout
 	if timeout == 0 {
 		timeout = defaultListTimeout
 	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
 	if a.server != nil && a.server.path != info.Path {
 		a.server.close()
 		a.server = nil
@@ -220,22 +229,74 @@ func (a *Adapter) listSkills(ctx context.Context, info ports.HarnessInfo, worksp
 	if a.server == nil {
 		s, err := startAppServer(ctx, info.Path, a.Env, a.ClientVersion, timeout)
 		if err != nil {
-			return list, err
+			return err
 		}
 		a.server = s
 	}
-	params := map[string]any{"cwds": []string{workspace}, "forceReload": a.reload}
-	err := a.server.call(ctx, timeout, "skills/list", params, &list)
+	err := a.server.call(ctx, timeout, method, params, result)
 	var se *serverError
 	if errors.As(err, &se) && se.broken {
 		a.server.close()
 		a.server = nil
 	}
+	return err
+}
+
+// rateLimitsRead is the answer to account/rateLimits/read, as Codex 0.163.0 writes it: its plan windows, which some
+// plans leave null, the limit it reports reached, and the account's spend control.
+type rateLimitsRead struct {
+	RateLimits *struct {
+		Primary              *rateLimitWindow `json:"primary"`
+		Secondary            *rateLimitWindow `json:"secondary"`
+		RateLimitReachedType *string          `json:"rateLimitReachedType"`
+		SpendControlReached  *bool            `json:"spendControlReached"`
+	} `json:"rateLimits"`
+}
+
+// rateLimitWindow is one plan window of Codex: the share of it used, in percent, and when it resets.
+type rateLimitWindow struct {
+	UsedPercent float64 `json:"usedPercent"`
+	ResetsAt    *int64  `json:"resetsAt"`
+}
+
+// ReadQuota implements ports.QuotaReader with the app server's account/rateLimits/read, which makes no model call.
+func (a *Adapter) ReadQuota(ctx context.Context, info ports.HarnessInfo) (domain.Quota, error) {
+	var read rateLimitsRead
+	a.mu.Lock()
+	err := a.callLocked(ctx, info, "account/rateLimits/read", nil, &read)
+	a.mu.Unlock()
 	if err != nil {
-		return skillsList{}, err
+		return domain.Quota{}, err
 	}
-	a.reload = false
-	return list, nil
+	return read.quota()
+}
+
+// quota is the reading the answer gives; an answer without rateLimits is one the adapter does not understand.
+func (r rateLimitsRead) quota() (domain.Quota, error) {
+	l := r.RateLimits
+	if l == nil {
+		return domain.Quota{}, domain.TextErr("quota_report_unrecognized",
+			"{{harness}}'s usage report names no plan window HarmFlow can read", "harness", Name)
+	}
+	var q domain.Quota
+	for _, w := range []struct {
+		name   string
+		window *rateLimitWindow
+	}{{"primary", l.Primary}, {"secondary", l.Secondary}} {
+		if w.window == nil {
+			continue
+		}
+		var resets time.Time
+		if w.window.ResetsAt != nil && *w.window.ResetsAt > 0 {
+			resets = time.Unix(*w.window.ResetsAt, 0)
+		}
+		q.Windows = append(q.Windows, domain.QuotaWindow{Name: w.name, UsedPercent: w.window.UsedPercent, ResetsAt: resets})
+	}
+	if l.RateLimitReachedType != nil && *l.RateLimitReachedType != "" {
+		q.Limit = &domain.QuotaWindow{Name: *l.RateLimitReachedType}
+	}
+	q.SpendControlReached = l.SpendControlReached != nil && *l.SpendControlReached
+	return q, nil
 }
 
 // skills are the skills Codex lists for workspace and has enabled, each name once: the first in the list's own order,

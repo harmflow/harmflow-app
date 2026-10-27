@@ -154,6 +154,9 @@ type App struct {
 	accepting     bool
 	stopping      bool
 	adapters      map[string]ports.HarnessAdapter
+	// quotas holds each harness's last quota reading, by harness id, and quotaReads runs one read of a harness at a time.
+	quotas     map[string]quotaReading
+	quotaReads map[string]*sync.Mutex
 	// unavailableUntil is when the daemon last became available again, at its start or when the machine woke: a firing
 	// scheduled before it and still due came due while the daemon or the machine was down, and is a misfire however
 	// late it is.
@@ -220,7 +223,8 @@ func New(d Deps) (*App, error) {
 		tasks: map[string]*taskEntry{}, executions: map[string]*domain.Execution{}, running: map[string]*runHandle{},
 		inventory: map[string]ports.HarnessInfo{}, manualPaths: map[string]string{}, sched: map[string]*scheduleState{},
 		firings: map[string][]firingRecord{}, ledger: map[string]map[string]*domain.WorkItem{}, accepting: true,
-		adapters: map[string]ports.HarnessAdapter{}, ShutdownRequested: make(chan struct{}),
+		adapters: map[string]ports.HarnessAdapter{}, quotas: map[string]quotaReading{}, quotaReads: map[string]*sync.Mutex{},
+		ShutdownRequested: make(chan struct{}),
 	}
 	for _, h := range d.Harnesses {
 		a.adapters[h.ID()] = h

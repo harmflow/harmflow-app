@@ -55,9 +55,15 @@ type Adapter struct {
 }
 
 var (
-	_ ports.HarnessAdapter    = (*Adapter)(nil)
-	_ ports.HarnessIdentifier = (*Adapter)(nil)
+	_ ports.HarnessAdapter     = (*Adapter)(nil)
+	_ ports.HarnessIdentifier  = (*Adapter)(nil)
+	_ ports.QuotaReader        = (*Adapter)(nil)
+	_ ports.ExtraUsageReporter = (*Adapter)(nil)
 )
+
+// ReportsExtraUsage implements ports.ExtraUsageReporter: every rate-limit report of the stream says whether the session
+// is using extra usage.
+func (a *Adapter) ReportsExtraUsage() bool { return true }
 
 // ID implements ports.HarnessAdapter: the harness's identifier.
 func (a *Adapter) ID() string { return ID }
@@ -563,12 +569,7 @@ type streamLine struct {
 	TotalCostUSD *float64              `json:"total_cost_usd"`
 	Usage        *apiUsage             `json:"usage"`
 	ModelUsage   map[string]modelUsage `json:"modelUsage"`
-	RateLimit    *struct {
-		Status        string `json:"status"`
-		ResetsAt      int64  `json:"resetsAt"`
-		RateLimitType string `json:"rateLimitType"`
-		OverageStatus string `json:"overageStatus"`
-	} `json:"rate_limit_info"`
+	RateLimit    *rateLimitInfo        `json:"rate_limit_info"`
 }
 
 type contentBlock struct {
@@ -665,10 +666,12 @@ func (p *parser) Line(line []byte) []ports.HarnessEvent {
 			p.rateStatus = sl.RateLimit.Status
 			p.rateType = sl.RateLimit.RateLimitType
 			p.resetsAt = sl.RateLimit.ResetsAt
+			out := []ports.HarnessEvent{{Kind: ports.HarnessQuota, Quota: sl.RateLimit.quota()}}
 			if sl.RateLimit.Status != "allowed" && sl.RateLimit.Status != "allowed_warning" {
-				return []ports.HarnessEvent{{Kind: ports.HarnessRateLimit, Message: fmt.Sprintf("%s limit: %s",
-					sl.RateLimit.RateLimitType, sl.RateLimit.Status)}}
+				out = append(out, ports.HarnessEvent{Kind: ports.HarnessRateLimit, Message: fmt.Sprintf("%s limit: %s",
+					sl.RateLimit.RateLimitType, sl.RateLimit.Status)})
 			}
+			return out
 		}
 	case "result":
 		p.result = &resultLine{IsError: sl.IsError, Subtype: sl.Subtype, Result: sl.Result, TotalCostUSD: sl.TotalCostUSD,

@@ -767,6 +767,7 @@ components:
         - codex_app_server_timed_out
         - codex_app_server_error
         - fallback_repeats_preferred
+        - extra_usage_unenforced
         - path_variable_unterminated
         - path_variable_undefined
         - path_not_absolute
@@ -789,6 +790,7 @@ components:
         - script_leftovers_ended
         - harness_version_untested
         - harness_version_unknown
+        - quota_unread
         - repository_unprotected
         - report_not_json
         - report_schema_invalid
@@ -841,6 +843,9 @@ components:
         - harness_unavailable_readiness
         - harness_rate_limited
         - harness_quota_exhausted
+        - quota_exhausted
+        - quota_exhausted_until
+        - extra_usage_stopped
         - harness_switched
         - no_alternative_harness
         - no_alternative_harness_detail
@@ -869,6 +874,7 @@ components:
         - harness_feature_missing
         - harness_version_below_minimum
         - claude_not_signed_in
+        - quota_report_unrecognized
         - not_signed_in
         - authentication_unverified
         - gh_auth_problem

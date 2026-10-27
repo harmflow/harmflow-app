@@ -201,6 +201,8 @@ const (
 	HarnessNetworkWait HarnessEventKind = "network_wait"
 	// HarnessUsage carries the attempt's token use so far, each time the harness reports more.
 	HarnessUsage HarnessEventKind = "usage"
+	// HarnessQuota carries the quota the harness reported while it runs, extra usage included.
+	HarnessQuota HarnessEventKind = "quota"
 )
 
 // HarnessEvent is one observation an OutputParser read from the harness's output; which fields it carries depends on
@@ -220,6 +222,7 @@ type HarnessEvent struct {
 	Model  string
 	Effort string
 	Usage  *domain.Usage
+	Quota  *domain.Quota
 }
 
 // OutputParser turns one attempt's stdout lines into events and classifies its end.
@@ -279,6 +282,18 @@ type HarnessIdentifier interface {
 // and the save keeps them with that warning.
 type ProfileWarner interface {
 	ProfileWarning(info HarnessInfo, model, effort string) (domain.Text, bool)
+}
+
+// QuotaReader is a HarnessAdapter that reads its harness's quota without a model call. An error says the quota could
+// not be read: the command failed, timed out, or printed what the adapter does not understand.
+type QuotaReader interface {
+	ReadQuota(ctx context.Context, info HarnessInfo) (domain.Quota, error)
+}
+
+// ExtraUsageReporter is a HarnessAdapter whose running harness reports when it turns to extra usage, in a HarnessQuota
+// event, so the attempt can be ended then. Any other harness can be checked only before its attempt starts.
+type ExtraUsageReporter interface {
+	ReportsExtraUsage() bool
 }
 
 // SystemInfo reads the gauges of the sidebar.

@@ -113,6 +113,10 @@ func (f *fakeHarness) Detect(ctx context.Context, _ string) ports.HarnessInfo {
 	return info
 }
 func (f *fakeHarness) ValidateProfile(ports.HarnessInfo, string, string) error { return nil }
+
+// ReportsExtraUsage says what the real adapter of the same harness says: only Claude Code reports extra usage as
+// it runs.
+func (f *fakeHarness) ReportsExtraUsage() bool { return f.id == domain.HarnessClaudeCode }
 func (f *fakeHarness) UserItem(_ context.Context, _ ports.HarnessInfo, kind, name, _ string) (ports.ResolvedItem, bool, []ports.DiscoveryError, error) {
 	found := kind == "skill" && name == "user-skill" || kind == "agent" && name == "user-agent" ||
 		kind == "skill" && name == "review-notes" && f.id == domain.HarnessClaudeCode
