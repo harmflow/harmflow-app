@@ -56,6 +56,40 @@ func TestSyntaxErrorLine(t *testing.T) {
 	}
 }
 
+// A document that parses but cannot be validated is refused with a text of its own: an empty one, and one holding a
+// value JSON cannot carry, such as YAML's not-a-number.
+func TestUnreadableDocument(t *testing.T) {
+	cases := []struct{ name, yaml, key string }{
+		{"empty", "", "document_empty"},
+		{"not a number", valid + "  limit: .nan\n", "document_not_representable"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			doc, _, issues := ParseYAML([]byte(c.yaml))
+			if doc != nil || len(issues) != 1 || issues[0].Key != c.key || issues[0].Code != "syntax" {
+				t.Errorf("ParseYAML(%q) = %v, %+v; want no document and one syntax issue %s", c.yaml, doc, issues, c.key)
+			}
+		})
+	}
+}
+
+// A key YAML reads as a number keeps its text, so the schema names it as written.
+func TestNumericKeyKeepsItsText(t *testing.T) {
+	v, err := New()
+	if err != nil {
+		t.Fatalf("New() = %v, want no error", err)
+	}
+	text := valid + "  1: one\n"
+	doc, node, issues := ParseYAML([]byte(text))
+	if len(issues) > 0 {
+		t.Fatalf("ParseYAML(%q) issues = %+v, want none", text, issues)
+	}
+	got := v.ValidateTask(doc, node)
+	if len(got) != 1 || got[0].Key != "schema_additional_properties" || got[0].Params["properties"] != `"1"` {
+		t.Errorf("ValidateTask(%q) = %+v, want one schema_additional_properties issue for \"1\"", text, got)
+	}
+}
+
 // versionSecond is the valid task with kind first, so apiVersion sits on line 2 and a location that fell back to the
 // document's start would show.
 var versionSecond = strings.Replace(valid, "apiVersion: harmflow/v1alpha1\nkind: Task\n",
