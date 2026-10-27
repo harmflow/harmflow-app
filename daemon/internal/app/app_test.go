@@ -1223,25 +1223,47 @@ func TestNoFailoverOnATimeoutOrATaskError(t *testing.T) {
 	}
 }
 
-// harmflow-app#215: one timeout covers every attempt of an execution. The first attempt fails over after two thirds of
-// it, and the alternative, which ignores SIGTERM, is stopped when the same timeout elapses, and killed once its grace
-// is over. A timeout started afresh for the alternative would end it at 5/3 of the timeout plus the grace at the
-// earliest, so the bound below, the timeout plus the grace plus less than a third of the timeout, tells the two apart.
+// harmflow-app#215: one timeout covers every attempt of an execution. The first attempt exhausts its quota and fails
+// over, and the alternative, which ignores SIGTERM, is stopped when the same timeout elapses, and killed once its grace
+// is over. A timeout started afresh for the alternative could not end it before the first attempt's quota plus the
+// timeout plus the grace, so an execution that ends before that bound kept one timeout.
+//
+// The first attempt reports its quota once it reads the line the test writes 3 s in, so its shell's start counts
+// within those 3 s, not after them, and no sleep has to start. The rest of the timeout's 8 s is for the alternative's
+// process to start and ignore SIGTERM, or nothing tests its grace. The timeout is no longer so that 50 runs, which show
+// the test holds under the load of a full test run, fit within go test's default 10 minutes, about 9 s each.
 func TestOneTimeoutAcrossAFailover(t *testing.T) {
-	const timeout, grace, slack = 6 * time.Second, time.Second, 1900 * time.Millisecond
+	const timeout, grace, quotaAfter = 8 * time.Second, time.Second, 3 * time.Second
 	e := newEnv(t, func(e *env) { e.timeoutUnit = time.Second })
-	e.create("shared", codexFallback+"  execution:\n    timeoutMinutes: 6\n    cancelGraceSeconds: 1\n")
+	e.create("shared", codexFallback+"  execution:\n    timeoutMinutes: 8\n    cancelGraceSeconds: 1\n")
 	dir := t.TempDir()
-	e.claude.setScript(func(ports.RunRequest) string { return "sleep 4; echo 'END quota'" })
+	fifo := filepath.Join(dir, "quota")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatalf("Mkfifo(%s): %v", fifo, err)
+	}
+	// Read-write, so the open does not wait for the shell, and the shell's own open does not wait for the test.
+	feed, err := os.OpenFile(fifo, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("open %s: %v", fifo, err)
+	}
+	t.Cleanup(func() { _ = feed.Close() }) // a reader still waiting then reads the end of the file
+	e.claude.setScript(func(ports.RunRequest) string { return fmt.Sprintf("read quota < %s; echo 'END quota'", fifo) })
 	e.codex.setScript(func(ports.RunRequest) string {
 		return fmt.Sprintf("trap '' TERM; echo $$ > %s/codex; echo working; sleep 30; echo 'END ok'", dir)
 	})
 	began := time.Now()
 	r, _ := e.app.RunTask("shared")
+	time.Sleep(quotaAfter - time.Since(began))
+	// Taken before the write: the first attempt cannot read the line, and so end, any earlier.
+	quota := time.Since(began)
+	if _, err := feed.WriteString("quota\n"); err != nil {
+		t.Fatalf("write %s: %v", fifo, err)
+	}
 	x := e.wait(r.ExecutionID, domain.StatusFailed)
 	elapsed := time.Since(began)
 	if len(x.Attempts) != 2 {
-		t.Fatalf("%d attempts %+v, want 2: the quota did not fail over before the timeout", len(x.Attempts), x.Attempts)
+		t.Fatalf("%d attempts %+v, the quota %s in; want 2: the quota did not fail over before the timeout",
+			len(x.Attempts), x.Attempts, quota)
 	}
 	if x.ErrorKey != "execution_timed_out" || x.HarnessSwitches != 1 {
 		t.Errorf("the execution failed with %q (%s) after %d switches, want execution_timed_out after 1", x.ErrorMessage,
@@ -1250,8 +1272,17 @@ func TestOneTimeoutAcrossAFailover(t *testing.T) {
 	if at := x.Attempts[1]; at.Harness != domain.HarnessCodex || at.Outcome != domain.AttemptTimedOut || at.EndedAt == nil {
 		t.Errorf("Codex's attempt %+v, want it ended, timed out", at)
 	}
-	if elapsed < timeout || elapsed > timeout+grace+slack {
-		t.Errorf("the execution ended after %s, want between %s and %s", elapsed, timeout, timeout+grace+slack)
+	// Codex's shell writes its pid once it ignores SIGTERM, so the file is there when the execution ends unless the
+	// timeout's SIGTERM ended the shell as it started.
+	ignored, err := os.Stat(filepath.Join(dir, "codex"))
+	if err != nil {
+		t.Fatalf("Codex's pid file: %v, the quota %s in; want it written before the timeout, once Codex ignored SIGTERM",
+			err, quota)
+	}
+	if fresh := quota + timeout + grace; elapsed < timeout+grace || elapsed >= fresh {
+		t.Errorf("the execution ended after %s, the quota %s in and Codex ignoring SIGTERM %s in; want from %s, the "+
+			"timeout and its grace, to before %s, the earliest end of a timeout started afresh", elapsed, quota,
+			ignored.ModTime().Sub(began), timeout+grace, fresh)
 	}
 	if pid := waitForPid(t, filepath.Join(dir, "codex")); alive(pid) {
 		t.Errorf("Codex's process %d outlived the execution", pid)
