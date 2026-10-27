@@ -240,6 +240,15 @@ async function type(input: HTMLInputElement, value: string) {
   });
 }
 
+/** Chooses an option of a select as React sees it. */
+async function choose(select: HTMLSelectElement, value: string) {
+  const setValue = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!;
+  await act(async () => {
+    setValue.call(select, value);
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+
 /** Replaces the YAML editor's text as typing would: a change of the user's, which reaches the editor's onChange. */
 async function typeYaml(text: string) {
   const view = editor();
@@ -343,8 +352,10 @@ describe("task editor save from the YAML tab", () => {
     const fromYaml = panel().textContent;
     close();
 
-    // A fresh editor, whose panel reads Valid until the form's save is answered.
+    // A fresh editor, whose panel reads Valid until the form's save is answered. The task's expression opens as
+    // Weekdays, whose controls cannot write minute 61, so it is typed under Custom.
     await open("edit");
+    await choose(field("Repeats").querySelector("select")!, "custom");
     await type(cronField().querySelector("input")!, BAD_CRON);
     await save();
     expect(sent("PUT", "/tasks/standup")).toEqual([{ document: taskDoc("Standup notes", BAD_CRON), baseRevision: "r1" }]);
