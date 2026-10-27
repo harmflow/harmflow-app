@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -41,9 +42,12 @@ func (a *App) adapterIDs() []string {
 	return ids
 }
 
-// RefreshHarnesses detects every harness again.
+// RefreshHarnesses detects every harness again, and has the harnesses that cache the user's items read them again.
 func (a *App) RefreshHarnesses(ctx context.Context) []ports.HarnessInfo {
 	for _, id := range sortedKeys(a.adapters) {
+		if r, ok := a.adapters[id].(ports.ItemReloader); ok {
+			r.ReloadUserItems()
+		}
 		a.detect(ctx, id)
 	}
 	return a.Harnesses()
@@ -175,11 +179,13 @@ type TaskTypeInfo struct {
 	DefaultPrompt string   `json:"defaultPrompt,omitempty"`
 }
 
-// Catalog is what a task can cite: the agents and skills, built in or the user's, and the task types.
+// Catalog is what a task can cite: the agents and skills, built in or the user's, and the task types; Problems are what
+// a harness could not list.
 type Catalog struct {
-	Agents    []CatalogEntry `json:"agents"`
-	Skills    []CatalogEntry `json:"skills"`
-	TaskTypes []TaskTypeInfo `json:"taskTypes"`
+	Agents    []CatalogEntry   `json:"agents"`
+	Skills    []CatalogEntry   `json:"skills"`
+	TaskTypes []TaskTypeInfo   `json:"taskTypes"`
+	Problems  []CatalogProblem `json:"problems"`
 }
 
 // BuiltinPrefix starts the name of every built-in agent or skill, and of no user's one HarmFlow lists.
@@ -197,27 +203,88 @@ Open or update a draft pull request that reports what was implemented, the tests
 
 func (a *App) builtinDir() catalog.Dir { return catalog.Dir{Root: a.d.Paths.Builtins, Builtin: true} }
 
-// resolveItem finds an agent or skill by name for a harness: built-ins by the hf- prefix, the user's in the harness
-// configuration. where says where it was looked for.
-func (a *App) resolveItem(kind, name, harness string) (ports.ResolvedItem, string, bool) {
+// itemLookup is what looking an agent or skill up for a harness found: the item, or where it was looked for and what
+// the harness reported it could not load on the way, or that the harness's list could not be read.
+type itemLookup struct {
+	item       ports.ResolvedItem
+	found      bool
+	missing    missingItem
+	unreadable error // the harness's list could not be read
+}
+
+// resolveItem finds an agent or skill by name for a harness: built-ins by the hf- prefix, the user's as the harness
+// finds them for workspace.
+func (a *App) resolveItem(ctx context.Context, kind, name, harness, workspace string) itemLookup {
+	m := missingItem{kind: kind, name: name, source: "harness"}
 	if strings.HasPrefix(name, BuiltinPrefix) {
 		it, ok := a.builtinDir().Item(kind, name)
-		return it, "built in", ok
+		m.where, m.source = "built in", "builtin"
+		return itemLookup{item: it, found: ok, missing: m}
 	}
 	ad, ok := a.adapters[harness]
 	if !ok {
-		return ports.ResolvedItem{}, "unknown harness", false
+		m.where = "unknown harness"
+		return itemLookup{missing: m}
 	}
-	it, found := ad.UserItem(kind, name)
-	where := "the " + ad.Name() + " configuration"
-	return it, where, found
+	m.where = "the " + ad.Name() + " configuration"
+	if l, ok := ad.(ports.WorkspaceLister); ok && l.ListsPerWorkspace(kind) {
+		m.where, m.source, m.workspace = ad.Name()+"'s "+kind+" list for "+workspace, kind+"_list", workspace
+	}
+	it, found, problems, err := ad.UserItem(ctx, a.harnessInfo(ctx, harness), kind, name, workspace)
+	if len(problems) > 0 {
+		m.errors = discoveryErrors(problems)
+		m.where += ", which could not load " + m.errors
+		m.source += "_errors"
+	}
+	return itemLookup{item: it, found: found, missing: m, unreadable: err}
+}
+
+// discoveryErrors reads a harness's discovery errors as one line: each file and the harness's message.
+func discoveryErrors(problems []ports.DiscoveryError) string {
+	parts := make([]string, 0, len(problems))
+	for _, p := range problems {
+		parts = append(parts, p.Path+": "+p.Message)
+	}
+	return strings.Join(parts, "; ")
+}
+
+// itemWorkspace is the folder a task's own agents and skills are looked up for: its workspace path, expanded, when it
+// sets one, otherwise the folder HarmFlow runs it in.
+func (a *App) itemWorkspace(doc domain.TaskDocument) string {
+	if w := doc.Spec.Workspace; w != nil && w.Path != "" {
+		if p, err := a.expand(w.Path); err == nil {
+			return p
+		}
+	}
+	return filepath.Join(a.d.Paths.Workspace, doc.Metadata.ID)
+}
+
+// CatalogProblem is what kept a harness from listing the user's items in full: a file it reported it could not load,
+// in its own words, or its list that could not be read.
+type CatalogProblem struct {
+	Harness string `json:"harness"`
+	Kind    string `json:"kind"`
+	Path    string `json:"path,omitempty"`
+	domain.Text
 }
 
 // Catalog lists the built-in agents and skills, offered on every harness, then the user's, each with the harnesses
-// whose configuration holds it, sorted by name; a user's item named with the hf- prefix is left out. A user's agent
-// that more than one harness holds is copied from the first of them by name.
-func (a *App) Catalog() Catalog {
-	c := Catalog{Agents: []CatalogEntry{}, Skills: []CatalogEntry{}}
+// that find it for workspace, sorted by name. A user's item is left out when a task cannot cite it: its name has the
+// hf- prefix, or is not an identifier of the task schema, as a plugin's `<plugin>:<skill>` is not. A user's agent that
+// more than one harness holds is copied from the first of them by name. An empty workspace is HarmFlow's workspace
+// root. What a harness could not list is in Problems.
+func (a *App) Catalog(ctx context.Context, workspace string) Catalog {
+	c := Catalog{Agents: []CatalogEntry{}, Skills: []CatalogEntry{}, Problems: []CatalogProblem{}}
+	if workspace != "" {
+		if p, err := a.expand(workspace); err == nil {
+			workspace = p
+		} else {
+			workspace = ""
+		}
+	}
+	if workspace == "" {
+		workspace = a.d.Paths.Workspace
+	}
 	all := sortedKeys(a.adapters)
 	for _, kind := range []string{"agent", "skill"} {
 		entries := map[string]*CatalogEntry{}
@@ -226,8 +293,18 @@ func (a *App) Catalog() Catalog {
 				Harnesses: all, Copy: a.agentCopy(it)}
 		}
 		for _, id := range all {
-			for _, it := range a.adapters[id].UserItems(kind) {
-				if strings.HasPrefix(it.Name, BuiltinPrefix) {
+			ad := a.adapters[id]
+			items, problems, err := ad.UserItems(ctx, a.harnessInfo(ctx, id), kind, workspace)
+			if err != nil {
+				c.Problems = append(c.Problems, CatalogProblem{Harness: id, Kind: kind,
+					Text: listUnreadable(ad.Name(), workspace, err)})
+			}
+			for _, p := range problems {
+				c.Problems = append(c.Problems, CatalogProblem{Harness: id, Kind: kind, Path: p.Path,
+					Text: domain.Text{Message: p.Message}})
+			}
+			for _, it := range items {
+				if strings.HasPrefix(it.Name, BuiltinPrefix) || !a.d.Validator.ValidIdentifier(it.Name) {
 					continue
 				}
 				e := entries[it.Name]

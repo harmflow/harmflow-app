@@ -233,9 +233,37 @@ type HarnessAdapter interface {
 	Detect(ctx context.Context, manualPath string) HarnessInfo
 	ValidateProfile(info HarnessInfo, model, effort string) error
 	Prepare(info HarnessInfo, req RunRequest) (Invocation, OutputParser, error)
-	// UserItem looks up an agent or skill in the user's harness configuration.
-	UserItem(kind, name string) (ResolvedItem, bool)
-	UserItems(kind string) []ResolvedItem
+	// UserItem looks up an agent or skill in the user's harness configuration, as the harness finds it for workspace, a
+	// folder that is never empty. An error says the harness's list could not be read, which is not the item missing;
+	// the discovery errors are what the harness reported it could not load on the way.
+	UserItem(ctx context.Context, info HarnessInfo, kind, name, workspace string) (ResolvedItem, bool, []DiscoveryError, error)
+	// UserItems lists the agents or skills of the user's harness configuration for workspace, each name once, with the
+	// discovery errors the harness reported; an error says the list could not be read.
+	UserItems(ctx context.Context, info HarnessInfo, kind, workspace string) ([]ResolvedItem, []DiscoveryError, error)
+}
+
+// DiscoveryError is what a harness reported it could not load while it listed the user's items, such as a SKILL.md
+// whose front matter it rejects: the file, and the harness's own message.
+type DiscoveryError struct {
+	Path    string `json:"path"`
+	Message string `json:"message"`
+}
+
+// ItemReloader is a HarnessAdapter whose harness caches the user's items: ReloadUserItems makes its next list read them
+// from disk again, as an explicit refresh asks.
+type ItemReloader interface {
+	ReloadUserItems()
+}
+
+// WorkspaceLister is a HarnessAdapter that finds the user's items of a kind in its harness's own list for a workspace,
+// not in a folder of its configuration: ListsPerWorkspace says which kinds.
+type WorkspaceLister interface {
+	ListsPerWorkspace(kind string) bool
+}
+
+// HarnessCloser is a HarnessAdapter that keeps a process of its harness running between calls; Close ends it.
+type HarnessCloser interface {
+	Close()
 }
 
 // HarnessIdentifier is a HarnessAdapter that tells whether a file is its harness: an executable file whose --version

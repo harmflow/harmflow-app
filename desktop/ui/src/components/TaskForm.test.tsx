@@ -145,6 +145,7 @@ describe("task form agent", () => {
       { name: "tester", kind: "agent", source: "user", harnesses: ["claude-code"], copy: { ...reviewer, prompt: "You test.", hash: "sha256:" + "c".repeat(64) } },
     ],
     skills: [],
+    problems: [],
     taskTypes: [],
   });
   let current: Doc = {};

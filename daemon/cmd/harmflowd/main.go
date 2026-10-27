@@ -140,7 +140,7 @@ func run(homeFlag, builtinsFlag string, port int) error {
 		Tasks: tasks, State: state, Executions: execs, Events: events, Validator: validator,
 		Harnesses: []ports.HarnessAdapter{
 			&claudecode.Adapter{Home: userHome, PathEnv: pathEnv, Env: harnessEnv},
-			&codex.Adapter{Home: userHome, PathEnv: pathEnv, Env: harnessEnv},
+			&codex.Adapter{Home: userHome, PathEnv: pathEnv, Env: harnessEnv, ClientVersion: Version},
 		},
 		Service:    launchd.NewAgent(userHome, filepath.Join(paths.Logs, "daemon.log")),
 		System:     &sysinfo.Reader{},

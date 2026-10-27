@@ -331,6 +331,14 @@ export const ptBR: Resources = {
       '{{harness}} não é um fallback válido: o agente "{{name}}" não foi encontrado para ele ($t(itemSource.{{source}}))',
     fallback_skill_missing:
       '{{harness}} não é um fallback válido: a skill "{{name}}" não foi encontrada para ele ($t(itemSource.{{source}}))',
+    skill_list_unreadable: "não foi possível ler a lista de skills do {{harness}} para {{workspace}}: {{detail}}",
+    fallback_skill_list_unreadable:
+      "{{harness}} não é um fallback válido: não foi possível ler a lista de skills dele para {{workspace}}: {{detail}}",
+    codex_app_server_missing: "o Codex {{version}} não tem app server",
+    codex_app_server_start_failed: "o app server do Codex não pôde iniciar: {{detail}}",
+    codex_app_server_exited: "o app server do Codex encerrou",
+    codex_app_server_timed_out: "o app server do Codex não respondeu a {{method}} em {{seconds}} segundos",
+    codex_app_server_error: "o app server do Codex respondeu a {{method}} com um erro: {{detail}}",
     fallback_repeats_preferred: "este fallback repete o harness e o modelo preferidos",
     path_variable_unterminated: 'referência a variável não terminada em "{{path}}"',
     path_variable_undefined: 'variável de caminho {{names}} não definida em "{{path}}"; defina-a em $t(nav.settings)',
@@ -456,6 +464,8 @@ export const ptBR: Resources = {
   itemSource: {
     builtin: "embutido",
     harness: "na configuração do {{harness}}",
+    skill_list: "na lista de skills do {{harness}} para {{workspace}}",
+    skill_list_errors: "na lista de skills do {{harness}} para {{workspace}}, que não conseguiu carregar {{errors}}",
   },
   errorClass: {
     quota_exhausted: "cota esgotada",

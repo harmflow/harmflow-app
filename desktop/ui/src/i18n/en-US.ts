@@ -326,6 +326,14 @@ export const enUS = {
       '{{harness}} is not a valid fallback: agent "{{name}}" cannot be found for it ($t(itemSource.{{source}}))',
     fallback_skill_missing:
       '{{harness}} is not a valid fallback: skill "{{name}}" cannot be found for it ($t(itemSource.{{source}}))',
+    skill_list_unreadable: "{{harness}}'s skill list for {{workspace}} could not be read: {{detail}}",
+    fallback_skill_list_unreadable:
+      "{{harness}} is not a valid fallback: its skill list for {{workspace}} could not be read: {{detail}}",
+    codex_app_server_missing: "Codex {{version}} has no app server",
+    codex_app_server_start_failed: "Codex's app server could not start: {{detail}}",
+    codex_app_server_exited: "Codex's app server exited",
+    codex_app_server_timed_out: "Codex's app server did not answer {{method}} within {{seconds}} seconds",
+    codex_app_server_error: "Codex's app server answered {{method}} with an error: {{detail}}",
     fallback_repeats_preferred: "this fallback repeats the preferred harness and model",
     path_variable_unterminated: 'unterminated variable reference in "{{path}}"',
     path_variable_undefined: 'undefined path variable {{names}} in "{{path}}"; define it in $t(nav.settings)',
@@ -447,6 +455,8 @@ export const enUS = {
   itemSource: {
     builtin: "built in",
     harness: "the {{harness}} configuration",
+    skill_list: "{{harness}}'s skill list for {{workspace}}",
+    skill_list_errors: "{{harness}}'s skill list for {{workspace}}, which could not load {{errors}}",
   },
   errorClass: {
     quota_exhausted: "quota exhausted",

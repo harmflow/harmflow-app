@@ -314,6 +314,12 @@ func (a *App) Stop(reason domain.Text) {
 			}
 		}
 		a.wg.Wait()
+		// No execution or loop asks a harness anything more: the processes harnesses keep between calls end.
+		for _, id := range sortedKeys(a.adapters) {
+			if c, ok := a.adapters[id].(ports.HarnessCloser); ok {
+				c.Close()
+			}
+		}
 	})
 }
 
