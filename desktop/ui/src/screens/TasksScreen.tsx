@@ -10,6 +10,7 @@ import { Icon } from "../components/Icon";
 import { TaskEditor, type LeaveCheck } from "../components/TaskEditor";
 import { toast } from "../components/toast";
 import { Banner, Button, Chip, EmptyState, IconButton, Modal, Select, StatusChip, TextInput, Toggle, cx } from "../components/ui";
+import { copyTypeAgent } from "../lib/agentCopy";
 import { daemonText } from "../lib/daemonText";
 import { formatRelative } from "../lib/format";
 import { useNow } from "../lib/hooks";
@@ -62,14 +63,17 @@ function NewTask({
   const catalog = useStore((s) => s.catalog);
   const initial = useMemo(
     () =>
-      newTaskDocument(
-        template,
+      copyTypeAgent(
+        newTaskDocument(
+          template,
+          catalog,
+          template === "github"
+            ? t("tasks.templates.github")
+            : template === "script"
+              ? t("tasks.templates.script")
+              : t("tasks.templates.general"),
+        ),
         catalog,
-        template === "github"
-          ? t("tasks.templates.github")
-          : template === "script"
-            ? t("tasks.templates.script")
-            : t("tasks.templates.general"),
       ),
     // A template is built once per editor; later catalog loads must not reset the user's input.
     [template],

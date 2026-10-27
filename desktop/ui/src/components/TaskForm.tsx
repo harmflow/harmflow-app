@@ -338,8 +338,6 @@ function AgentOrigin({ doc, onChange, catalog }: { doc: Doc; onChange: (doc: Doc
   const origin = originOf(doc);
   const selected = origin ? agents.find((a) => a.name === origin.agent) : undefined;
   const changed = changedOrigin(doc, all);
-  const type = getIn<string>(doc, ["spec", "type"]);
-  const defaultPrompt = catalog?.taskTypes.find((x) => x.id === type)?.defaultPrompt;
   const omitted = selected?.copy ? leftOut(doc, selected.copy) : [];
   const prompt = getIn<string>(doc, ["spec", "prompt"]) ?? "";
   const fieldChanges = changed && origin ? copyChanges(doc, origin.agent, changed) : [];
@@ -352,7 +350,7 @@ function AgentOrigin({ doc, onChange, catalog }: { doc: Doc; onChange: (doc: Doc
     const copy = agents.find((a) => a.name === name)?.copy;
     if (!copy) return;
     if (
-      promptEdited(doc, all, defaultPrompt) &&
+      promptEdited(doc, all) &&
       !(await native.confirm(t("tasks.agent.replaceConfirm", { name }), t("tasks.agent.replaceTitle"), t("tasks.agent.replace"), t("common.cancel")))
     ) {
       return;

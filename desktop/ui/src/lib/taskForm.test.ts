@@ -24,8 +24,8 @@ const catalog: Catalog = {
       id: "github",
       parametersKey: "github",
       defaultAgents: [],
-      defaultSkills: ["hf-github-issue-implementer", "hf-github-draft-pr"],
-      defaultPrompt: "Implement the oldest issue labeled agent-ready.",
+      defaultSkills: ["hf-github-issue-queue", "hf-github-draft-pr"],
+      selectedAgent: "hf-github-issue-implementer",
     },
     { id: "general", parametersKey: null, defaultAgents: [], defaultSkills: [] },
   ],
@@ -70,12 +70,14 @@ describe("form ↔ document", () => {
       metadata: { id: "implement-github-issues", name: "Implement GitHub issues" },
       spec: {
         type: "github",
-        prompt: "Implement the oldest issue labeled agent-ready.",
-        skills: ["hf-github-issue-implementer", "hf-github-draft-pr"],
+        prompt: "",
+        skills: ["hf-github-issue-queue", "hf-github-draft-pr"],
         github: { repositories: [{ baseBranch: "main" }] },
       },
     });
+    // The agent the type selects is not a subagent, and is copied in by copyTypeAgent.
     expect(getIn(github, ["spec", "agents"])).toBeUndefined();
+    expect(getIn(github, ["spec", "origin"])).toBeUndefined();
     const general = newTaskDocument("general", catalog, "Triagem de e-mail");
     expect(getIn(general, ["spec", "github"])).toBeUndefined();
     expect(getIn(general, ["metadata", "id"])).toBe("triagem-de-e-mail");

@@ -751,7 +751,8 @@ export interface components {
                 parametersKey: string | null;
                 defaultAgents: string[];
                 defaultSkills: string[];
-                defaultPrompt?: string;
+                /** @description The agent a new task of the type selects: the task starts as that agent's copy, with the agent as its origin. Absent for a type that selects none. */
+                selectedAgent?: string;
             }[];
         };
         /** @description The task document of contracts/schemas/task.schema.json. */

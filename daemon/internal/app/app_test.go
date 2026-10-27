@@ -3429,6 +3429,25 @@ func TestCatalogCarriesTheAgentCopy(t *testing.T) {
 	}
 }
 
+// A new GitHub task selects the built-in implementer, whose copy becomes its prompt; the
+// implementer is neither one of the type's skills nor a subagent, and no other type selects an agent.
+func TestGitHubTypeSelectsTheImplementer(t *testing.T) {
+	e := newEnv(t)
+	for _, tt := range e.app.Catalog(t.Context(), "").TaskTypes {
+		want := ""
+		if tt.ID == domain.TypeGitHub {
+			want = BuiltinIssueAgent
+			if skills := []string{"hf-github-issue-queue", "hf-github-worktree", "hf-github-draft-pr"}; !slices.Equal(tt.DefaultSkills, skills) {
+				t.Errorf("Catalog() type %s: default skills = %v, want %v", tt.ID, tt.DefaultSkills, skills)
+			}
+		}
+		if tt.SelectedAgent != want || len(tt.DefaultAgents) != 0 {
+			t.Errorf("Catalog() type %s: selected agent %q and default agents %v, want %q and none", tt.ID, tt.SelectedAgent,
+				tt.DefaultAgents, want)
+		}
+	}
+}
+
 // A task's origin names the agent its prompt was copied from; it is not a reference, so an agent that no longer exists
 // rejects nothing. Export and import keep the origin as it was.
 func TestOriginSurvivesExportAndImport(t *testing.T) {

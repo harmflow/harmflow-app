@@ -3,7 +3,8 @@
 // it again, the choice outlives a restart, and the daemon's connection state is the topbar's alone. ⌘N opens the
 // template picker as the topbar's New task does (harmflow-app#169). ⌘S saves only in a task editor (harmflow-app#230).
 // Every way out of a task editor with unsaved changes asks first, and each template pick opens an editor of its own
-// (harmflow-app#170). ⌘+, ⌘−, and ⌘0 zoom the dashboard everywhere, and the level outlives a restart (harmflow-app#55).
+// (harmflow-app#170); a new GitHub task starts as the copy of the agent its type selects (harmflow-app#280). ⌘+, ⌘−,
+// and ⌘0 zoom the dashboard everywhere, and the level outlives a restart (harmflow-app#55).
 // A render error never leaves the window empty, and the interface tells the shell when it has painted (harmflow-app#96).
 import { EditorView } from "@codemirror/view";
 import { readFileSync } from "node:fs";
@@ -630,6 +631,37 @@ describe("unsaved changes", () => {
     expect(asked()).toBe(3);
     expect(nameField().value).toBe("Script task");
     expect(unsaved()).toBeNull();
+  });
+
+  it("starts a GitHub task as the copy of the agent its type selects, with nothing unsaved", async () => {
+    const hash = "sha256:" + "c".repeat(64);
+    patchStateForTests({
+      catalog: {
+        agents: [
+          {
+            name: "hf-implementer",
+            kind: "agent",
+            source: "builtin",
+            harnesses: ["claude-code"],
+            copy: { prompt: "You implement issues.", description: "Implements issues", modelHarnesses: [], skills: ["hf-queue"], omittedFields: [], hash },
+          },
+        ],
+        skills: [],
+        problems: [],
+        taskTypes: [
+          { id: "github", parametersKey: "github", defaultAgents: [], defaultSkills: [], selectedAgent: "hf-implementer" },
+        ],
+      },
+    });
+    try {
+      await launch();
+      await newTask("Implement GitHub issues");
+      expect(host!.querySelector<HTMLSelectElement>('select[aria-label="Agent"]')!.value).toBe("hf-implementer");
+      expect(host!.querySelector<HTMLTextAreaElement>(".input--prompt")!.value).toBe("You implement issues.");
+      expect(unsaved()).toBeNull();
+    } finally {
+      patchStateForTests({ catalog: undefined });
+    }
   });
 
   it("asks from the notification bell, the More menu, and a notice or tray target", async () => {

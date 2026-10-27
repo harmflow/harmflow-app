@@ -963,8 +963,8 @@ func TestFormDocumentIsTheFile(t *testing.T) {
 		{"slug":"gpt-5.6-terra","supported_reasoning_levels":[{"effort":"low"},{"effort":"high"}]}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// HarmFlow ships no built-in agent, so the task's agent is the user's, in the test's own configuration of each
-	// harness.
+	// The task's subagent is the user's, in the test's own configuration of each harness, so the form covers a user's
+	// agent beside the built-in skills.
 	claudeConfig := filepath.Join(home, "claude")
 	for _, dir := range []string{claudeConfig, codexHome} {
 		if err := os.MkdirAll(filepath.Join(dir, "agents"), 0o700); err != nil {
@@ -1054,7 +1054,7 @@ func completeTask(id, repo string) map[string]any {
 			},
 			"prompt":      "Implement the oldest issue labelled ready-for-agent.",
 			"agents":      []any{"issue-reviewer"},
-			"skills":      []any{"hf-github-issue-implementer", "hf-github-issue-queue", "hf-github-draft-pr"},
+			"skills":      []any{"hf-github-issue-queue", "hf-github-worktree", "hf-github-draft-pr"},
 			"workspace":   map[string]any{"path": "~/harmflow-work"},
 			"schedule":    map[string]any{"cron": "30 6 * * 1-5", "timezone": "America/Sao_Paulo", "missedRun": map[string]any{"policy": "skip"}},
 			"concurrency": map[string]any{"overlappingRuns": "skip"},
@@ -1072,6 +1072,82 @@ func completeTask(id, repo string) map[string]any {
 			"notifications": map[string]any{"native": map[string]any{"enabled": false,
 				"events": []any{"execution.failed", "test.failed"}}},
 		}}
+}
+
+// A new GitHub task selects the built-in issue implementer of this checkout, an agent and not a skill: it is copied
+// whole, with no field left out, it brings the built-in skills it uses, and a task made of its copy, with the agent as
+// its origin, is valid.
+func TestGitHubTypeSelectsTheBuiltinImplementer(t *testing.T) {
+	home := t.TempDir()
+	d := startDaemon(t, home)
+	catalog := d.call("GET", "/catalog", nil, 200)
+	var selected string
+	for _, x := range catalog["taskTypes"].([]any) {
+		if tt := x.(map[string]any); tt["id"] == "github" {
+			selected, _ = tt["selectedAgent"].(string)
+		}
+	}
+	if selected != "hf-github-issue-implementer" {
+		t.Fatalf("GET /catalog: the GitHub type selects %q, want hf-github-issue-implementer", selected)
+	}
+	copied := d.builtinAgentCopy(selected)
+	builtinSkills := map[string]bool{}
+	for _, x := range catalog["skills"].([]any) {
+		if s := x.(map[string]any); s["source"] == "builtin" {
+			builtinSkills[s["name"].(string)] = true
+		}
+	}
+	if builtinSkills[selected] {
+		t.Errorf("GET /catalog lists %s as a built-in skill too", selected)
+	}
+	skills, _ := copied["skills"].([]any)
+	if want := []any{"hf-github-issue-queue", "hf-github-worktree", "hf-github-draft-pr"}; !reflect.DeepEqual(skills, want) {
+		t.Errorf("the copy of %s brings the skills %v, want %v", selected, skills, want)
+	}
+	for _, s := range skills {
+		if !builtinSkills[s.(string)] {
+			t.Errorf("the copy of %s brings %v, which is no built-in skill", selected, s)
+		}
+	}
+	if omitted, _ := copied["omittedFields"].([]any); len(omitted) != 0 {
+		t.Errorf("the copy of %s leaves out %v, want nothing", selected, omitted)
+	}
+	prompt, _ := copied["prompt"].(string)
+	if !strings.Contains(prompt, "\n## This task\n") {
+		t.Errorf("the copy of %s has no This task section to customize:\n%s", selected, prompt)
+	}
+
+	repo := t.TempDir()
+	d.call("PATCH", "/settings", map[string]any{"allowedFolders": []any{repo}}, 200)
+	doc := map[string]any{"apiVersion": "harmflow/v1alpha1", "kind": "Task",
+		"metadata": map[string]any{"id": "implement", "name": "Implement GitHub issues", "description": copied["description"]},
+		"spec": map[string]any{
+			"type":    "github",
+			"prompt":  prompt,
+			"origin":  map[string]any{"agent": selected, "hash": copied["hash"]},
+			"skills":  skills,
+			"harness": map[string]any{"preferred": map[string]any{"provider": "claude-code"}},
+			"github": map[string]any{
+				"repositories": []any{map[string]any{"name": "harmflow/example", "localPath": repo}},
+			},
+		}}
+	if v := d.call("POST", "/tasks/validate", map[string]any{"document": doc}, 200); v["valid"] != true {
+		t.Errorf("a task made of the copy of %s fails validation: %v", selected, v["errors"])
+	}
+}
+
+// builtinAgentCopy is what selecting the built-in agent copies into a task, as GET /catalog gives it.
+func (d *daemon) builtinAgentCopy(name string) map[string]any {
+	d.t.Helper()
+	for _, x := range d.call("GET", "/catalog", nil, 200)["agents"].([]any) {
+		if a := x.(map[string]any); a["name"] == name && a["source"] == "builtin" {
+			if c, ok := a["copy"].(map[string]any); ok {
+				return c
+			}
+		}
+	}
+	d.t.Fatalf("GET /catalog lists no built-in agent %s with a copy", name)
+	return nil
 }
 
 // One file that breaks a schema rule is refused the same way by the form, the YAML editor's create and save, and

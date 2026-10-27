@@ -411,7 +411,7 @@ spec:
   type: github
   prompt: Implement the oldest eligible issue.
   agents: [issue-reviewer]
-  skills: [hf-github-issue-implementer, hf-github-draft-pr]
+  skills: [hf-github-issue-queue, hf-github-draft-pr]
   workspace:
     path: ~/work
   schedule:

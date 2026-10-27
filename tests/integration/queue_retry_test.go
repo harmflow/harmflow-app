@@ -27,7 +27,7 @@ const (
 
 // An issue whose processing failed before any pull request linked it — here, the daemon killed mid-run — comes back
 // as work to retry in the next firing, and no longer once its retry limit is spent. An issue a pull request links is
-// never selected. The real Claude Code runs the built-in skills of this checkout.
+// never selected. The real Claude Code runs the built-in agent's copy and the built-in skills of this checkout.
 func TestFailedIssueIsRetriedUntilItsLimit(t *testing.T) {
 	claude := realClaude(t)
 	linked, failing, untouched := queueFixtures(t)
@@ -35,7 +35,7 @@ func TestFailedIssueIsRetriedUntilItsLimit(t *testing.T) {
 	home := t.TempDir()
 	d := startDaemon(t, home)
 	useClaude(d, claude, clone)
-	d.call("POST", "/tasks", map[string]any{"yaml": queueTask(clone)}, 201)
+	d.call("POST", "/tasks", map[string]any{"yaml": queueTask(d, clone)}, 201)
 
 	firings := []struct {
 		want   int
@@ -143,7 +143,18 @@ func useClaude(d *daemon, claude, clone string) {
 	d.call("PATCH", "/settings", map[string]any{"allowedFolders": []any{filepath.Dir(clone)}}, 200)
 }
 
-func queueTask(clone string) string {
+// queueTask is a task made of the built-in issue implementer as selecting it copies it, with its eligible issues
+// customized to the fixtures.
+func queueTask(d *daemon, clone string) string {
+	d.t.Helper()
+	copied := d.builtinAgentCopy("hf-github-issue-implementer")
+	const eligible = "- **Eligible issues:** open issues labeled `agent-ready` that are not labeled `blocked`.\n"
+	prompt, _ := copied["prompt"].(string)
+	if !strings.Contains(prompt, eligible) {
+		d.t.Fatalf("the copy of hf-github-issue-implementer has no line %q to customize:\n%s", eligible, prompt)
+	}
+	prompt = strings.Replace(prompt, eligible, fmt.Sprintf(
+		"- **Eligible issues:** open issues of %s labelled %s; every other issue is excluded.\n", queueRepo, queueLabel), 1)
 	return fmt.Sprintf(`apiVersion: harmflow/v1alpha1
 kind: Task
 metadata:
@@ -152,9 +163,11 @@ metadata:
 spec:
   type: github
   prompt: |
-    Use the skill hf-github-issue-implementer.
-    Work only on open issues of %[1]s labelled %[2]s; every other issue is excluded.
-  skills: [hf-github-issue-implementer, hf-github-issue-queue, hf-github-worktree, hf-github-draft-pr]
+    %[4]s
+  origin:
+    agent: hf-github-issue-implementer
+    hash: %[5]s
+  skills: [hf-github-issue-queue, hf-github-worktree, hf-github-draft-pr]
   harness:
     preferred:
       provider: claude-code
@@ -180,7 +193,7 @@ spec:
       maxItemsPerCycle: 1
       resumeStrategy: resume_first
       maxFailedRetries: 1
-`, queueRepo, queueLabel, clone)
+`, queueRepo, queueLabel, clone, strings.ReplaceAll(prompt, "\n", "\n    "), copied["hash"])
 }
 
 func executionDir(d *daemon, id string) string {

@@ -91,9 +91,9 @@ func TestAcquireLockReportsOtherFailures(t *testing.T) {
 	}
 }
 
-// The built-ins directory is the one whose skills/ holds an hf- skill, with no agents/ beside it; any other directory
-// named skills is not it.
-func TestHoldsBuiltinSkill(t *testing.T) {
+// The built-ins directory is the one whose skills/ holds an hf- skill or whose agents/ holds an hf- agent, either one
+// alone; any other directory named skills or agents is not it.
+func TestHoldsBuiltins(t *testing.T) {
 	cases := []struct {
 		name string
 		dirs []string
@@ -101,9 +101,13 @@ func TestHoldsBuiltinSkill(t *testing.T) {
 		want bool
 	}{
 		{"a built-in skill", []string{"skills/hf-github-worktree"}, "", true},
-		{"no skills directory", []string{"agents"}, "", false},
+		{"a built-in agent", []string{"agents"}, "agents/hf-github-issue-implementer.md", true},
+		{"empty skills and agents directories", []string{"skills", "agents"}, "", false},
 		{"only the user's skills", []string{"skills/review-notes", "skills/harmflow-github-worktree"}, "", false},
-		{"a file with the prefix", []string{"skills"}, "skills/hf-notes.md", false},
+		{"only the user's agents", []string{"agents"}, "agents/reviewer.md", false},
+		{"a file with the prefix in skills", []string{"skills"}, "skills/hf-notes.md", false},
+		{"a folder with the prefix in agents", []string{"agents/hf-reviewer"}, "", false},
+		{"an agent that is not Markdown", []string{"agents"}, "agents/hf-reviewer.txt", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -118,8 +122,8 @@ func TestHoldsBuiltinSkill(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if got := holdsBuiltinSkill(dir); got != c.want {
-				t.Errorf("holdsBuiltinSkill(%v) = %v, want %v", c.dirs, got, c.want)
+			if got := holdsBuiltins(dir); got != c.want {
+				t.Errorf("holdsBuiltins(%v, %q) = %v, want %v", c.dirs, c.file, got, c.want)
 			}
 		})
 	}

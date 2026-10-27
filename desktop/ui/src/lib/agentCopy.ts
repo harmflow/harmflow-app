@@ -2,7 +2,7 @@
 // its model the task's when the task's harness accepts it, and its skills join the task's. The task keeps the agent's
 // name and the hash of what was copied as its origin only; the copy never follows the agent, and an agent that no
 // longer exists changes nothing.
-import type { CatalogEntry } from "../api/types";
+import type { Catalog, CatalogEntry } from "../api/types";
 import { getIn, setIn, type Doc, type Path } from "./taskForm";
 
 export interface Origin {
@@ -52,12 +52,22 @@ export function leftOut(doc: Doc, copy: AgentCopy): string[] {
 }
 
 /**
- * Whether replacing the prompt could lose the user's words: a prompt that is neither empty, nor the type's default, nor
- * what the origin agent's copy holds now.
+ * The new task with the agent its type selects copied into it, as choosing that agent does; the task as it is when the
+ * type selects none or the catalog carries no copy of it.
  */
-export function promptEdited(doc: Doc, agents: CatalogEntry[], defaultPrompt?: string): boolean {
+export function copyTypeAgent(doc: Doc, catalog: Catalog | undefined): Doc {
+  const name = catalog?.taskTypes.find((t) => t.id === getIn<string>(doc, ["spec", "type"]))?.selectedAgent;
+  const copy = name ? catalog?.agents.find((a) => a.name === name)?.copy : undefined;
+  return name && copy ? applyAgentCopy(doc, name, copy) : doc;
+}
+
+/**
+ * Whether replacing the prompt could lose the user's words: a prompt that is neither empty nor what the origin agent's
+ * copy holds now.
+ */
+export function promptEdited(doc: Doc, agents: CatalogEntry[]): boolean {
   const prompt = getIn<string>(doc, ["spec", "prompt"]) ?? "";
-  if (!prompt.trim() || prompt === defaultPrompt) return false;
+  if (!prompt.trim()) return false;
   const origin = originOf(doc);
   const copied = origin ? agents.find((a) => a.name === origin.agent)?.copy : undefined;
   return copied?.prompt !== prompt;

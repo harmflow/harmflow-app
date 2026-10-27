@@ -79,8 +79,8 @@
   </tr>
   <tr>
     <td width="33%" valign="top">
-      <code>04</code> <a href="skills"><b>skills/</b></a><br>
-      The built-in skills of the issue implementer, which a new GitHub task selects by default, prefixed
+      <code>04</code> <a href="agents"><b>agents/</b></a> · <a href="skills"><b>skills/</b></a><br>
+      The built-in agent and skills of the issue implementer, which a new GitHub task selects by default, prefixed
       <code>hf-</code>.
     </td>
     <td width="33%" valign="top">
@@ -169,12 +169,15 @@ metadata:
   name: Implement ready issues
 spec:
   type: github                                # works GitHub repositories; or general, or script
-  prompt: |
-    Use the skill hf-github-issue-implementer.
-    Select one open issue labeled ready-for-agent, oldest first.
-    Implement it following the repository's conventions and run its tests.
-    Open a draft pull request that reports what passed and what failed.
-  skills: [hf-github-issue-implementer, hf-github-issue-queue, hf-github-worktree, hf-github-draft-pr]
+  prompt: |                                   # the agent hf-github-issue-implementer, copied and customized
+    You implement GitHub issues for a HarmFlow task, unattended. …
+
+    ## This task
+
+    - **Eligible issues:** open issues labeled `ready-for-agent`.
+    - **Work branch:** `harmflow/<issue-number>-<short-slug>`.
+    - …
+  skills: [hf-github-issue-queue, hf-github-worktree, hf-github-draft-pr]
   schedule:
     cron: "0 2 * * 1-5"                       # weeknights at 02:00
     missedRun: {policy: run_on_resume}        # asleep at 02:00? run on wake
