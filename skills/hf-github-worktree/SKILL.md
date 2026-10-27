@@ -12,18 +12,37 @@ execution's workspace (`paths.workspace`).
 
 ## 1. Check the base branch's protection
 
+A branch is protected by classic branch protection, by the rules of a ruleset, or by both, and either one alone may
+require the review. Read both; each call prints `review`, `pull_request`, or `none`:
+
 ```bash
-gh api repos/OWNER/REPO/branches/BASE/protection --silent
+gh api repos/OWNER/REPO/branches/BASE/protection --jq 'if .required_pull_request_reviews == null then "none" elif .required_pull_request_reviews.required_approving_review_count >= 1 then "review" else "pull_request" end'
+gh api "repos/OWNER/REPO/rules/branches/BASE?per_page=100" --jq '[.[] | select(.type == "pull_request") | .parameters.required_approving_review_count] | if length == 0 then "none" elif max >= 1 then "review" else "pull_request" end'
 ```
 
-If this fails with 404, the base branch is not protected: "never merge" then depends only on this session's
-discipline. Continue, and append to `progress.jsonl`:
+- `review`: a merge needs a pull request and at least one approving review.
+- `pull_request`: a merge needs a pull request, but no approving review.
+- `none`: no pull request is required. A call that fails answers `none`, whatever it printed: a 404 from the first is a
+  branch with no classic protection, never an unprotected branch by itself, and a 403 is a plan or a token that cannot
+  read the protection.
+
+The stronger of the two answers decides — `review`, then `pull_request`, then `none` — and gives the message:
+
+| Answer | Message |
+|---|---|
+| `review` | None: the branch is protected against merging without review, and nothing is reported |
+| `pull_request` | `BASE requires a pull request but no approving review; merges without review are possible` |
+| `none` | `BASE has no branch protection; merges without review are possible` |
+
+With a message, "never merge" depends only on this session's discipline. Continue, and append to `progress.jsonl` the
+message as the table writes it, with only BASE replaced by the branch's name:
 
 ```json
-{"type":"repository.unprotected","repository":"OWNER/REPO","message":"BASE has no branch protection; merges without review are possible"}
+{"type":"repository.unprotected","repository":"OWNER/REPO","message":"<message>"}
 ```
 
-Also add it to the report's `warnings` with the code `repository_unprotected`.
+Also add it to the report's `warnings` with the code `repository_unprotected` and the same message. Never word the
+message yourself, nor add to it what the calls printed.
 
 ## 2. Create or reuse the worktree
 
