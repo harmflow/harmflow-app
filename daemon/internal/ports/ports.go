@@ -156,6 +156,9 @@ type RunRequest struct {
 	Permissions    domain.Permissions
 	ExecutionDir   string
 	Env            []string
+	// PolicyCheck marks a request that validation makes only to learn the restrictions: no attempt starts, and WorkDir
+	// stands in for a working directory, so nothing in it describes the task.
+	PolicyCheck bool
 }
 
 // Restriction is one declared restriction and whether the harness enforces it. Text says how; the user sees

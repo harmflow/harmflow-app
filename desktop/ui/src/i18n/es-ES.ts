@@ -362,6 +362,8 @@ export const esES: Resources = {
       "Claude Code no limita los comandos de shell al espacio de trabajo; solo limita sus herramientas de edición de archivos",
     restriction_claude_shell_network:
       "Claude Code no bloquea el acceso a la red desde los comandos de shell; solo quita sus herramientas web",
+    restriction_claude_allow_rules:
+      "Claude Code suma las reglas de permiso de su $t(claudeSettings.{{sources}}) a la lista de herramientas de la tarea, y permiten más que la lista o no se pudieron leer; la configuración administrada no se comprueba",
     restriction_codex_tool_lists:
       "Codex no tiene listas de herramientas permitidas o denegadas; las listas personalizadas no se aplican",
     harness_version_untested: "{{harness}} {{version}} es más reciente que las versiones con las que se probó HarmFlow",
@@ -513,6 +515,15 @@ export const esES: Resources = {
     harness: "en la configuración de {{harness}}",
     skill_list: "en la lista de skills de {{harness}} para {{workspace}}",
     skill_list_errors: "en la lista de skills de {{harness}} para {{workspace}}, que no pudo cargar {{errors}}",
+  },
+  claudeSettings: {
+    user: "configuración de usuario",
+    project: "configuración de proyecto",
+    local: "configuración local",
+    user_project: "configuración de usuario y de proyecto",
+    user_local: "configuración de usuario y local",
+    project_local: "configuración de proyecto y local",
+    user_project_local: "configuración de usuario, de proyecto y local",
   },
   errorClass: {
     quota_exhausted: "cuota agotada",

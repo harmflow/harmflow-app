@@ -361,6 +361,8 @@ export const ptBR: Resources = {
       "o Claude Code não confina os comandos de shell ao workspace; só as ferramentas de edição de arquivos são confinadas",
     restriction_claude_shell_network:
       "o Claude Code não bloqueia o acesso à rede pelos comandos de shell; só as ferramentas web são removidas",
+    restriction_claude_allow_rules:
+      "o Claude Code soma as regras de permissão das suas $t(claudeSettings.{{sources}}) à lista de ferramentas da tarefa, e elas permitem mais que a lista ou não puderam ser lidas; as configurações gerenciadas não são verificadas",
     restriction_codex_tool_lists:
       "o Codex não tem lista de ferramentas permitidas ou negadas; as listas personalizadas não são aplicadas",
     harness_version_untested: "{{harness}} {{version}} é mais novo que as versões com que o HarmFlow foi testado",
@@ -519,6 +521,15 @@ export const ptBR: Resources = {
     harness: "na configuração do {{harness}}",
     skill_list: "na lista de skills do {{harness}} para {{workspace}}",
     skill_list_errors: "na lista de skills do {{harness}} para {{workspace}}, que não conseguiu carregar {{errors}}",
+  },
+  claudeSettings: {
+    user: "configurações de usuário",
+    project: "configurações de projeto",
+    local: "configurações locais",
+    user_project: "configurações de usuário e de projeto",
+    user_local: "configurações de usuário e locais",
+    project_local: "configurações de projeto e locais",
+    user_project_local: "configurações de usuário, de projeto e locais",
   },
   errorClass: {
     quota_exhausted: "cota esgotada",

@@ -206,6 +206,173 @@ func TestPrepareTranslatesPermissions(t *testing.T) {
 	}
 }
 
+// harmflow-app#211: Claude Code merges the allow rules of every settings source into a custom profile's tool list. A
+// rule the task's allowed and denied lists do not carry, in a settings file HarmFlow can read, leaves the list not
+// enforced, and the warning names the source; validation reads only the user's settings. A rule counts as carried only
+// when it is identical to an entry, and a file that cannot be read or parsed widens the list.
+func TestPrepareReportsAllowRulesThatWidenTheToolList(t *testing.T) {
+	const bashAll = `{"permissions":{"allow":["Bash(*)"]}}`
+	const python = `{"permissions":{"allow":["Bash(python3:*)"]}}`
+	const dir = "<dir>" // a folder where the file would be: it exists, but cannot be read
+	allowed := []string{"Read", "Bash(jq:*)"}
+	cases := []struct {
+		name                 string
+		user, project, local string // a settings file's content; "" for no file
+		allowed, denied      []string
+		networkDenied        bool
+		policyCheck          bool
+		want                 string // the sources param of a list not enforced; "" for an enforced list
+	}{
+		{name: "a user rule at validation", user: bashAll, allowed: allowed, policyCheck: true, want: "user"},
+		{name: "a user rule at an execution", user: bashAll, allowed: allowed, want: "user"},
+		{name: "a project rule at an execution", project: python, allowed: allowed, want: "project"},
+		{name: "a local rule at an execution", local: python, allowed: allowed, want: "local"},
+		{name: "a project rule at validation", project: bashAll, local: bashAll, allowed: allowed, policyCheck: true},
+		{name: "user and local rules", user: bashAll, local: python, allowed: allowed, want: "user_local"},
+		{name: "rules in every source", user: bashAll, project: python, local: python, allowed: allowed,
+			want: "user_project_local"},
+		{name: "rules identical to allowed entries", user: `{"permissions":{"allow":["Bash(jq:*)","Read"]}}`,
+			project: `{"permissions":{"allow":["Read"]}}`, allowed: allowed},
+		{name: "a rule identical to a denied entry", user: `{"permissions":{"allow":["Bash(rm:*)"]}}`, allowed: allowed,
+			denied: []string{"Bash(rm:*)"}},
+		{name: "a web tool the denied network removes", local: `{"permissions":{"allow":["WebFetch"]}}`, allowed: allowed,
+			networkDenied: true},
+		{name: "a web tool the network allows", local: `{"permissions":{"allow":["WebFetch"]}}`, allowed: allowed,
+			want: "local"},
+		{name: "a reading tool of the default list", user: `{"permissions":{"allow":["Grep"]}}`},
+		{name: "a rule a pattern of the list would cover", user: `{"permissions":{"allow":["Bash(git status:*)"]}}`,
+			allowed: []string{"Bash(git:*)"}, want: "user"},
+		{name: "no settings files", allowed: allowed},
+		{name: "settings without allow rules", user: `{"model":"opus","permissions":{"deny":["Bash(*)"]}}`,
+			project: `{}`, allowed: allowed},
+		{name: "user settings that are not JSON", user: `{"permissions":`, allowed: allowed, want: "user"},
+		{name: "local settings that are not JSON", local: `not json`, allowed: allowed, want: "local"},
+		{name: "allow rules that are not a list", user: `{"permissions":{"allow":"Bash(*)"}}`, allowed: allowed,
+			want: "user"},
+		{name: "project settings that cannot be read", project: dir, allowed: allowed, want: "project"},
+	}
+	where := map[string]string{"user": "user settings", "project": "project settings", "local": "local settings",
+		"user_local": "user and local settings", "user_project_local": "user, project, and local settings"}
+	info := ports.HarnessInfo{Path: "/bin/claude", Features: map[string]bool{}}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			config, work := t.TempDir(), t.TempDir()
+			t.Setenv("CLAUDE_CONFIG_DIR", config)
+			writeSettings(t, filepath.Join(config, "settings.json"), c.user)
+			writeSettings(t, filepath.Join(work, ".claude", "settings.json"), c.project)
+			writeSettings(t, filepath.Join(work, ".claude", "settings.local.json"), c.local)
+			perm := *domain.TaskDocument{}.Effective().Spec.Permissions
+			perm.Profile = domain.ProfileCustom
+			perm.Custom.AllowedTools, perm.Custom.DeniedTools = c.allowed, c.denied
+			if c.networkDenied {
+				perm.Network = domain.NetworkDeny
+			}
+			a := &Adapter{Home: t.TempDir()}
+			inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: work, Permissions: perm, ExecutionDir: t.TempDir(),
+				PolicyCheck: c.policyCheck})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r, ok := restriction(inv.Restrictions, "tool_allowlist")
+			switch {
+			case !ok:
+				t.Fatalf("Prepare restrictions = %+v, want one named tool_allowlist", inv.Restrictions)
+			case c.want == "":
+				if !r.Enforced || strings.Contains(r.Text.Message, "allows only") {
+					t.Errorf("tool_allowlist = %+v, want enforced, with a text that does not claim only the listed tools run", r)
+				}
+			case r.Enforced || r.Text.Key != "restriction_claude_allow_rules" || r.Text.Params["sources"] != c.want:
+				t.Errorf("tool_allowlist = %+v, want not enforced, restriction_claude_allow_rules naming %s", r, c.want)
+			case !strings.Contains(r.Text.Message, "its "+where[c.want]+" ") ||
+				!strings.Contains(r.Text.Message, "managed settings are not checked"):
+				t.Errorf("tool_allowlist text = %q, want it to name the %s and say managed settings are not checked",
+					r.Text.Message, where[c.want])
+			}
+		})
+	}
+}
+
+// The user's settings are read from CLAUDE_CONFIG_DIR when it is set, as the user's agents and skills are, and from
+// .claude in the home folder otherwise.
+func TestPrepareReadsTheUserSettingsOfTheConfigurationDirectory(t *testing.T) {
+	a := &Adapter{Home: t.TempDir()}
+	writeSettings(t, filepath.Join(a.Home, ".claude", "settings.json"), `{"permissions":{"allow":["Bash(*)"]}}`)
+	info := ports.HarnessInfo{Path: "/bin/claude", Features: map[string]bool{}}
+	perm := *domain.TaskDocument{}.Effective().Spec.Permissions
+	perm.Profile = domain.ProfileCustom
+	perm.Custom.AllowedTools = []string{"Read"}
+	for _, c := range []struct {
+		name, configDir string
+		enforced        bool
+	}{
+		{"home", "", false},
+		{"CLAUDE_CONFIG_DIR", t.TempDir(), true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("CLAUDE_CONFIG_DIR", c.configDir)
+			inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: t.TempDir(), Permissions: perm, PolicyCheck: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r, _ := restriction(inv.Restrictions, "tool_allowlist"); r.Enforced != c.enforced {
+				t.Errorf("tool_allowlist = %+v, want Enforced %t", r, c.enforced)
+			}
+		})
+	}
+}
+
+// Only the custom profile hands Claude Code a list for the user's rules to widen: read_only and workspace_write read
+// no settings file and report what they did before.
+func TestPrepareChecksAllowRulesOnlyForTheCustomProfile(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	writeSettings(t, filepath.Join(config, "settings.json"), `{"permissions":{"allow":["Bash(*)"]}}`)
+	a := &Adapter{Home: t.TempDir()}
+	info := ports.HarnessInfo{Path: "/bin/claude", Features: map[string]bool{}}
+	for _, profile := range []string{domain.ProfileReadOnly, domain.ProfileWorkspaceWrite} {
+		perm := *domain.TaskDocument{}.Effective().Spec.Permissions
+		perm.Profile = profile
+		inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: t.TempDir(), Permissions: perm})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range inv.Restrictions {
+			if r.Name == "tool_allowlist" || r.Text.Key == "restriction_claude_allow_rules" {
+				t.Errorf("%s: Prepare restrictions = %+v, want none about the tool list", profile, inv.Restrictions)
+			}
+		}
+	}
+}
+
+func restriction(rs []ports.Restriction, name string) (ports.Restriction, bool) {
+	for _, r := range rs {
+		if r.Name == name {
+			return r, true
+		}
+	}
+	return ports.Restriction{}, false
+}
+
+// writeSettings writes a settings file, or a folder in its place for "<dir>"; empty content writes nothing.
+func writeSettings(t *testing.T, path, content string) {
+	t.Helper()
+	if content == "" {
+		return
+	}
+	if content == "<dir>" {
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // Built-in skills are delivered as a plugin of the execution; built-in agents are defined for the session, as
 // subagents: no agent is the session's main one, so the task's prompt runs as Claude Code's default agent.
 func TestPrepareDeliversBuiltins(t *testing.T) {

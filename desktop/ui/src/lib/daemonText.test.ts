@@ -16,7 +16,7 @@ describe("daemonText", () => {
     expect(daemonText(text)).toBe('a skill "lint" não foi encontrada para Codex (na configuração do Codex)');
   });
 
-  it("translates what a text names: a status, a cron field, a screen", () => {
+  it("translates what a text names: a status, a cron field, a screen, the settings that widen a tool list", () => {
     expect(daemonText({ message: "", messageKey: "execution_ended", params: { status: "cancelled" } })).toBe(
       "a execução já terminou (Cancelada)",
     );
@@ -25,6 +25,12 @@ describe("daemonText", () => {
     ).toBe('campo de dia do mês inválido "32"');
     expect(daemonText({ message: "", messageKey: "path_variable_undefined", params: { names: "ROOT", path: "${ROOT}/x" } })).toBe(
       'variável de caminho ROOT não definida em "${ROOT}/x"; defina-a em Configurações',
+    );
+    expect(
+      daemonText({ message: "", messageKey: "restriction_claude_allow_rules", params: { where: "user and local settings", sources: "user_local" } }),
+    ).toBe(
+      "o Claude Code soma as regras de permissão das suas configurações de usuário e locais à lista de ferramentas da tarefa, " +
+        "e elas permitem mais que a lista ou não puderam ser lidas; as configurações gerenciadas não são verificadas",
     );
   });
 
