@@ -11,12 +11,28 @@ const (
 )
 
 // Task types. The behavior of each lives in its prompt, agents, and skills, except a script task's, which is its
-// program: it runs instead of a harness session.
+// program: it runs instead of a harness session. A GitHub task works GitHub repositories, whatever it does in them.
 const (
-	TypeGitHubIssueImplementation = "github-issue-implementation"
-	TypeGeneral                   = "general"
-	TypeScriptTask                = "script"
+	TypeGitHub     = "github"
+	TypeGeneral    = "general"
+	TypeScriptTask = "script"
 )
+
+// LegacyTypeGitHub and LegacyGitHubKey are the GitHub type's name and its parameters block's from before the type
+// served any task that works GitHub repositories. A task file or an execution record written then may still carry
+// them, and they are read as TypeGitHub and its block.
+const (
+	LegacyTypeGitHub = "github-issue-implementation"
+	LegacyGitHubKey  = "githubIssueImplementation"
+)
+
+// CanonicalType returns a task type's current name: TypeGitHub for LegacyTypeGitHub, and any other type as it is.
+func CanonicalType(t string) string {
+	if t == LegacyTypeGitHub {
+		return TypeGitHub
+	}
+	return t
+}
 
 // Operating systems a script task may declare.
 const (
@@ -83,21 +99,21 @@ type TaskMetadata struct {
 
 // TaskSpec is a task's spec block. A script task has no prompt and no harness, so both are left out of its file.
 type TaskSpec struct {
-	Enabled                   *bool                      `yaml:"enabled,omitempty" json:"enabled,omitempty"`
-	Type                      string                     `yaml:"type" json:"type"`
-	Prompt                    string                     `yaml:"prompt,omitempty" json:"prompt,omitempty"`
-	Origin                    *Origin                    `yaml:"origin,omitempty" json:"origin,omitempty"`
-	Agents                    []string                   `yaml:"agents,omitempty" json:"agents,omitempty"`
-	Skills                    []string                   `yaml:"skills,omitempty" json:"skills,omitempty"`
-	Workspace                 *Workspace                 `yaml:"workspace,omitempty" json:"workspace,omitempty"`
-	Schedule                  *Schedule                  `yaml:"schedule,omitempty" json:"schedule,omitempty"`
-	Concurrency               *Concurrency               `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
-	Harness                   HarnessSelection           `yaml:"harness,omitempty" json:"harness,omitzero"`
-	Permissions               *Permissions               `yaml:"permissions,omitempty" json:"permissions,omitempty"`
-	Execution                 *ExecutionLimits           `yaml:"execution,omitempty" json:"execution,omitempty"`
-	Notifications             *Notifications             `yaml:"notifications,omitempty" json:"notifications,omitempty"`
-	GitHubIssueImplementation *GitHubIssueImplementation `yaml:"githubIssueImplementation,omitempty" json:"githubIssueImplementation,omitempty"`
-	Script                    *ScriptSpec                `yaml:"script,omitempty" json:"script,omitempty"`
+	Enabled       *bool            `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	Type          string           `yaml:"type" json:"type"`
+	Prompt        string           `yaml:"prompt,omitempty" json:"prompt,omitempty"`
+	Origin        *Origin          `yaml:"origin,omitempty" json:"origin,omitempty"`
+	Agents        []string         `yaml:"agents,omitempty" json:"agents,omitempty"`
+	Skills        []string         `yaml:"skills,omitempty" json:"skills,omitempty"`
+	Workspace     *Workspace       `yaml:"workspace,omitempty" json:"workspace,omitempty"`
+	Schedule      *Schedule        `yaml:"schedule,omitempty" json:"schedule,omitempty"`
+	Concurrency   *Concurrency     `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
+	Harness       HarnessSelection `yaml:"harness,omitempty" json:"harness,omitzero"`
+	Permissions   *Permissions     `yaml:"permissions,omitempty" json:"permissions,omitempty"`
+	Execution     *ExecutionLimits `yaml:"execution,omitempty" json:"execution,omitempty"`
+	Notifications *Notifications   `yaml:"notifications,omitempty" json:"notifications,omitempty"`
+	GitHub        *GitHubSpec      `yaml:"github,omitempty" json:"github,omitempty"`
+	Script        *ScriptSpec      `yaml:"script,omitempty" json:"script,omitempty"`
 }
 
 // Origin is the agent a task's prompt was copied from and a hash of what was copied. The task never runs that agent:
@@ -232,17 +248,18 @@ type RepositoryTarget struct {
 	BaseBranch string `yaml:"baseBranch,omitempty" json:"baseBranch,omitempty"`
 }
 
-// GitHubIssueImplementation is the parameters of the github-issue-implementation type: its repositories, its issue
-// queue, and its delivery. Which issues are eligible is written in the prompt.
-type GitHubIssueImplementation struct {
+// GitHubSpec is the parameters of the github type: the repositories a task works and its per-cycle limits, its queue
+// and its delivery. What the task does in them — which issues or pull requests it works, and how — is written in its
+// prompt, agents, and skills.
+type GitHubSpec struct {
 	Repositories []RepositoryTarget `yaml:"repositories" json:"repositories"`
 	Queue        *IssueQueue        `yaml:"queue,omitempty" json:"queue,omitempty"`
 	Delivery     *Delivery          `yaml:"delivery,omitempty" json:"delivery,omitempty"`
 }
 
-// IssueQueue is how a github-issue-implementation task picks its work items each time it fires: the order issues are
-// read in, how many are discovered and worked, whether work to resume comes before new issues, and how often one item
-// is resumed or retried before it needs a human.
+// IssueQueue is how a GitHub task picks its work items each time it fires: the order items are read in, how many are
+// discovered and worked, whether work to resume comes before new items, and how often one item is resumed or retried
+// before it needs a human.
 type IssueQueue struct {
 	Ordering              string `yaml:"ordering,omitempty" json:"ordering,omitempty"`
 	MaxDiscoveredPerCycle *int   `yaml:"maxDiscoveredPerCycle,omitempty" json:"maxDiscoveredPerCycle,omitempty"`
@@ -378,7 +395,7 @@ func (d TaskDocument) Effective() TaskDocument {
 	if s.Notifications.Native.Events == nil {
 		s.Notifications.Native.Events = append([]string(nil), DefaultNotifiedEvents...)
 	}
-	if g := s.GitHubIssueImplementation; g != nil {
+	if g := s.GitHub; g != nil {
 		for i := range g.Repositories {
 			if g.Repositories[i].BaseBranch == "" {
 				g.Repositories[i].BaseBranch = DefaultBaseBranch
@@ -475,17 +492,17 @@ func (d TaskDocument) ScheduleRule() string {
 
 // Repositories lists the repository targets of a type that takes them.
 func (d TaskDocument) Repositories() []RepositoryTarget {
-	if d.Spec.GitHubIssueImplementation == nil {
+	if d.Spec.GitHub == nil {
 		return nil
 	}
-	return d.Spec.GitHubIssueImplementation.Repositories
+	return d.Spec.GitHub.Repositories
 }
 
 // TypeParameters returns the block of the task's type, or nil for a type with none.
 func (d TaskDocument) TypeParameters() any {
 	switch d.Spec.Type {
-	case TypeGitHubIssueImplementation:
-		return d.Effective().Spec.GitHubIssueImplementation
+	case TypeGitHub:
+		return d.Effective().Spec.GitHub
 	case TypeScriptTask:
 		return d.Effective().Spec.Script
 	default:
@@ -593,8 +610,8 @@ func (d TaskDocument) clone() TaskDocument {
 		}
 		s.Notifications = &nc
 	}
-	if g := s.GitHubIssueImplementation; g != nil {
-		gc := GitHubIssueImplementation{Repositories: cloneSlice(g.Repositories)}
+	if g := s.GitHub; g != nil {
+		gc := GitHubSpec{Repositories: cloneSlice(g.Repositories)}
 		if g.Queue != nil {
 			q := *g.Queue
 			q.MaxDiscoveredPerCycle = clonePtr(g.Queue.MaxDiscoveredPerCycle)
@@ -606,7 +623,7 @@ func (d TaskDocument) clone() TaskDocument {
 		if g.Delivery != nil {
 			gc.Delivery = &Delivery{TestRepairAttempts: clonePtr(g.Delivery.TestRepairAttempts)}
 		}
-		s.GitHubIssueImplementation = &gc
+		s.GitHub = &gc
 	}
 	if sc := s.Script; sc != nil {
 		cc := ScriptSpec{Command: cloneSlice(sc.Command), WorkingDirectory: sc.WorkingDirectory, Systems: cloneSlice(sc.Systems)}

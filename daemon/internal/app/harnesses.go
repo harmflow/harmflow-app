@@ -191,8 +191,8 @@ type Catalog struct {
 // BuiltinPrefix starts the name of every built-in agent or skill, and of no user's one HarmFlow lists.
 const BuiltinPrefix = "hf-"
 
-// BuiltinIssueSkills are the built-in skills of the GitHub issue implementation type, the MVP's only built-in set: the
-// first carries out the task and uses the others.
+// BuiltinIssueSkills are the built-in skills of the issue implementer, the MVP's only built-in set, which a new GitHub
+// task selects by default and need not keep: the first carries out the task and uses the others.
 var BuiltinIssueSkills = []string{"hf-github-issue-implementer", "hf-github-issue-queue", "hf-github-worktree", "hf-github-draft-pr"}
 
 const defaultIssuePrompt = `Use the skill hf-github-issue-implementer.
@@ -324,9 +324,9 @@ func (a *App) Catalog(ctx context.Context, workspace string) Catalog {
 			}
 		}
 	}
-	key, scriptKey := "githubIssueImplementation", "script"
+	key, scriptKey := "github", "script"
 	c.TaskTypes = []TaskTypeInfo{
-		{ID: domain.TypeGitHubIssueImplementation, ParametersKey: &key, DefaultAgents: []string{},
+		{ID: domain.TypeGitHub, ParametersKey: &key, DefaultAgents: []string{},
 			DefaultSkills: append([]string{}, BuiltinIssueSkills...), DefaultPrompt: defaultIssuePrompt},
 		{ID: domain.TypeGeneral, ParametersKey: nil, DefaultAgents: []string{}, DefaultSkills: []string{}},
 		{ID: domain.TypeScriptTask, ParametersKey: &scriptKey, DefaultAgents: []string{}, DefaultSkills: []string{}},

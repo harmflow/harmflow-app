@@ -53,7 +53,7 @@ func TestPathsInRequestsAreChecked(t *testing.T) {
 		// Not created: it resolves through the home folder, which exists, into ~/Library.
 		{"a local path whose .. leads into ~/Library", "POST", "/tasks", map[string]any{"yaml": issueTask("dotdot",
 			"~/harmflow-not-created/../Library/Application Support")}, "path_forbidden_place",
-			"/spec/githubIssueImplementation/repositories/0/localPath"},
+			"/spec/github/repositories/0/localPath"},
 		{"a relative program", "POST", "/tasks", map[string]any{"yaml": scriptTask("relative",
 			"  script:\n    command: [./run.sh]\n")}, "script_program_relative", "/spec/script/command/0"},
 		{"a variable a saved task uses set to /", "PATCH", "/settings",
@@ -90,12 +90,12 @@ metadata:
   id: ` + id + `
   name: Task ` + id + `
 spec:
-  type: github-issue-implementation
+  type: github
   prompt: Implement the oldest eligible issue.
   harness:
     preferred:
       provider: claude-code
-  githubIssueImplementation:
+  github:
     repositories:
       - name: octo/repo
         localPath: "` + localPath + `"

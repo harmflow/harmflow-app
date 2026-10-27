@@ -24,7 +24,7 @@ metadata:
   id: implement-issues
   name: Implement issues
 spec:
-  type: github-issue-implementation
+  type: github
   prompt: Implement the oldest ready issue.
   schedule:
     cron: "0 9 * * 1-5"
@@ -34,7 +34,7 @@ spec:
     fallback:
       candidates:
         - provider: codex
-  githubIssueImplementation:
+  github:
     repositories:
       - name: octo/app
         localPath: /src/app
@@ -49,7 +49,7 @@ func TestSchemaDefaultsAreTheDaemons(t *testing.T) {
 	for _, p := range []string{
 		"/spec/enabled", "/spec/permissions/profile", "/spec/permissions/restrictToWorkspace", "/spec/permissions/network",
 		"/spec/concurrency/overlappingRuns", "/spec/schedule/missedRun/policy", "/spec/harness/fallback/on",
-		"/spec/notifications/native/events", "/spec/githubIssueImplementation/repositories/*/baseBranch",
+		"/spec/notifications/native/events", "/spec/github/repositories/*/baseBranch",
 		"/spec/harness/preferred/model", "/spec/harness/preferred/effort", "/spec/harness/fallback/candidates/*/model",
 		"/spec/harness/fallback/candidates/*/effort",
 	} {

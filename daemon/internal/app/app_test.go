@@ -1233,8 +1233,8 @@ func TestFailoverKeepsThePermissions(t *testing.T) {
 	repo := mkdir(t, filepath.Join(e.app.Paths().UserHome, "repo"))
 	doc := strings.Replace(taskYAML("confined", codexFallback+"  workspace:\n    path: "+work+"\n"+
 		"  permissions:\n    profile: workspace_write\n    restrictToWorkspace: true\n"+
-		fmt.Sprintf("  githubIssueImplementation:\n    repositories:\n      - name: o/r\n        localPath: %q\n", repo)),
-		"type: general", "type: github-issue-implementation", 1)
+		fmt.Sprintf("  github:\n    repositories:\n      - name: o/r\n        localPath: %q\n", repo)),
+		"type: general", "type: github", 1)
 	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: doc}); err != nil {
 		t.Fatalf("CreateTask(confined): %v", err)
 	}
@@ -3002,8 +3002,8 @@ func TestUpdateKeepsTheType(t *testing.T) {
 	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: issueTask("hub", repo, "")}); err != nil {
 		t.Fatal(err)
 	}
-	if cp, err := e.app.DuplicateTask(t.Context(), "hub"); err != nil || cp.Type != domain.TypeGitHubIssueImplementation {
-		t.Errorf("DuplicateTask(hub) = %q, %v; want a %s task", cp.Type, err, domain.TypeGitHubIssueImplementation)
+	if cp, err := e.app.DuplicateTask(t.Context(), "hub"); err != nil || cp.Type != domain.TypeGitHub {
+		t.Errorf("DuplicateTask(hub) = %q, %v; want a %s task", cp.Type, err, domain.TypeGitHub)
 	}
 	view, _ := e.app.GetTask("hub")
 	general := taskYAML("hub", "")
@@ -3059,6 +3059,139 @@ func TestUpdateKeepsTheType(t *testing.T) {
 	after, err := e.app.UpdateTask(t.Context(), "hub", TaskInput{YAML: kept, BaseRevision: edited.Revision})
 	if err != nil || after.Type != domain.TypeGeneral || after.YAML != kept {
 		t.Errorf("UpdateTask(hub keeping its type) = %s task, YAML %q, %v; want the edit saved", after.Type, after.YAML, err)
+	}
+}
+
+// legacyIssueTask is issueTask under the GitHub type's legacy names, with a comment a save keeps.
+func legacyIssueTask(id, localPath string) string {
+	return strings.NewReplacer(
+		"  type: github\n", "  # Written before the type was renamed.\n  type: "+domain.LegacyTypeGitHub+"\n",
+		"  github:\n", "  "+domain.LegacyGitHubKey+":\n",
+	).Replace(issueTask(id, localPath, ""))
+}
+
+// hasLegacyNames reports whether a task's text names the GitHub type or its block by a legacy name.
+func hasLegacyNames(text string) bool {
+	return strings.Contains(text, domain.LegacyTypeGitHub) || strings.Contains(text, domain.LegacyGitHubKey)
+}
+
+// firstRepositoryName is the name of the first repository of a decoded github block, nil when it has none.
+func firstRepositoryName(block any) any {
+	repos, _ := valueAt(block, "repositories").([]any)
+	if len(repos) == 0 {
+		return nil
+	}
+	return valueAt(repos[0], "name")
+}
+
+// A task file that still names the GitHub type and its block by their legacy names loads as a github task, and nothing
+// rewrites it until it is saved. Then the form and the YAML editor alike write the new names, the YAML editor keeping
+// the file's comments, and the save is no change of the type. A form that still sends the legacy names is read the
+// same way.
+func TestLegacyGitHubNamesLoadAndSaveAsNew(t *testing.T) {
+	e := newEnv(t)
+	repo := mkdir(t, filepath.Join(e.app.Paths().UserHome, "repo"))
+	written := map[string]string{}
+	for _, id := range []string{"from-form", "from-editor"} {
+		written[id] = legacyIssueTask(id, repo)
+		path := filepath.Join(e.app.Paths().Tasks, id+".yaml")
+		if err := os.WriteFile(path, []byte(written[id]), 0o600); err != nil {
+			t.Fatalf("os.WriteFile(%s) = %v, want no error", path, err)
+		}
+	}
+	e.app.scanTaskFiles(t.Context())
+	for id, text := range written {
+		v, err := e.app.GetTask(id)
+		if err != nil || v.Invalid || v.Type != domain.TypeGitHub || !slices.Equal(v.Repositories, []string{"octo/repo"}) {
+			t.Fatalf("GetTask(%s) = %s task, invalid %v, repositories %v, %v; want a valid %s task of octo/repo", id,
+				v.Type, v.Invalid, v.Repositories, err, domain.TypeGitHub)
+		}
+		if got := firstRepositoryName(valueAt(v.Document, "spec", "github")); got != "octo/repo" {
+			t.Errorf("GetTask(%s).Document spec.github.repositories[0].name = %v, want octo/repo", id, got)
+		}
+		if onDisk, err := os.ReadFile(v.Path); err != nil || string(onDisk) != text || v.YAML != text {
+			t.Errorf("os.ReadFile(%s) = %q, %v and GetTask(%s).YAML = %q; want both as written",
+				v.Path, onDisk, err, id, v.YAML)
+		}
+	}
+
+	t.Run("the YAML editor", func(t *testing.T) {
+		view, _ := e.app.GetTask("from-editor")
+		edited := strings.Replace(view.YAML, "Implement the oldest", "Implement the newest", 1)
+		if _, err := e.app.UpdateTask(t.Context(), "from-editor", TaskInput{YAML: edited, BaseRevision: view.Revision}); err != nil {
+			t.Fatalf("UpdateTask(from-editor) = %v, want the edit saved", err)
+		}
+		onDisk, _ := os.ReadFile(view.Path)
+		if text := string(onDisk); hasLegacyNames(text) || !strings.Contains(text, "type: github\n") ||
+			!strings.Contains(text, "  github:\n") || !strings.Contains(text, "Implement the newest") ||
+			!strings.Contains(text, "# Written before the type was renamed.") {
+			t.Errorf("os.ReadFile(%s) after UpdateTask(from-editor) = %q, "+
+				"want the edit and the comment under the new names", view.Path, text)
+		}
+	})
+
+	t.Run("the form", func(t *testing.T) {
+		view, _ := e.app.GetTask("from-form")
+		document, err := json.Marshal(view.Document)
+		if err != nil {
+			t.Fatalf("json.Marshal(GetTask(from-form).Document) = %v, want no error", err)
+		}
+		legacy := strings.NewReplacer(`"type":"github"`, `"type":"`+domain.LegacyTypeGitHub+`"`,
+			`"github":{`, `"`+domain.LegacyGitHubKey+`":{`).Replace(string(document))
+		if !hasLegacyNames(legacy) {
+			t.Fatalf("hasLegacyNames(%s) = false, want true", legacy)
+		}
+		if r := e.app.Validate(t.Context(), TaskInput{Document: json.RawMessage(legacy)}); !r.Valid || hasLegacyNames(r.YAML) {
+			t.Errorf("Validate(the form's document under the legacy names) valid %v, YAML %q, errors %+v; want it valid "+
+				"under the new names", r.Valid, r.YAML, r.Errors)
+		}
+		if _, err := e.app.UpdateTask(t.Context(), "from-form", TaskInput{Document: document, BaseRevision: view.Revision}); err != nil {
+			t.Fatalf("UpdateTask(from-form) = %v, want it saved", err)
+		}
+		if onDisk, _ := os.ReadFile(view.Path); hasLegacyNames(string(onDisk)) {
+			t.Errorf("os.ReadFile(%s) after UpdateTask(from-form) = %q, want the new names", view.Path, onDisk)
+		}
+	})
+}
+
+// A GitHub task need not select the built-in issue implementer, and the rule against merging is the implementer's, not
+// the type's: a GitHub task with no agent or skill whose own prompt merges validates and runs, its repositories in its
+// session's context.
+func TestGitHubTaskWithoutTheImplementerRuns(t *testing.T) {
+	e := newEnv(t)
+	repo := mkdir(t, filepath.Join(e.app.Paths().UserHome, "repo"))
+	const prompt = "Merge each approved pull request of octo/repo whose checks passed."
+	doc := strings.Replace(issueTask("merger", repo, ""), "Implement the oldest eligible issue.", prompt, 1)
+	if r := e.app.Validate(t.Context(), TaskInput{YAML: doc}); !r.Valid {
+		t.Fatalf("Validate(merger) errors = %+v, want none", r.Errors)
+	}
+	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: doc}); err != nil {
+		t.Fatalf("CreateTask(merger) = %v, want it saved", err)
+	}
+	var q requests
+	e.claude.setScript(func(req ports.RunRequest) string { q.add(req); return "echo 'END ok'" })
+	r, err := e.app.RunTask("merger")
+	if err != nil {
+		t.Fatalf("RunTask(merger) = %v, want it started", err)
+	}
+	e.wait(r.ExecutionID, domain.StatusCompleted)
+	sent := q.all()
+	if len(sent) != 1 || sent[0].Prompt != prompt || len(sent[0].Agents) != 0 || len(sent[0].Skills) != 0 {
+		t.Fatalf("RunTask(merger) sent the harness %+v, "+
+			"want one request with the task's own prompt and no agent or skill", sent)
+	}
+	path := filepath.Join(sent[0].ExecutionDir, "context.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%s) = %v, want no error", path, err)
+	}
+	var ctx map[string]any
+	if err := json.Unmarshal(data, &ctx); err != nil {
+		t.Fatalf("json.Unmarshal(%s) = %v, want no error", path, err)
+	}
+	if typ, name := valueAt(ctx, "task", "type"), firstRepositoryName(valueAt(ctx, "task", "parameters")); typ != domain.TypeGitHub || name != "octo/repo" {
+		t.Errorf("valueAt(context.json, task, type) = %v and its first repository = %v; want %s and octo/repo",
+			typ, name, domain.TypeGitHub)
 	}
 }
 
@@ -3443,13 +3576,13 @@ func TestDefaultsAndOverridesFromYAML(t *testing.T) {
 		def, set any
 	}{
 		{"execution.timeoutMinutes", 60, 90},
-		{"githubIssueImplementation.delivery.testRepairAttempts", 2, 0},
-		{"githubIssueImplementation.queue.maxResumeAttempts", 3, 0},
-		{"githubIssueImplementation.queue.resumeStrategy", "resume_first", "alternate"},
-		{"githubIssueImplementation.queue.maxDiscoveredPerCycle", 10, 25},
-		{"githubIssueImplementation.queue.maxItemsPerCycle", 1, 2},
-		{"githubIssueImplementation.queue.ordering", "oldest_first", "newest_first"},
-		{"githubIssueImplementation.queue.maxFailedRetries", 3, 0},
+		{"github.delivery.testRepairAttempts", 2, 0},
+		{"github.queue.maxResumeAttempts", 3, 0},
+		{"github.queue.resumeStrategy", "resume_first", "alternate"},
+		{"github.queue.maxDiscoveredPerCycle", 10, 25},
+		{"github.queue.maxItemsPerCycle", 1, 2},
+		{"github.queue.ordering", "oldest_first", "newest_first"},
+		{"github.queue.maxFailedRetries", 3, 0},
 		{"execution.rateLimit.initialWaitSeconds", 60, 15},
 		{"execution.rateLimit.maxWaitSeconds", 900, 120},
 		{"execution.rateLimit.maxRetries", 5, 0},
@@ -3465,12 +3598,12 @@ metadata:
   id: %s
   name: Task %s
 spec:
-  type: github-issue-implementation
+  type: github
   prompt: Implement the oldest eligible issue.
   harness:
     preferred:
       provider: claude-code
-%s%s  githubIssueImplementation:
+%s%s  github:
     repositories:
       - name: octo/repo
         localPath: %s
@@ -3876,10 +4009,10 @@ func TestRecoveryMarksInterrupted(t *testing.T) {
 	// Each recovery counts against the retry limit of the item's own task, here one retry, where the default of three
 	// would leave the item failed after its second interruption.
 	e.idle("crash")
-	issues := strings.Replace(taskYAML("issues", fmt.Sprintf("  githubIssueImplementation:\n    repositories:\n"+
+	issues := strings.Replace(taskYAML("issues", fmt.Sprintf("  github:\n    repositories:\n"+
 		"      - name: o/r\n        localPath: %q\n    queue:\n      maxFailedRetries: 1\n",
 		mkdir(t, filepath.Join(e.app.Paths().UserHome, "repo")))),
-		"type: general", "type: github-issue-implementation", 1)
+		"type: general", "type: github", 1)
 	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: issues}); err != nil {
 		t.Fatal(err)
 	}

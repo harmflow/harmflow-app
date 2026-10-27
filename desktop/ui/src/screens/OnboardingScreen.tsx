@@ -142,7 +142,7 @@ export function OnboardingScreen({
             <h2>{t("onboarding.firstTask.title")}</h2>
             <p>{t("onboarding.firstTask.body")}</p>
             <div className="templates">
-              <button type="button" className="template" disabled={!daemonUp} onClick={() => void complete(() => onCreateTask("github-issue-implementation"))}>
+              <button type="button" className="template" disabled={!daemonUp} onClick={() => void complete(() => onCreateTask("github"))}>
                 <span className="template__icon">
                   <Icon name="code" size={24} />
                 </span>

@@ -150,7 +150,7 @@ metadata:
   id: queue
   name: Queue retry
 spec:
-  type: github-issue-implementation
+  type: github
   prompt: |
     Use the skill hf-github-issue-implementer.
     Work only on open issues of %[1]s labelled %[2]s; every other issue is excluded.
@@ -171,7 +171,7 @@ spec:
         "Bash(gh issue list:*)", "Bash(gh issue view:*)", "Bash(gh pr list:*)", "Bash(gh pr view:*)", "Bash(gh api:*)"]
   execution:
     timeoutMinutes: 15
-  githubIssueImplementation:
+  github:
     repositories:
       - name: %[1]s
         localPath: %[3]s

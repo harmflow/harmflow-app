@@ -1209,7 +1209,7 @@ func (r *run) sawEvent(eventType, url string) bool {
 
 func (r *run) limits() domain.WorkItemLimits {
 	l := domain.WorkItemLimits{MaxResumeAttempts: domain.DefaultMaxResumeAttempts, MaxFailedRetries: domain.DefaultMaxFailedRetries}
-	if g := r.eff.Spec.GitHubIssueImplementation; g != nil && g.Queue != nil {
+	if g := r.eff.Spec.GitHub; g != nil && g.Queue != nil {
 		l.MaxResumeAttempts, l.MaxFailedRetries = *g.Queue.MaxResumeAttempts, *g.Queue.MaxFailedRetries
 	}
 	return l

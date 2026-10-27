@@ -106,7 +106,7 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
     <section className="detail panel">
       <header className="detail__header">
         <span className="exec-card__glyph exec-card__glyph--lg" aria-hidden="true">
-          <Icon name={exec.taskType === "github-issue-implementation" ? "code" : isScript ? "terminal" : "settings"} size={24} />
+          <Icon name={exec.taskType === "github" ? "code" : isScript ? "terminal" : "settings"} size={24} />
         </span>
         <div className="detail__heading">
           <div className="detail__title-row">

@@ -68,7 +68,7 @@ export function ExecutionCard({
   const { t, i18n } = useTranslation();
   const step = useCurrentStep(execution);
   const active = isActive(execution.status);
-  const isGithub = execution.taskType === "github-issue-implementation";
+  const isGithub = execution.taskType === "github";
 
   return (
     <article

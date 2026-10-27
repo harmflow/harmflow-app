@@ -61,7 +61,7 @@ func (p *Prober) gh(ctx context.Context) ports.ToolInfo {
 	t := ports.ToolInfo{ID: "gh", Authentication: "unknown"}
 	t.Path = p.find("gh")
 	if t.Path == "" {
-		t.SetDiagnostic(domain.T("gh_not_found", "the GitHub CLI (gh) was not found; the GitHub issue type needs it"))
+		t.SetDiagnostic(domain.T("gh_not_found", "the GitHub CLI (gh) was not found; the GitHub task type needs it"))
 		return t
 	}
 	out, _, err := procutil.Output(ctx, 10*time.Second, p.Env, t.Path, "--version")
