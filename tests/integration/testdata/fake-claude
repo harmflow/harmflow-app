@@ -26,7 +26,9 @@ if [ "$1 $2" = "-p /usage" ]; then
   echo "Current session: 4% used · resets 6pm (UTC)"
   exit 0
 fi
-PROMPT=$(cat)
+# Shell builtins stand in for cat and dirname: on a loaded host, each process the stand-in starts can take seconds,
+# and the tests' deadlines count them.
+IFS= read -r -d '' PROMPT
 SCENARIO=ok
 [[ "$PROMPT" =~ SCENARIO=([a-z]+) ]] && SCENARIO=${BASH_REMATCH[1]}
 if [[ "$PROMPT" == *"PARTIAL=1"* ]]; then
@@ -35,7 +37,8 @@ if [[ "$PROMPT" == *"PARTIAL=1"* ]]; then
 fi
 PROGRESS="$HARMFLOW_EXECUTION_DIR/progress.jsonl"
 # The daemon keeps each execution's log in the logs directory beside the runs directory that holds the execution's.
-LOG="$(dirname "$(dirname "$HARMFLOW_EXECUTION_DIR")")/logs/$HARMFLOW_EXECUTION_ID.jsonl"
+RUNS=${HARMFLOW_EXECUTION_DIR%/*}
+LOG="${RUNS%/*}/logs/$HARMFLOW_EXECUTION_ID.jsonl"
 # logged waits until the execution's log holds the text: the daemon reads progress.jsonl about once a second, and the
 # stdout lines that follow must not reach it first.
 logged() {
