@@ -68,6 +68,9 @@ func TestReadQuota(t *testing.T) {
 // A recorded stream of a session whose plan window ran out: the CLI rejects the call on the window, yet goes on with
 // extra usage and finishes. Its rate-limit report says so, and is the harness's quota reading.
 func TestParseExtraUsage(t *testing.T) {
+	if !(&Adapter{}).ReportsExtraUsage() {
+		t.Error("ReportsExtraUsage() = false, want true: every rate-limit report says whether extra usage is in use")
+	}
 	p, events := replay(t, "extra-usage.jsonl")
 	var quotas []*domain.Quota
 	for _, e := range events {

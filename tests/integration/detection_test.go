@@ -73,9 +73,11 @@ func (c cli) only(t *testing.T, allowed ...string) map[string]int {
 	return counts
 }
 
-// The probes detection runs, and how a run invokes each CLI.
+// The probes detection runs, and how a run invokes each CLI. Claude Code's probes include the quota read before an
+// attempt, `claude -p /usage`, which runs no turn and makes no model call.
 var (
-	claudeProbes = []string{"--version", "--help", "auth status"}
+	claudeProbes = []string{"--version", "--help", "auth status", claudeQuota}
+	claudeQuota  = "-p /usage"
 	codexProbes  = []string{"--version", "exec --help", "--help", "login status"}
 	claudeRun    = "-p --output-format"
 	codexRun     = "exec --json"
@@ -220,8 +222,9 @@ func TestManualPathIsTheOneRun(t *testing.T) {
 	if x := d.runOn("manual", "claude-code"); x["status"] != "completed" {
 		t.Fatalf("status %v, error %v", x["status"], x["errorMessage"])
 	}
-	if counts := claude.only(t, append(claudeProbes, claudeRun)...); counts[claudeRun] != 1 {
-		t.Errorf("the file set by hand ran %d times, want once: %v", counts[claudeRun], counts)
+	if counts := claude.only(t, append(claudeProbes, claudeRun)...); counts[claudeRun] != 1 || counts[claudeQuota] != 1 {
+		t.Errorf("the file set by hand ran %d times and read the quota %d times, want once each: %v", counts[claudeRun],
+			counts[claudeQuota], counts)
 	}
 }
 
