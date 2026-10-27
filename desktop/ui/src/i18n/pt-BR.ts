@@ -340,6 +340,8 @@ export const ptBR: Resources = {
     codex_app_server_timed_out: "o app server do Codex não respondeu a {{method}} em {{seconds}} segundos",
     codex_app_server_error: "o app server do Codex respondeu a {{method}} com um erro: {{detail}}",
     fallback_repeats_preferred: "este fallback repete o harness e o modelo preferidos",
+    extra_usage_unenforced:
+      "nada interrompe o {{harness}} depois que ele começa, então a proibição de uso extra da tarefa só é verificada antes de cada tentativa",
     path_variable_unterminated: 'referência a variável não terminada em "{{path}}"',
     path_variable_undefined: 'variável de caminho {{names}} não definida em "{{path}}"; defina-a em $t(nav.settings)',
     local_path_missing: "o caminho local {{path}} não existe nesta máquina",
@@ -367,6 +369,7 @@ export const ptBR: Resources = {
       "o Codex não tem lista de ferramentas permitidas ou negadas; as listas personalizadas não são aplicadas",
     harness_version_untested: "{{harness}} {{version}} é mais novo que as versões com que o HarmFlow foi testado",
     harness_version_unknown: "{{harness}} não informou um número de versão, então o HarmFlow não sabe se foi testado com ela",
+    quota_unread: "não foi possível ler a cota do {{harness}}, então a tentativa começou sem essa verificação: {{detail}}",
     repository_unprotected: "{{repository}}: a branch base não está protegida contra merge sem revisão",
     report_not_json: "report.json não é um JSON válido; foi ignorado",
     report_schema_invalid: "report.json não segue o seu schema ({{path}}: {{detail}}); foi ignorado",
@@ -423,6 +426,9 @@ export const ptBR: Resources = {
     harness_rate_limited:
       "limite de taxa; nova tentativa em {{harness}} daqui a {{wait}} (tentativa {{retry}} de {{max}})",
     harness_quota_exhausted: "{{harness}} esgotou sua cota",
+    quota_exhausted: "{{harness}} não tem mais cota ({{limit}})",
+    quota_exhausted_until: "{{harness}} não tem mais cota ({{limit}}) até {{resets}}",
+    extra_usage_stopped: "{{harness}} passou a usar uso extra, que a tarefa não permite, então sua tentativa foi encerrada",
     harness_switched: "trocando de {{from}} para {{to}}",
     no_alternative_harness:
       "{{harness}} não pode continuar ($t(errorClass.{{errorClass}})) e nenhum harness alternativo está disponível",
@@ -452,6 +458,7 @@ export const ptBR: Resources = {
     harness_feature_missing: "esta versão do {{harness}} não tem {{feature}}, de que o HarmFlow precisa",
     harness_version_below_minimum: "o {{harness}} {{version}} é anterior à {{minimum}}, a linha de versões mais antiga que o HarmFlow suporta",
     claude_not_signed_in: "o Claude Code não está conectado; execute `claude` em um terminal e entre na conta",
+    quota_report_unrecognized: "o relatório de uso do {{harness}} não traz nenhuma janela do plano que o HarmFlow consiga ler",
     not_signed_in: "{{name}} não está conectado; execute `{{command}}` em um terminal",
     authentication_unverified: "não foi possível verificar a autenticação",
     gh_auth_problem: "gh auth status relatou um problema",

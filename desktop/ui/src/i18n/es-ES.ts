@@ -341,6 +341,8 @@ export const esES: Resources = {
     codex_app_server_timed_out: "el app server de Codex no respondió a {{method}} en {{seconds}} segundos",
     codex_app_server_error: "el app server de Codex respondió a {{method}} con un error: {{detail}}",
     fallback_repeats_preferred: "este fallback repite el harness y el modelo preferidos",
+    extra_usage_unenforced:
+      "nada detiene a {{harness}} una vez que se ejecuta, así que la prohibición de uso extra de la tarea solo se comprueba antes de cada intento",
     path_variable_unterminated: 'referencia a variable sin cerrar en "{{path}}"',
     path_variable_undefined: 'variable de ruta {{names}} no definida en "{{path}}"; defínela en $t(nav.settings)',
     local_path_missing: "la ruta local {{path}} no existe en esta máquina",
@@ -368,6 +370,7 @@ export const esES: Resources = {
       "Codex no tiene listas de herramientas permitidas o denegadas; las listas personalizadas no se aplican",
     harness_version_untested: "{{harness}} {{version}} es más reciente que las versiones con las que se probó HarmFlow",
     harness_version_unknown: "{{harness}} no informó un número de versión, así que HarmFlow no sabe si se probó con ella",
+    quota_unread: "no se pudo leer la cuota de {{harness}}, así que el intento empezó sin esa comprobación: {{detail}}",
     repository_unprotected: "{{repository}}: la rama base no está protegida contra merges sin revisión",
     report_not_json: "report.json no es un JSON válido; se ignoró",
     report_schema_invalid: "report.json no sigue su schema ({{path}}: {{detail}}); se ignoró",
@@ -425,6 +428,9 @@ export const esES: Resources = {
     harness_rate_limited:
       "límite de frecuencia; se reintenta en {{harness}} dentro de {{wait}} (reintento {{retry}} de {{max}})",
     harness_quota_exhausted: "{{harness}} agotó su cuota",
+    quota_exhausted: "{{harness}} no tiene cuota restante ({{limit}})",
+    quota_exhausted_until: "{{harness}} no tiene cuota restante ({{limit}}) hasta {{resets}}",
+    extra_usage_stopped: "{{harness}} pasó a consumir uso extra, que la tarea no permite, así que su intento se terminó",
     harness_switched: "cambiando de {{from}} a {{to}}",
     no_alternative_harness:
       "{{harness}} no puede continuar ($t(errorClass.{{errorClass}})) y no hay ningún harness alternativo disponible",
@@ -454,6 +460,7 @@ export const esES: Resources = {
     harness_feature_missing: "esta versión de {{harness}} no tiene {{feature}}, que HarmFlow necesita",
     harness_version_below_minimum: "{{harness}} {{version}} es anterior a la {{minimum}}, la línea de versiones más antigua que admite HarmFlow",
     claude_not_signed_in: "Claude Code no tiene la sesión iniciada; ejecuta `claude` en una terminal e inicia sesión",
+    quota_report_unrecognized: "el informe de uso de {{harness}} no nombra ninguna ventana del plan que HarmFlow pueda leer",
     not_signed_in: "{{name}} no tiene la sesión iniciada; ejecuta `{{command}}` en una terminal",
     authentication_unverified: "no se pudo verificar la autenticación",
     gh_auth_problem: "gh auth status informó de un problema",
