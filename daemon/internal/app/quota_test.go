@@ -118,8 +118,8 @@ func TestExtraUsageEndsTheAttempt(t *testing.T) {
 	}
 }
 
-// A task that allows extra usage reads no quota, starts on an exhausted one, and keeps an attempt that turns to extra
-// usage.
+// A task that allows extra usage has its quota checked too, yet starts on an exhausted one and keeps an attempt that
+// turns to extra usage.
 func TestExtraUsageAllowed(t *testing.T) {
 	e := newEnv(t)
 	e.create("generous", codexFallback+"  execution:\n    allowExtraUsage: true\n")
@@ -131,8 +131,8 @@ func TestExtraUsageAllowed(t *testing.T) {
 		x.Attempts[0].Outcome != domain.AttemptSucceeded || x.HarnessSwitches != 0 {
 		t.Errorf("attempts %+v, %d switches; want one Claude Code attempt that succeeded", x.Attempts, x.HarnessSwitches)
 	}
-	if n := e.claude.reads(); n != 0 {
-		t.Errorf("%d quota reads, want none", n)
+	if n := e.claude.reads(); n != 1 {
+		t.Errorf("%d quota reads, want 1: the quota is checked before each attempt", n)
 	}
 	for _, w := range x.Warnings {
 		if w.Code == domain.WarningPolicyUnenforced {

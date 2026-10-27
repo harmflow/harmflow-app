@@ -56,13 +56,11 @@ func (a *App) storeQuota(harness string, q domain.Quota) {
 	a.mu.Unlock()
 }
 
-// quotaHeld checks the harness's quota before an attempt of a task that allows no extra usage. An exhausted quota holds
-// the attempt back: the end it returns is that quota, found before the session opens. A quota that cannot be read lets
-// the attempt start, with a warning on the execution. A task that allows extra usage reads no quota.
+// quotaHeld checks the harness's quota before each attempt. For a task that allows no extra usage, an exhausted quota
+// holds the attempt back: the end it returns is that quota, found before the session opens. A quota that cannot be read
+// lets the attempt start, with a warning on the execution. A task that allows extra usage is checked too, and nothing
+// holds it back.
 func (r *run) quotaHeld(ctx context.Context, ad ports.HarnessAdapter, info ports.HarnessInfo) (domain.AttemptEnd, bool) {
-	if r.def.AllowsExtraUsage() {
-		return domain.AttemptEnd{}, false
-	}
 	q, read, err := r.a.quota(ctx, ad, info)
 	if !read {
 		return domain.AttemptEnd{}, false
@@ -71,6 +69,9 @@ func (r *run) quotaHeld(ctx context.Context, ad ports.HarnessAdapter, info ports
 		r.warn(domain.Warning{Code: domain.WarningOther, Subject: ad.ID(), Text: domain.T("quota_unread",
 			"{{harness}}'s quota could not be read, so the attempt started without that check: {{detail}}",
 			"harness", ad.Name()).Nest("detail", domain.TextOf(err))}, "", false)
+		return domain.AttemptEnd{}, false
+	}
+	if r.def.AllowsExtraUsage() {
 		return domain.AttemptEnd{}, false
 	}
 	w, exhausted := q.Exhausted()
