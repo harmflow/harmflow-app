@@ -503,6 +503,7 @@ type parser struct {
 	result     *resultLine
 	rateStatus string
 	rateType   string
+	overage    bool // the last rate-limit report said the session is using extra usage
 	resetsAt   int64
 	lastText   string
 	messages   map[string]messageUsage // the latest usage of each assistant message, by message id
@@ -665,6 +666,7 @@ func (p *parser) Line(line []byte) []ports.HarnessEvent {
 		if sl.RateLimit != nil {
 			p.rateStatus = sl.RateLimit.Status
 			p.rateType = sl.RateLimit.RateLimitType
+			p.overage = sl.RateLimit.IsUsingOverage
 			p.resetsAt = sl.RateLimit.ResetsAt
 			out := []ports.HarnessEvent{{Kind: ports.HarnessQuota, Quota: sl.RateLimit.quota()}}
 			if sl.RateLimit.Status != "allowed" && sl.RateLimit.Status != "allowed_warning" {
@@ -833,11 +835,14 @@ func (p *parser) Finish(exitCode int, stderrTail string, timedOut, cancelled boo
 	}
 	end.Class = patterns.Text(text)
 	if p.rateStatus == "rejected" {
-		// The stream itself said the limit rejected the session: a plan window is a quota, anything else a rate limit.
-		if planWindow(p.rateType) {
-			end.Class = domain.ClassQuotaExhausted
-		} else {
+		// The stream itself said the limit rejected the session: a plan window is a quota, anything else a rate limit. A
+		// plan window rejected while the session goes on with extra usage is no quota exhausted, so the session's error
+		// keeps the class its text gives; the runner ends the attempt of a task that allows no extra usage as a quota.
+		switch {
+		case !planWindow(p.rateType):
 			end.Class = domain.ClassRateLimited
+		case !p.overage:
+			end.Class = domain.ClassQuotaExhausted
 		}
 	}
 	if p.resetsAt > 0 && end.Class == domain.ClassRateLimited {

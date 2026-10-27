@@ -61,6 +61,40 @@ func TestParseQuota(t *testing.T) {
 	}
 }
 
+// harmflow-app#306: a plan window rejected while the session goes on with extra usage is no exhausted quota, so a
+// session that then fails for a reason of its own ends as the error its text gives, and does not fail over. The same
+// report without isUsingOverage is an exhausted quota, as before.
+func TestFinishReadsAFailedSessionOnExtraUsageAsItsOwnError(t *testing.T) {
+	const overage = `,"isUsingOverage":true,"overageInUse":true`
+	data, err := os.ReadFile(filepath.Join("testdata", "extra-usage-error.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), overage) {
+		t.Fatalf("the fixture's rate-limit report lacks %s", overage)
+	}
+	cases := []struct {
+		name, report, stderr string
+		want                 domain.ErrorClass
+	}{
+		{"on extra usage", overage, "", domain.ClassTaskError},
+		{"on extra usage, until it ran out", overage, "You're out of extra usage · resets 9pm", domain.ClassQuotaExhausted},
+		{"not on extra usage", `,"isUsingOverage":false,"overageInUse":false`, "", domain.ClassQuotaExhausted},
+		{"isUsingOverage absent", "", "", domain.ClassQuotaExhausted},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := &parser{tools: map[string]toolUse{}}
+			for _, line := range strings.Split(strings.ReplaceAll(string(data), overage, c.report), "\n") {
+				p.Line([]byte(line))
+			}
+			if end := p.Finish(1, c.stderr, false, false); end.Class != c.want {
+				t.Errorf("Finish(1, %q, false, false).Class = %s (%s), want %s", c.stderr, end.Class, end.Error.Message, c.want)
+			}
+		})
+	}
+}
+
 // A signed-out CLI, as Claude Code 2.1.309 printed it with an empty configuration directory, is an
 // unavailable harness.
 func TestParseNotLoggedIn(t *testing.T) {
