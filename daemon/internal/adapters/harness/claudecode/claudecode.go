@@ -834,7 +834,7 @@ func (p *parser) Finish(exitCode int, stderrTail string, timedOut, cancelled boo
 	end.Class = patterns.Text(text)
 	if p.rateStatus == "rejected" {
 		// The stream itself said the limit rejected the session: a plan window is a quota, anything else a rate limit.
-		if strings.Contains(p.rateType, "hour") || strings.Contains(p.rateType, "day") || strings.Contains(p.rateType, "week") {
+		if planWindow(p.rateType) {
 			end.Class = domain.ClassQuotaExhausted
 		} else {
 			end.Class = domain.ClassRateLimited

@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/procutil"
@@ -78,10 +79,18 @@ func (r rateLimitInfo) quota() *domain.Quota {
 		q.Windows = append(q.Windows, domain.QuotaWindow{Name: name, UsedPercent: *w.Utilization * 100,
 			ResetsAt: unixTime(w.ResetsAt)})
 	}
-	if r.Status == "rejected" {
+	// A call rejected on a plan window is a limit reached; one rejected on anything else is a temporary rate limit, which
+	// retries on the same harness, as Finish classifies it.
+	if r.Status == "rejected" && planWindow(r.RateLimitType) {
 		q.Limit = &domain.QuotaWindow{Name: r.RateLimitType, ResetsAt: unixTime(r.ResetsAt)}
 	}
 	return q
+}
+
+// planWindow reports whether a rate limit's type names a plan window, such as five_hour or seven_day.
+func planWindow(rateLimitType string) bool {
+	return strings.Contains(rateLimitType, "hour") || strings.Contains(rateLimitType, "day") ||
+		strings.Contains(rateLimitType, "week")
 }
 
 // unixTime is a time in seconds since the epoch; zero when not reported.
