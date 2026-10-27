@@ -356,6 +356,8 @@ export const enUS = {
       "Claude Code does not confine shell commands to the workspace; only its file-edit tools are confined",
     restriction_claude_shell_network:
       "Claude Code does not block network access from shell commands; only its web tools are removed",
+    restriction_claude_allow_rules:
+      "Claude Code adds the allow rules of its $t(claudeSettings.{{sources}}) to the task's tool list, and they allow more than the list or could not be read; managed settings are not checked",
     restriction_codex_tool_lists: "Codex has no per-tool allow or deny list; the custom tool lists are not enforced",
     harness_version_untested: "{{harness}} {{version}} is newer than the versions HarmFlow was tested with",
     harness_version_unknown: "{{harness}} reported no version number, so HarmFlow cannot tell whether it was tested with it",
@@ -496,6 +498,17 @@ export const enUS = {
     harness: "the {{harness}} configuration",
     skill_list: "{{harness}}'s skill list for {{workspace}}",
     skill_list_errors: "{{harness}}'s skill list for {{workspace}}, which could not load {{errors}}",
+  },
+  // The Claude Code settings sources whose allow rules widen a task's tool list, as restriction_claude_allow_rules
+  // names them.
+  claudeSettings: {
+    user: "user settings",
+    project: "project settings",
+    local: "local settings",
+    user_project: "user and project settings",
+    user_local: "user and local settings",
+    project_local: "project and local settings",
+    user_project_local: "user, project, and local settings",
   },
   errorClass: {
     quota_exhausted: "quota exhausted",

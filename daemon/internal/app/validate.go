@@ -335,7 +335,8 @@ func (a *App) policyWarnings(ctx context.Context, doc domain.TaskDocument) []dom
 		return nil
 	}
 	info := a.harnessInfo(ctx, ad.ID())
-	inv, _, err := ad.Prepare(info, ports.RunRequest{WorkDir: os.TempDir(), Permissions: *eff.Spec.Permissions})
+	inv, _, err := ad.Prepare(info, ports.RunRequest{WorkDir: os.TempDir(), Permissions: *eff.Spec.Permissions,
+		PolicyCheck: true})
 	if err != nil {
 		return nil
 	}

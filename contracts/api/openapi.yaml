@@ -783,6 +783,7 @@ components:
         # Execution warnings
         - restriction_claude_shell_workspace
         - restriction_claude_shell_network
+        - restriction_claude_allow_rules
         - restriction_codex_tool_lists
         - restriction_script_unenforced
         - script_leftovers_ended

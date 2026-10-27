@@ -6,7 +6,9 @@ package claudecode
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
@@ -350,8 +352,7 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 			args = append(args, "--disallowedTools", strings.Join(denied, ","))
 		}
 		dirs = append(dirs, perm.Custom.WritablePaths...)
-		restrictions = append(restrictions, ports.Restriction{Name: "tool_allowlist", Enforced: true,
-			Text: domain.Text{Message: "Claude Code allows only the listed tools"}})
+		restrictions = append(restrictions, a.allowlistRestriction(req, append(append([]string{}, allowed...), denied...)))
 		restrictions = append(restrictions, shellRestrictions(mode == "acceptEdits" && hasShell(allowed), network,
 			*perm.RestrictToWorkspace)...)
 	default: // workspace_write
@@ -377,6 +378,77 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 	inv := ports.Invocation{Path: info.Path, Args: args, Env: req.Env, Dir: req.WorkDir, Stdin: req.Prompt,
 		Restrictions: restrictions}
 	return inv, &parser{tools: map[string]toolUse{}}, nil
+}
+
+// settingsSources are the Claude Code settings files HarmFlow reads for allow rules, in the order a warning names them:
+// the user's, in the configuration directory, then the working directory's project and local ones. Managed settings
+// are not read.
+var settingsSources = []struct{ name, file string }{
+	{"user", "settings.json"},
+	{"project", filepath.Join(".claude", "settings.json")},
+	{"local", filepath.Join(".claude", "settings.local.json")},
+}
+
+// allowlistRestriction says whether the custom profile's tool list is enforced. Claude Code merges the allow rules of
+// every settings source it loads into the list it is given, so an allow rule that covered, the task's allowed and
+// denied tools, does not hold widens the list. A rule is covered only when it is identical to an entry, and a file that
+// exists but cannot be read or parsed widens the list too, since it cannot be checked. Validation reads only the user's
+// settings: its working directory is not the task's.
+func (a *Adapter) allowlistRestriction(req ports.RunRequest, covered []string) ports.Restriction {
+	var widening []string
+	for _, s := range settingsSources {
+		path := filepath.Join(req.WorkDir, s.file)
+		switch {
+		case s.name == "user":
+			path = filepath.Join(a.configDir(), s.file)
+		case req.PolicyCheck || req.WorkDir == "":
+			continue
+		}
+		rules, err := allowRules(path)
+		if err != nil || slices.ContainsFunc(rules, func(r string) bool { return !slices.Contains(covered, r) }) {
+			widening = append(widening, s.name)
+		}
+	}
+	if len(widening) == 0 {
+		return ports.Restriction{Name: "tool_allowlist", Enforced: true,
+			Text: domain.Text{Message: "Claude Code allows the listed tools, and the commands it judges read-only"}}
+	}
+	return ports.Restriction{Name: "tool_allowlist", Enforced: false,
+		Text: domain.T("restriction_claude_allow_rules",
+			"Claude Code adds the allow rules of its {{where}} to the task's tool list, and they allow more than the list or could not be read; managed settings are not checked",
+			"where", settingsPhrase(widening), "sources", strings.Join(widening, "_"))}
+}
+
+// allowRules are the permissions.allow rules of a Claude Code settings file; a missing file has none.
+func allowRules(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var settings struct {
+		Permissions struct {
+			Allow []string `json:"allow"`
+		} `json:"permissions"`
+	}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return nil, err
+	}
+	return settings.Permissions.Allow, nil
+}
+
+// settingsPhrase names settings sources in en-US: "user settings", "user and local settings", "user, project, and
+// local settings".
+func settingsPhrase(sources []string) string {
+	switch len(sources) {
+	case 1:
+		return sources[0] + " settings"
+	case 2:
+		return sources[0] + " and " + sources[1] + " settings"
+	}
+	return strings.Join(sources[:len(sources)-1], ", ") + ", and " + sources[len(sources)-1] + " settings"
 }
 
 // shellRestrictions names what the shell tool can do that Claude Code's permission mode does not confine.
