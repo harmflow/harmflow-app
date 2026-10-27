@@ -76,7 +76,7 @@ func (c cli) only(t *testing.T, allowed ...string) map[string]int {
 // The probes detection runs, and how a run invokes each CLI.
 var (
 	claudeProbes = []string{"--version", "--help", "auth status"}
-	codexProbes  = []string{"--version", "exec --help", "login status"}
+	codexProbes  = []string{"--version", "exec --help", "--help", "login status"}
 	claudeRun    = "-p --output-format"
 	codexRun     = "exec --json"
 )
