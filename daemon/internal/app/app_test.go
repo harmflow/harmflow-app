@@ -2904,6 +2904,39 @@ func TestWaitingFiringAcrossRestart(t *testing.T) {
 	}
 }
 
+// A harness the daemon's stop ends is interrupted, even when it exits as one that finished. The stand-in answers the
+// stop's SIGTERM with its success line and code 0, as a shell whose child the signal ended first may go on to do.
+func TestStopInterruptsAHarnessThatExitsAsFinished(t *testing.T) {
+	e := newEnv(t)
+	e.create("stopped", "")
+	e.claude.setScript(func(ports.RunRequest) string {
+		return `exec perl -e '$| = 1; $SIG{TERM} = sub { print "END ok\n"; exit 0 }; print "working\n"; sleep 30'`
+	})
+	r, _ := e.app.RunTask("stopped")
+	// The harness prints its first line once it answers SIGTERM.
+	if !e.poll(10*time.Second, func() bool {
+		events, _, _ := e.app.ExecutionEvents(r.ExecutionID, 0, 0)
+		return slices.ContainsFunc(events, func(ev domain.Event) bool {
+			return ev.Type == domain.EventHarnessMessage && ev.Message == "working"
+		})
+	}) {
+		t.Fatal("the harness printed nothing")
+	}
+	e.app.Stop(domain.Text{Message: "test stop"})
+	x, _ := e.app.GetExecution(r.ExecutionID)
+	if len(x.Attempts) != 1 || x.Attempts[0].ExitCode == nil || *x.Attempts[0].ExitCode != 0 ||
+		x.Attempts[0].Outcome != domain.AttemptSucceeded {
+		t.Fatalf("attempts %+v, want one whose harness exited with code 0 and its success line", x.Attempts)
+	}
+	if x.Status != domain.StatusInterrupted {
+		t.Errorf("the stopped execution is %s, want interrupted", x.Status)
+	}
+	e = e.restart(t)
+	if x, _ := e.app.GetExecution(r.ExecutionID); x.Status != domain.StatusInterrupted {
+		t.Errorf("after the restart, the stopped execution is %s, want interrupted", x.Status)
+	}
+}
+
 // Autostart is opt-in. Starting the app, a patch that leaves autostart out, and completing onboarding neither turn it
 // on nor off; only a patch that names it does, and turning it on starts this daemon with its data directory.
 func TestAutostartChangesOnlyOnRequest(t *testing.T) {

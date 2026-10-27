@@ -139,11 +139,13 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 			Payload: map[string]any{"trigger": string(x.Trigger), "timeoutAt": deadline, "definitionRevision": rev}})
 		return r.prepare()
 	})
-	if status == "" {
-		status, reason = r.outcomeFromReport()
-	} else if r.daemonStopping() && !r.cancelRequested() && !r.ownEnd {
-		// A daemon that stops never continues the execution: it is interrupted.
+	switch {
+	case r.daemonStopping() && !r.cancelRequested() && !r.ownEnd:
+		// A daemon that stops never continues the execution: it is interrupted, even when the harness it ended exited as
+		// one that finished, with code 0 and a final message.
 		status, reason = domain.StatusInterrupted, daemonStopped()
+	case status == "":
+		status, reason = r.outcomeFromReport()
 	}
 	r.finish(status, reason)
 }
