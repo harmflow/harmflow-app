@@ -89,6 +89,11 @@ func TestParseExtraUsage(t *testing.T) {
 		t.Errorf("end %+v, want success", end)
 	}
 
+	// A call rejected on anything but a plan window is a temporary rate limit, which retries: no limit is reached.
+	if q := (rateLimitInfo{Status: "rejected", RateLimitType: "requests"}).quota(); q.Limit != nil {
+		t.Errorf("quota() of a call rejected on requests = %+v, want no limit reached", q)
+	}
+
 	// A report within the plan says so too, with no extra usage and nothing exhausted.
 	_, events = replay(t, "success.jsonl")
 	for _, e := range events {
