@@ -687,7 +687,13 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 	end := parser.Finish(proc.ExitCode(), proc.StderrTail(), timedOut, stopped && r.cancelRequested())
 	// Its final text and error quote the harness, and the next attempt's context and the summary quote them in turn.
 	eventlog.RedactFields(&end)
-	r.endAttempt(end, proc.ExitCode())
+	// As for a program, the user's cancellation comes first, then the daemon's stop, then the timeout. A harness the
+	// stop ended is interrupted, whatever its exit: code 0 with its success line, another code, or a signal.
+	if stopped && !r.cancelRequested() && r.daemonStopping() {
+		r.endAttemptAs(end, proc.ExitCode(), domain.AttemptInterrupted, daemonStopped())
+	} else {
+		r.endAttempt(end, proc.ExitCode())
+	}
 	return end, timedOut
 }
 
@@ -699,7 +705,14 @@ func (r *run) closeRaw(raw io.Closer) {
 	}
 }
 
+// endAttempt closes the current attempt with the outcome and error its end gives.
 func (r *run) endAttempt(end domain.AttemptEnd, exit int) {
+	r.endAttemptAs(end, exit, attemptOutcome(end.Class), end.Error)
+}
+
+// endAttemptAs closes the current attempt with an outcome and an error of the daemon's, which stand in for its end's,
+// and records the rest of its end: the exit code, the session, and the usage.
+func (r *run) endAttemptAs(end domain.AttemptEnd, exit int, outcome domain.AttemptOutcome, why domain.Text) {
 	a := r.a
 	now := a.now()
 	a.mu.Lock()
@@ -717,10 +730,9 @@ func (r *run) endAttempt(end domain.AttemptEnd, exit int) {
 	if end.Usage != nil {
 		at.Usage = end.Usage
 	}
-	at.SetError(end.Error)
-	at.Outcome = attemptOutcome(end.Class)
+	at.SetError(why)
+	at.Outcome = outcome
 	harness := at.Harness
-	outcome := at.Outcome
 	// Commands still marked running when the process ended did not complete.
 	for i := range r.x.Commands {
 		if r.x.Commands[i].Status == "running" && r.x.Commands[i].Attempt == at.Number {
@@ -730,7 +742,7 @@ func (r *run) endAttempt(end domain.AttemptEnd, exit int) {
 	}
 	a.mu.Unlock()
 	sev := domain.SeverityInfo
-	if end.Class != domain.ClassNone {
+	if outcome != domain.AttemptSucceeded {
 		sev = domain.SeverityWarning
 	}
 	name := harness
@@ -738,7 +750,7 @@ func (r *run) endAttempt(end domain.AttemptEnd, exit int) {
 		name = ad.Name()
 	}
 	r.event(domain.Event{Type: domain.EventHarnessExited, Harness: harness, Severity: sev,
-		Payload: domain.ErrorPayload(map[string]any{"exitCode": exit, "outcome": string(outcome)}, end.Error)}.Says(
+		Payload: domain.ErrorPayload(map[string]any{"exitCode": exit, "outcome": string(outcome)}, why)}.Says(
 		domain.T("harness_exited", "{{harness}} ended: {{outcome}}", "harness", name,
 			"outcome", strings.ReplaceAll(string(outcome), "_", " "), "attemptOutcome", string(outcome))))
 	r.save(true)
