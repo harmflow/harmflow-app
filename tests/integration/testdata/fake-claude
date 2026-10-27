@@ -21,6 +21,11 @@ HELP
     exit 0 ;;
   auth) echo '{"loggedIn": true}'; exit 0 ;;
 esac
+# The usage report the daemon reads before an attempt, with no session: a plan window well within its limit.
+if [ "$1 $2" = "-p /usage" ]; then
+  echo "Current session: 4% used · resets 6pm (UTC)"
+  exit 0
+fi
 PROMPT=$(cat)
 SCENARIO=ok
 [[ "$PROMPT" =~ SCENARIO=([a-z]+) ]] && SCENARIO=${BASH_REMATCH[1]}
