@@ -229,7 +229,13 @@ func (d *daemon) list(path string) []map[string]any {
 
 func (d *daemon) waitStatus(id string, want ...string) map[string]any {
 	d.t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
+	return d.waitStatusWithin(20*time.Second, id, want...)
+}
+
+// waitStatusWithin is waitStatus with a deadline of its own, for an execution that starts more processes than most.
+func (d *daemon) waitStatusWithin(within time.Duration, id string, want ...string) map[string]any {
+	d.t.Helper()
+	deadline := time.Now().Add(within)
 	var x map[string]any
 	for time.Now().Before(deadline) {
 		x = d.call("GET", "/executions/"+id, nil, 200)
@@ -2018,7 +2024,10 @@ func TestFailoverEndsWhatTheFirstAttemptLeft(t *testing.T) {
 		"    fallback:\n      candidates:\n        - provider: codex\n  execution:\n    cancelGraceSeconds: 1\n")}, 201)
 	run := d.call("POST", "/tasks/leftover/run", nil, 202)
 	id := run["executionId"].(string)
-	x := d.waitStatus(id, "completed", "failed")
+	// The execution starts eleven processes one after another: eight checks of the two harnesses before their attempts,
+	// the two stand-ins, and the mv that writes the leftover's pid. On a loaded host each start can take seconds: 20
+	// seconds did not always cover them, and a heavier load took them up to 75.
+	x := d.waitStatusWithin(120*time.Second, id, "completed", "failed")
 	left := readPid(t, filepath.Join(x["executionDir"].(string), "leftover.pid"))
 	t.Cleanup(func() {
 		if !gone(left) {

@@ -10,7 +10,8 @@ case "$1" in
       exit 0
     fi ;;
 esac
-PROMPT=$(cat)
+# The read builtin, not cat: on a loaded host, each process the stand-in starts can take seconds.
+IFS= read -r -d '' PROMPT
 echo '{"type":"thread.started","thread_id":"fake-thread"}'
 echo '{"type":"turn.started"}'
 if [[ "$PROMPT" == *"CODEX=quota"* ]]; then
