@@ -82,6 +82,9 @@ type fakeHarness struct {
 	held        int           // Detect calls waiting for the gate
 	// cutLag is how long a held Detect takes to return once its context ends, as a CLI takes time to exit.
 	cutLag time.Duration
+	// quota answers ReadQuota when set; otherwise every read finds a quota with nothing used. quotaReads counts them.
+	quota      func() (domain.Quota, error)
+	quotaReads int
 }
 
 func (f *fakeHarness) ID() string   { return f.id }
@@ -117,6 +120,28 @@ func (f *fakeHarness) ValidateProfile(ports.HarnessInfo, string, string) error {
 // ReportsExtraUsage says what the real adapter of the same harness says: only Claude Code reports extra usage as
 // it runs.
 func (f *fakeHarness) ReportsExtraUsage() bool { return f.id == domain.HarnessClaudeCode }
+
+func (f *fakeHarness) ReadQuota(context.Context, ports.HarnessInfo) (domain.Quota, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.quotaReads++
+	if f.quota == nil {
+		return domain.Quota{}, nil
+	}
+	return f.quota()
+}
+
+func (f *fakeHarness) setQuota(q func() (domain.Quota, error)) {
+	f.mu.Lock()
+	f.quota = q
+	f.mu.Unlock()
+}
+
+func (f *fakeHarness) reads() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.quotaReads
+}
 func (f *fakeHarness) UserItem(_ context.Context, _ ports.HarnessInfo, kind, name, _ string) (ports.ResolvedItem, bool, []ports.DiscoveryError, error) {
 	found := kind == "skill" && name == "user-skill" || kind == "agent" && name == "user-agent" ||
 		kind == "skill" && name == "review-notes" && f.id == domain.HarnessClaudeCode
@@ -208,6 +233,11 @@ func (p *fakeParser) Line(b []byte) []ports.HarnessEvent {
 	if rest, ok := strings.CutPrefix(s, "STARTED "); ok {
 		model, effort, _ := strings.Cut(rest, " ")
 		return []ports.HarnessEvent{{Kind: ports.HarnessStarted, Model: model, Effort: effort}}
+	}
+	if s == "EXTRA usage" {
+		// A plan window used up and the session going on with extra usage, as Claude Code reports it.
+		return []ports.HarnessEvent{{Kind: ports.HarnessQuota, Quota: &domain.Quota{UsingExtraUsage: true,
+			Windows: []domain.QuotaWindow{{Name: "five_hour", UsedPercent: 100}}}}}
 	}
 	if n, ok := strings.CutPrefix(s, "USAGE "); ok {
 		p.input, _ = strconv.ParseInt(n, 10, 64)
