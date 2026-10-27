@@ -56,8 +56,8 @@ jobs:
             case $part in
               contracts)   pattern='^(contracts/|daemon/internal/contracts/|desktop/ui/src/api/generated\.ts$)' ;;
               daemon)      pattern='^daemon/' ;;
-              integration) pattern='^(daemon/|tests/|skills/)' ;;
-              desktop)     pattern='^(desktop/|skills/)' ;;
+              integration) pattern='^(daemon/|tests/|agents/|skills/)' ;;
+              desktop)     pattern='^(desktop/|agents/|skills/)' ;;
               packaging)   pattern='^packaging/' ;;
             esac
             if touched "$pattern"; then echo "$part=true" >> "$GITHUB_OUTPUT"; else echo "$part=false" >> "$GITHUB_OUTPUT"; fi
