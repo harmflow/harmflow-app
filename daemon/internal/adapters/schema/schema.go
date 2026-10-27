@@ -31,11 +31,12 @@ type Issue struct {
 	Code   string `json:"code,omitempty"`
 }
 
-// Validator holds the task, execution report, and event schemas, compiled.
+// Validator holds the task, execution report, and event schemas, compiled, and the task schema's identifier.
 type Validator struct {
-	task   *jsonschema.Schema
-	report *jsonschema.Schema
-	event  *jsonschema.Schema
+	task       *jsonschema.Schema
+	identifier *jsonschema.Schema
+	report     *jsonschema.Schema
+	event      *jsonschema.Schema
 }
 
 // New compiles the embedded schemas; an error means an embedded schema does not compile.
@@ -60,6 +61,10 @@ func New() (*Validator, error) {
 	if err != nil {
 		return nil, err
 	}
+	identifier, err := c.Compile(contracts.TaskSchemaURL + "#/$defs/identifier")
+	if err != nil {
+		return nil, err
+	}
 	report, err := c.Compile(contracts.ReportSchemaURL)
 	if err != nil {
 		return nil, err
@@ -68,7 +73,7 @@ func New() (*Validator, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Validator{task: task, report: report, event: event}, nil
+	return &Validator{task: task, identifier: identifier, report: report, event: event}, nil
 }
 
 var yamlLine = regexp.MustCompile(`line (\d+)(?::|,)?\s*(?:column (\d+))?`)
@@ -147,6 +152,11 @@ func FromJSON(data []byte) (any, error) {
 // ValidateTask checks a decoded document against task.schema.json; node, when given, locates each issue.
 func (v *Validator) ValidateTask(doc any, node *yaml.Node) []Issue {
 	return collect(v.task.Validate(doc), node)
+}
+
+// ValidIdentifier says whether name is an identifier of task.schema.json, the name a task cites an agent or a skill by.
+func (v *Validator) ValidIdentifier(name string) bool {
+	return v.identifier.Validate(name) == nil
 }
 
 // ValidateReport checks report.json against execution-report.schema.json.

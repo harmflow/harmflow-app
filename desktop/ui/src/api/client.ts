@@ -79,7 +79,8 @@ export const api = {
   refreshHarnesses: () => call<Harness[]>("POST", "/harnesses/refresh"),
   setHarnessPath: (id: HarnessId, path: string | null) => call<Harness>("PUT", `/harnesses/${id}`, { path }),
   tools: () => call<Tool[]>("GET", "/tools"),
-  catalog: () => call<Catalog>("GET", "/catalog"),
+  /** What a task can cite; a harness that finds the user's items per workspace, as Codex its skills, lists workspace's. */
+  catalog: (workspace?: string) => call<Catalog>("GET", `/catalog${query({ workspace })}`),
 
   tasks: () => call<TaskSummary[]>("GET", "/tasks"),
   task: (id: string) => call<Task>("GET", `/tasks/${enc(id)}`),

@@ -382,7 +382,7 @@ func (r *run) repositoryPaths() map[string]string {
 // returns a terminal status when the attempts themselves decide it, or "" when the report decides.
 func (r *run) attempts(ctx context.Context, start func(harness string) error) (domain.ExecutionStatus, domain.Text) {
 	a := r.a
-	chain, invalid := r.chain()
+	chain, invalid := r.chain(ctx)
 	for _, w := range invalid {
 		r.warn(domain.Warning{Code: domain.WarningInvalidFallback, Text: w}, domain.EventHarnessNoAlternative, false)
 	}
@@ -521,7 +521,7 @@ func (r *run) quotaExhausted(ad ports.HarnessAdapter, harness string, end domain
 }
 
 // chain returns the preferred profile and the fallbacks that can load the task's agents and skills.
-func (r *run) chain() ([]domain.HarnessProfile, []domain.Text) {
+func (r *run) chain(ctx context.Context) ([]domain.HarnessProfile, []domain.Text) {
 	profiles := r.def.Profiles()
 	out := []domain.HarnessProfile{profiles[0]}
 	var invalid []domain.Text
@@ -530,7 +530,7 @@ func (r *run) chain() ([]domain.HarnessProfile, []domain.Text) {
 		if !ok {
 			continue
 		}
-		if missing := r.a.missingItems(r.def, p.Provider); len(missing) > 0 {
+		if missing := r.a.missingItems(ctx, r.def, p.Provider, r.itemWorkspace()); len(missing) > 0 {
 			invalid = append(invalid, missing[0].invalidFallback(ad.Name()))
 			continue
 		}
@@ -562,7 +562,7 @@ func (r *run) warn(w domain.Warning, eventType string, emit bool) {
 func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info ports.HarnessInfo, p domain.HarnessProfile, reason domain.Text,
 	prev []previousAttempt) (domain.AttemptEnd, bool) {
 	a := r.a
-	agents, skills, err := r.resolve(ad)
+	agents, skills, err := r.resolve(ctx, ad)
 	if err != nil {
 		return domain.AttemptEnd{Class: domain.ClassTaskError, Error: domain.TextOf(err)}, false
 	}
@@ -763,24 +763,39 @@ func attemptOutcome(c domain.ErrorClass) domain.AttemptOutcome {
 	}
 }
 
-// resolve finds the task's agents and skills for one harness.
-func (r *run) resolve(ad ports.HarnessAdapter) ([]ports.ResolvedItem, []ports.ResolvedItem, error) {
+// resolve finds the task's agents and skills for one harness, as it finds them for the execution's working directory.
+func (r *run) resolve(ctx context.Context, ad ports.HarnessAdapter) ([]ports.ResolvedItem, []ports.ResolvedItem, error) {
 	var agents, skills []ports.ResolvedItem
-	for _, name := range r.eff.Spec.Agents {
-		it, where, ok := r.a.resolveItem("agent", name, ad.ID())
-		if !ok {
-			return nil, nil, &domain.TextError{Text: missingItem{"agent", name, where}.notFound(ad.Name())}
+	for _, kind := range []string{"agent", "skill"} {
+		names := r.eff.Spec.Agents
+		if kind == "skill" {
+			names = r.eff.Spec.Skills
 		}
-		agents = append(agents, it)
-	}
-	for _, name := range r.eff.Spec.Skills {
-		it, where, ok := r.a.resolveItem("skill", name, ad.ID())
-		if !ok {
-			return nil, nil, &domain.TextError{Text: missingItem{"skill", name, where}.notFound(ad.Name())}
+		for _, name := range names {
+			l := r.a.resolveItem(ctx, kind, name, ad.ID(), r.itemWorkspace())
+			if l.unreadable != nil {
+				l.missing.unreadable = l.unreadable
+			}
+			if l.unreadable != nil || !l.found {
+				return nil, nil, &domain.TextError{Text: l.missing.notFound(ad.Name())}
+			}
+			if kind == "agent" {
+				agents = append(agents, l.item)
+			} else {
+				skills = append(skills, l.item)
+			}
 		}
-		skills = append(skills, it)
 	}
 	return agents, skills, nil
+}
+
+// itemWorkspace is the folder the execution's agents and skills are looked up for: its working directory, or, before
+// the workspace is prepared, the one it will be.
+func (r *run) itemWorkspace() string {
+	if r.work != "" {
+		return r.work
+	}
+	return r.a.itemWorkspace(r.def)
 }
 
 // harmflowContext is HarmFlow's orchestration context for the session: where to find the task's parameters and

@@ -113,15 +113,17 @@ func (f *fakeHarness) Detect(ctx context.Context, _ string) ports.HarnessInfo {
 	return info
 }
 func (f *fakeHarness) ValidateProfile(ports.HarnessInfo, string, string) error { return nil }
-func (f *fakeHarness) UserItem(kind, name string) (ports.ResolvedItem, bool) {
+func (f *fakeHarness) UserItem(_ context.Context, _ ports.HarnessInfo, kind, name, _ string) (ports.ResolvedItem, bool, []ports.DiscoveryError, error) {
 	found := kind == "skill" && name == "user-skill" || kind == "agent" && name == "user-agent" ||
 		kind == "skill" && name == "review-notes" && f.id == domain.HarnessClaudeCode
 	if !found {
-		return ports.ResolvedItem{}, false
+		return ports.ResolvedItem{}, false, nil, nil
 	}
-	return ports.ResolvedItem{Name: name, Kind: kind, Path: filepath.Join("/", f.id, kind+"s", name)}, true
+	return ports.ResolvedItem{Name: name, Kind: kind, Path: filepath.Join("/", f.id, kind+"s", name)}, true, nil, nil
 }
-func (f *fakeHarness) UserItems(string) []ports.ResolvedItem { return nil }
+func (f *fakeHarness) UserItems(context.Context, ports.HarnessInfo, string, string) ([]ports.ResolvedItem, []ports.DiscoveryError, error) {
+	return nil, nil, nil
+}
 func (f *fakeHarness) Prepare(_ ports.HarnessInfo, req ports.RunRequest) (ports.Invocation, ports.OutputParser, error) {
 	f.mu.Lock()
 	parser := &fakeParser{}
@@ -3236,7 +3238,7 @@ func TestCatalogCarriesTheAgentCopy(t *testing.T) {
 		t.Fatalf("os.WriteFile(hf-reviewer.md) = %v, want no error", err)
 	}
 	var entry *CatalogEntry
-	for _, a := range e.app.Catalog().Agents {
+	for _, a := range e.app.Catalog(t.Context(), "").Agents {
 		if a.Name == "hf-reviewer" {
 			entry = &a
 		}
@@ -3254,7 +3256,7 @@ func TestCatalogCarriesTheAgentCopy(t *testing.T) {
 	if want := []string{domain.HarnessClaudeCode, domain.HarnessCodex}; !slices.Equal(c.ModelHarnesses, want) {
 		t.Errorf("Catalog() copy of hf-reviewer: model harnesses = %v, want %v", c.ModelHarnesses, want)
 	}
-	for _, s := range e.app.Catalog().Skills {
+	for _, s := range e.app.Catalog(t.Context(), "").Skills {
 		if s.Copy != nil {
 			t.Errorf("Catalog() skill %s: copy = %+v, want none", s.Name, s.Copy)
 		}

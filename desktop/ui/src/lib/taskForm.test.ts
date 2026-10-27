@@ -18,6 +18,7 @@ import {
 const catalog: Catalog = {
   agents: [],
   skills: [],
+  problems: [],
   taskTypes: [
     {
       id: "github-issue-implementation",

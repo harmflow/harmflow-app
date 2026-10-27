@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ApiError, api } from "../api/client";
 import { native } from "../api/native";
-import type { Task, TaskInput, ValidationResult } from "../api/types";
+import type { Catalog, Task, TaskInput, ValidationResult } from "../api/types";
 import { daemonText } from "../lib/daemonText";
 import { useDebounced } from "../lib/hooks";
 import type { Doc } from "../lib/taskForm";
@@ -61,6 +61,22 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
   const { tipped, tooltip } = useTooltip(tipBelow);
 
   const showExternal = !!task && externalChange !== undefined && externalChange > openedAtEvent.current && !externalSeen;
+
+  // A harness that finds the user's skills per workspace, as Codex does, offers the ones it has in the task's workspace:
+  // the catalog is asked for it, and the one already loaded stands in until it answers.
+  const spec = doc.spec as { workspace?: { path?: unknown } } | undefined;
+  const workspace = useDebounced(typeof spec?.workspace?.path === "string" ? spec.workspace.path : "", 500);
+  const [workspaceCatalog, setWorkspaceCatalog] = useState<Catalog>();
+  useEffect(() => {
+    let cancelled = false;
+    api.catalog(workspace || undefined).then(
+      (c) => !cancelled && setWorkspaceCatalog(c),
+      () => {}, // the catalog already loaded stays
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [workspace]);
 
   const input = (): TaskInput => (tab === "form" ? { document: doc, baseRevision } : { yaml, baseRevision });
 
@@ -269,7 +285,7 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
             <TaskForm
               doc={doc}
               mode={mode}
-              catalog={catalog}
+              catalog={workspaceCatalog ?? catalog}
               harnesses={harnesses}
               errorPaths={errorPaths}
               onChange={(next) => {

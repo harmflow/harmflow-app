@@ -164,6 +164,14 @@ paths:
       tags: [tasks]
       operationId: getCatalog
       summary: Agents and skills a task can cite, built in or the user's
+      parameters:
+        - name: workspace
+          in: query
+          required: false
+          description: >-
+            The folder a harness that finds the user's items per workspace, such as Codex for its skills, lists them
+            for: a task's workspace path, expanded as the task's paths are. HarmFlow's workspace root when absent.
+          schema: { type: string }
       responses:
         "200":
           description: The catalog.
@@ -751,6 +759,13 @@ components:
         - skill_missing
         - fallback_agent_missing
         - fallback_skill_missing
+        - skill_list_unreadable
+        - fallback_skill_list_unreadable
+        - codex_app_server_missing
+        - codex_app_server_start_failed
+        - codex_app_server_exited
+        - codex_app_server_timed_out
+        - codex_app_server_error
         - fallback_repeats_preferred
         - path_variable_unterminated
         - path_variable_undefined
@@ -1043,12 +1058,27 @@ components:
         omittedFields: { type: array, items: { type: string } }
         hash: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
 
+    CatalogProblem:
+      description: >-
+        What kept a harness from listing the user's items in full: a file it reported it could not load, with its own
+        message and no key, or its list that could not be read, as a text of the daemon's.
+      type: object
+      required: [harness, kind, message]
+      properties:
+        harness: { type: string }
+        kind: { type: string, enum: [agent, skill] }
+        path: { type: string, description: "The file the harness could not load." }
+        message: { type: string }
+        messageKey: { $ref: "#/components/schemas/MessageKey" }
+        params: { $ref: "#/components/schemas/MessageParams" }
+
     Catalog:
       type: object
-      required: [agents, skills, taskTypes]
+      required: [agents, skills, taskTypes, problems]
       properties:
         agents: { type: array, items: { $ref: "#/components/schemas/CatalogEntry" } }
         skills: { type: array, items: { $ref: "#/components/schemas/CatalogEntry" } }
+        problems: { type: array, items: { $ref: "#/components/schemas/CatalogProblem" } }
         taskTypes:
           type: array
           items:

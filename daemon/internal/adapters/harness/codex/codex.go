@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/catalog"
@@ -36,20 +37,30 @@ const (
 var requiredFlags = []string{"--json", "--sandbox", "--cd", "--skip-git-repo-check"}
 
 // Adapter is the HarnessAdapter of the Codex CLI. It looks for the CLI on PathEnv, then in KnownLocations, and runs its
-// probes with Env; the user's agents and skills, its models cache, and its configuration are read from the Codex home
-// under Home, or CODEX_HOME.
+// probes with Env; the user's agents, its models cache, and its configuration are read from the Codex home under Home,
+// or CODEX_HOME. The user's skills are the ones Codex's app server lists, from one server it keeps running until Close.
 type Adapter struct {
 	Home    string
 	PathEnv string
 	Env     []string
 	// KnownLocations are searched after PATH; nil is the usual install locations, an empty list none.
 	KnownLocations []string
+	// ClientVersion is the version HarmFlow names itself with to the app server.
+	ClientVersion string
+
+	mu          sync.Mutex
+	server      *appServer
+	reload      bool          // the next skills/list carries forceReload
+	listTimeout time.Duration // a call to the app server; zero is defaultListTimeout
 }
 
 var (
 	_ ports.HarnessAdapter    = (*Adapter)(nil)
 	_ ports.HarnessIdentifier = (*Adapter)(nil)
 	_ ports.ProfileWarner     = (*Adapter)(nil)
+	_ ports.ItemReloader      = (*Adapter)(nil)
+	_ ports.HarnessCloser     = (*Adapter)(nil)
+	_ ports.WorkspaceLister   = (*Adapter)(nil)
 )
 
 // ID implements ports.HarnessAdapter: the harness's identifier.
@@ -135,6 +146,10 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 	for _, f := range append(requiredFlags, "--add-dir", "--ephemeral", "--model", "--color") {
 		info.Features[f] = strings.Contains(help, f)
 	}
+	// The app server lists the user's skills. Codex 0.163.0 marks the command experimental, though skills/list is in its
+	// stable schema; the help lists it either way.
+	top, _, _ := procutil.Output(ctx, 15*time.Second, a.Env, info.Path, "--help")
+	info.Features["app-server"] = strings.Contains(top, "app-server")
 	info.VersionSupport = "supported"
 	for _, f := range requiredFlags {
 		if !info.Features[f] {
@@ -313,13 +328,33 @@ func (a *Adapter) ProfileWarning(info ports.HarnessInfo, model, effort string) (
 
 func (a *Adapter) userDir() catalog.Dir { return catalog.Dir{Root: a.codexHome()} }
 
-// UserItem implements ports.HarnessAdapter, looking the item up in the Codex home.
-func (a *Adapter) UserItem(kind, name string) (ports.ResolvedItem, bool) {
-	return a.userDir().Item(kind, name)
+// UserItem implements ports.HarnessAdapter: a skill is the first of that name in Codex's skill list for workspace, an
+// agent is looked up in the Codex home.
+func (a *Adapter) UserItem(ctx context.Context, info ports.HarnessInfo, kind, name, workspace string) (ports.ResolvedItem, bool, []ports.DiscoveryError, error) {
+	if kind != "skill" {
+		it, ok := a.userDir().Item(kind, name)
+		return it, ok, nil, nil
+	}
+	items, problems, err := a.skills(ctx, info, workspace)
+	if err != nil {
+		return ports.ResolvedItem{}, false, nil, err
+	}
+	for _, it := range items {
+		if it.Name == name {
+			return it, true, problems, nil
+		}
+	}
+	return ports.ResolvedItem{}, false, problems, nil
 }
 
-// UserItems implements ports.HarnessAdapter: the agents or skills of the Codex home.
-func (a *Adapter) UserItems(kind string) []ports.ResolvedItem { return a.userDir().Items(kind) }
+// UserItems implements ports.HarnessAdapter: the skills of Codex's skill list for workspace, or the agents of the Codex
+// home.
+func (a *Adapter) UserItems(ctx context.Context, info ports.HarnessInfo, kind, workspace string) ([]ports.ResolvedItem, []ports.DiscoveryError, error) {
+	if kind != "skill" {
+		return a.userDir().Items(kind), nil, nil
+	}
+	return a.skills(ctx, info, workspace)
+}
 
 // Prepare implements ports.HarnessAdapter: a `codex exec --json` invocation with the model and effort asked for and the
 // permission profile translated to a sandbox, with the restrictions it enforces and those it cannot. Its stdin is the

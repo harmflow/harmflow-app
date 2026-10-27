@@ -33,12 +33,21 @@ esac
 // installed on this machine ever runs.
 func newCodexApp(t *testing.T) (*App, string) {
 	t.Helper()
+	return newCodexAppOn(t, standInCodex)
+}
+
+// newCodexAppOn is newCodexApp on the stand-in script given; its Codex adapter, and the app server it may start, end
+// with the test.
+func newCodexAppOn(t *testing.T, script string) (*App, string) {
+	t.Helper()
 	codexHome := t.TempDir()
 	t.Setenv("CODEX_HOME", codexHome)
 	bin := filepath.Join(t.TempDir(), "codex")
-	if err := os.WriteFile(bin, []byte(standInCodex), 0o700); err != nil {
+	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	cx := &codex.Adapter{Home: t.TempDir(), KnownLocations: []string{}}
+	t.Cleanup(cx.Close)
 	paths := NewPaths(t.TempDir(), t.TempDir(), t.TempDir())
 	tasks, _ := fsstore.NewTasks(paths.Tasks)
 	state, _ := fsstore.NewState(paths.State)
@@ -50,7 +59,7 @@ func newCodexApp(t *testing.T) (*App, string) {
 	}
 	a, err := New(Deps{Paths: paths, Version: "test", Location: time.UTC, Tasks: tasks, State: state,
 		Executions: execs, Events: events, Validator: v, TickInterval: time.Hour, Logger: log.New(io.Discard, "", 0),
-		Harnesses: []ports.HarnessAdapter{&fakeHarness{id: domain.HarnessClaudeCode}, &codex.Adapter{Home: t.TempDir()}}})
+		Harnesses: []ports.HarnessAdapter{&fakeHarness{id: domain.HarnessClaudeCode}, cx}})
 	if err != nil {
 		t.Fatal(err)
 	}

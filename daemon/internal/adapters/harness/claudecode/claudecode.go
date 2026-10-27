@@ -229,14 +229,17 @@ func (a *Adapter) ValidateProfile(info ports.HarnessInfo, model, effort string) 
 	return nil
 }
 
-// UserItem implements ports.HarnessAdapter, looking the item up in Claude Code's configuration directory.
-func (a *Adapter) UserItem(kind, name string) (ports.ResolvedItem, bool) {
-	return catalog.Dir{Root: a.configDir()}.Item(kind, name)
+// UserItem implements ports.HarnessAdapter, looking the item up in Claude Code's configuration directory, whatever the
+// workspace.
+func (a *Adapter) UserItem(_ context.Context, _ ports.HarnessInfo, kind, name, _ string) (ports.ResolvedItem, bool, []ports.DiscoveryError, error) {
+	it, ok := catalog.Dir{Root: a.configDir()}.Item(kind, name)
+	return it, ok, nil, nil
 }
 
-// UserItems implements ports.HarnessAdapter: the agents or skills of Claude Code's configuration directory.
-func (a *Adapter) UserItems(kind string) []ports.ResolvedItem {
-	return catalog.Dir{Root: a.configDir()}.Items(kind)
+// UserItems implements ports.HarnessAdapter: the agents or skills of Claude Code's configuration directory, whatever the
+// workspace.
+func (a *Adapter) UserItems(_ context.Context, _ ports.HarnessInfo, kind, _ string) ([]ports.ResolvedItem, []ports.DiscoveryError, error) {
+	return catalog.Dir{Root: a.configDir()}.Items(kind), nil, nil
 }
 
 var readTools = []string{"Read", "Glob", "Grep", "Skill", "Task", "TodoWrite"}

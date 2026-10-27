@@ -628,6 +628,23 @@ func TestOrigin(t *testing.T) {
 	}
 }
 
+// A name is an identifier as the task schema defines one: what a task can cite. A plugin's skill, a name in caps, and
+// one too long are not.
+func TestValidIdentifier(t *testing.T) {
+	v, err := New()
+	if err != nil {
+		t.Fatalf("New() = %v, want no error", err)
+	}
+	for name, want := range map[string]bool{
+		"my-skill": true, "hf-github-worktree": true, "imagegen": true, "a": true, strings.Repeat("a", 64): true,
+		"pdf:pdf": false, "My-Skill": false, "-skill": false, "skill-": false, "": false, strings.Repeat("a", 65): false,
+	} {
+		if got := v.ValidIdentifier(name); got != want {
+			t.Errorf("ValidIdentifier(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
+
 // A schema error carries a key and params the desktop translates, beside its en-US text.
 func TestSchemaErrorsAreTranslatable(t *testing.T) {
 	v, _ := New()
