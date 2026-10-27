@@ -15,8 +15,8 @@ import (
 )
 
 // appServerStandIn writes a stand-in for the codex CLI whose `app-server` answers initialize, and answers skills/list
-// with the shell commands onList, which read the request's id in $id. Every line the server receives is appended to
-// the file it returns second.
+// and account/rateLimits/read with the shell commands onList, which read the request's id in $id. Every line the server
+// receives is appended to the file it returns second.
 func appServerStandIn(t *testing.T, onList string) (string, string) {
 	t.Helper()
 	dir := tempDir(t)
@@ -33,7 +33,7 @@ case "$1" in
       id=$(printf '%s' "$line" | sed -n 's/^{"id":\([0-9]*\),.*/\1/p')
       case "$line" in
         *'"method":"initialize"'*) printf '{"id":%s,"result":{"userAgent":"stand-in"}}\n' "$id" ;;
-        *'"method":"skills/list"'*) ` + onList + ` ;;
+        *'"method":"skills/list"'*|*'"method":"account/rateLimits/read"'*) ` + onList + ` ;;
       esac
     done ;;
 esac
