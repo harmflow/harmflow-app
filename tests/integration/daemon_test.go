@@ -1045,8 +1045,8 @@ func completeTask(id, repo string) map[string]any {
 		"metadata": map[string]any{"id": id, "name": "Complete " + id, "description": "Every section of the form, set."},
 		"spec": map[string]any{
 			"enabled": false,
-			"type":    "github-issue-implementation",
-			"githubIssueImplementation": map[string]any{
+			"type":    "github",
+			"github": map[string]any{
 				"repositories": []any{map[string]any{"name": "harmflow/example", "localPath": repo, "baseBranch": "develop"}},
 				"queue": map[string]any{"ordering": "newest_first", "maxDiscoveredPerCycle": 5, "maxItemsPerCycle": 2,
 					"resumeStrategy": "alternate", "maxResumeAttempts": 1, "maxFailedRetries": 0},

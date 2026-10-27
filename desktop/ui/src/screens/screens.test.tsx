@@ -44,7 +44,7 @@ const running: ExecutionSummary = {
   id: "exec-8f3a2c",
   taskId: "implementacao-core",
   taskName: "Implement GitHub issues",
-  taskType: "github-issue-implementation",
+  taskType: "github",
   status: "running",
   trigger: "schedule",
   createdAt: "2026-10-20T19:23:10-03:00",
@@ -97,7 +97,7 @@ const harness: Harness = {
 const task: TaskSummary = {
   id: "implementacao-core",
   name: "Implement GitHub issues",
-  type: "github-issue-implementation",
+  type: "github",
   enabled: true,
   revision: "r1",
   harness: "claude-code",
@@ -387,8 +387,21 @@ describe("screens", () => {
   it("asks for repositories only for the GitHub type", () => {
     const form = (doc: Record<string, unknown>) =>
       renderToString(<TaskForm doc={doc} onChange={() => {}} mode="create" harnesses={[harness]} errorPaths={new Set()} />);
-    expect(form(newTaskDocument("github-issue-implementation", undefined, "A"))).toContain("Repositórios");
+    expect(form(newTaskDocument("github", undefined, "A"))).toContain("Repositórios");
     expect(form(newTaskDocument("general", undefined, "B"))).not.toContain("Repositórios");
+  });
+
+  it("labels the type GitHub and presents its repositories and limits as any GitHub task's", () => {
+    // No catalog: the task selects no built-in implementer, and its form is the same.
+    const html = renderToString(
+      <TaskForm doc={newTaskDocument("github", undefined, "Merge")} onChange={() => {}} mode="create" harnesses={[harness]} errorPaths={new Set()} />,
+    );
+    for (const shown of ["Parâmetros do tipo — GitHub", "Itens descobertos por ciclo", "Itens processados por execução", "Novas tentativas de um item que falhou"]) {
+      expect(html).toContain(shown);
+    }
+    for (const hidden of ["Implementar issues do GitHub", "Issues descobertas", "Issues processadas", "uma issue que falhou", "Quais issues são elegíveis"]) {
+      expect(html).not.toContain(hidden);
+    }
   });
 
   it("asks a script task for its program, and for no prompt, agents, or harness", () => {

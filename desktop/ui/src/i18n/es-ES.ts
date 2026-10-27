@@ -449,7 +449,7 @@ export const esES: Resources = {
     claude_not_found: "no se encontró claude en el PATH ni en las ubicaciones de instalación habituales",
     codex_not_found: "no se encontró codex en el PATH, en Codex.app ni en las ubicaciones de instalación habituales",
     git_not_found: "no se encontró git",
-    gh_not_found: "no se encontró la CLI de GitHub (gh); el tipo de issue de GitHub la necesita",
+    gh_not_found: "no se encontró la CLI de GitHub (gh); el tipo de tarea GitHub la necesita",
     command_failed: "{{command}} falló: {{detail}}",
     harness_feature_missing: "esta versión de {{harness}} no tiene {{feature}}, que HarmFlow necesita",
     harness_version_below_minimum: "{{harness}} {{version}} es anterior a la {{minimum}}, la línea de versiones más antigua que admite HarmFlow",
@@ -886,7 +886,7 @@ export const esES: Resources = {
       scriptHint: "Ejecuta un programa o un script tuyo según una programación — en lugar de un agente de launchd, del Programador de tareas o de cron.",
     },
     types: {
-      "github-issue-implementation": "Implementar issues de GitHub",
+      github: "GitHub",
       general: "General",
       script: "Script",
     },
@@ -967,14 +967,14 @@ export const esES: Resources = {
       localPath: "Ruta local",
       baseBranch: "Rama base",
       addRepository: "Añadir repositorio",
-      issueSelectionHint:
-        "Qué issues son elegibles se escribe en el prompt; HarmFlow no tiene sintaxis de filtros propia.",
+      workSelectionHint:
+        "Qué trabaja la tarea en estos repositorios, y cómo, se escribe en su prompt y en sus agentes y skills; HarmFlow no tiene sintaxis de filtros propia.",
       ordering: "Orden",
-      maxDiscoveredPerCycle: "Issues descubiertas por ciclo",
-      maxItemsPerCycle: "Issues procesadas por ejecución",
+      maxDiscoveredPerCycle: "Elementos descubiertos por ciclo",
+      maxItemsPerCycle: "Elementos procesados por ejecución",
       resumeStrategy: "Prioridad de reanudación",
       maxResumeAttempts: "Reanudaciones antes de requerir atención",
-      maxFailedRetries: "Reintentos de una issue fallida",
+      maxFailedRetries: "Reintentos de un elemento fallido",
       testRepairAttempts: "Intentos de reparar pruebas",
       preferred: "Harness preferido",
       provider: "Harness",
@@ -1039,8 +1039,8 @@ export const esES: Resources = {
         "Nada confina el programa de un script: se ejecuta con tus derechos, y cada restricción de abajo aparece como no aplicada.",
     },
     options: {
-      ordering: { oldest_first: "Más antiguas primero", newest_first: "Más recientes primero" },
-      resumeStrategy: { resume_first: "Reanudaciones primero", new_first: "Nuevas primero", alternate: "Alternar" },
+      ordering: { oldest_first: "Más antiguos primero", newest_first: "Más recientes primero" },
+      resumeStrategy: { resume_first: "Reanudaciones primero", new_first: "Nuevos primero", alternate: "Alternar" },
       missedRun: { run_on_resume: "Ejecutar una vez al volver", skip: "Omitir" },
       overlap: { queue: "Esperar en la cola", skip: "Omitir" },
       repeat: {
@@ -1185,7 +1185,7 @@ export const esES: Resources = {
         local: "Las tareas, el estado y los logs se quedan en esta máquina.",
         permissions:
           "Cada tarea declara qué puede tocar su agente; HarmFlow lo aplica mediante los controles del propio harness y avisa cuando una restricción no se puede aplicar.",
-        github: "El trabajo en GitHub usa tu sesión de gh y Git. HarmFlow nunca hace merge de un pull request.",
+        github: "El trabajo en GitHub usa tu sesión de gh y Git. El implementador de issues integrado nunca hace merge de un pull request.",
         api: "El panel habla con el daemon mediante una API local autenticada.",
       },
     },

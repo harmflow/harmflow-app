@@ -185,7 +185,7 @@ func (a *App) taskLimits(taskID string) domain.WorkItemLimits {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if e := a.tasks[taskID]; e != nil {
-		if g := e.doc.Effective().Spec.GitHubIssueImplementation; g != nil {
+		if g := e.doc.Effective().Spec.GitHub; g != nil {
 			l.MaxResumeAttempts, l.MaxFailedRetries = *g.Queue.MaxResumeAttempts, *g.Queue.MaxFailedRetries
 		}
 	}

@@ -105,7 +105,7 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
   };
 
   const type = get<string>(["spec", "type"]) ?? "general";
-  const isGithub = type === "github-issue-implementation";
+  const isGithub = type === "github";
   // A script task runs a program instead of a harness session: no prompt, agents, skills, or harness.
   const isScript = type === "script";
 
@@ -185,24 +185,24 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
       )}
 
       {isGithub ? (
-        <Section id="type" title={`${t("tasks.sections.type")} — ${t("tasks.types.github-issue-implementation")}`} icon="code">
+        <Section id="type" title={`${t("tasks.sections.type")} — ${t("tasks.types.github")}`} icon="code">
           <h4 className="subhead">{t("tasks.fields.repositories")}</h4>
           <RepositoryList
-            rows={get<Item[]>(["spec", "githubIssueImplementation", "repositories"]) ?? []}
-            onChange={(rows) => set(["spec", "githubIssueImplementation", "repositories"], rows)}
+            rows={get<Item[]>(["spec", "github", "repositories"]) ?? []}
+            onChange={(rows) => set(["spec", "github", "repositories"], rows)}
             errorPaths={errorPaths}
           />
           <p className="hint-line">
-            <Icon name="sparkle" size={13} /> {t("tasks.fields.issueSelectionHint")}
+            <Icon name="sparkle" size={13} /> {t("tasks.fields.workSelectionHint")}
           </p>
           <div className="grid-3">
-            <EnumField path={["spec", "githubIssueImplementation", "queue", "ordering"]} label={t("tasks.fields.ordering")} optionKey="ordering" doc={doc} set={set} defLabel={defLabel} />
-            <IntField path={["spec", "githubIssueImplementation", "queue", "maxDiscoveredPerCycle"]} label={t("tasks.fields.maxDiscoveredPerCycle")} doc={doc} set={set} />
-            <IntField path={["spec", "githubIssueImplementation", "queue", "maxItemsPerCycle"]} label={t("tasks.fields.maxItemsPerCycle")} doc={doc} set={set} />
-            <EnumField path={["spec", "githubIssueImplementation", "queue", "resumeStrategy"]} label={t("tasks.fields.resumeStrategy")} optionKey="resumeStrategy" doc={doc} set={set} defLabel={defLabel} />
-            <IntField path={["spec", "githubIssueImplementation", "queue", "maxResumeAttempts"]} label={t("tasks.fields.maxResumeAttempts")} doc={doc} set={set} />
-            <IntField path={["spec", "githubIssueImplementation", "queue", "maxFailedRetries"]} label={t("tasks.fields.maxFailedRetries")} doc={doc} set={set} />
-            <IntField path={["spec", "githubIssueImplementation", "delivery", "testRepairAttempts"]} label={t("tasks.fields.testRepairAttempts")} doc={doc} set={set} />
+            <EnumField path={["spec", "github", "queue", "ordering"]} label={t("tasks.fields.ordering")} optionKey="ordering" doc={doc} set={set} defLabel={defLabel} />
+            <IntField path={["spec", "github", "queue", "maxDiscoveredPerCycle"]} label={t("tasks.fields.maxDiscoveredPerCycle")} doc={doc} set={set} />
+            <IntField path={["spec", "github", "queue", "maxItemsPerCycle"]} label={t("tasks.fields.maxItemsPerCycle")} doc={doc} set={set} />
+            <EnumField path={["spec", "github", "queue", "resumeStrategy"]} label={t("tasks.fields.resumeStrategy")} optionKey="resumeStrategy" doc={doc} set={set} defLabel={defLabel} />
+            <IntField path={["spec", "github", "queue", "maxResumeAttempts"]} label={t("tasks.fields.maxResumeAttempts")} doc={doc} set={set} />
+            <IntField path={["spec", "github", "queue", "maxFailedRetries"]} label={t("tasks.fields.maxFailedRetries")} doc={doc} set={set} />
+            <IntField path={["spec", "github", "delivery", "testRepairAttempts"]} label={t("tasks.fields.testRepairAttempts")} doc={doc} set={set} />
           </div>
         </Section>
       ) : null}
@@ -698,7 +698,7 @@ function NamePicker({
 
 function RepositoryList({ rows, onChange, errorPaths }: { rows: Item[]; onChange: (rows: Item[] | undefined) => void; errorPaths: Set<string> }) {
   const { t } = useTranslation();
-  const base = "/spec/githubIssueImplementation/repositories";
+  const base = "/spec/github/repositories";
   const update = (i: number, key: string, v: string) => onChange(rows.map((r, j) => (j === i ? cleanRow({ ...r, [key]: v }) : r)));
   return (
     <div className="row-list">
@@ -724,7 +724,7 @@ function RepositoryList({ rows, onChange, errorPaths }: { rows: Item[]; onChange
           />
           <TextInput
             className="mono"
-            placeholder={String(schemaDefault(["spec", "githubIssueImplementation", "repositories", 0, "baseBranch"]) ?? "main")}
+            placeholder={String(schemaDefault(["spec", "github", "repositories", 0, "baseBranch"]) ?? "main")}
             value={(row.baseBranch as string) ?? ""}
             onChange={(e) => update(i, "baseBranch", e.target.value)}
           />

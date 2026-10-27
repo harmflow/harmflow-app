@@ -278,7 +278,8 @@ type ProcessIdentity struct {
 const ExecutionSchemaVersion = "2"
 
 // Upgrade reads a record of an older schema as the current one. In schema 1, an attempt's model and effort were the
-// configured ones, so they move to ConfiguredModel and ConfiguredEffort, and the used ones read not reported.
+// configured ones, so they move to ConfiguredModel and ConfiguredEffort, and the used ones read not reported. A record
+// of any schema may name its task's type by a legacy name, which reads as the current one.
 func (x *Execution) Upgrade() {
 	if x.SchemaVersion == "1" {
 		for i := range x.Attempts {
@@ -287,6 +288,7 @@ func (x *Execution) Upgrade() {
 		}
 		x.Model = ""
 	}
+	x.TaskType = CanonicalType(x.TaskType)
 	x.SchemaVersion = ExecutionSchemaVersion
 }
 

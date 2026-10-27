@@ -21,8 +21,8 @@ const catalog: Catalog = {
   problems: [],
   taskTypes: [
     {
-      id: "github-issue-implementation",
-      parametersKey: "githubIssueImplementation",
+      id: "github",
+      parametersKey: "github",
       defaultAgents: [],
       defaultSkills: ["hf-github-issue-implementer", "hf-github-draft-pr"],
       defaultPrompt: "Implement the oldest issue labeled agent-ready.",
@@ -63,20 +63,21 @@ describe("form ↔ document", () => {
   });
 
   it("builds a GitHub task from the catalog, with repositories only for that type", () => {
-    const github = newTaskDocument("github-issue-implementation", catalog, "Implement GitHub issues");
+    const github = newTaskDocument("github", catalog, "Implement GitHub issues");
     expect(github).toMatchObject({
       apiVersion: "harmflow/v1alpha1",
       kind: "Task",
       metadata: { id: "implement-github-issues", name: "Implement GitHub issues" },
       spec: {
-        type: "github-issue-implementation",
+        type: "github",
+        prompt: "Implement the oldest issue labeled agent-ready.",
         skills: ["hf-github-issue-implementer", "hf-github-draft-pr"],
-        githubIssueImplementation: { repositories: [{ baseBranch: "main" }] },
+        github: { repositories: [{ baseBranch: "main" }] },
       },
     });
     expect(getIn(github, ["spec", "agents"])).toBeUndefined();
     const general = newTaskDocument("general", catalog, "Triagem de e-mail");
-    expect(getIn(general, ["spec", "githubIssueImplementation"])).toBeUndefined();
+    expect(getIn(general, ["spec", "github"])).toBeUndefined();
     expect(getIn(general, ["metadata", "id"])).toBe("triagem-de-e-mail");
   });
 
@@ -88,14 +89,14 @@ describe("form ↔ document", () => {
 describe("schema", () => {
   it("reads the defaults from the contract", () => {
     expect(schemaDefault(["spec", "execution", "timeoutMinutes"])).toBe(60);
-    expect(schemaDefault(["spec", "githubIssueImplementation", "queue", "maxItemsPerCycle"])).toBe(1);
-    expect(schemaDefault(["spec", "githubIssueImplementation", "queue", "ordering"])).toBe("oldest_first");
+    expect(schemaDefault(["spec", "github", "queue", "maxItemsPerCycle"])).toBe(1);
+    expect(schemaDefault(["spec", "github", "queue", "ordering"])).toBe("oldest_first");
     expect(schemaDefault(["spec", "harness", "fallback", "maxSwitches"])).toBe(1);
     expect(schemaDefault(["spec", "execution", "cancelGraceSeconds"])).toBe(30);
   });
 
   it("reads closed sets from the contract", () => {
-    expect(schemaEnum(["spec", "type"])).toEqual(["github-issue-implementation", "general", "script"]);
+    expect(schemaEnum(["spec", "type"])).toEqual(["github", "general", "script"]);
     expect(schemaEnum(["spec", "schedule", "missedRun", "policy"])).toEqual(["run_on_resume", "skip"]);
     expect(schemaEnum(["spec", "notifications", "native", "events"])).toContain("pull_request.created");
     expect(schemaEnum(["spec", "script", "systems"])).toEqual(["macos", "linux", "windows"]);

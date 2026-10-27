@@ -19,12 +19,12 @@ metadata:
   id: %s
   name: Task %s
 spec:
-  type: github-issue-implementation
+  type: github
   prompt: Implement the oldest eligible issue.
   harness:
     preferred:
       provider: claude-code
-  githubIssueImplementation:
+  github:
     repositories:
       - name: octo/repo
         localPath: %s
@@ -69,7 +69,7 @@ func TestTaskPathsAreChecked(t *testing.T) {
 		return taskYAML("t", "  permissions:\n    profile: custom\n    custom:\n      writablePaths: ["+p+"]\n")
 	}
 	const ws, wp = "/spec/workspace/path", "/spec/permissions/custom/writablePaths/0"
-	const lp = "/spec/githubIssueImplementation/repositories/0/localPath"
+	const lp = "/spec/github/repositories/0/localPath"
 	cases := []struct {
 		name, yaml, path, key string
 	}{

@@ -34,22 +34,22 @@ func TestEffectiveDefaults(t *testing.T) {
 	}
 
 	g := minimalTask()
-	g.Spec.Type = TypeGitHubIssueImplementation
-	g.Spec.GitHubIssueImplementation = &GitHubIssueImplementation{Repositories: []RepositoryTarget{{Name: "o/r", LocalPath: "/x"}}}
+	g.Spec.Type = TypeGitHub
+	g.Spec.GitHub = &GitHubSpec{Repositories: []RepositoryTarget{{Name: "o/r", LocalPath: "/x"}}}
 	g.Spec.Execution = &ExecutionLimits{TimeoutMinutes: ptr(20)}
 	ge := g.Effective().Spec
-	q := ge.GitHubIssueImplementation.Queue
+	q := ge.GitHub.Queue
 	if *ge.Execution.TimeoutMinutes != 20 {
 		t.Errorf("timeout override lost")
 	}
 	if q.Ordering != OrderingOldestFirst || q.ResumeStrategy != ResumeFirst || *q.MaxDiscoveredPerCycle != 10 ||
 		*q.MaxItemsPerCycle != 1 || *q.MaxResumeAttempts != 3 || *q.MaxFailedRetries != 3 ||
-		*ge.GitHubIssueImplementation.Delivery.TestRepairAttempts != 2 ||
-		ge.GitHubIssueImplementation.Repositories[0].BaseBranch != "main" {
+		*ge.GitHub.Delivery.TestRepairAttempts != 2 ||
+		ge.GitHub.Repositories[0].BaseBranch != "main" {
 		t.Errorf("queue defaults wrong: %+v", q)
 	}
 	// Effective never mutates the document it came from.
-	if g.Spec.GitHubIssueImplementation.Queue != nil || g.Spec.Permissions != nil {
+	if g.Spec.GitHub.Queue != nil || g.Spec.Permissions != nil {
 		t.Error("Effective mutated the original")
 	}
 }
@@ -62,7 +62,7 @@ func TestEffectiveWorkspaceFollowsTheType(t *testing.T) {
 	if w := script.Effective().Spec.Workspace; w != nil {
 		t.Errorf("script task: Effective().Spec.Workspace = %+v, want nil", *w)
 	}
-	for _, typ := range []string{TypeGeneral, TypeGitHubIssueImplementation} {
+	for _, typ := range []string{TypeGeneral, TypeGitHub} {
 		d := minimalTask()
 		d.Spec.Type = typ
 		if w := d.Effective().Spec.Workspace; w == nil || *w != (Workspace{}) {
@@ -200,6 +200,25 @@ func TestUpgradeMovesConfiguredValues(t *testing.T) {
 	x.Upgrade()
 	if x.Attempts[0].Model != "claude-sonnet-4-5" || x.Attempts[0].ConfiguredModel != "sonnet" {
 		t.Errorf("a current record changed: %+v", x.Attempts[0])
+	}
+}
+
+// A record of any schema that names its task's type by the GitHub type's legacy name reads as a GitHub task's, and
+// every other type stays as it is.
+func TestUpgradeReadsTheLegacyGitHubType(t *testing.T) {
+	for _, c := range []struct{ schema, recorded, want string }{
+		{"1", LegacyTypeGitHub, TypeGitHub},
+		{ExecutionSchemaVersion, LegacyTypeGitHub, TypeGitHub},
+		{ExecutionSchemaVersion, TypeGitHub, TypeGitHub},
+		{ExecutionSchemaVersion, TypeGeneral, TypeGeneral},
+		{ExecutionSchemaVersion, TypeScriptTask, TypeScriptTask},
+	} {
+		x := Execution{SchemaVersion: c.schema, TaskType: c.recorded}
+		x.Upgrade()
+		if x.TaskType != c.want {
+			t.Errorf("Upgrade() of a schema %s record of a %s task: TaskType = %q, want %q", c.schema, c.recorded,
+				x.TaskType, c.want)
+		}
 	}
 }
 

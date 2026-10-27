@@ -91,7 +91,7 @@ func (a *App) taskPathIssues(doc domain.TaskDocument, e pathEnv) []pathIssue {
 		writable("/spec/workspace/path", w.Path)
 	}
 	for i, repo := range doc.Repositories() {
-		writable(fmt.Sprintf("/spec/githubIssueImplementation/repositories/%d/localPath", i), repo.LocalPath)
+		writable(fmt.Sprintf("/spec/github/repositories/%d/localPath", i), repo.LocalPath)
 	}
 	if p := doc.Spec.Permissions; p != nil && p.Custom != nil {
 		for i, w := range p.Custom.WritablePaths {

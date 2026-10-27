@@ -80,7 +80,7 @@ export function listToLines(list: unknown): string {
   return Array.isArray(list) ? list.join("\n") : "";
 }
 
-export type TemplateKind = "github-issue-implementation" | "general" | "script";
+export type TemplateKind = "github" | "general" | "script";
 
 const BASE_DOCUMENT = { apiVersion: "harmflow/v1alpha1", kind: "Task" } as const;
 
@@ -98,8 +98,8 @@ export function newTaskDocument(kind: TemplateKind, catalog: Catalog | undefined
   };
   if (type?.defaultAgents.length) spec.agents = [...type.defaultAgents];
   if (type?.defaultSkills.length) spec.skills = [...type.defaultSkills];
-  if (kind === "github-issue-implementation") {
-    spec.githubIssueImplementation = { repositories: [{ name: "", localPath: "", baseBranch: "main" }] };
+  if (kind === "github") {
+    spec.github = { repositories: [{ name: "", localPath: "", baseBranch: "main" }] };
   }
   return {
     ...BASE_DOCUMENT,

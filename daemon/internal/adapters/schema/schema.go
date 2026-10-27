@@ -99,6 +99,93 @@ func ParseYAML(text []byte) (any, *yaml.Node, []Issue) {
 	return value, &node, nil
 }
 
+// RenameLegacy reads the GitHub type's legacy names in a task document as the current ones, in place: a spec whose
+// type is domain.LegacyTypeGitHub gets domain.TypeGitHub, and its domain.LegacyGitHubKey block becomes its github
+// block, unless the spec has one already, which validation then refuses beside the legacy one. It renames the decoded
+// value and, when node is not nil, the node tree it came from, whose nodes keep their lines and columns, so an issue is
+// still located in the text as written. It reports whether it renamed anything.
+func RenameLegacy(value any, node *yaml.Node) bool {
+	doc, _ := value.(map[string]any)
+	spec, ok := doc["spec"].(map[string]any)
+	if !ok {
+		return false
+	}
+	renamed := false
+	if spec["type"] == domain.LegacyTypeGitHub {
+		spec["type"] = domain.TypeGitHub
+		renamed = true
+	}
+	block, legacy := spec[domain.LegacyGitHubKey]
+	if _, current := spec["github"]; legacy && !current {
+		spec["github"] = block
+		delete(spec, domain.LegacyGitHubKey)
+		renamed = true
+	}
+	if renamed && node != nil {
+		renameLegacyNodes(node)
+	}
+	return renamed
+}
+
+// renameLegacyNodes makes in a node tree the renames RenameLegacy made in the value decoded from it. A type or a block
+// key written as an alias becomes a plain scalar where the alias stood, so the node it names keeps its value wherever
+// else the task uses it. A spec the value got through an alias, or a type or a block it got through a merge key, keeps
+// the legacy names in the tree; no valid task has one, since the mapping they come from would hold a type or a block
+// outside the spec, where the schema refuses them.
+func renameLegacyNodes(root *yaml.Node) {
+	spec := mappingValue(root, "spec")
+	if spec == nil {
+		return
+	}
+	current := mappingValue(spec, "github") != nil
+	for i := 0; i+1 < len(spec.Content); i += 2 {
+		switch key := scalarValue(spec.Content[i]); {
+		case key == "type" && scalarValue(spec.Content[i+1]) == domain.LegacyTypeGitHub:
+			spec.Content[i+1] = renamedScalar(spec.Content[i+1], domain.TypeGitHub)
+		case key == domain.LegacyGitHubKey && !current:
+			spec.Content[i] = renamedScalar(spec.Content[i], "github")
+		}
+	}
+}
+
+// mappingValue is the value of key in a mapping node, or in the mapping a document node holds; nil when there is none.
+func mappingValue(n *yaml.Node, key string) *yaml.Node {
+	if n.Kind == yaml.DocumentNode && len(n.Content) > 0 {
+		n = n.Content[0]
+	}
+	if n.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if scalarValue(n.Content[i]) == key {
+			return n.Content[i+1]
+		}
+	}
+	return nil
+}
+
+// scalarValue is the value of a scalar node, read through an alias; "" for any other node.
+func scalarValue(n *yaml.Node) string {
+	if n.Kind == yaml.AliasNode && n.Alias != nil {
+		n = n.Alias
+	}
+	if n.Kind != yaml.ScalarNode {
+		return ""
+	}
+	return n.Value
+}
+
+// renamedScalar is the scalar n with the value v. An alias gives way to a new scalar in its place, with its comments,
+// so the node it names keeps its value.
+func renamedScalar(n *yaml.Node, v string) *yaml.Node {
+	if n.Kind == yaml.AliasNode {
+		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: v, Line: n.Line, Column: n.Column,
+			HeadComment: n.HeadComment, LineComment: n.LineComment, FootComment: n.FootComment}
+	}
+	n.Value = v
+	return n
+}
+
 func syntaxIssue(err error) Issue {
 	msg := strings.TrimPrefix(err.Error(), "yaml: ")
 	is := Issue{Text: domain.T("yaml_syntax", "YAML syntax error: {{detail}}", "detail", msg), Code: "syntax"}

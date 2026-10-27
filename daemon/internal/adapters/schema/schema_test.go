@@ -8,6 +8,7 @@ import (
 	"go/token"
 	"maps"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"sort"
@@ -119,13 +120,13 @@ func TestSchemaVersionIsRequired(t *testing.T) {
 // A general task takes no repository; a GitHub task needs them; a schema error is located.
 func TestTypeParametersAndLocation(t *testing.T) {
 	v, _ := New()
-	gh := strings.Replace(valid, "type: general", "type: github-issue-implementation", 1)
+	gh := strings.Replace(valid, "type: general", "type: github", 1)
 	doc, node, _ := ParseYAML([]byte(gh))
 	issues := v.ValidateTask(doc, node)
-	if len(issues) == 0 || !strings.Contains(issues[0].Message, "githubIssueImplementation") {
+	if len(issues) == 0 || !strings.Contains(issues[0].Message, `"github"`) {
 		t.Fatalf("a GitHub task without repositories passed: %+v", issues)
 	}
-	withRepo := valid + "  githubIssueImplementation:\n    repositories:\n      - name: o/r\n        localPath: /x\n"
+	withRepo := valid + "  github:\n    repositories:\n      - name: o/r\n        localPath: /x\n"
 	doc, node, _ = ParseYAML([]byte(withRepo))
 	if issues := v.ValidateTask(doc, node); len(issues) == 0 {
 		t.Fatal("a general task accepted repositories")
@@ -135,6 +136,137 @@ func TestTypeParametersAndLocation(t *testing.T) {
 	issues = v.ValidateTask(doc, node)
 	if len(issues) == 0 || issues[0].Line != 12 || issues[0].Path != "/spec/harness/preferred/effort" {
 		t.Fatalf("got %+v, want the effort on line 12", issues)
+	}
+}
+
+// legacyGitHub is a GitHub task under the type's legacy names, its block's localPath on line 15.
+const legacyGitHub = `apiVersion: harmflow/v1alpha1
+kind: Task
+metadata:
+  id: implement-issues
+  name: Implement issues
+spec:
+  type: github-issue-implementation
+  prompt: Implement the oldest ready issue.
+  harness:
+    preferred:
+      provider: claude-code
+  githubIssueImplementation:
+    repositories:
+      - name: octo/app
+        localPath: /src/app
+`
+
+// A task file with the GitHub type's legacy names, or with either of them, reads as a github task with a github block,
+// in the value the schema validates and in the node tree a save encodes, even when the type or the block's key is an
+// alias. A spec that has both blocks keeps them, and the schema refuses the legacy one; a document with the current
+// names, or with no spec mapping, is left as it is.
+func TestRenameLegacy(t *testing.T) {
+	v, err := New()
+	if err != nil {
+		t.Fatalf("New() = %v, want no error", err)
+	}
+	current := strings.NewReplacer("type: github-issue-implementation", "type: github",
+		"githubIssueImplementation:", "github:").Replace(legacyGitHub)
+	cases := []struct {
+		name, text string
+		renamed    bool
+		// keeps is whether the legacy block stays beside a github block.
+		keeps bool
+		// tree is whether the node tree, decoded again, reads as the renamed value: a spec reached through an alias or
+		// a merge key keeps its legacy names in the tree.
+		tree bool
+		// task is whether the text is a whole task, which issues are the keys of what validation finds in.
+		task   bool
+		issues []string
+	}{
+		{"legacy type and block", legacyGitHub, true, false, true, true, nil},
+		{"legacy block only", strings.Replace(legacyGitHub, "type: github-issue-implementation", "type: github", 1),
+			true, false, true, true, nil},
+		{"legacy type only", strings.Replace(legacyGitHub, "githubIssueImplementation:", "github:", 1),
+			true, false, true, true, nil},
+		{"current names", current, false, false, true, true, nil},
+		{"both blocks", legacyGitHub + "  github:\n    repositories:\n      - name: o/r\n        localPath: /x\n",
+			true, true, true, true, []string{"schema_additional_properties"}},
+		{"no spec", "apiVersion: harmflow/v1alpha1\n", false, false, true, false, nil},
+		{"a spec that is no mapping", "spec: text\n", false, false, true, false, nil},
+		{"a type through an alias", strings.NewReplacer("name: Implement issues", "name: &t github-issue-implementation",
+			"type: github-issue-implementation", "type: *t").Replace(legacyGitHub), true, false, true, true, nil},
+		{"a block key through an alias", strings.NewReplacer("name: Implement issues", "name: &k githubIssueImplementation",
+			"githubIssueImplementation:", "*k :").Replace(legacyGitHub), true, false, true, true, nil},
+		{"a spec through an alias", "x: &s\n  type: github-issue-implementation\nspec: *s\n",
+			true, false, false, false, nil},
+		{"a spec through a merge key", "x: &top\n  spec:\n    type: github-issue-implementation\n<<: *top\n",
+			true, false, false, false, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			doc, node, issues := ParseYAML([]byte(c.text))
+			if len(issues) > 0 {
+				t.Fatalf("ParseYAML(%q) issues = %+v, want none", c.text, issues)
+			}
+			if got := RenameLegacy(doc, node); got != c.renamed {
+				t.Errorf("RenameLegacy(%q) = %v, want %v", c.text, got, c.renamed)
+			}
+			spec, _ := doc.(map[string]any)["spec"].(map[string]any)
+			if c.renamed && spec["type"] != domain.TypeGitHub {
+				t.Errorf("RenameLegacy(%q) left spec.type %v, want %s", c.text, spec["type"], domain.TypeGitHub)
+			}
+			if _, kept := spec[domain.LegacyGitHubKey]; kept != c.keeps {
+				t.Errorf("RenameLegacy(%q) kept the %s block: %v, want %v", c.text, domain.LegacyGitHubKey, kept, c.keeps)
+			}
+			out, err := yaml.Marshal(node)
+			if err != nil {
+				t.Fatalf("yaml.Marshal(the renamed tree) = %v, want no error", err)
+			}
+			again, _, _ := ParseYAML(out)
+			if same := reflect.DeepEqual(again, doc); same != c.tree {
+				t.Errorf("reflect.DeepEqual(ParseYAML(yaml.Marshal(RenameLegacy(%q))), the renamed value) = %v, "+
+					"want %v; the tree reads %v, the value %v", c.text, same, c.tree, again, doc)
+			}
+			if !c.task {
+				return
+			}
+			var keys []string
+			for _, is := range v.ValidateTask(doc, node) {
+				keys = append(keys, is.Key)
+			}
+			if !slices.Equal(keys, c.issues) {
+				t.Errorf("ValidateTask(the renamed %q) issues %v, want %v", c.name, keys, c.issues)
+			}
+		})
+	}
+}
+
+// An issue in a renamed block is named by its current path and located in the text as written.
+func TestRenameLegacyKeepsTheLocation(t *testing.T) {
+	v, err := New()
+	if err != nil {
+		t.Fatalf("New() = %v, want no error", err)
+	}
+	text := strings.Replace(legacyGitHub, "localPath: /src/app", `localPath: ""`, 1)
+	doc, node, _ := ParseYAML([]byte(text))
+	RenameLegacy(doc, node)
+	issues := v.ValidateTask(doc, node)
+	if len(issues) != 1 || issues[0].Path != "/spec/github/repositories/0/localPath" || issues[0].Line != 15 {
+		t.Errorf("ValidateTask(the renamed task with an empty localPath) = %+v, want one issue at "+
+			"/spec/github/repositories/0/localPath on line 15", issues)
+	}
+}
+
+// The form's document, decoded from JSON and with no node tree, is renamed the same way.
+func TestRenameLegacyDocument(t *testing.T) {
+	doc, err := FromJSON([]byte(`{"spec": {"type": "github-issue-implementation",
+		"githubIssueImplementation": {"repositories": []}}}`))
+	if err != nil {
+		t.Fatalf("FromJSON = %v, want no error", err)
+	}
+	if !RenameLegacy(doc, nil) {
+		t.Fatal("RenameLegacy(the form's legacy document, nil) = false, want true")
+	}
+	got, _ := json.Marshal(doc)
+	if want := `{"spec":{"github":{"repositories":[]},"type":"github"}}`; string(got) != want {
+		t.Errorf("RenameLegacy(the form's legacy document) = %s, want %s", got, want)
 	}
 }
 
@@ -219,7 +351,7 @@ func TestNamingViolationsNameThePointer(t *testing.T) {
 	})
 	want := []string{
 		`task.schema.json#/$defs/execution/properties/timeout_minutes: property "timeout_minutes" is not camelCase`,
-		`task.schema.json#/$defs/githubIssueImplementation/properties/queue/properties/ordering/enum/0: "oldestFirst" is not snake_case`,
+		`task.schema.json#/$defs/github/properties/queue/properties/ordering/enum/0: "oldestFirst" is not snake_case`,
 		`task.schema.json#/$defs/harnessProvider/enum/0: "claude_code" is not a kebab-case identifier`,
 		`task.schema.json#/$defs/notifiableEvent/enum/4: "execution.needs-attention" is not an object.action event type in snake_case`,
 		`task.schema.json#/$defs/gone: no enum to check as identifier`,
@@ -273,10 +405,10 @@ kind: Task
 metadata:
   id: every-field
   name: Every field
-  description: Sets every field a github-issue-implementation task takes.
+  description: Sets every field a github task takes.
 spec:
   enabled: false
-  type: github-issue-implementation
+  type: github
   prompt: Implement the oldest eligible issue.
   agents: [issue-reviewer]
   skills: [hf-github-issue-implementer, hf-github-draft-pr]
@@ -321,7 +453,7 @@ spec:
     native:
       enabled: false
       events: [execution.failed, pull_request.created]
-  githubIssueImplementation:
+  github:
     repositories:
       - name: octo/repo
         localPath: ~/work/repo

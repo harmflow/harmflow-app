@@ -54,10 +54,10 @@
       }
     },
     "taskType": {
-      "description": "github-issue-implementation takes repositories; general takes no type parameters; script runs a program of the user's instead of a harness session.",
+      "description": "github works GitHub repositories and takes their targets and per-cycle limits; general takes no type parameters; script runs a program of the user's instead of a harness session. A file that still names the type github-issue-implementation, or its block githubIssueImplementation, loads as github, and saving it writes the new names.",
       "type": "string",
       "enum": [
-        "github-issue-implementation",
+        "github",
         "general",
         "script"
       ]
@@ -136,8 +136,8 @@
         "notifications": {
           "$ref": "#/$defs/notifications"
         },
-        "githubIssueImplementation": {
-          "$ref": "#/$defs/githubIssueImplementation"
+        "github": {
+          "$ref": "#/$defs/github"
         },
         "script": {
           "$ref": "#/$defs/script"
@@ -166,7 +166,7 @@
               "skills": false,
               "workspace": false,
               "harness": false,
-              "githubIssueImplementation": false
+              "github": false
             }
           },
           "else": {
@@ -186,13 +186,13 @@
             ],
             "properties": {
               "type": {
-                "const": "github-issue-implementation"
+                "const": "github"
               }
             }
           },
           "then": {
             "required": [
-              "githubIssueImplementation"
+              "github"
             ]
           }
         },
@@ -210,7 +210,7 @@
           "then": {
             "not": {
               "required": [
-                "githubIssueImplementation"
+                "github"
               ]
             }
           }
@@ -534,8 +534,8 @@
         }
       }
     },
-    "githubIssueImplementation": {
-      "description": "Parameters of the github-issue-implementation type. Which issues are eligible is written in the prompt; there is no filter syntax.",
+    "github": {
+      "description": "Parameters of the github type: the repositories a task works and its per-cycle limits. What it does in them — which issues or pull requests it works, and how — is written in its prompt, agents, and skills; there is no filter syntax.",
       "type": "object",
       "additionalProperties": false,
       "required": [

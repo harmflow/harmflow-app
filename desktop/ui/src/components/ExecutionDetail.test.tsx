@@ -34,7 +34,7 @@ const base: Execution = {
   id: "exec-done",
   taskId: "core-issues",
   taskName: "Implement GitHub issues",
-  taskType: "github-issue-implementation",
+  taskType: "github",
   status: "running",
   trigger: "manual",
   createdAt: started,

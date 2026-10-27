@@ -80,7 +80,8 @@
   <tr>
     <td width="33%" valign="top">
       <code>04</code> <a href="skills"><b>skills/</b></a><br>
-      The built-in skills of the GitHub issue implementation type, prefixed <code>hf-</code>.
+      The built-in skills of the issue implementer, which a new GitHub task selects by default, prefixed
+      <code>hf-</code>.
     </td>
     <td width="33%" valign="top">
       <code>05</code> <a href="packaging"><b>packaging/</b></a><br>
@@ -101,7 +102,7 @@
 | Node with pnpm | 24 · 10 | the interface |
 | Rust | stable | the desktop shell |
 | Claude Code or Codex | signed in | running tasks |
-| Git and the GitHub CLI (`gh`) | signed in | the GitHub issue type |
+| Git and the GitHub CLI (`gh`) | signed in | the GitHub task type |
 | `rsvg-convert` (`brew install librsvg`) | any | `make icons` only — the rendered icons are committed |
 | `cargo-llvm-cov`, with Rust's `llvm-tools-preview`, and `jq` | any | `make coverage` only |
 
@@ -167,7 +168,7 @@ metadata:
   id: nightly-issues
   name: Implement ready issues
 spec:
-  type: github-issue-implementation           # or general, with no type parameters
+  type: github                                # works GitHub repositories; or general, or script
   prompt: |
     Use the skill hf-github-issue-implementer.
     Select one open issue labeled ready-for-agent, oldest first.
@@ -182,10 +183,14 @@ spec:
     fallback:
       candidates: [{provider: codex}]         # quota exhausted or unavailable → Codex
   permissions: {profile: workspace_write, network: allow}
-  githubIssueImplementation:
+  github:                                     # the repositories it works, and its per-cycle limits
     repositories:
       - {name: acme/api, localPath: ~/code/acme/api}
 ```
+
+A GitHub task does in its repositories what its prompt, agents, and skills say: this one implements issues with the
+built-in issue implementer, which never merges. A file that still names the type `github-issue-implementation` and its
+block `githubIssueImplementation` loads as before, and saving it writes the new names.
 
 ## How a task runs
 

@@ -65,7 +65,7 @@ function NewTask({
       newTaskDocument(
         template,
         catalog,
-        template === "github-issue-implementation"
+        template === "github"
           ? t("tasks.templates.github")
           : template === "script"
             ? t("tasks.templates.script")
@@ -101,7 +101,7 @@ export function TemplatePicker({ onPick, onClose }: { onPick: (k: TemplateKind) 
   return (
     <Modal title={t("tasks.templates.title")} onClose={onClose}>
       <div className="templates">
-        <button type="button" className="template" onClick={() => onPick("github-issue-implementation")}>
+        <button type="button" className="template" onClick={() => onPick("github")}>
           <span className="template__icon">
             <Icon name="code" size={24} />
           </span>
@@ -244,7 +244,7 @@ function TaskList({ onView, onOpenExecution }: { onView: (v: TaskView) => void; 
               <div className="task-row__main" onClick={() => onView({ kind: "edit", id: task.id })}>
                 <div className="task-row__title">
                   <span className="task-row__glyph">
-                    <Icon name={task.type === "github-issue-implementation" ? "code" : "sparkle"} size={18} />
+                    <Icon name={task.type === "github" ? "code" : "sparkle"} size={18} />
                   </span>
                   <strong>{task.name}</strong>
                   <span className="mono muted small">{task.id}</span>
