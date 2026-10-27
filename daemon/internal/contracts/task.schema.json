@@ -63,7 +63,7 @@
       ]
     },
     "spec": {
-      "description": "Every type but script needs a prompt and a harness; a script task takes neither, nor agents, skills, or a workspace.",
+      "description": "Every type but script needs a prompt and a harness; a script task takes neither, nor agents, skills, a workspace, or execution.allowExtraUsage.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -166,7 +166,12 @@
               "skills": false,
               "workspace": false,
               "harness": false,
-              "github": false
+              "github": false,
+              "execution": {
+                "properties": {
+                  "allowExtraUsage": false
+                }
+              }
             }
           },
           "else": {
@@ -437,6 +442,11 @@
           "minimum": 1,
           "maximum": 600,
           "default": 30
+        },
+        "allowExtraUsage": {
+          "description": "Whether the execution may spend extra usage, billed beyond what its harness's plan includes. When false, an attempt does not start on a harness whose quota is exhausted, and a Claude Code attempt that turns to extra usage is ended. A script task runs no harness and does not take it.",
+          "type": "boolean",
+          "default": false
         },
         "rateLimit": {
           "type": "object",

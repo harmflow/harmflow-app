@@ -177,6 +177,9 @@ func (a *App) semanticChecks(ctx context.Context, r *ValidationResult, doc domai
 				r.addWarning(path, domain.WarningOther, text)
 			}
 		}
+		if !doc.AllowsExtraUsage() && !reportsExtraUsage(ad) {
+			r.addWarning(path+"/provider", domain.WarningPolicyUnenforced, extraUsageUnenforced(ad.Name()))
+		}
 		if !info.Detected {
 			r.addWarning(path+"/provider", domain.WarningHarnessNotReady,
 				domain.T("harness_not_detected", "{{harness}} was not detected on this machine", "harness", ad.Name()))
@@ -362,6 +365,21 @@ func (a *App) policyWarnings(ctx context.Context, doc domain.TaskDocument) []dom
 		}
 	}
 	return out
+}
+
+// reportsExtraUsage reports whether the harness says, while it runs, that it turned to extra usage, so an attempt that
+// does not allow it can be ended then.
+func reportsExtraUsage(ad ports.HarnessAdapter) bool {
+	r, ok := ad.(ports.ExtraUsageReporter)
+	return ok && r.ReportsExtraUsage()
+}
+
+// extraUsageUnenforced says a task that allows no extra usage can be held to it on a harness only before each attempt
+// starts.
+func extraUsageUnenforced(harness string) domain.Text {
+	return domain.T("extra_usage_unenforced",
+		"nothing stops {{harness}} once it runs, so the task's ban on extra usage is checked only before each attempt starts",
+		"harness", harness)
 }
 
 func marshalYAML(doc domain.TaskDocument) ([]byte, error) {

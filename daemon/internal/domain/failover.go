@@ -25,6 +25,7 @@ type AttemptEnd struct {
 	Class      ErrorClass
 	Error      Text
 	RetryAfter time.Duration // a reset time the harness reported, for rate limits
+	ResetsAt   time.Time     // when an exhausted quota resets, when the harness reported it
 	ExitCode   int
 	SessionID  string
 	FinalText  string // the agent's last message, carried into the next attempt's summary

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/eventlog"
@@ -46,6 +47,10 @@ type run struct {
 	// ownEnd is set while the outcome is the end of an attempt whose harness exited on its own: a daemon that began
 	// stopping while what it left running was ended does not make that outcome interrupted.
 	ownEnd bool
+	// stopAttempt ends the running attempt alone, and extraUsage is set once it was ended for turning to extra usage
+	// that its task does not allow. Both are set before the attempt's harness starts.
+	stopAttempt context.CancelFunc
+	extraUsage  atomic.Bool
 }
 
 func (a *App) launch(x *domain.Execution, h *runHandle) {
@@ -409,6 +414,9 @@ func (r *run) attempts(ctx context.Context, start func(harness string) error) (d
 			end = domain.AttemptEnd{Class: domain.ClassHarnessUnavailable, Error: unavailableText(ad, info)}
 			r.event(domain.Event{Type: domain.EventHarnessUnavailable, Harness: profile.Provider, Severity: domain.SeverityWarning,
 				Payload: map[string]any{"readiness": info.Readiness}}.Says(end.Error))
+		} else if held, ok := r.quotaHeld(ctx, ad, info); ok {
+			// No session opens on an exhausted quota: it fails over as an unavailable harness does.
+			end = held
 		} else {
 			if !started {
 				if err := start(profile.Provider); err != nil {
@@ -517,8 +525,12 @@ func unavailableText(ad ports.HarnessAdapter, info ports.HarnessInfo) domain.Tex
 }
 
 func (r *run) quotaExhausted(ad ports.HarnessAdapter, harness string, end domain.AttemptEnd) {
+	payload := map[string]any{}
+	if !end.ResetsAt.IsZero() {
+		payload["resetsAt"] = end.ResetsAt
+	}
 	r.event(domain.Event{Type: domain.EventHarnessQuotaExhausted, Harness: harness, Severity: domain.SeverityWarning,
-		Payload: domain.ErrorPayload(map[string]any{}, end.Error)}.Says(domain.T("harness_quota_exhausted",
+		Payload: domain.ErrorPayload(payload, end.Error)}.Says(domain.T("harness_quota_exhausted",
 		"{{harness}} exhausted its quota", "harness", ad.Name())))
 }
 
@@ -607,6 +619,10 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 				domain.EventPolicyUnenforced, true)
 		}
 	}
+	if !r.def.AllowsExtraUsage() && !reportsExtraUsage(ad) {
+		r.warn(domain.Warning{Code: domain.WarningPolicyUnenforced, Subject: "allowExtraUsage",
+			Text: extraUsageUnenforced(ad.Name())}, domain.EventPolicyUnenforced, true)
+	}
 	switch info.VersionSupport {
 	case "untested_newer":
 		r.warn(domain.Warning{Code: domain.WarningVersionUntested, Subject: p.Provider,
@@ -625,6 +641,12 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 	if err != nil {
 		raw = nil
 	}
+	// The attempt can be ended alone, without the execution's cancel, so a stop for extra usage leaves the execution
+	// neither cancelled nor timed out.
+	attemptCtx, stopAttempt := context.WithCancel(ctx)
+	defer stopAttempt()
+	r.stopAttempt = stopAttempt
+	r.extraUsage.Store(false)
 	// The reader calls back in order and finishes before the process counts as done.
 	proc, err := procutil.Start(inv, raw, func(line []byte) {
 		for _, he := range parser.Line(line) {
@@ -673,7 +695,7 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 		}
 	}()
 	grace := time.Duration(*r.eff.Spec.Execution.CancelGraceSeconds) * time.Second
-	proc.Wait(ctx, grace)
+	proc.Wait(attemptCtx, grace)
 	r.logEnded(proc.Ended())
 	close(stopProgress)
 	<-progressDone
@@ -685,6 +707,12 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 	stopped := !r.ownEnd
 	timedOut := stopped && errors.Is(ctx.Err(), context.DeadlineExceeded) && !r.cancelRequested()
 	end := parser.Finish(proc.ExitCode(), proc.StderrTail(), timedOut, stopped && r.cancelRequested())
+	if r.extraUsage.Load() && stopped && !timedOut && !r.cancelRequested() && ctx.Err() == nil {
+		// Ended for its extra usage, whatever the harness made of the signal: the quota it ran out of is exhausted.
+		end.Class = domain.ClassQuotaExhausted
+		end.Error = domain.T("extra_usage_stopped",
+			"{{harness}} turned to extra usage, which the task does not allow, so its attempt was ended", "harness", ad.Name())
+	}
 	// Its final text and error quote the harness, and the next attempt's context and the summary quote them in turn.
 	eventlog.RedactFields(&end)
 	r.endAttempt(end, proc.ExitCode())
@@ -975,6 +1003,10 @@ func (r *run) onHarnessEvent(he ports.HarnessEvent) {
 	case ports.HarnessNetworkWait:
 		r.event(domain.Event{Type: domain.EventHarnessNetworkWaiting, Severity: domain.SeverityWarning,
 			Message: trimTo(he.Message, 2000)})
+	case ports.HarnessQuota:
+		if he.Quota != nil {
+			r.onQuota(*he.Quota)
+		}
 	case ports.HarnessUsage:
 		// No event of its own: the record is saved every second, and an open detail reloads on the attempt's next event.
 		a.mu.Lock()

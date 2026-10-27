@@ -61,6 +61,7 @@ var (
 	_ ports.ItemReloader      = (*Adapter)(nil)
 	_ ports.HarnessCloser     = (*Adapter)(nil)
 	_ ports.WorkspaceLister   = (*Adapter)(nil)
+	_ ports.QuotaReader       = (*Adapter)(nil)
 )
 
 // ID implements ports.HarnessAdapter: the harness's identifier.
