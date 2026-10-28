@@ -2,6 +2,7 @@ package integration
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -95,8 +96,27 @@ func processIdentity(pid int) string {
 	return strings.TrimSpace(string(out))
 }
 
-// TestHoldADaemon is the run TestNoDaemonOutlivesAnInterruptedRun interrupts: it starts a daemon, writes its PID, and
-// blocks until it is ended.
+// daemonsOn is the PIDs of the processes other than this one whose command line passes --home home: a daemon on the
+// home, a process about to become one, or the parent startDetachedDaemon runs, which passes the daemon's arguments.
+func daemonsOn(home string) ([]int, error) {
+	out, err := exec.Command("ps", "-A", "-ww", "-o", "pid=,args=").Output()
+	if err != nil {
+		return nil, fmt.Errorf("list processes: %w", err)
+	}
+	var pids []int
+	for _, line := range strings.Split(string(out), "\n") {
+		field, args, _ := strings.Cut(strings.TrimSpace(line), " ")
+		pid, err := strconv.Atoi(field)
+		if err != nil || pid == os.Getpid() || !strings.Contains(" "+args+" ", " --home "+home+" ") {
+			continue
+		}
+		pids = append(pids, pid)
+	}
+	return pids, nil
+}
+
+// TestHoldADaemon is the run TestNoDaemonOutlivesAnInterruptedRun interrupts, and the one
+// TestNoDaemonOutlivesALatePID lets fail: it starts a daemon, writes its PID, and blocks until it is ended.
 func TestHoldADaemon(t *testing.T) {
 	pidFile := os.Getenv(holdEnv)
 	if pidFile == "" {
@@ -189,5 +209,74 @@ func TestNoDaemonOutlivesAnInterruptedRun(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A daemon the short-lived parent starts never outlives a test whose startDetachedDaemon gave up waiting for its PID.
+// The parent starts the daemon and holds its PID back for a minute, long past the helper's wait, so the run fails
+// without ever reading it; once the run has ended, no process runs on the daemon's home.
+func TestNoDaemonOutlivesALatePID(t *testing.T) {
+	t.Parallel()
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	// Should the daemon outlive the run, the test ends it rather than leaving it behind too.
+	t.Cleanup(func() {
+		left, _ := daemonsOn(home)
+		for _, pid := range left {
+			_ = syscall.Kill(-pid, syscall.SIGKILL)
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	})
+	run := exec.Command(self, "-test.run=^TestHoldADaemon$", "-test.count=1")
+	run.Env = append(os.Environ(), binaryEnv+"="+binary, holdEnv+"="+filepath.Join(t.TempDir(), "daemon.pid"),
+		holdEnv+"_HOME="+home, holdEnv+"_DETACHED=1", starterEnv+"_LATE=1m")
+	var out bytes.Buffer
+	run.Stdout, run.Stderr = &out, &out
+	if err := run.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan struct{})
+	go func() { _ = run.Wait(); close(exited) }()
+	t.Cleanup(func() {
+		_ = run.Process.Kill()
+		<-exited
+	})
+	// While the helper waits for the PID the parent holds back, the daemon comes up and writes its runtime file.
+	runtimeFile := filepath.Join(home, "run", "daemon.json")
+	started := false
+	timeout := time.After(60 * time.Second)
+	for ended := false; !ended; {
+		select {
+		case <-exited:
+			ended = true
+		case <-timeout:
+			t.Fatal("the run did not end within 60s")
+		case <-time.After(50 * time.Millisecond):
+			if _, err := os.Stat(runtimeFile); err == nil {
+				started = true
+			}
+		}
+	}
+	if !strings.Contains(out.String(), "the parent started no daemon") {
+		t.Fatalf("the run did not give up waiting for the daemon's PID:\n%s", out.String())
+	}
+	for deadline := time.Now().Add(15 * time.Second); ; time.Sleep(100 * time.Millisecond) {
+		left, err := daemonsOn(home)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(left) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("daemonsOn(%s) = %v 15s after the run ended, want none:\n%s", home, left, out.String())
+		}
+	}
+	if !started {
+		t.Errorf("the daemon wrote no runtime file while the parent held its PID back, so the run left none to end:\n%s",
+			out.String())
 	}
 }
