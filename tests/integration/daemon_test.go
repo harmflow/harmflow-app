@@ -3221,7 +3221,15 @@ func TestDaemonOutlivesItsStarter(t *testing.T) {
 	if h := d.call("GET", "/health", nil, 200); h["pid"] != health["pid"] || h["startedAt"] != health["startedAt"] {
 		t.Fatalf("GET /health answered for another daemon: %v, then %v", health, h)
 	}
-	if x := d.waitStatus(id, "completed", "failed", "cancelled", "interrupted"); x["status"] != "completed" {
+	// From running, the execution has the stand-in's ticks scenario left: ten ticks half a second apart, each pause a
+	// sleep the stand-in starts, so eleven process starts with its own, then the end of the attempt. The harness checks
+	// run before running, outside this wait. On a loaded host each start can take seconds: with a full run and other
+	// process starts beside it, the ticks came up to 4.4 seconds apart, and 20 seconds from running did not cover them.
+	// The wait gives the pauses their five seconds and each start 10 seconds, as
+	// TestFailoverEndsWhatTheFirstAttemptLeft gives its eleven starts.
+	const pauses, starts, perStart = 10 * 500 * time.Millisecond, 11, 10 * time.Second
+	x := d.waitStatusWithin(pauses+starts*perStart, id, "completed", "failed", "cancelled", "interrupted")
+	if x["status"] != "completed" {
 		t.Errorf("the execution is %v, want completed", x["status"])
 	}
 }
