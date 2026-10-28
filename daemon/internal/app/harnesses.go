@@ -228,6 +228,8 @@ func (a *App) resolveItem(ctx context.Context, kind, name, harness, workspace st
 	m.where = "the " + ad.Name() + " configuration"
 	if l, ok := ad.(ports.WorkspaceLister); ok && l.ListsPerWorkspace(kind) {
 		m.where, m.source, m.workspace = ad.Name()+"'s "+kind+" list for "+workspace, kind+"_list", workspace
+	} else if r, ok := ad.(ports.WorkspaceFolderReader); ok && r.ReadsWorkspace(kind) {
+		m.where, m.source, m.workspace = m.where+" and the workspace "+workspace, "harness_workspace", workspace
 	}
 	it, found, problems, err := ad.UserItem(ctx, a.harnessInfo(ctx, harness), kind, name, workspace)
 	if len(problems) > 0 {
@@ -250,12 +252,22 @@ func discoveryErrors(problems []ports.DiscoveryError) string {
 // itemWorkspace is the folder a task's own agents and skills are looked up for: its workspace path, expanded, when it
 // sets one, otherwise the folder HarmFlow runs it in.
 func (a *App) itemWorkspace(doc domain.TaskDocument) string {
-	if w := doc.Spec.Workspace; w != nil && w.Path != "" {
-		if p, err := a.expand(w.Path); err == nil {
+	path := ""
+	if w := doc.Spec.Workspace; w != nil {
+		path = w.Path
+	}
+	return a.taskFolder(path, doc.Metadata.ID)
+}
+
+// taskFolder is the folder of a task with this workspace path and ID: the path, expanded, when it is set and expands,
+// otherwise the folder HarmFlow runs the task in, which for no ID is HarmFlow's workspace root.
+func (a *App) taskFolder(path, id string) string {
+	if path != "" {
+		if p, err := a.expand(path); err == nil {
 			return p
 		}
 	}
-	return filepath.Join(a.d.Paths.Workspace, doc.Metadata.ID)
+	return filepath.Join(a.d.Paths.Workspace, id)
 }
 
 // CatalogProblem is what kept a harness from listing the user's items in full: a file it reported it could not load,
@@ -268,22 +280,15 @@ type CatalogProblem struct {
 }
 
 // Catalog lists the built-in agents and skills, offered on every harness, then the user's, each with the harnesses
-// that find it for workspace, sorted by name. A user's item is left out when a task cannot cite it: its name has the
-// hf- prefix, or is not an identifier of the task schema, as a plugin's `<plugin>:<skill>` is not. A user's agent that
-// more than one harness holds is copied from the first of them by name. An empty workspace is HarmFlow's workspace
-// root. What a harness could not list is in Problems.
-func (a *App) Catalog(ctx context.Context, workspace string) Catalog {
+// that find it for the folder of a task with this workspace path and ID, sorted by name. That folder is the one
+// validation and an execution look the task's items up for: the workspace path, expanded, otherwise the folder HarmFlow
+// runs the task in, and HarmFlow's workspace root for neither. A user's item is left out when a task cannot cite it: its
+// name has the hf- prefix, or is not an identifier of the task schema, as a plugin's `<plugin>:<skill>` is not. A
+// user's agent that more than one harness holds is copied from the first of them by name. What a harness could not
+// list is in Problems.
+func (a *App) Catalog(ctx context.Context, workspace, task string) Catalog {
 	c := Catalog{Agents: []CatalogEntry{}, Skills: []CatalogEntry{}, Problems: []CatalogProblem{}}
-	if workspace != "" {
-		if p, err := a.expand(workspace); err == nil {
-			workspace = p
-		} else {
-			workspace = ""
-		}
-	}
-	if workspace == "" {
-		workspace = a.d.Paths.Workspace
-	}
+	workspace = a.taskFolder(workspace, task)
 	all := sortedKeys(a.adapters)
 	for _, kind := range []string{"agent", "skill"} {
 		entries := map[string]*CatalogEntry{}

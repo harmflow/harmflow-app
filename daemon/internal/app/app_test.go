@@ -3676,7 +3676,7 @@ func TestCatalogCarriesTheAgentCopy(t *testing.T) {
 		t.Fatalf("os.WriteFile(hf-reviewer.md) = %v, want no error", err)
 	}
 	var entry *CatalogEntry
-	for _, a := range e.app.Catalog(t.Context(), "").Agents {
+	for _, a := range e.app.Catalog(t.Context(), "", "").Agents {
 		if a.Name == "hf-reviewer" {
 			entry = &a
 		}
@@ -3694,7 +3694,7 @@ func TestCatalogCarriesTheAgentCopy(t *testing.T) {
 	if want := []string{domain.HarnessClaudeCode, domain.HarnessCodex}; !slices.Equal(c.ModelHarnesses, want) {
 		t.Errorf("Catalog() copy of hf-reviewer: model harnesses = %v, want %v", c.ModelHarnesses, want)
 	}
-	for _, s := range e.app.Catalog(t.Context(), "").Skills {
+	for _, s := range e.app.Catalog(t.Context(), "", "").Skills {
 		if s.Copy != nil {
 			t.Errorf("Catalog() skill %s: copy = %+v, want none", s.Name, s.Copy)
 		}
@@ -3705,7 +3705,7 @@ func TestCatalogCarriesTheAgentCopy(t *testing.T) {
 // implementer is neither one of the type's skills nor a subagent, and no other type selects an agent.
 func TestGitHubTypeSelectsTheImplementer(t *testing.T) {
 	e := newEnv(t)
-	for _, tt := range e.app.Catalog(t.Context(), "").TaskTypes {
+	for _, tt := range e.app.Catalog(t.Context(), "", "").TaskTypes {
 		want := ""
 		if tt.ID == domain.TypeGitHub {
 			want = BuiltinIssueAgent

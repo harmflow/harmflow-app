@@ -503,6 +503,7 @@ export const enUS = {
   itemSource: {
     builtin: "built in",
     harness: "the {{harness}} configuration",
+    harness_workspace: "the {{harness}} configuration and the workspace {{workspace}}",
     skill_list: "{{harness}}'s skill list for {{workspace}}",
     skill_list_errors: "{{harness}}'s skill list for {{workspace}}, which could not load {{errors}}",
   },

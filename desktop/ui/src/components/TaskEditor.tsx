@@ -62,21 +62,24 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
 
   const showExternal = !!task && externalChange !== undefined && externalChange > openedAtEvent.current && !externalSeen;
 
-  // A harness that finds the user's skills per workspace, as Codex does, offers the ones it has in the task's workspace:
-  // the catalog is asked for it, and the one already loaded stands in until it answers.
+  // A harness that finds the user's skills per workspace, as Codex and Claude Code do, offers the ones it has in the
+  // task's workspace: the catalog is asked for it, and the one already loaded stands in until it answers. The task's ID
+  // goes with its workspace path, so that with none the daemon reads the folder it runs the task in, as validation does.
   const spec = doc.spec as { workspace?: { path?: unknown } } | undefined;
+  const metadata = doc.metadata as { id?: unknown } | undefined;
   const workspace = useDebounced(typeof spec?.workspace?.path === "string" ? spec.workspace.path : "", 500);
+  const taskId = useDebounced(typeof metadata?.id === "string" ? metadata.id : "", 500);
   const [workspaceCatalog, setWorkspaceCatalog] = useState<Catalog>();
   useEffect(() => {
     let cancelled = false;
-    api.catalog(workspace || undefined).then(
+    api.catalog(workspace || undefined, taskId || undefined).then(
       (c) => !cancelled && setWorkspaceCatalog(c),
       () => {}, // the catalog already loaded stays
     );
     return () => {
       cancelled = true;
     };
-  }, [workspace]);
+  }, [workspace, taskId]);
 
   const input = (): TaskInput => (tab === "form" ? { document: doc, baseRevision } : { yaml, baseRevision });
 

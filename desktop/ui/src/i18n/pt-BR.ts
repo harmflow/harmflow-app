@@ -526,6 +526,7 @@ export const ptBR: Resources = {
   itemSource: {
     builtin: "embutido",
     harness: "na configuração do {{harness}}",
+    harness_workspace: "na configuração do {{harness}} e no workspace {{workspace}}",
     skill_list: "na lista de skills do {{harness}} para {{workspace}}",
     skill_list_errors: "na lista de skills do {{harness}} para {{workspace}}, que não conseguiu carregar {{errors}}",
   },

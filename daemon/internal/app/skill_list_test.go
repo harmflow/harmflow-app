@@ -3,13 +3,21 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/harmflow/harmflow-app/daemon/internal/adapters/eventlog"
+	"github.com/harmflow/harmflow-app/daemon/internal/adapters/fsstore"
+	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/claudecode"
+	"github.com/harmflow/harmflow-app/daemon/internal/adapters/schema"
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
+	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
 // skillListCodex is a stand-in Codex whose app server answers skills/list with the shell commands onList, which read
@@ -138,8 +146,9 @@ func TestCodexSkillsComeFromItsSkillList(t *testing.T) {
 	}
 }
 
-// The catalog lists a skill of Codex's list once, with Codex once among its harnesses, for the workspace asked, or for
-// the workspace root; what Codex could not load is in its problems and in a missing skill's message. A skill a task
+// The catalog lists a skill of Codex's list once, with Codex once among its harnesses, for the workspace path asked,
+// for the run folder of a task asked with none, as validation does, or for the workspace root with neither; what Codex
+// could not load is in its problems and in a missing skill's message. A skill a task
 // cannot cite, a plugin's `<plugin>:<skill>` or a name with the hf- prefix, is not offered, though Codex lists it.
 func TestCatalogListsCodexSkillsForTheWorkspace(t *testing.T) {
 	received := filepath.Join(t.TempDir(), "received.jsonl")
@@ -150,29 +159,33 @@ func TestCatalogListsCodexSkillsForTheWorkspace(t *testing.T) {
 	ctx := t.Context()
 	ws := t.TempDir()
 
-	c := a.Catalog(ctx, ws)
+	c := a.Catalog(ctx, ws, "plain")
 	var entries []CatalogEntry
 	for _, e := range c.Skills {
 		switch e.Name {
 		case "my-skill":
 			entries = append(entries, e)
 		case "pdf:pdf", "hf-users-own":
-			t.Errorf("Catalog(ctx, %s) offers %+v, want no skill a task cannot cite", ws, e)
+			t.Errorf("Catalog(ctx, %s, plain) offers %+v, want no skill a task cannot cite", ws, e)
 		}
 	}
 	if len(entries) != 1 || !slices.Equal(entries[0].Harnesses, []string{domain.HarnessCodex}) {
-		t.Errorf("Catalog(ctx, %s) my-skill = %+v, want one entry, on codex once", ws, entries)
+		t.Errorf("Catalog(ctx, %s, plain) my-skill = %+v, want one entry, on codex once", ws, entries)
 	}
 	if got := lastCwds(t, received); !slices.Equal(got, []string{ws}) {
-		t.Errorf("Catalog(ctx, %s) listed skills for %q, want [%s]", ws, got, ws)
+		t.Errorf("Catalog(ctx, %s, plain) listed skills for %q, want the workspace path [%s]", ws, got, ws)
 	}
 	if len(c.Problems) != 1 || c.Problems[0].Path != "/x/broken/SKILL.md" || c.Problems[0].Message != "invalid front matter" ||
 		c.Problems[0].Harness != domain.HarnessCodex {
-		t.Errorf("Catalog(ctx, %s) problems = %+v, want the SKILL.md Codex could not load", ws, c.Problems)
+		t.Errorf("Catalog(ctx, %s, plain) problems = %+v, want the SKILL.md Codex could not load", ws, c.Problems)
 	}
-	a.Catalog(ctx, "")
+	a.Catalog(ctx, "", "plain")
+	if got, want := lastCwds(t, received), []string{filepath.Join(a.d.Paths.Workspace, "plain")}; !slices.Equal(got, want) {
+		t.Errorf(`Catalog(ctx, "", plain) listed skills for %q, want the task's run folder %q, as validation reads`, got, want)
+	}
+	a.Catalog(ctx, "", "")
 	if got := lastCwds(t, received); !slices.Equal(got, []string{a.d.Paths.Workspace}) {
-		t.Errorf(`Catalog(ctx, "") listed skills for %q, want the workspace root %q`, got, a.d.Paths.Workspace)
+		t.Errorf(`Catalog(ctx, "", "") listed skills for %q, want the workspace root %q`, got, a.d.Paths.Workspace)
 	}
 
 	_, err := a.CreateTask(ctx, TaskInput{YAML: codexTaskYAML("gone", "  skills: [no-such-skill]\n")})
@@ -207,8 +220,163 @@ func TestUnreadableSkillListIsNotAMissingSkill(t *testing.T) {
 	if !slices.Contains(keys, "fallback_skill_list_unreadable") || slices.Contains(keys, "fallback_skill_missing") {
 		t.Errorf("ImportTask(fb) warns %q, want fallback_skill_list_unreadable and no fallback_skill_missing", keys)
 	}
-	if c := a.Catalog(ctx, ""); len(c.Problems) != 1 || c.Problems[0].Key != "skill_list_unreadable" {
-		t.Errorf(`Catalog(ctx, "") problems = %+v, want one, skill_list_unreadable`, c.Problems)
+	if c := a.Catalog(ctx, "", ""); len(c.Problems) != 1 || c.Problems[0].Key != "skill_list_unreadable" {
+		t.Errorf(`Catalog(ctx, "", "") problems = %+v, want one, skill_list_unreadable`, c.Problems)
+	}
+}
+
+// newClaudeApp is an App whose Claude Code is the real adapter, with a temporary configuration directory, which it
+// returns, and whose Codex is a fake. The adapter finds no CLI, so no Claude Code installed on this machine ever runs.
+func newClaudeApp(t *testing.T) (*App, string) {
+	t.Helper()
+	config := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	paths := NewPaths(t.TempDir(), t.TempDir(), t.TempDir())
+	tasks, _ := fsstore.NewTasks(paths.Tasks)
+	state, _ := fsstore.NewState(paths.State)
+	execs, _ := fsstore.NewExecutions(paths.Executions)
+	events, _ := eventlog.New(paths.Logs, time.Now)
+	v, err := schema.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cc := &claudecode.Adapter{Home: t.TempDir(), PathEnv: t.TempDir(), KnownLocations: []string{}}
+	a, err := New(Deps{Paths: paths, Version: "test", Location: time.UTC, Tasks: tasks, State: state,
+		Executions: execs, Events: events, Validator: v, TickInterval: time.Hour, Logger: log.New(io.Discard, "", 0),
+		Harnesses: []ports.HarnessAdapter{cc, &fakeHarness{id: domain.HarnessCodex}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a, config
+}
+
+// writeSkill writes a SKILL.md into dir, named for the folder.
+func writeSkill(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	md := "---\nname: " + filepath.Base(dir) + "\ndescription: A skill.\n---\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(md), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A Claude Code user's skill in the workspace's .claude/skills is found for that workspace only. A task placed there
+// cites it and saves, the task editor's catalog offers it there, and an execution there, the attempt a failover hands to
+// Claude Code included, resolves it in that folder. A task placed elsewhere is refused, naming the configuration and the
+// workspace looked in, and a Codex task placed elsewhere is warned that its Claude Code fallback is invalid. A skill of
+// Claude Code's configuration directory is found for every workspace, as before.
+func TestClaudeCodeSkillsComeFromTheWorkspace(t *testing.T) {
+	a, config := newClaudeApp(t)
+	ctx := t.Context()
+	ws, other := filepath.Join(a.d.Paths.UserHome, "ws"), filepath.Join(a.d.Paths.UserHome, "other")
+	writeSkill(t, filepath.Join(ws, ".claude", "skills", "user-skill"))
+	writeSkill(t, filepath.Join(config, "skills", "review-notes"))
+	if err := os.MkdirAll(other, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	placed := func(id, skills, workspace string) string {
+		return taskYAML(id, "  skills: ["+skills+"]\n  workspace:\n    path: "+workspace+"\n")
+	}
+
+	if _, err := a.CreateTask(ctx, TaskInput{YAML: placed("here", "user-skill, review-notes", "~/ws")}); err != nil {
+		t.Fatalf("CreateTask(here), citing a skill of its workspace and one of the configuration = %v, want no error", err)
+	}
+	if _, err := a.CreateTask(ctx, TaskInput{YAML: placed("configured", "review-notes", "~/other")}); err != nil {
+		t.Fatalf("CreateTask(configured), citing a skill of the configuration = %v, want no error", err)
+	}
+	_, err := a.CreateTask(ctx, TaskInput{YAML: placed("elsewhere", "user-skill", "~/other")})
+	ae, ok := err.(*Error)
+	if !ok || ae.Key != "skill_not_found" || ae.Params["source"] != "harness_workspace" || ae.Params["workspace"] != other ||
+		!strings.Contains(ae.Message, "the Claude Code configuration and the workspace "+other) {
+		t.Errorf("CreateTask(elsewhere) = %v (%+v), want skill_not_found naming the configuration and %s", err, ae, other)
+	}
+
+	if got, want := claudeCodeOffers(ctx, a, "~/ws", "here"), []string{"review-notes", "user-skill"}; !slices.Equal(got, want) {
+		t.Errorf(`Catalog(ctx, "~/ws", here) offers %q on Claude Code, want %q`, got, want)
+	}
+	if got, want := claudeCodeOffers(ctx, a, "~/other", "elsewhere"), []string{"review-notes"}; !slices.Equal(got, want) {
+		t.Errorf(`Catalog(ctx, "~/other", elsewhere) offers %q on Claude Code, want %q`, got, want)
+	}
+
+	// The fake Codex finds user-skill for every workspace, so only Claude Code's lookup tells the two tasks apart.
+	fallback := func(id, workspace string) string {
+		return codexTaskYAML(id, "    fallback:\n      candidates:\n        - provider: claude-code\n"+
+			"  skills: [user-skill]\n  workspace:\n    path: "+workspace+"\n")
+	}
+	imported, err := a.ImportTask(ctx, fallback("fallback-elsewhere", "~/other"), false)
+	if err != nil {
+		t.Fatalf("ImportTask(fallback-elsewhere) = %v, want no error", err)
+	}
+	var invalid []string
+	for _, w := range imported.Warnings {
+		if w.Code == domain.WarningInvalidFallback {
+			invalid = append(invalid, w.Key)
+		}
+	}
+	if !slices.Equal(invalid, []string{"fallback_skill_missing"}) {
+		t.Errorf("ImportTask(fallback-elsewhere) invalid-fallback warnings %q, want fallback_skill_missing", invalid)
+	}
+	res := a.Validate(ctx, TaskInput{YAML: fallback("fallback-here", "~/ws")})
+	if res.doc == nil {
+		t.Fatalf("Validate(fallback-here) errors = %+v, want none", res.Errors)
+	}
+	for _, w := range res.Warnings {
+		if w.Code == domain.WarningInvalidFallback {
+			t.Errorf("Validate(fallback-here) warns %+v, want no invalid-fallback warning for Claude Code", w)
+		}
+	}
+	r := &run{a: a, def: *res.doc, eff: res.doc.Effective(), work: ws}
+	_, skills, err := r.resolve(ctx, a.adapters[domain.HarnessClaudeCode])
+	if want := filepath.Join(ws, ".claude", "skills", "user-skill"); err != nil || len(skills) != 1 || skills[0].Path != want {
+		t.Errorf("resolve(claude-code) in %s = %+v, %v; want user-skill at %s", ws, skills, err, want)
+	}
+	r.work = other
+	if _, _, err := r.resolve(ctx, a.adapters[domain.HarnessClaudeCode]); domain.TextOf(err).Key != "skill_not_found" {
+		t.Errorf("resolve(claude-code) in %s error %v, want skill_not_found", other, err)
+	}
+}
+
+// claudeCodeOffers is the names of the user's skills the catalog offers on Claude Code for a task with this workspace
+// path and ID.
+func claudeCodeOffers(ctx context.Context, a *App, workspace, task string) []string {
+	var names []string
+	for _, e := range a.Catalog(ctx, workspace, task).Skills {
+		if e.Source == "user" && slices.Contains(e.Harnesses, domain.HarnessClaudeCode) {
+			names = append(names, e.Name)
+		}
+	}
+	return names
+}
+
+// A task with no workspace path finds the same Claude Code skills in the task editor's catalog as on save: those of the
+// folder HarmFlow runs it in. A skill of that folder's .claude/skills is offered for the task and passes validation; a
+// skill of HarmFlow's workspace root, or of another task's folder, is neither offered nor accepted.
+func TestClaudeCodeSkillsOfATaskWithNoWorkspacePath(t *testing.T) {
+	a, _ := newClaudeApp(t)
+	writeSkill(t, filepath.Join(a.d.Paths.Workspace, "unplaced", ".claude", "skills", "run-skill"))
+	writeSkill(t, filepath.Join(a.d.Paths.Workspace, ".claude", "skills", "root-skill"))
+
+	for _, c := range []struct {
+		task string
+		want []string
+	}{
+		{"unplaced", []string{"run-skill"}},
+		{"another", nil},
+	} {
+		t.Run(c.task, func(t *testing.T) {
+			if got := claudeCodeOffers(t.Context(), a, "", c.task); !slices.Equal(got, c.want) {
+				t.Errorf(`Catalog(ctx, "", %s) offers %q on Claude Code, want %q`, c.task, got, c.want)
+			}
+			for _, skill := range []string{"run-skill", "root-skill"} {
+				res := a.Validate(t.Context(), TaskInput{YAML: taskYAML(c.task, "  skills: ["+skill+"]\n")})
+				if got, want := res.Valid, slices.Contains(c.want, skill); got != want {
+					t.Errorf("Validate(%s citing %s) valid = %v (errors %+v), want %v, as the catalog offers it", c.task,
+						skill, got, res.Errors, want)
+				}
+			}
+		})
 	}
 }
 
@@ -218,19 +386,19 @@ func TestRefreshReloadsCodexSkills(t *testing.T) {
 	received := filepath.Join(t.TempDir(), "received.jsonl")
 	a, _ := newCodexAppOn(t, skillListCodex(received, listAnswer(nil, "")))
 	ctx := context.Background()
-	a.Catalog(ctx, "")
+	a.Catalog(ctx, "", "")
 	a.RefreshHarnesses(ctx)
-	a.Catalog(ctx, "")
-	a.Catalog(ctx, "")
+	a.Catalog(ctx, "", "")
+	a.Catalog(ctx, "", "")
 	var reloads []bool
 	for _, p := range listParams(t, received) {
 		reloads = append(reloads, p["forceReload"] == true)
 	}
 	if want := []bool{false, true, false}; !slices.Equal(reloads, want) {
-		t.Errorf(`Catalog(ctx, ""), before and after RefreshHarnesses, sent forceReload %v, want %v`, reloads, want)
+		t.Errorf(`Catalog(ctx, "", ""), before and after RefreshHarnesses, sent forceReload %v, want %v`, reloads, want)
 	}
 	data, _ := os.ReadFile(received)
 	if n := strings.Count(string(data), `"method":"initialize"`); n != 1 {
-		t.Errorf(`Catalog(ctx, ""), three calls, sent initialize %d times, want once`, n)
+		t.Errorf(`Catalog(ctx, "", ""), three calls, sent initialize %d times, want once`, n)
 	}
 }
