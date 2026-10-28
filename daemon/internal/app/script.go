@@ -259,7 +259,9 @@ func (r *run) runScript(ctx context.Context, deadline time.Time) (domain.Executi
 				Payload: map[string]any{"stream": stream}})
 		}
 	}
-	proc, err := procutil.StartLines(ports.Invocation{Path: program, Args: argv[1:], Env: env, Dir: wd,
+	// The output is held until script.started is logged, so the log has the program start before anything it wrote,
+	// however soon it writes; the start waits for the process identity, which is saved first for crash recovery.
+	proc, err := procutil.StartHeld(ports.Invocation{Path: program, Args: argv[1:], Env: env, Dir: wd,
 		ExecutionID: r.x.ID}, raw, output("stdout"), output("stderr"))
 	if err != nil {
 		if raw != nil {
@@ -279,6 +281,7 @@ func (r *run) runScript(ctx context.Context, deadline time.Time) (domain.Executi
 	r.event(domain.Event{Type: domain.EventScriptStarted,
 		Payload: map[string]any{"pid": proc.Pid(), "program": program}}.Says(
 		domain.T("script_started", "{{program}} started", "program", name)))
+	proc.Release()
 
 	grace := time.Duration(*r.eff.Spec.Execution.CancelGraceSeconds) * time.Second
 	proc.Wait(ctx, grace)
