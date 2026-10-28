@@ -223,6 +223,40 @@ func TestScriptOutputIsMarkedAndRedacted(t *testing.T) {
 	}
 }
 
+// script.started comes before every line of the program's output, and script.exited after it, also for a program that
+// writes at once, whose first lines once raced the record of its start. The order was a race, so the test runs often.
+func TestScriptStartedComesBeforeItsOutput(t *testing.T) {
+	e := newEnv(t)
+	e.createScript("early", "  script:\n    command: [/bin/sh, -c, \"echo one; echo two >&2\"]\n")
+	for run := 1; run <= 30; run++ {
+		x := e.runScript("early", domain.StatusCompleted)
+		e.output(x.ID) // waits for the execution's last event
+		events, _, _ := e.app.ExecutionEvents(x.ID, 0, 0)
+		var started, exited int64
+		var output []int64
+		for _, ev := range events {
+			switch ev.Type {
+			case domain.EventScriptStarted:
+				started = ev.ID
+			case domain.EventScriptExited:
+				exited = ev.ID
+			case domain.EventScriptOutput:
+				output = append(output, ev.ID)
+			}
+		}
+		if started == 0 || exited == 0 || len(output) != 2 {
+			t.Fatalf("run %d: script.started %d, script.exited %d, and %d output lines, want both events and 2 lines",
+				run, started, exited, len(output))
+		}
+		for _, id := range output {
+			if id < started || id > exited {
+				t.Fatalf("run %d: script.output %d is not between script.started %d and script.exited %d",
+					run, id, started, exited)
+			}
+		}
+	}
+}
+
 // Cancelling, and the timeout, stop the program and the process it started in the background.
 func TestScriptStopEndsItsProcesses(t *testing.T) {
 	e := newEnv(t)

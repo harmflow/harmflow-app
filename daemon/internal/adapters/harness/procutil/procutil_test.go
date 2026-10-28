@@ -147,6 +147,89 @@ func TestStreamsAreRecordedInOneOrder(t *testing.T) {
 	}
 }
 
+// StartHeld records no line before Release. A program that writes more than the pipe and the queued lines hold waits on
+// its writes meanwhile, then runs to its end with every line recorded, in order.
+func TestHeldOutputWaitsForRelease(t *testing.T) {
+	const n = 200000 // about 1.3 MB, past the pipe, the reader's buffer, and the queued lines
+	marker := filepath.Join(t.TempDir(), "wrote")
+	script := "seq 1 " + strconv.Itoa(n) + "; echo end >&2; touch " + marker
+	var mu sync.Mutex
+	var out, errs []string
+	record := func(lines *[]string) func([]byte) {
+		return func(b []byte) {
+			mu.Lock()
+			*lines = append(*lines, string(b))
+			mu.Unlock()
+		}
+	}
+	p, err := StartHeld(ports.Invocation{Path: "/bin/sh", Args: []string{"-c", script}}, nil, record(&out), record(&errs))
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	mu.Lock()
+	early := len(out) + len(errs)
+	mu.Unlock()
+	if early != 0 {
+		t.Errorf("%d lines recorded before Release, want 0", early)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("the program wrote all its output before Release, which the hold cannot have taken")
+	}
+	p.Release()
+	<-p.Done()
+	if len(out) != n {
+		t.Fatalf("%d stdout lines recorded, want %d", len(out), n)
+	}
+	for i, line := range out {
+		if line != strconv.Itoa(i+1) {
+			t.Fatalf("stdout line %d is %q, want %d", i, line, i+1)
+		}
+	}
+	if len(errs) != 1 || errs[0] != "end" {
+		t.Errorf("stderr lines %q, want [end]", errs)
+	}
+	if _, err := os.Stat(marker); err != nil || p.ExitCode() != 0 {
+		t.Errorf("the program did not run to its end: exit code %d, marker %v", p.ExitCode(), err)
+	}
+}
+
+// Held output never stalls the process for good: a program that exits before the release keeps its lines waiting, and
+// Wait, called with no Release, releases them.
+func TestWaitReleasesHeldOutput(t *testing.T) {
+	var mu sync.Mutex
+	var got []string
+	record := func(b []byte) {
+		mu.Lock()
+		got = append(got, string(b))
+		mu.Unlock()
+	}
+	p, err := StartHeld(ports.Invocation{Path: "/bin/sh", Args: []string{"-c", "echo one; echo two >&2"}}, nil, record, record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-p.exited:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the program did not exit while its output was held")
+	}
+	select {
+	case <-p.Done():
+		t.Error("Done was closed before the held output was released")
+	default:
+	}
+	mu.Lock()
+	early := len(got)
+	mu.Unlock()
+	if early != 0 {
+		t.Errorf("%d lines recorded before the release, want 0", early)
+	}
+	p.Wait(context.Background(), time.Second)
+	if len(got) != 2 || !(got[0] == "one" && got[1] == "two" || got[0] == "two" && got[1] == "one") {
+		t.Errorf("lines %q, want one and two", got)
+	}
+}
+
 // A probe returns once its timeout ends even when a child of the command keeps its output open, as the native binary
 // an npm wrapper starts can; otherwise a harness's check would never end.
 func TestOutputReturnsWhenAChildKeepsThePipeOpen(t *testing.T) {

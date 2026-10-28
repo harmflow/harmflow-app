@@ -42,6 +42,9 @@ type Process struct {
 	// exitedOnItsOwn is set when the process had exited before Stop began, so Stop's signals did not end it.
 	exitedOnItsOwn bool
 	ended          []Ended
+	// released is closed once the recorder may take the output: at the start, unless StartHeld holds it until Release.
+	released    chan struct{}
+	releaseOnce sync.Once
 }
 
 // Start launches the invocation; onLine receives each stdout line, raw receives stdout and stderr verbatim.
@@ -54,6 +57,19 @@ func Start(inv ports.Invocation, raw io.Writer, onLine func([]byte)) (*Process, 
 // stream's own, and across the two the order they arrived. The process counts as done once both streams are drained
 // and recorded, or once outputDelay has passed since it exited.
 func StartLines(inv ports.Invocation, raw io.Writer, onStdout, onStderr func([]byte)) (*Process, error) {
+	return launch(inv, raw, onStdout, onStderr, false)
+}
+
+// StartHeld is StartLines with the output held back until Release: the recorder takes no line before it, so the caller
+// can record first what must come before the output, such as the program's start with its pid. The process runs
+// meanwhile; once the pipes and the lines queued for the recorder are full, its writes wait, and no line is lost.
+// Wait and Stop release the output too, so the hold never outlasts the wait for the process.
+func StartHeld(inv ports.Invocation, raw io.Writer, onStdout, onStderr func([]byte)) (*Process, error) {
+	return launch(inv, raw, onStdout, onStderr, true)
+}
+
+// launch starts the process for StartLines and StartHeld; held holds the output until Release.
+func launch(inv ports.Invocation, raw io.Writer, onStdout, onStderr func([]byte), held bool) (*Process, error) {
 	cmd := exec.Command(inv.Path, inv.Args...)
 	cmd.Dir = inv.Dir
 	cmd.Env = inv.Env
@@ -93,7 +109,10 @@ func StartLines(inv ports.Invocation, raw io.Writer, onStdout, onStderr func([]b
 	}
 	pid := cmd.Process.Pid
 	p := &Process{cmd: cmd, exited: make(chan struct{}), done: make(chan struct{}), stderr: &tail{max: 64 * 1024},
-		tree: Tree{Pid: pid, Group: pid, ExecutionID: inv.ExecutionID}}
+		tree: Tree{Pid: pid, Group: pid, ExecutionID: inv.ExecutionID}, released: make(chan struct{})}
+	if !held {
+		p.Release()
+	}
 	// Read before Wait can reap the process, while its pid is surely its own.
 	if start, err := startTime(pid); err == nil {
 		p.tree.Start = start
@@ -124,6 +143,7 @@ func StartLines(inv ports.Invocation, raw io.Writer, onStdout, onStderr func([]b
 	recorded := make(chan struct{})
 	go func() {
 		defer close(recorded)
+		<-p.released
 		for l := range lines {
 			if raw != nil {
 				_, _ = raw.Write(l.text) // the raw capture is a copy; the line still reaches on below
@@ -271,6 +291,7 @@ func signalName(s syscall.Signal) string {
 }
 
 // Done is closed when the process has exited and its output is drained, or has stayed open outputDelay past its exit.
+// Output StartHeld holds is recorded first, so Done waits for Release.
 func (p *Process) Done() <-chan struct{} { return p.done }
 
 // ExitCode is the process's exit code, read once Done is closed.
@@ -294,9 +315,15 @@ func (p *Process) Pid() int {
 // crash ends them with EndStoredTree. Start is zero when the kernel's start time could not be read.
 func (p *Process) Tree() Tree { return p.tree }
 
+// Release lets the recorder take the output StartHeld held back, in the order it arrived. It does nothing once the
+// output is released.
+func (p *Process) Release() { p.releaseOnce.Do(func() { close(p.released) }) }
+
 // Stop ends the process and every process it started, with EndTree: SIGTERM, then SIGKILL after the grace period.
-// Once the process has exited on its own, what it ends is what the process left running.
+// Once the process has exited on its own, what it ends is what the process left running. It releases held output
+// first, so the output ends.
 func (p *Process) Stop(grace time.Duration) {
+	p.Release()
 	p.mu.Lock()
 	if p.stopping {
 		p.mu.Unlock()
@@ -341,8 +368,10 @@ func (p *Process) Ended() []Ended {
 
 // Wait waits for the process to exit, or for the context's end, which stops it. Either way it then ends with Stop every
 // process the harness started that still runs, the grace period applying to them, so none outlives the attempt; it
-// returns once that is done and the output has ended.
+// returns once that is done and the output has ended. It releases held output first, since a process whose writes
+// wait on the hold would not exit.
 func (p *Process) Wait(ctx context.Context, grace time.Duration) {
+	p.Release()
 	select {
 	case <-p.exited:
 	case <-ctx.Done():
