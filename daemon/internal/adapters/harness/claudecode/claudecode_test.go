@@ -383,7 +383,7 @@ func TestPrepareReportsEditRulesThatReachOutside(t *testing.T) {
 	const dir = "<dir>" // a folder where the file would be: it exists, but cannot be read
 	cases := []struct {
 		name                 string
-		user, project, local string // a settings file's content, <work>, <added>, and <exec> naming those folders; "" for no file
+		user, project, local string // settings content; <work>, <added>, <exec> name the folders; "" for no file
 		policyCheck          bool
 		want                 string // the sources param of edits not limited; "" for limited edits
 	}{
