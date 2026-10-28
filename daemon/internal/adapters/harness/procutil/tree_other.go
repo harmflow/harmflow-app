@@ -8,6 +8,8 @@ import (
 )
 
 // The process table is read on macOS only; elsewhere EndTree ends the harness's group.
+const readsProcessTable = false
+
 var errNoProcessTable = errors.New("the process table is read on macOS only")
 
 func processTable() (map[int]procInfo, error) { return nil, errNoProcessTable }

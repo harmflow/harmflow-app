@@ -92,6 +92,16 @@ func (d *daemon) in(t *testing.T) *daemon {
 	return &c
 }
 
+// needProcessTable skips a test of what the daemon finds and ends outside a harness's group, which only a daemon that
+// reads the process table does. The daemon reads it on macOS only, and this module cannot import the daemon's package
+// that says so.
+func needProcessTable(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "darwin" {
+		t.Skip("needs the process table, which the daemon reads on macOS only")
+	}
+}
+
 // startDaemon starts harmflowd on the home, with env added to the test's own environment, a later entry winning.
 func startDaemon(t *testing.T, home string, env ...string) *daemon {
 	t.Helper()
@@ -2064,9 +2074,7 @@ func TestFailoverCostsReportedAndEstimated(t *testing.T) {
 // A harness that exits on its own with a quota failure leaves a background process that redirects its output, and the
 // execution fails over. The process is ended before the second attempt starts, and the log names it as left running.
 func TestFailoverEndsWhatTheFirstAttemptLeft(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("finding what a harness left needs the process table, which the daemon reads on macOS only")
-	}
+	needProcessTable(t)
 	d := startDaemon(t, t.TempDir())
 	d.call("POST", "/tasks", map[string]any{"yaml": task("leftover", "SCENARIO=leftover",
 		"    fallback:\n      candidates:\n        - provider: codex\n  execution:\n    cancelGraceSeconds: 1\n")}, 201)
@@ -2128,9 +2136,7 @@ func tokensOf(usage map[string]any) map[string]any {
 // Code runs a tool command, and the log names the second; another task keeps running. The execution ends cancelled, and
 // its record, log, raw output, workspace, and execution directory are kept.
 func TestCancelEndsTheTree(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("ending a child in a session of its own needs the process table, which the daemon reads on macOS only")
-	}
+	needProcessTable(t)
 	d := startDaemon(t, t.TempDir())
 	d.call("POST", "/tasks", map[string]any{"yaml": task("slow-a", "SCENARIO=session PARTIAL=1", "  execution:\n    cancelGraceSeconds: 1\n")}, 201)
 	d.call("POST", "/tasks", map[string]any{"yaml": task("slow-b", "SCENARIO=slow", "")}, 201)
@@ -2303,10 +2309,7 @@ func waitPs(t *testing.T, pid int, field, want string) {
 // process group of its own, outlives the daemon; the restart ends it before the execution reads interrupted, with its
 // child in its group and a command in a session of its own, as Claude Code runs a tool command, and the log names each.
 func TestRestartInterrupts(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("naming and ending what a killed daemon left needs the process table, which the daemon reads on macOS " +
-			"only")
-	}
+	needProcessTable(t)
 	home := t.TempDir()
 	d := startDaemon(t, home)
 	d.call("POST", "/tasks", map[string]any{"yaml": task("crash", "SCENARIO=session", "  execution:\n    cancelGraceSeconds: 1\n")}, 201)

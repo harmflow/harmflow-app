@@ -573,21 +573,25 @@ func TestDetectSkipsAFileThatIsNotCodex(t *testing.T) {
 	if err := os.WriteFile(plain, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cases := map[string]string{impostor: "harness_not_identified", plain: "harness_path_not_executable", real: ""}
-	// macOS's /bin/sh is bash, which answers --version as a program that is not Codex; on Linux it is often dash,
-	// which fails --version, so the case runs on macOS only.
-	if runtime.GOOS == "darwin" {
-		cases["/bin/sh"] = "harness_not_identified"
-	} else {
-		t.Log("Identify(/bin/sh) is checked on macOS only, where /bin/sh is bash")
+	cases := []struct{ name, path, key string }{
+		{"a system program", "/bin/sh", "harness_not_identified"},
+		{"an impostor", impostor, "harness_not_identified"},
+		{"a file that is not executable", plain, "harness_path_not_executable"},
+		{"Codex", real, ""},
 	}
-	for path, key := range cases {
-		got := ""
-		if err := a.Identify(context.Background(), path); err != nil {
-			got = domain.TextOf(err).Key
-		}
-		if got != key {
-			t.Errorf("Identify(%s) = %q, want %q", path, got, key)
-		}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if c.path == "/bin/sh" && runtime.GOOS != "darwin" {
+				t.Skip("macOS's /bin/sh is bash, which answers --version as a program that is not Codex; " +
+					"elsewhere it is often dash, which fails --version")
+			}
+			got := ""
+			if err := a.Identify(context.Background(), c.path); err != nil {
+				got = domain.TextOf(err).Key
+			}
+			if got != c.key {
+				t.Errorf("Identify(%s) = %q, want %q", c.path, got, c.key)
+			}
+		})
 	}
 }

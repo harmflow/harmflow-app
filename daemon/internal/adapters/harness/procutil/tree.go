@@ -46,6 +46,10 @@ const (
 // executionIDVariable is the one variable of a process's environment the scan reads.
 const executionIDVariable = "HARMFLOW_EXECUTION_ID"
 
+// ReadsProcessTable reports whether this build reads the kernel's process table, which EndTree needs to find what a
+// harness left outside its group. Without it, EndTree ends the harness's group alone.
+func ReadsProcessTable() bool { return readsProcessTable }
+
 // EndTree ends every process the harness started, wherever it moved, and returns those it ended. It
 // finds them three ways: the harness's descendants by parent pid, kept from a snapshot taken before SIGTERM and added
 // to by another before SIGKILL, so a descendant that left the group or the session is found while its parent runs;
