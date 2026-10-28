@@ -1593,7 +1593,13 @@ func TestRunStreamAndReplay(t *testing.T) {
 	id := run["executionId"].(string)
 	var seen []sseEvent
 	var streamed []loggedEvent
-	timeout := time.After(20 * time.Second)
+	// The wait follows the run's pace: it fails once silence passes with no event of the execution, not at a fixed time
+	// from the request. Under a full run's load the run's process starts, the stand-in's sleep, and the daemon's reads of
+	// progress.jsonl took more than 20 seconds together, while the stream carried each event as the daemon emitted it.
+	const silence = 20 * time.Second
+	quiet := time.NewTimer(silence)
+	defer quiet.Stop()
+	last := "the run request"
 	for done := false; !done; {
 		select {
 		case e, ok := <-events:
@@ -1605,9 +1611,11 @@ func TestRunStreamAndReplay(t *testing.T) {
 				seen = append(seen, e)
 				streamed = append(streamed, got)
 				done = e.Type == "execution.completed"
+				last = e.Type
+				quiet.Reset(silence)
 			}
-		case <-timeout:
-			t.Fatalf("no execution.completed; saw %d events", len(seen))
+		case <-quiet.C:
+			t.Fatalf("no event of the execution in %v since %s; saw %d events and no execution.completed", silence, last, len(seen))
 		}
 	}
 	closeStream()
