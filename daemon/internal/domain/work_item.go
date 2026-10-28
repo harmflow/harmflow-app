@@ -41,6 +41,11 @@ type WorkItemLimits struct {
 	MaxFailedRetries  int
 }
 
+// Skipped reports whether the session left the item alone: its result changes none of the item's status.
+func (r WorkItemResult) Skipped() bool {
+	return r.Outcome == "skipped"
+}
+
 // ApplyResult folds one execution's result for the item into the ledger entry. A failure counts toward the retry
 // limit, a resumption toward the resume limit. The item needs a human past the retry limit, or at the resume limit
 // while a later cycle would still resume it.

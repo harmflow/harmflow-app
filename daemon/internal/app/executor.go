@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -51,6 +52,22 @@ type run struct {
 	// that its task does not allow. Both are set before the attempt's harness starts.
 	stopAttempt context.CancelFunc
 	extraUsage  atomic.Bool
+	// selected holds every work item the session selected, in order, each with what the ledger held for it before;
+	// guarded by the App's mutex.
+	selected []selection
+}
+
+// selectionOf is what the ledger held for key when the session selected it, nil when the session did not select it.
+func (r *run) selectionOf(key string) *selection {
+	r.a.mu.Lock()
+	defer r.a.mu.Unlock()
+	for i := range r.selected {
+		if r.selected[i].key == key {
+			s := r.selected[i]
+			return &s
+		}
+	}
+	return nil
 }
 
 func (a *App) launch(x *domain.Execution, h *runHandle) {
@@ -1106,7 +1123,13 @@ func (r *run) onProgress(p domain.ProgressLine) {
 		a.mu.Unlock()
 		// The record names the item before the ledger does: recovery counts the interruption from the record.
 		r.save(true)
-		a.trackWorkItem(r.x.TaskID, p.WorkItem, msg, p.Repository, r.x.ID)
+		before := a.trackWorkItem(r.x.TaskID, p.WorkItem, msg, p.Repository, r.x.ID)
+		if p.WorkItem != "" && r.selectionOf(p.WorkItem) == nil {
+			// A second selection of the item finds it in progress: what it held before is the first one's.
+			a.mu.Lock()
+			r.selected = append(r.selected, before)
+			a.mu.Unlock()
+		}
 	case domain.EventTestStarted:
 		r.setStatus(domain.StatusTesting, domain.Text{Message: msg})
 	case domain.EventTestCompleted:
@@ -1159,17 +1182,18 @@ func (r *run) outcomeFromReport() (domain.ExecutionStatus, domain.Text) {
 		r.a.mu.Unlock()
 		return domain.StatusCompleted, domain.Text{}
 	}
+	// An ignored report loses its work items' results, so the execution needs attention, with the reason it was ignored.
 	value, err := schema.FromJSON(data)
 	if err != nil {
-		r.warn(domain.Warning{Code: domain.WarningOther,
-			Text: domain.T("report_not_json", "report.json is not valid JSON; it was ignored")}, "", false)
-		return domain.StatusCompleted, domain.Text{}
+		text := domain.T("report_not_json", "report.json is not valid JSON; it was ignored")
+		r.warn(domain.Warning{Code: domain.WarningOther, Text: text}, "", false)
+		return domain.StatusNeedsAttention, text
 	}
 	if issues := r.a.d.Validator.ValidateReport(value); len(issues) > 0 {
-		r.warn(domain.Warning{Code: domain.WarningOther, Text: domain.T("report_schema_invalid",
-			"report.json does not follow its schema ({{path}}: {{detail}}); it was ignored",
-			"path", issues[0].Path, "detail", issues[0].Message)}, "", false)
-		return domain.StatusCompleted, domain.Text{}
+		text := domain.T("report_schema_invalid", "report.json does not follow its schema ({{path}}: {{detail}}); it was ignored",
+			"path", issues[0].Path, "detail", issues[0].Message)
+		r.warn(domain.Warning{Code: domain.WarningOther, Text: text}, "", false)
+		return domain.StatusNeedsAttention, text
 	}
 	var rep domain.ExecutionReport
 	if err := json.Unmarshal(data, &rep); err != nil {
@@ -1226,7 +1250,7 @@ func (r *run) applyReport(rep *domain.ExecutionReport) {
 	}
 	limits := r.limits()
 	for _, w := range rep.WorkItems {
-		a.applyWorkItem(r.x.TaskID, w, r.x.ID, limits)
+		a.applyWorkItem(r.x.TaskID, w, r.x.ID, limits, r.selectionOf(w.Key))
 		if w.PullRequest != nil && w.PullRequest.URL != "" {
 			t := domain.EventPullRequestUpdated
 			if w.PullRequest.Created != nil && *w.PullRequest.Created {
@@ -1282,7 +1306,8 @@ func (a *App) finish(r *run, status domain.ExecutionStatus, reason domain.Text) 
 	r.finish(status, reason)
 }
 
-// finish records the terminal state and its event. A failed or interrupted work item counts toward its retry limit.
+// finish records the terminal state and its event. A work item the session selected and left without a result counts
+// toward its retry limit, unless the execution was cancelled.
 func (r *run) finish(status domain.ExecutionStatus, reason domain.Text) {
 	a := r.a
 	now := a.now()
@@ -1301,11 +1326,19 @@ func (r *run) finish(status domain.ExecutionStatus, reason domain.Text) {
 		r.x.CancelRequestedAt = &now
 	}
 	r.x.SetStep(domain.Text{})
-	workItem := r.x.WorkItem
-	hasResult := len(r.x.WorkItems) > 0
+	// Every item the session selected and left without a result counts as an operational failure, as an interruption
+	// does, whatever ended the execution, except the user's cancellation, which counts nothing against its items.
+	var unreported []string
+	if status != domain.StatusCancelled {
+		for _, s := range r.selected {
+			if !slices.ContainsFunc(r.x.WorkItems, func(w domain.WorkItemResult) bool { return w.Key == s.key }) {
+				unreported = append(unreported, s.key)
+			}
+		}
+	}
 	a.mu.Unlock()
-	if (status == domain.StatusFailed || status == domain.StatusInterrupted) && workItem != "" && !hasResult {
-		a.failWorkItem(r.x.TaskID, workItem, r.x.ID, r.lastOperation, r.limitsOrDefault())
+	for _, key := range unreported {
+		a.failWorkItem(r.x.TaskID, key, r.x.ID, r.lastOperation, r.limitsOrDefault())
 	}
 	r.save(true)
 	sev := domain.SeverityInfo

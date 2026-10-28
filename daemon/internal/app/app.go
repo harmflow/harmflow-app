@@ -153,6 +153,7 @@ type App struct {
 	sched         map[string]*scheduleState
 	firings       map[string][]firingRecord // by task id
 	ledger        map[string]map[string]*domain.WorkItem
+	ledgerRepair  bool // the ledger was saved before ledgerVersion, and repairLedger has not mended it yet
 	notifications []Notification
 	accepting     bool
 	stopping      bool
@@ -269,6 +270,7 @@ func (a *App) Start(ctx context.Context) error {
 	if err := a.recover(ctx); err != nil {
 		return err
 	}
+	a.repairLedger() // after recovery, so that every execution its items name has ended
 	a.refreshHarnessesAsync(detectCtx)
 	a.emit(domain.Event{Type: domain.EventDaemonStarted, Payload: map[string]any{"version": a.d.Version, "pid": os.Getpid()}}.Says(
 		domain.T("daemon_started", "HarmFlow daemon {{version}} started", "version", a.d.Version)))
