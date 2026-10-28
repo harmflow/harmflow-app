@@ -539,8 +539,15 @@ func (e *env) poll(budget time.Duration, cond func() bool) bool {
 // wait returns the execution once it has one of the statuses; a final status it does not want fails at once.
 func (e *env) wait(id string, want ...domain.ExecutionStatus) ExecutionView {
 	e.t.Helper()
+	return e.waitWithin(10*time.Second, id, want...)
+}
+
+// waitWithin is wait with a budget of its own, for an execution whose end comes later by design, such as after a grace
+// period.
+func (e *env) waitWithin(budget time.Duration, id string, want ...domain.ExecutionStatus) ExecutionView {
+	e.t.Helper()
 	var x ExecutionView
-	e.poll(10*time.Second, func() bool {
+	e.poll(budget, func() bool {
 		x, _ = e.app.GetExecution(id)
 		return slices.Contains(want, x.Status) || x.Status.IsTerminal()
 	})
