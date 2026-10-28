@@ -148,29 +148,34 @@ func TestCodexSkillsComeFromItsSkillList(t *testing.T) {
 
 // The catalog lists a skill of Codex's list once, with Codex once among its harnesses, for the workspace path asked,
 // for the run folder of a task asked with none, as validation does, or for the workspace root with neither; what Codex
-// could not load is in its problems and in a missing skill's message. A skill a task
-// cannot cite, a plugin's `<plugin>:<skill>` or a name with the hf- prefix, is not offered, though Codex lists it.
+// could not load is in its problems and in a missing skill's message. A plugin's skill is offered by the name Codex
+// reports, `<plugin>:<skill>`, spaces included; a skill a task cannot cite, a name with the hf- prefix or one that is
+// neither an identifier nor a plugin's skill, is not offered, though Codex lists it.
 func TestCatalogListsCodexSkillsForTheWorkspace(t *testing.T) {
 	received := filepath.Join(t.TempDir(), "received.jsonl")
 	broken := `{"path":"/x/broken/SKILL.md","message":"invalid front matter"}`
 	a, _ := newCodexAppOn(t, skillListCodex(received,
 		listAnswer([]string{"my-skill", "/u/my-skill/SKILL.md", "my-skill", "/r/my-skill/SKILL.md",
-			"pdf:pdf", "/p/pdf/SKILL.md", "hf-users-own", "/u/hf-users-own/SKILL.md"}, broken)))
+			"pdf:pdf", "/p/pdf/SKILL.md", "pdf:Fill Forms", "/p/fill-forms/SKILL.md",
+			"hf-users-own", "/u/hf-users-own/SKILL.md", "My Skill", "/u/spaced/SKILL.md"},
+			broken)))
 	ctx := t.Context()
 	ws := t.TempDir()
 
 	c := a.Catalog(ctx, ws, "plain")
-	var entries []CatalogEntry
+	entries := map[string][]CatalogEntry{}
 	for _, e := range c.Skills {
 		switch e.Name {
-		case "my-skill":
-			entries = append(entries, e)
-		case "pdf:pdf", "hf-users-own":
+		case "my-skill", "pdf:pdf", "pdf:Fill Forms":
+			entries[e.Name] = append(entries[e.Name], e)
+		case "hf-users-own", "My Skill":
 			t.Errorf("Catalog(ctx, %s, plain) offers %+v, want no skill a task cannot cite", ws, e)
 		}
 	}
-	if len(entries) != 1 || !slices.Equal(entries[0].Harnesses, []string{domain.HarnessCodex}) {
-		t.Errorf("Catalog(ctx, %s, plain) my-skill = %+v, want one entry, on codex once", ws, entries)
+	for _, name := range []string{"my-skill", "pdf:pdf", "pdf:Fill Forms"} {
+		if got := entries[name]; len(got) != 1 || !slices.Equal(got[0].Harnesses, []string{domain.HarnessCodex}) {
+			t.Errorf("Catalog(ctx, %s, plain) %s = %+v, want one entry, on codex once", ws, name, got)
+		}
 	}
 	if got := lastCwds(t, received); !slices.Equal(got, []string{ws}) {
 		t.Errorf("Catalog(ctx, %s, plain) listed skills for %q, want the workspace path [%s]", ws, got, ws)
@@ -193,6 +198,67 @@ func TestCatalogListsCodexSkillsForTheWorkspace(t *testing.T) {
 	if !ok || ae.Key != "skill_not_found" || ae.Params["source"] != "skill_list_errors" ||
 		!strings.Contains(ae.Message, "invalid front matter") || !strings.Contains(ae.Message, "skill list for") {
 		t.Errorf("CreateTask(gone) = %v (%+v), want skill_not_found naming Codex's skill list and its errors", err, ae)
+	}
+}
+
+// A Codex task cites a plugin's skill by the name Codex's skill list reports, uppercase letters included. It saves when
+// the list returns the skill for the task's workspace, and fails naming it when the list does not; it exports and
+// imports with its names unchanged, and an import whose skill this machine's Codex lacks warns, naming it. An execution
+// resolves the skill at the SKILL.md Codex reports.
+func TestCodexPluginSkills(t *testing.T) {
+	received := filepath.Join(t.TempDir(), "received.jsonl")
+	a, _ := newCodexAppOn(t, skillListCodex(received, listAnswer([]string{"pdf:pdf", "/p/pdf/SKILL.md",
+		"presentations:Presentations", "/p/presentations/SKILL.md"}, "")))
+	ctx := t.Context()
+
+	created, err := a.CreateTask(ctx, TaskInput{YAML: codexTaskYAML("plugins", "  skills: [pdf:pdf, presentations:Presentations]\n")})
+	if err != nil {
+		t.Fatalf("CreateTask(plugins), citing two plugin skills of Codex's list = %v, want no error", err)
+	}
+	if !strings.Contains(created.YAML, "skills: [pdf:pdf, presentations:Presentations]") {
+		t.Errorf("CreateTask(plugins) wrote\n%s\nwant the skills as Codex names them", created.YAML)
+	}
+	_, err = a.CreateTask(ctx, TaskInput{YAML: codexTaskYAML("absent", "  skills: [spreadsheets:excel-live-control]\n")})
+	ae, ok := err.(*Error)
+	if !ok || ae.Key != "skill_not_found" || ae.Params["name"] != "spreadsheets:excel-live-control" ||
+		!strings.Contains(ae.Message, `"spreadsheets:excel-live-control"`) {
+		t.Errorf("CreateTask(absent) = %v (%+v), want skill_not_found naming spreadsheets:excel-live-control", err, ae)
+	}
+
+	exported, err := a.ExportTask("plugins")
+	if err != nil {
+		t.Fatalf("ExportTask(plugins) = %v, want no error", err)
+	}
+	if !strings.Contains(string(exported), "pdf:pdf") || !strings.Contains(string(exported), "presentations:Presentations") {
+		t.Errorf("ExportTask(plugins) =\n%s\nwant both plugin skills by their names", exported)
+	}
+	elsewhere := strings.Replace(string(exported), "pdf:pdf", "spreadsheets:excel-live-control", 1)
+	imported, err := a.ImportTask(ctx, elsewhere, true)
+	if err != nil {
+		t.Fatalf("ImportTask(export of plugins, citing a skill Codex lacks) = %v, want no error", err)
+	}
+	if !strings.Contains(imported.YAML, "skills: [spreadsheets:excel-live-control, presentations:Presentations]") {
+		t.Errorf("ImportTask(export of plugins) wrote\n%s\nwant the skills' names unchanged", imported.YAML)
+	}
+	var missing []string
+	for _, w := range imported.Warnings {
+		if w.Key == "skill_missing" {
+			missing = append(missing, w.Params["name"])
+		}
+	}
+	if !slices.Equal(missing, []string{"spreadsheets:excel-live-control"}) {
+		t.Errorf("ImportTask(export of plugins) warns skill_missing for %q, want only spreadsheets:excel-live-control",
+			missing)
+	}
+
+	res := a.Validate(ctx, TaskInput{YAML: codexTaskYAML("plugins", "  skills: [presentations:Presentations]\n")})
+	if res.doc == nil {
+		t.Fatalf("Validate(plugins) errors = %+v, want none", res.Errors)
+	}
+	r := &run{a: a, def: *res.doc, eff: res.doc.Effective(), work: t.TempDir()}
+	_, skills, err := r.resolve(ctx, a.adapters[domain.HarnessCodex])
+	if err != nil || len(skills) != 1 || skills[0].Name != "presentations:Presentations" || skills[0].Path != "/p/presentations" {
+		t.Errorf("resolve(codex) = %+v, %v; want presentations:Presentations at /p/presentations", skills, err)
 	}
 }
 
@@ -248,6 +314,98 @@ func newClaudeApp(t *testing.T) (*App, string) {
 		t.Fatal(err)
 	}
 	return a, config
+}
+
+// newClaudeAppOn is newClaudeApp with a stand-in Claude Code CLI, whose script answers its probes and its plugin
+// commands, so the adapter detects it.
+func newClaudeAppOn(t *testing.T, script string) *App {
+	t.Helper()
+	a, _ := newClaudeApp(t)
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cc := a.adapters[domain.HarnessClaudeCode].(*claudecode.Adapter)
+	cc.PathEnv = bin
+	return a
+}
+
+// pluginClaude is a stand-in Claude Code that is signed in and has the plugin pdf@market enabled, installed at root,
+// whose skills are pdf and Forms.
+func pluginClaude(root string) string {
+	return `#!/bin/bash
+case "$1" in
+  --version) echo "2.1.309 (Claude Code)" ;;
+  --help) echo "-p, --print  --output-format <format>  --permission-mode <mode>  --allowedTools <tools...>  --append-system-prompt <prompt>" ;;
+  auth) echo '{"loggedIn": true}' ;;
+  plugin)
+    case "$2" in
+      list) echo '[{"id":"pdf@market","enabled":true,"projectEnabled":false,"installPath":"` + root + `"}]' ;;
+      details) printf 'pdf 1.0.0\n\nComponent inventory\n  Skills (2)  pdf, Forms\n' ;;
+    esac ;;
+esac
+`
+}
+
+// A Claude Code task cites a plugin's skill by the name Claude Code gives it, `<plugin>:<skill>`. It saves when a
+// plugin Claude Code has enabled has that skill, and fails naming the skill and the plugins looked in when none has it;
+// the task editor's catalog offers it; an import whose skill no enabled plugin has warns, naming it; and an execution
+// resolves it in the plugin's folder.
+func TestClaudeCodePluginSkills(t *testing.T) {
+	root := t.TempDir()
+	writeSkill(t, filepath.Join(root, "skills", "pdf"))
+	a := newClaudeAppOn(t, pluginClaude(root))
+	ctx := t.Context()
+	ws := filepath.Join(a.d.Paths.UserHome, "ws")
+	if err := os.MkdirAll(ws, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	placed := func(id, skills string) string {
+		return taskYAML(id, "  skills: ["+skills+"]\n  workspace:\n    path: ~/ws\n")
+	}
+
+	if _, err := a.CreateTask(ctx, TaskInput{YAML: placed("plugins", "pdf:pdf, pdf:Forms")}); err != nil {
+		t.Fatalf("CreateTask(plugins), citing two skills of an enabled plugin = %v, want no error", err)
+	}
+	_, err := a.CreateTask(ctx, TaskInput{YAML: placed("absent", "pdf:missing")})
+	ae, ok := err.(*Error)
+	if !ok || ae.Key != "skill_not_found" || ae.Params["name"] != "pdf:missing" || ae.Params["source"] != "plugin_list" ||
+		ae.Params["workspace"] != ws || !strings.Contains(ae.Message, "Claude Code's plugins for "+ws) {
+		t.Errorf("CreateTask(absent) = %v (%+v), want skill_not_found naming pdf:missing and Claude Code's plugins for %s",
+			err, ae, ws)
+	}
+
+	if got, want := claudeCodeOffers(ctx, a, "~/ws", "plugins"), []string{"pdf:Forms", "pdf:pdf"}; !slices.Equal(got, want) {
+		t.Errorf(`Catalog(ctx, "~/ws", plugins) offers %q on Claude Code, want %q`, got, want)
+	}
+
+	imported, err := a.ImportTask(ctx, placed("imported", "pdf:pdf, other:skill"), false)
+	if err != nil {
+		t.Fatalf("ImportTask(imported) = %v, want no error", err)
+	}
+	var missing []string
+	for _, w := range imported.Warnings {
+		if w.Key == "skill_missing" {
+			missing = append(missing, w.Params["name"])
+		}
+	}
+	if !slices.Equal(missing, []string{"other:skill"}) {
+		t.Errorf("ImportTask(imported) warns skill_missing for %q, want only other:skill", missing)
+	}
+
+	res := a.Validate(ctx, TaskInput{YAML: placed("plugins", "pdf:pdf, pdf:Forms")})
+	if res.doc == nil {
+		t.Fatalf("Validate(plugins) errors = %+v, want none", res.Errors)
+	}
+	r := &run{a: a, def: *res.doc, eff: res.doc.Effective(), work: ws}
+	_, skills, err := r.resolve(ctx, a.adapters[domain.HarnessClaudeCode])
+	var paths []string
+	for _, s := range skills {
+		paths = append(paths, s.Name+" "+s.Path)
+	}
+	if want := []string{"pdf:pdf " + filepath.Join(root, "skills", "pdf"), "pdf:Forms " + root}; err != nil || !slices.Equal(paths, want) {
+		t.Errorf("resolve(claude-code) = %q, %v; want %q", paths, err, want)
+	}
 }
 
 // writeSkill writes a SKILL.md into dir, named for the folder.

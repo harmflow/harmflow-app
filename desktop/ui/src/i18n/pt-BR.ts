@@ -334,6 +334,7 @@ export const ptBR: Resources = {
     skill_list_unreadable: "não foi possível ler a lista de skills do {{harness}} para {{workspace}}: {{detail}}",
     fallback_skill_list_unreadable:
       "{{harness}} não é um fallback válido: não foi possível ler a lista de skills dele para {{workspace}}: {{detail}}",
+    claude_plugin_output_unrecognized: "{{command}} não imprimiu nada que o HarmFlow consiga ler",
     codex_app_server_missing: "o Codex {{version}} não tem app server",
     codex_app_server_start_failed: "o app server do Codex não pôde iniciar: {{detail}}",
     codex_app_server_exited: "o app server do Codex encerrou",
@@ -529,6 +530,8 @@ export const ptBR: Resources = {
     harness_workspace: "na configuração do {{harness}} e no workspace {{workspace}}",
     skill_list: "na lista de skills do {{harness}} para {{workspace}}",
     skill_list_errors: "na lista de skills do {{harness}} para {{workspace}}, que não conseguiu carregar {{errors}}",
+    plugin_list: "nos plugins do {{harness}} para {{workspace}}",
+    plugin_list_errors: "nos plugins do {{harness}} para {{workspace}}, que não conseguiram carregar {{errors}}",
   },
   claudeSettings: {
     user: "configurações de usuário",

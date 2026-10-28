@@ -811,6 +811,65 @@ func TestValidIdentifier(t *testing.T) {
 	}
 }
 
+// A skill name is an identifier, or a plugin's skill exactly as its harness reports it, `<plugin>:<skill>`, uppercase
+// letters and inner whitespace included and each part at most 64 characters. Any other name is not: an identifier
+// holds no whitespace, a part neither begins nor ends with it, and a name is never a path.
+func TestValidSkillName(t *testing.T) {
+	v, err := New()
+	if err != nil {
+		t.Fatalf("New() = %v, want no error", err)
+	}
+	long := strings.Repeat("a", 64)
+	spaced := strings.Repeat("a", 31) + " " + strings.Repeat("a", 32)
+	for name, want := range map[string]bool{
+		"my-skill": true, "hf-github-worktree": true, "a": true, long: true,
+		"pdf:pdf": true, "presentations:Presentations": true, "spreadsheets:excel-live-control": true,
+		"documents:documents": true, long + ":" + long: true, "harmflow:hf-github-draft-pr": true,
+		"pdf:my skill": true, "pdf:Fill Forms": true, "my plugin:x": true, "pdf:a\tb": true, spaced + ":" + spaced: true,
+		"My-Skill": false, "-skill": false, "": false, strings.Repeat("a", 65): false, "my skill": false,
+		"My Skill": false, "pdf:": false, ":pdf": false, ":": false, "a:b:c": false, "pdf:Fill Forms:x": false,
+		"pdf :pdf": false, "pdf: pdf": false, " pdf:pdf": false, "pdf:pdf ": false, "x:\tpdf": false, "pdf: ": false,
+		"x/y:z": false, "x:y/z": false, `x\y:z`: false, "x:..": true, "x:my/skill": false, `x:my\skill`: false,
+		strings.Repeat("a", 65) + ":pdf": false, "pdf:" + strings.Repeat("a", 65): false, "pdf:" + spaced + "a": false,
+	} {
+		if got := v.ValidSkillName(name); got != want {
+			t.Errorf("ValidSkillName(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+// A task cites a plugin's skill by its harness's name, but an agent still by an identifier only, and a skill name that
+// is neither form is refused at the skill, once. A plugin's skill cited twice is refused at the list, as any skill is.
+func TestTaskCitesAPluginSkill(t *testing.T) {
+	v, err := New()
+	if err != nil {
+		t.Fatalf("New() = %v, want no error", err)
+	}
+	doc, node, _ := ParseYAML([]byte(valid +
+		"  skills: [pdf:pdf, presentations:Presentations, \"pdf:Fill Forms\", release-notes]\n"))
+	if issues := v.ValidateTask(doc, node); len(issues) > 0 {
+		t.Errorf("ValidateTask(plugin skills) = %+v, want no issue", issues)
+	}
+	for _, c := range []struct {
+		name, yaml, key, path string
+	}{
+		{"an agent in the plugin form", valid + "  agents: [pdf:pdf]\n", "schema_pattern", "/spec/agents/0"},
+		{"a skill whose part begins with a space", valid + "  skills: [\"pdf: pdf\"]\n", "schema_pattern", "/spec/skills/0"},
+		{"a skill with a space and no plugin", valid + "  skills: [\"my skill\"]\n", "schema_pattern", "/spec/skills/0"},
+		{"a skill with two colons", valid + "  skills: [\"a:b:c\"]\n", "schema_pattern", "/spec/skills/0"},
+		{"a skill in caps without a plugin", valid + "  skills: [My-Skill]\n", "schema_pattern", "/spec/skills/0"},
+		{"a plugin skill twice", valid + "  skills: [pdf:pdf, pdf:pdf]\n", "schema_unique_items", "/spec/skills"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			doc, node, _ := ParseYAML([]byte(c.yaml))
+			issues := v.ValidateTask(doc, node)
+			if len(issues) != 1 || issues[0].Key != c.key || issues[0].Path != c.path {
+				t.Errorf("ValidateTask(%s) = %+v, want one %s at %s", c.name, issues, c.key, c.path)
+			}
+		})
+	}
+}
+
 // A schema error carries a key and params the desktop translates, beside its en-US text.
 func TestSchemaErrorsAreTranslatable(t *testing.T) {
 	v, _ := New()

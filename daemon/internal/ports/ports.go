@@ -273,6 +273,12 @@ type WorkspaceFolderReader interface {
 	ReadsWorkspace(kind string) bool
 }
 
+// PluginLister is a HarnessAdapter that finds a plugin's items of a kind, named `<plugin>:<name>`, in its harness's list
+// of the plugins it has enabled for a workspace, not in a folder: ListsPlugins says which kinds.
+type PluginLister interface {
+	ListsPlugins(kind string) bool
+}
+
 // HarnessCloser is a HarnessAdapter that keeps a process of its harness running between calls; Close ends it.
 type HarnessCloser interface {
 	Close()

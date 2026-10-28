@@ -28,6 +28,16 @@ describe("daemonText", () => {
     );
   });
 
+  it("names the plugins a plugin's skill was looked for in", () => {
+    const where = "Claude Code's plugins for /w";
+    const text = {
+      message: `skill "pdf:pdf" cannot be found for Claude Code (${where})`,
+      messageKey: "skill_not_found" as const,
+      params: { name: "pdf:pdf", harness: "Claude Code", where, source: "plugin_list", workspace: "/w" },
+    };
+    expect(daemonText(text)).toBe('a skill "pdf:pdf" não foi encontrada para Claude Code (nos plugins do Claude Code para /w)');
+  });
+
   it("translates what a text names: a status, a cron field, a screen, the settings that widen a tool list", () => {
     expect(daemonText({ message: "", messageKey: "execution_ended", params: { status: "cancelled" } })).toBe(
       "a execução já terminou (Cancelada)",
