@@ -966,6 +966,181 @@ func TestTaskLifecycle(t *testing.T) {
 	}
 }
 
+// Disabling a task over the API rewrites spec.enabled in its file and no other key, and takes away its next firing: the
+// minute boundary that comes while it is disabled starts no execution. Enabling it gives it a next firing again, which
+// starts a scheduled execution.
+func TestDisablingAndEnablingChangeTheFileAndTheFirings(t *testing.T) {
+	d := startDaemon(t, t.TempDir())
+	// The task is disabled before the minute boundary its save announces, so a save in the last seconds of a minute
+	// waits for the next one: that boundary must not fire the task before the disable reaches it.
+	if left := time.Until(time.Now().Truncate(time.Minute).Add(time.Minute)); left < 10*time.Second {
+		time.Sleep(left + time.Second)
+	}
+	// Its notices are off, so no notification follows the scheduled run.
+	created := d.call("POST", "/tasks", map[string]any{"yaml": task("toggled", "SCENARIO=ok",
+		"  schedule:\n    cron: \"* * * * *\"\n    timezone: UTC\n  notifications:\n    native:\n      enabled: false\n")}, 201)
+	if created["enabled"] != true || created["nextFireAt"] == nil {
+		t.Fatalf("the saved task reads enabled %v, next firing %v; want enabled, with a next firing", created["enabled"],
+			created["nextFireAt"])
+	}
+	file := filepath.Join(d.home, "tasks", "toggled.yaml")
+	saved, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, _ := yamlAsJSON(t, saved).(map[string]any)
+	if spec, _ := original["spec"].(map[string]any); spec != nil {
+		delete(spec, "enabled")
+	}
+	// inFile checks that the task's file reads spec.enabled as want, and is the saved file in every other key.
+	inFile := func(step string, want bool) {
+		t.Helper()
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("%s: %v", step, err)
+		}
+		doc, _ := yamlAsJSON(t, data).(map[string]any)
+		spec, _ := doc["spec"].(map[string]any)
+		if spec["enabled"] != want {
+			t.Errorf("%s: the file reads spec.enabled %v, want %v:\n%s", step, spec["enabled"], want, data)
+		}
+		delete(spec, "enabled")
+		if !reflect.DeepEqual(doc, original) {
+			t.Errorf("%s: the file differs from the saved one in a key other than spec.enabled:\n%s\nwant\n%s", step, data,
+				saved)
+		}
+	}
+
+	disabled := d.call("POST", "/tasks/toggled/disable", nil, 200)
+	got := d.call("GET", "/tasks/toggled", nil, 200)
+	for source, v := range map[string]map[string]any{"the disable's answer": disabled, "GET /tasks/toggled": got} {
+		if _, next := v["nextFireAt"]; v["enabled"] != false || next {
+			t.Errorf("%s reads enabled %v, next firing %v; want disabled, with no next firing", source, v["enabled"],
+				v["nextFireAt"])
+		}
+	}
+	if disabled["revision"] == nil || disabled["revision"] == created["revision"] || got["revision"] != disabled["revision"] {
+		t.Errorf("revisions: saved %v, the disable's answer %v, GET %v; want a new one, read back by GET",
+			created["revision"], disabled["revision"], got["revision"])
+	}
+	if listed := d.listedTask("toggled"); listed == nil || listed["enabled"] != false {
+		t.Errorf("GET /tasks lists %v, want toggled disabled", listed)
+	}
+	inFile("after the disable", false)
+
+	// Schedules have no seconds field, so the firing comes at the next minute boundary, at most 60 s away, and the
+	// scheduler records it within a tick; the record has as long again on a loaded host.
+	deadline := time.Now().Truncate(time.Minute).Add(2 * time.Minute)
+	var skipped map[string]any
+	for skipped == nil {
+		if time.Now().After(deadline) {
+			t.Fatalf("by %s the disabled task has no skipped firing: %v", deadline.Format(time.TimeOnly),
+				firings(t, d.home, "toggled"))
+		}
+		time.Sleep(500 * time.Millisecond)
+		for _, r := range firings(t, d.home, "toggled") {
+			if r["outcome"] == "skipped" {
+				skipped = r
+			}
+		}
+	}
+	if skipped["reasonKey"] != "task_was_disabled" || skipped["trigger"] != "schedule" || skipped["executionId"] != nil {
+		t.Errorf("the firing while disabled is recorded as %v, want skipped because the task was disabled", skipped)
+	}
+	if runs := d.list("/executions?taskId=toggled"); len(runs) != 0 {
+		t.Fatalf("the disabled task has executions %v across the minute boundary %v, want none", runs,
+			skipped["scheduledFor"])
+	}
+
+	enabled := d.call("POST", "/tasks/toggled/enable", nil, 200)
+	next, err := time.Parse(time.RFC3339, fmt.Sprint(enabled["nextFireAt"]))
+	if enabled["enabled"] != true || err != nil {
+		t.Fatalf("the enable's answer reads enabled %v, next firing %v (%v); want enabled, with a next firing",
+			enabled["enabled"], enabled["nextFireAt"], err)
+	}
+	inFile("after the enable", true)
+	deadline = next.Add(60 * time.Second)
+	var runs []map[string]any
+	for len(runs) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("by %s the task enabled for %s has no execution", deadline.Format(time.TimeOnly),
+				next.Format(time.TimeOnly))
+		}
+		time.Sleep(500 * time.Millisecond)
+		runs = d.list("/executions?taskId=toggled")
+	}
+	id := runs[0]["id"].(string)
+	x := d.waitStatus(id, "completed")
+	// The next minute's firing must not run while the test ends.
+	d.call("POST", "/tasks/toggled/disable", nil, 200)
+	scheduledFor, err := time.Parse(time.RFC3339Nano, fmt.Sprint(x["scheduledFor"]))
+	if len(runs) != 1 || x["trigger"] != "schedule" || err != nil || !scheduledFor.Equal(next) {
+		t.Errorf("after the enable: %d executions; %s has trigger %v, scheduled for %v (%v); want one, from the schedule, "+
+			"for %v, the firing the enable announced", len(runs), id, x["trigger"], x["scheduledFor"], err,
+			enabled["nextFireAt"])
+	}
+}
+
+// A task duplicated over the API, its copy disabled, and the original removed: the copy stays under a new identifier,
+// disabled in the API's answers, in the list, and in its file, and the original is gone from the disk and the API.
+func TestDuplicateDisableTheCopyRemoveTheOriginal(t *testing.T) {
+	d := startDaemon(t, t.TempDir())
+	// With no schedule, the original never fires, so nothing runs that would hold its removal back.
+	d.call("POST", "/tasks", map[string]any{"yaml": task("original", "Say hi.", "")}, 201)
+	dup := d.call("POST", "/tasks/original/duplicate", nil, 201)
+	id, _ := dup["id"].(string)
+	if id == "" || id == "original" {
+		t.Fatalf("the duplicate's identifier is %q, want a new one", id)
+	}
+	// A duplicate is saved disabled; the dashboard's toggle still sends the call, which keeps it so.
+	disabled := d.call("POST", "/tasks/"+id+"/disable", nil, 200)
+	if status, body := d.request("DELETE", "/tasks/original", nil, nil); status != 204 {
+		t.Fatalf("DELETE /tasks/original: status %d, want 204: %s", status, body)
+	}
+
+	for source, v := range map[string]map[string]any{
+		"the duplicate's answer": dup,
+		"the disable's answer":   disabled,
+		"GET /tasks/" + id:       d.call("GET", "/tasks/"+id, nil, 200),
+		"GET /tasks":             d.listedTask(id),
+	} {
+		if v == nil || v["id"] != id || v["enabled"] != false {
+			t.Errorf("%s reads %v, want %s disabled", source, v, id)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(d.home, "tasks", id+".yaml"))
+	if err != nil {
+		t.Fatalf("the copy's file: %v", err)
+	}
+	doc, _ := yamlAsJSON(t, data).(map[string]any)
+	meta, _ := doc["metadata"].(map[string]any)
+	spec, _ := doc["spec"].(map[string]any)
+	if meta["id"] != id || spec["enabled"] != false {
+		t.Errorf("the copy's file reads metadata.id %v, spec.enabled %v; want %s, false:\n%s", meta["id"], spec["enabled"],
+			id, data)
+	}
+	if _, err := os.Stat(filepath.Join(d.home, "tasks", "original.yaml")); !os.IsNotExist(err) {
+		t.Errorf("the original's file after its removal: %v, want it gone", err)
+	}
+	if status, body := d.request("GET", "/tasks/original", nil, nil); status != 404 {
+		t.Errorf("GET /tasks/original: status %d, want 404: %s", status, body)
+	}
+	if listed := d.listedTask("original"); listed != nil {
+		t.Errorf("GET /tasks lists the removed original: %v", listed)
+	}
+}
+
+// listedTask is the task GET /tasks lists under the id, or nil when it lists none.
+func (d *daemon) listedTask(id string) map[string]any {
+	d.t.Helper()
+	for _, x := range d.list("/tasks") {
+		if x["id"] == id {
+			return x
+		}
+	}
+	return nil
+}
+
 // A form document that sets every section is written as a file equal to it, which passes validation and is listed;
 // after an edit outside the daemon, the task the API returns is the file.
 func TestFormDocumentIsTheFile(t *testing.T) {
