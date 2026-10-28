@@ -77,7 +77,7 @@ test-daemon: ## Unit tests of the daemon
 	go -C daemon test $(TEST_FLAGS) ./...
 
 .PHONY: test-desktop
-test-desktop: ## Type check and unit tests of the desktop
+test-desktop: sidecar ## Type check and unit tests of the desktop
 	pnpm -C desktop typecheck
 	pnpm -C desktop test
 	cd desktop/src-tauri && cargo test
@@ -110,7 +110,7 @@ coverage-daemon: ## Statements per package of the daemon, unit and integration d
 		"$(COVERAGE)/daemon.out"
 
 .PHONY: coverage-desktop
-coverage-desktop: ## Unit tests of the interface and the shell, held at their floors (needs cargo-llvm-cov)
+coverage-desktop: sidecar ## Unit tests of the interface and the shell, held at their floors (needs cargo-llvm-cov)
 	pnpm -C desktop test:coverage $(VITEST_FLOOR_FLAGS)
 	cd desktop/src-tauri && { cargo llvm-cov $(RUST_FLOOR_FLAGS) \
 		|| { cargo llvm-cov report --summary-only --json | jq -r --argjson lines $(RUST_FLOOR_LINES) \

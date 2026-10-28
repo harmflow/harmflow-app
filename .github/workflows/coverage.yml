@@ -81,9 +81,8 @@ jobs:
           # Cargo's output is target.noindex, as .cargo/config.toml sets it, not the default target.
           workspaces: desktop/src-tauri -> target.noindex
       - run: make deps
-      # The bundle's sidecar must exist for tauri-build, and the interface for the shell.
-      - run: make sidecar
       - run: pnpm -C desktop build
+      # The target builds the bundle's sidecar first, which tauri-build needs.
       - id: coverage
         run: make coverage-desktop HOLD_FLOORS=
       - name: Summary
