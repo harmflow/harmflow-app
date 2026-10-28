@@ -1,31 +1,42 @@
 #!/usr/bin/env bash
-# The steps of the nightly Stress workflow: it starts a fixed CPU load, runs each suite beside it, stops the load, and
-# prints the run's summary as Markdown. Each suite's output, duration, exit status, and 1-minute load average at its
-# start and end go to build/stress, which the summary reads.
+# The steps of a job of the nightly Stress workflow: it starts the job's CPU load, if any, runs each suite beside it,
+# stops the load, and prints the run's summary as Markdown. Each suite's output, duration, exit status, and 1-minute
+# load average at its start and end go to build/stress, which the summary reads.
 #
 # Usage: .github/scripts/stress.sh load-start|load-stop|run daemon|run integration|summary
-# load-start starts LOAD_PER_CORE busy processes (`yes`) per core, 2 when unset. run repeats the suite COUNT times (3
-# when unset), within DAEMON_TIMEOUT or INTEGRATION_TIMEOUT (go test durations), and exits with the suite's status.
+# load-start starts LOAD_PER_CORE busy processes (`yes`) per core, 2 when unset and none at 0. run repeats the suite
+# COUNT times (3 when unset), within DAEMON_TIMEOUT or INTEGRATION_TIMEOUT (go test durations), and exits with the
+# suite's status.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
 out=$root/build/stress
 mkdir -p "$out"
 
+# The 1-minute load average, on Linux and on macOS.
 load_average() {
-  sysctl -n vm.loadavg | awk '{print $2}'
+  if [ -r /proc/loadavg ]; then
+    awk '{print $1}' /proc/loadavg
+  else
+    sysctl -n vm.loadavg | awk '{print $2}'
+  fi
 }
 
 load_start() {
   local cores busy
-  cores=$(sysctl -n hw.ncpu)
+  cores=$(getconf _NPROCESSORS_ONLN)
   busy=$((cores * ${LOAD_PER_CORE:-2}))
   : >"$out/load.pids"
+  printf 'cores=%s\nbusy=%s\n' "$cores" "$busy" >"$out/load.env"
+  # BSD seq counts down from 1 to 0 for `seq 0`, so no load is a case of its own.
+  if [ "$busy" -eq 0 ]; then
+    echo "No load: the suites run alone on $cores cores."
+    return
+  fi
   for _ in $(seq "$busy"); do
     nohup yes >/dev/null 2>&1 &
     echo $! >>"$out/load.pids"
   done
-  printf 'cores=%s\nbusy=%s\n' "$cores" "$busy" >"$out/load.env"
   echo "Started $busy busy processes on $cores cores."
 }
 
@@ -77,12 +88,17 @@ failures() {
 
 summary() {
   local suite env log seconds
-  echo "## Suites under load"
-  echo
-  if [ -f "$out/load.env" ]; then
-    echo "Beside $(field "$out/load.env" busy) busy processes on $(field "$out/load.env" cores) cores."
+  if [ "$(field "$out/load.env" busy)" = 0 ]; then
+    echo "## Suites repeated, no load"
     echo
+    echo "Alone on $(field "$out/load.env" cores) cores, ${COUNT:-3} times each."
+  else
+    echo "## Suites under load"
+    echo
+    echo "Beside $(field "$out/load.env" busy) busy processes on $(field "$out/load.env" cores) cores," \
+      "${COUNT:-3} times each."
   fi
+  echo
   echo "| Suite | Result | Duration | Load at start | Load at end | Flags |"
   echo "|---|---|---:|---:|---:|---|"
   for suite in daemon integration; do
