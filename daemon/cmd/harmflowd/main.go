@@ -30,6 +30,7 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/sysinfo"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/tools"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/wake"
+	"github.com/harmflow/harmflow-app/daemon/internal/adapters/workspace"
 	"github.com/harmflow/harmflow-app/daemon/internal/app"
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
@@ -145,6 +146,7 @@ func run(homeFlag, builtinsFlag string, port int) error {
 		Service:    launchd.NewAgent(userHome, filepath.Join(paths.Logs, "daemon.log")),
 		System:     &sysinfo.Reader{},
 		Tools:      &tools.Prober{Home: userHome, PathEnv: pathEnv, Env: harnessEnv},
+		Workspace:  &workspace.Reader{PathEnv: pathEnv, Env: harnessEnv},
 		HarnessEnv: harnessEnv, DaemonExecutable: exe, DaemonArgs: daemonArgs, DaemonEnv: daemonEnv, Logger: logger,
 	})
 	if err != nil {

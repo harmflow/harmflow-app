@@ -98,6 +98,9 @@ type Deps struct {
 	Service    ports.HostServiceManager
 	System     ports.SystemInfo
 	Tools      ports.ToolProber
+	// Workspace reads the files an attempt changed in its workspace, for the checkpoint before a switch; without one, the
+	// checkpoint is not taken.
+	Workspace ports.WorkspaceReader
 	// HarnessEnv is the environment harness processes, and script tasks' programs, start with.
 	HarnessEnv []string
 	// OS is this machine's operating system, as a script task names it; the running one when empty.

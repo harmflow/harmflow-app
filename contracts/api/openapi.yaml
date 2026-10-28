@@ -1270,6 +1270,40 @@ components:
             pid: { type: integer }
             group: { type: integer }
             startedAt: { type: string, format: date-time }
+        checkpoint:
+          type: object
+          description: >-
+            What the attempt left in the workspace, read from the workspace itself before the switch that followed it,
+            whatever wrote the files, beside the execution's changedFiles, which the harness reported: paths with their
+            status, never their content. Inside a Git repository at the workspace's root or directly under it, a changed
+            file is one git status reports, untracked ones included and ignored ones not, or one the attempt's commits
+            changed since the repository's HEAD when the attempt started, or since the commit a worktree the attempt
+            created started at. Outside one, it is a file modified since the attempt started, found by a scan. Absent on
+            an attempt no switch followed, and on older records.
+          required: [files]
+          properties:
+            files:
+              type: array
+              description: The changed files, sorted by path, 500 at most.
+              items:
+                type: object
+                required: [path, status]
+                properties:
+                  path: { type: string, description: "Relative to the workspace, with / between its parts." }
+                  status:
+                    type: string
+                    enum: [added, modified, deleted, untracked]
+                    description: Outside Git, always modified, since a scan cannot tell an added file from a changed one.
+            more: { type: integer, description: "The changed files past the first 500, which files leaves out." }
+            scanned:
+              type: boolean
+              description: >-
+                Part of the workspace is outside any Git repository, so its files were found by their modification time: a
+                deleted file, or one whose modification time was kept, is not seen there.
+            scanLimited:
+              type: boolean
+              description: >-
+                The scan stopped at its limit of 20000 files and folders, so files it did not reach may have changed too.
 
     AttemptUsage:
       type: object

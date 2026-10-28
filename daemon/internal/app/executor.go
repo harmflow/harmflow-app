@@ -307,6 +307,9 @@ type previousAttempt struct {
 	Error         string `json:"error,omitempty"`
 	LastOperation string `json:"lastOperation,omitempty"`
 	LastMessage   string `json:"lastMessage,omitempty"`
+	// checkpoint is the files the attempt left changed, which the next attempt's session context names; context.json
+	// does not carry it.
+	checkpoint *domain.Checkpoint
 }
 
 // writeContext gives the session the task's parameters and history: what the skills need to skip processed work,
@@ -410,6 +413,7 @@ func (r *run) attempts(ctx context.Context, start func(harness string) error) (d
 		ad := a.adapters[profile.Provider]
 		info := a.detect(ctx, profile.Provider) // revalidate before every attempt
 		var end domain.AttemptEnd
+		var mark *ports.WorkspaceMark // set when an attempt ran in this pass and a switch can follow it
 		if !info.Ready() {
 			end = domain.AttemptEnd{Class: domain.ClassHarnessUnavailable, Error: unavailableText(ad, info)}
 			r.event(domain.Event{Type: domain.EventHarnessUnavailable, Harness: profile.Provider, Severity: domain.SeverityWarning,
@@ -427,6 +431,7 @@ func (r *run) attempts(ctx context.Context, start func(harness string) error) (d
 			if err := r.writeContext(prev); err != nil {
 				return domain.StatusFailed, domain.T("context_write_failed", "writing context.json: {{detail}}", "detail", err.Error())
 			}
+			mark = r.markWorkspace(ctx, idx+1 < len(chain))
 			var timedOut bool
 			end, timedOut = r.runAttempt(ctx, ad, info, profile, reason, prev)
 			if end.Class == domain.ClassCancelled {
@@ -475,6 +480,12 @@ func (r *run) attempts(ctx context.Context, start func(harness string) error) (d
 			nextName := a.adapters[next.Provider].Name()
 			if end.Class == domain.ClassQuotaExhausted {
 				r.quotaExhausted(ad, profile.Provider, end)
+			}
+			if mark != nil {
+				if c := r.readCheckpoint(ctx, *mark); c != nil {
+					eventlog.RedactFields(c) // its paths, kept and sent on like the harness's own text
+					r.keepCheckpoint(c, &prev[len(prev)-1])
+				}
 			}
 			a.mu.Lock()
 			r.x.HarnessSwitches++
@@ -878,6 +889,9 @@ This is a new session continuing the same execution. The previous attempt ran on
 		}
 		if last.LastMessage != "" {
 			fmt.Fprintf(&b, " Its last message: %s", last.LastMessage)
+		}
+		if last.checkpoint != nil {
+			b.WriteString("\n" + checkpointText(last.checkpoint))
 		}
 		b.WriteString(`
 Continue from the current state of the workspace. Reconcile before repeating any external operation — a commit, a push, a pull request — so nothing is duplicated.

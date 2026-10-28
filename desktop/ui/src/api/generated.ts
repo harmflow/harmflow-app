@@ -896,6 +896,25 @@ export interface components {
                 /** Format: date-time */
                 startedAt: string;
             };
+            /** @description What the attempt left in the workspace, read from the workspace itself before the switch that followed it, whatever wrote the files, beside the execution's changedFiles, which the harness reported: paths with their status, never their content. Inside a Git repository at the workspace's root or directly under it, a changed file is one git status reports, untracked ones included and ignored ones not, or one the attempt's commits changed since the repository's HEAD when the attempt started, or since the commit a worktree the attempt created started at. Outside one, it is a file modified since the attempt started, found by a scan. Absent on an attempt no switch followed, and on older records. */
+            checkpoint?: {
+                /** @description The changed files, sorted by path, 500 at most. */
+                files: {
+                    /** @description Relative to the workspace, with / between its parts. */
+                    path: string;
+                    /**
+                     * @description Outside Git, always modified, since a scan cannot tell an added file from a changed one.
+                     * @enum {string}
+                     */
+                    status: "added" | "modified" | "deleted" | "untracked";
+                }[];
+                /** @description The changed files past the first 500, which files leaves out. */
+                more?: number;
+                /** @description Part of the workspace is outside any Git repository, so its files were found by their modification time: a deleted file, or one whose modification time was kept, is not seen there. */
+                scanned?: boolean;
+                /** @description The scan stopped at its limit of 20000 files and folders, so files it did not reach may have changed too. */
+                scanLimited?: boolean;
+            };
         };
         /** @description What the harness reported of the attempt's token use: the count so far while it runs, the final one when it ends. The cost is stamped when the attempt ends — the harness's own figure, or an estimate from the adapter's dated table of API list prices — so a later table never reprices it. Numbers and enums only; the desktop words them. Absent when the attempt started no harness process; older records have none. */
         AttemptUsage: {

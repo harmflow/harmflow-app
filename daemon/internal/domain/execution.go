@@ -4,6 +4,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -119,6 +121,58 @@ type Attempt struct {
 	// a crash ends it and what it started, and nothing else; absent when no harness process started, or when its start
 	// time could not be read.
 	Process *HarnessProcess `json:"process,omitempty"`
+	// Checkpoint is what the attempt left in the workspace, read before the switch it ended in; absent on an attempt no
+	// switch followed, and on older records.
+	Checkpoint *Checkpoint `json:"checkpoint,omitempty"`
+}
+
+// MaxCheckpointFiles is how many changed files a checkpoint lists; it counts the rest.
+const MaxCheckpointFiles = 500
+
+// CheckpointScanLimit is how many entries of the workspace, files and folders, the scan of the part outside Git visits
+// at most, so a large folder costs a switch a bounded time.
+const CheckpointScanLimit = 20000
+
+// The statuses of a CheckpointFile, as an Attempt's checkpoint in contracts/api/openapi.yaml names them.
+const (
+	FileAdded     = "added"
+	FileModified  = "modified"
+	FileDeleted   = "deleted"
+	FileUntracked = "untracked"
+)
+
+// Checkpoint is the files an attempt changed in its workspace, read from the workspace itself whatever wrote them, as
+// paths with their status, never their content. Inside a Git repository at the workspace's root or directly under it,
+// they are what Git reports; outside one, the files modified since the attempt started, found by a scan.
+type Checkpoint struct {
+	Files []CheckpointFile `json:"files"`
+	// More counts the changed files past the first MaxCheckpointFiles, which Files leaves out.
+	More int `json:"more,omitempty"`
+	// Scanned is set when part of the workspace is outside any Git repository, so its files were found by their
+	// modification time: a deleted file, or one whose modification time was kept, is not seen there.
+	Scanned bool `json:"scanned,omitempty"`
+	// ScanLimited is set when the scan stopped at its limit, so files it did not reach may have changed too.
+	ScanLimited bool `json:"scanLimited,omitempty"`
+}
+
+// CheckpointFile is one changed file: its path relative to the workspace, and whether it was added, modified,
+// deleted, or left untracked.
+type CheckpointFile struct {
+	Path   string `json:"path"`
+	Status string `json:"status"`
+}
+
+// NewCheckpoint lists files, sorted by path, up to MaxCheckpointFiles, and counts the rest.
+func NewCheckpoint(files []CheckpointFile) *Checkpoint {
+	sorted := slices.SortedFunc(slices.Values(files), func(a, b CheckpointFile) int { return strings.Compare(a.Path, b.Path) })
+	if sorted == nil {
+		sorted = []CheckpointFile{}
+	}
+	c := &Checkpoint{Files: sorted}
+	if len(sorted) > MaxCheckpointFiles {
+		c.Files, c.More = sorted[:MaxCheckpointFiles], len(sorted)-MaxCheckpointFiles
+	}
+	return c
 }
 
 // HarnessProcess is a harness process as the kernel recorded it when the attempt started it: its pid, the process group
