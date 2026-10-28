@@ -222,6 +222,23 @@ func TestUpgradeReadsTheLegacyGitHubType(t *testing.T) {
 	}
 }
 
+// A skipped result changes no status, so a selected item can go back to the status it had before.
+func TestSkippedResultKeepsTheStatus(t *testing.T) {
+	for _, outcome := range []string{"skipped", "completed", "failed", ""} {
+		r := WorkItemResult{Key: "o/r#1", Outcome: outcome}
+		if got, want := r.Skipped(), outcome == "skipped"; got != want {
+			t.Errorf("WorkItemResult{Outcome: %q}.Skipped() = %v, want %v", outcome, got, want)
+		}
+	}
+	w := &WorkItem{Key: "o/r#1", Status: WorkItemCompleted}
+	w.ApplyResult(WorkItemResult{Key: "o/r#1", Outcome: "skipped"}, "x", WorkItemLimits{MaxResumeAttempts: 3,
+		MaxFailedRetries: 3}, time.Now())
+	if w.Status != WorkItemCompleted || w.Failures != 0 {
+		t.Errorf("a skipped result on a completed item left %s with %d failures, want completed with none", w.Status,
+			w.Failures)
+	}
+}
+
 // An item needs a human past its retry limit, or at its resume limit while a later cycle would still resume it; an
 // item its last allowed resumption ended keeps its status.
 func TestWorkItemLimits(t *testing.T) {

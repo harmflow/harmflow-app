@@ -82,18 +82,19 @@ func (w *workspaces) endedIn(task, dir string, status domain.ExecutionStatus, re
 var defaultLimits = domain.WorkItemLimits{MaxResumeAttempts: domain.DefaultMaxResumeAttempts,
 	MaxFailedRetries: domain.DefaultMaxFailedRetries}
 
-// selected records what the work_item.selected progress line leaves in the ledger: the item, in progress.
-func (w *workspaces) selected(task, key string, x *domain.Execution) {
+// selected records what the work_item.selected progress line leaves in the ledger: the item, in progress. It returns
+// what the ledger held for the item before.
+func (w *workspaces) selected(task, key string, x *domain.Execution) selection {
 	w.app.mu.Lock()
 	x.WorkItem = key
 	w.app.mu.Unlock()
-	w.app.trackWorkItem(task, key, "Fix it", "", x.ID)
+	return w.app.trackWorkItem(task, key, "Fix it", "", x.ID)
 }
 
 // reported records what a report.json naming the item with outcome leaves in the ledger.
 func (w *workspaces) reported(task, key, outcome string, x *domain.Execution) {
-	w.selected(task, key, x)
-	w.app.applyWorkItem(task, domain.WorkItemResult{Key: key, Outcome: outcome}, x.ID, defaultLimits)
+	before := w.selected(task, key, x)
+	w.app.applyWorkItem(task, domain.WorkItemResult{Key: key, Outcome: outcome}, x.ID, defaultLimits, &before)
 }
 
 // expireLogs lets the retention period elapse and runs the retention pass, as the maintenance loop does.
