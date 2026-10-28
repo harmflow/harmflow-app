@@ -3,21 +3,22 @@
 #
 # Each floor is the reading recorded in COVERAGE.md, truncated to two decimals. Move one only with its row there, in
 # one commit; a lowering also writes its reason there.
-cmd/harmflowd 75.89
-internal/adapters/catalog 52.70
-internal/adapters/eventlog 87.55
-internal/adapters/fsstore 72.30
-internal/adapters/harness/classify 47.36
-internal/adapters/harness/claudecode 90.78
-internal/adapters/harness/codex 88.46
-internal/adapters/harness/procutil 86.29
-internal/adapters/httpapi 75.13
+cmd/harmflowd 77.46
+internal/adapters/catalog 91.75
+internal/adapters/eventlog 88.88
+internal/adapters/fsstore 72.72
+internal/adapters/harness/classify 52.63
+internal/adapters/harness/claudecode 95.41
+internal/adapters/harness/codex 92.47
+internal/adapters/harness/procutil 58.21
+internal/adapters/httpapi 78.08
 internal/adapters/launchd 93.33
-internal/adapters/schema 81.04
-internal/adapters/secret 85.18
+internal/adapters/schema 88.38
+internal/adapters/secret 47.27
 internal/adapters/sysinfo 0.00
 internal/adapters/tools 0.00
 internal/adapters/wake 100.00
-internal/app 84.92
-internal/domain 92.41
+internal/adapters/workspace 84.92
+internal/app 87.33
+internal/domain 93.62
 internal/ports 75.00
