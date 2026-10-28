@@ -37,7 +37,8 @@ func newCodexApp(t *testing.T) (*App, string) {
 }
 
 // newCodexAppOn is newCodexApp on the stand-in script given; its Codex adapter, and the app server it may start, end
-// with the test.
+// with the test. Each probe of the stand-in has a minute, where the daemon gives Codex 15 or 20 seconds: under the load
+// of a full test run, starting the newly written script alone can take longer than that.
 func newCodexAppOn(t *testing.T, script string) (*App, string) {
 	t.Helper()
 	codexHome := t.TempDir()
@@ -46,7 +47,7 @@ func newCodexAppOn(t *testing.T, script string) (*App, string) {
 	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	cx := &codex.Adapter{Home: t.TempDir(), KnownLocations: []string{}}
+	cx := &codex.Adapter{Home: t.TempDir(), KnownLocations: []string{}, ProbeTimeout: time.Minute}
 	t.Cleanup(cx.Close)
 	paths := NewPaths(t.TempDir(), t.TempDir(), t.TempDir())
 	tasks, _ := fsstore.NewTasks(paths.Tasks)
