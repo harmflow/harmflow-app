@@ -1227,8 +1227,9 @@ func TestNoFailoverOnATimeoutOrATaskError(t *testing.T) {
 
 // harmflow-app#215: one timeout covers every attempt of an execution. The first attempt exhausts its quota and fails
 // over, and the alternative, which ignores SIGTERM, is stopped when the same timeout elapses, and killed once its grace
-// is over. A timeout started afresh for the alternative could not end it before the first attempt's quota plus the
-// timeout plus the grace, so an execution that ends before that bound kept one timeout.
+// is over, so its attempt records SIGKILL's exit code, 137. A timeout started afresh for the alternative could not end
+// it before the first attempt's quota plus the timeout plus the grace, so an execution that ends before that bound kept
+// one timeout.
 //
 // The first attempt reports its quota once it reads the line the test writes 3 s in, so its shell's start counts
 // within those 3 s, not after them, and no sleep has to start. The rest of the timeout's 8 s is for the alternative's
@@ -1273,6 +1274,13 @@ func TestOneTimeoutAcrossAFailover(t *testing.T) {
 	}
 	if at := x.Attempts[1]; at.Harness != domain.HarnessCodex || at.Outcome != domain.AttemptTimedOut || at.EndedAt == nil {
 		t.Errorf("Codex's attempt %+v, want it ended, timed out", at)
+	}
+	if c := x.Attempts[1].ExitCode; c == nil || *c != 137 {
+		got := "none"
+		if c != nil {
+			got = strconv.Itoa(*c)
+		}
+		t.Errorf("Codex's attempt recorded exit code %s, want 137, SIGKILL's once its grace was over", got)
 	}
 	// Codex's shell writes its pid once it ignores SIGTERM, so the file is there when the execution ends unless the
 	// timeout's SIGTERM ended the shell as it started.

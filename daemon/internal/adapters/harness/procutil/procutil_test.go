@@ -688,3 +688,32 @@ func TestEndStoredTreeAfterTheHarnessExitedEndsWhatCarriesTheID(t *testing.T) {
 		t.Errorf("ended %+v, want pid %d, outside the group", ended, daemon.pid)
 	}
 }
+
+// A harness that ignores SIGTERM and waits for its child ends with SIGKILL's exit once the grace period is over, never
+// with the exit of the command it runs next: it gets SIGKILL before the child does. Killed after the child, a shell ran
+// its next command and exited 0 in about one stop in three, so ten stops catch that nearly always.
+func TestAKilledHarnessEndsWithTheSignal(t *testing.T) {
+	needProcessTable(t)
+	for i := range 10 {
+		var lines []string
+		p := startShell(t, `trap '' TERM; echo started; sleep 300; echo next`, testEnv(), executionID(t),
+			func(b []byte) { lines = append(lines, string(b)) })
+		waitFor(t, "the harness to run sleep", func() bool {
+			table, err := processTable()
+			if err != nil {
+				return false
+			}
+			for _, c := range table {
+				if c.ppid == p.Pid() && c.name == "sleep" && !c.zombie {
+					return true
+				}
+			}
+			return false
+		})
+		cancelAndWait(p, 100*time.Millisecond)
+		if p.ExitCode() != 137 || p.Signal() != "SIGKILL" || len(lines) != 1 {
+			t.Fatalf("stop %d: exit %d, signal %q, stdout lines %q; want exit 137, SIGKILL, [started]", i+1, p.ExitCode(),
+				p.Signal(), lines)
+		}
+	}
+}
