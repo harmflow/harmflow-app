@@ -46,8 +46,11 @@ message yourself, nor add to it what the calls printed.
 
 ## 2. Create or reuse the worktree
 
-Name the branch as the task's prompt specifies; by default `harmflow/<issue-number>-<short-slug>`. The worktree path
-is `<paths.workspace>/<repo-name>-<issue-number>`.
+Name a new item's branch as the task's prompt specifies; by default `harmflow/<issue-number>-<short-slug>`. A resumed
+managed draft pull request is worked on its own head branch, the `headRefName` hf-github-issue-queue §1 lists for it,
+never on a branch named afresh, even when the prompt would name it differently now: a branch of another name finds no
+pull request and starts from the base branch, as a new item's would. The worktree path is
+`<paths.workspace>/<repo-name>-<issue-number>`.
 
 ```bash
 cd <local path>

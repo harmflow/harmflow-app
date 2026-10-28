@@ -20,30 +20,60 @@ If tests fail, try to fix them up to `task.parameters.delivery.testRepairAttempt
 again after each fix. Fix the code, never the tests' intent: do not delete, skip, or weaken a test to make it pass.
 When no test suite exists, the status is `not_run`.
 
-## 2. Commit and push the work branch
+## 2. Commit the work
 
 Append `{"type":"step.started","phase":"publishing","message":"Publishing OWNER/REPO#123"}`, then:
 
 ```bash
 git -C <worktree> add -A
 git -C <worktree> commit -m "<type>: <summary> (#<issue>)"
+```
+
+Follow the repository's commit conventions.
+
+## 3. Look for the item's pull request
+
+Before you push, look for an open pull request of the item in two ways — this is what makes a repeated or resumed
+execution safe. The branch name alone is not enough: a session that names the branch differently from an earlier one,
+or a task whose prompt changed its branch naming, would find nothing from its branch and open a second pull request
+for the same issue. Each call prints the open pull requests it finds, as a JSON array, `[]` when there is none:
+
+```bash
+gh api "repos/OWNER/REPO/pulls?head=OWNER:<branch>&state=open" --jq '[.[] | {number, url: .html_url, headRefName: .head.ref}]'
+gh api graphql -F owner=OWNER -F repo=REPO -f query='query($owner: String!, $repo: String!) {
+  repository(owner: $owner, name: $repo) { pullRequests(states: OPEN, first: 100) { nodes { number url headRefName
+    closingIssuesReferences(first: 25) { nodes { number } } } } } }' --jq '[.data.repository.pullRequests.nodes[] | select(any(.closingIssuesReferences.nodes[]; .number == <issue>)) | {number, url, headRefName}]'
+```
+
+The first reads the pull requests from the work branch. The second reads the open pull requests that close the item's
+issue, from any branch, by the `closingIssuesReferences` hf-github-issue-queue §1 reads to find a managed draft's
+issue, so that selecting and publishing agree on what the item's pull request is.
+
+- **The first finds one:** it is the item's pull request. Push, and update it (§4). Another pull request the second
+  finds is a second one already open for the issue: name it in the report's warnings (`conflicting_activity`).
+- **Only the second finds one:** an open pull request from another branch closes the issue, so the item already has
+  its pull request, on a branch this session did not work on. Push nothing, open no pull request, and never move your
+  commits onto that branch, which could overwrite or tangle work a person or another firing put there. The item's
+  outcome is `needs_attention` (§5), and the report's warnings get a `conflicting_activity` entry that names the work
+  branch, that pull request's branch, and its URL. Your commits stay on the local work branch, in its worktree, for a
+  person to decide.
+- **Neither finds one:** push, and open the pull request (§4).
+
+A call that fails decides nothing: push nothing and open no pull request, and the item's outcome is `failed`, as when
+the pull request could not be opened.
+
+## 4. Push, and open or update exactly one draft pull request
+
+```bash
 git -C <worktree> push -u origin <branch>
 ```
 
-Follow the repository's commit conventions. Push only the work branch — never the base branch, never with `--force`
-over commits you did not make. If the push is rejected because the branch moved, fetch and rebase your commits on it,
-and record the conflict in the report's warnings (`conflicting_activity`).
+Push only the work branch — never the base branch, never with `--force` over commits you did not make. If the push is
+rejected because the branch moved, fetch and rebase your commits on it, and record the conflict in the report's
+warnings (`conflicting_activity`).
 
-## 3. Open or update exactly one draft pull request
-
-First look for one that already exists for the branch — this is what makes a repeated or resumed execution safe:
-
-```bash
-gh pr list --repo OWNER/REPO --head <branch> --state open --json number,url,isDraft
-```
-
-- **One exists:** update it — push the new commits, then `gh pr edit <number> --repo OWNER/REPO --body-file <file>`.
-- **None exists:** `gh pr create --repo OWNER/REPO --draft --base BASE --head <branch> --title "<title>" --body-file <file>`,
+- **§3 found one from the work branch:** update it — `gh pr edit <number> --repo OWNER/REPO --body-file <file>`.
+- **§3 found none:** `gh pr create --repo OWNER/REPO --draft --base BASE --head <branch> --title "<title>" --body-file <file>`,
   adding the task's marking (by default `--label harmflow`; create the label first with
   `gh label create harmflow --repo OWNER/REPO --color 7C3AED` if it does not exist).
 
@@ -74,7 +104,7 @@ Managed by HarmFlow task <task-id> (execution <execution-id>).
 
 (`pull_request.updated` when it already existed).
 
-## 4. Report
+## 5. Report
 
 Add the item to `report.json` `workItems`:
 
@@ -89,5 +119,6 @@ Add the item to `report.json` `workItems`:
 `kind` is `resume` for a managed draft pull request resumed, and `new` for a new issue or a failed one retried
 (hf-github-issue-queue §1). The item's outcome is `completed` when its draft pull request was created or updated,
 even with failing tests; `failed` when the pull request could not be opened (keep the branch and the worktree);
-`needs_attention` when a human must decide. Set the report's `lastOperation` to the last external operation applied, such as
+`needs_attention` when a human must decide, as when §3 finds the item's pull request only from another branch, and
+then the item has no `pullRequest`. Set the report's `lastOperation` to the last external operation applied, such as
 `pushed harmflow/123-fix to OWNER/REPO` or `opened draft PR OWNER/REPO#45`.
