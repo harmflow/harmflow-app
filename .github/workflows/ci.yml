@@ -196,11 +196,10 @@ jobs:
           # Cargo's output is target.noindex, as .cargo/config.toml sets it, not the default target.
           workspaces: desktop/src-tauri -> target.noindex
       - run: make deps
-      # The bundle's sidecar must exist for tauri-build, and the interface for the shell.
-      - run: make sidecar
       - run: pnpm -C desktop build
       - run: pnpm -C desktop typecheck
-      # The unit tests of the interface and the shell, their coverage held against its floors.
+      # The unit tests of the interface and the shell, their coverage held against its floors. The target builds the
+      # bundle's sidecar first, which tauri-build needs, as it does for a contributor.
       - run: make coverage-desktop
       # The advisories against the interface's and the shell's dependencies; -k runs the second when the first fails.
       - name: Vulnerabilities

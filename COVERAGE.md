@@ -119,8 +119,8 @@ None yet.
 ## Taking a reading
 
 `make coverage` needs `cargo-llvm-cov`, Rust's `llvm-tools-preview` (`cargo install cargo-llvm-cov`,
-`rustup component add llvm-tools-preview`), and `jq`; the shell also needs the sidecar and the built interface, as for
-`make test-desktop`. It fails at the first part that reads below a floor, after printing that part's figures, and
+`rustup component add llvm-tools-preview`), and `jq`; it builds the sidecar the shell needs first, as
+`make test-desktop` does. It fails at the first part that reads below a floor, after printing that part's figures, and
 writes:
 
 - `build/coverage/daemon.out`, the merged profile, and prints the daemon's table above from it
