@@ -296,11 +296,16 @@ func TestScriptStopEndsItsProcesses(t *testing.T) {
 
 // A program that exits on its own leaves no background process running once the execution ends, even one that redirects
 // its output, and the log names it; the execution keeps the result the program's exit status gives.
+//
+// $! is the shell the program forks, which runs sleep only once it execs, and the log names a leftover by what it is
+// when it is ended. Under load the program could exit before that exec, so before it writes the child's pid and exits
+// it polls, 50 times at most, until the kernel names the child sleep: ps's ucomm, padded to 16 columns, reads the name
+// the log gives.
 func TestScriptExitEndsWhatTheProgramLeft(t *testing.T) {
 	e := newEnv(t)
 	dir := t.TempDir()
 	e.createScript("leaves", fmt.Sprintf(`  script:
-    command: [/bin/sh, -c, "sleep 600 >/dev/null 2>&1 & echo $! > %s/child"]
+    command: [/bin/sh, -c, "sleep 600 >/dev/null 2>&1 & c=$!; i=0; while [ $i -lt 50 ]; do case $(ps -o ucomm= -p $c) in sleep*) break;; esac; sleep 0.05; i=$((i+1)); done; echo $c > %s/child"]
   execution:
     cancelGraceSeconds: 1
 `, dir))
