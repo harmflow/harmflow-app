@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -66,6 +67,10 @@ func TestPathsInRequestsAreChecked(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			if c.name == "a shell as Codex" && runtime.GOOS != "darwin" {
+				t.Skip("macOS's /bin/sh is bash, which answers --version as a program that is not Codex; on Linux it " +
+					"is often dash, which fails --version")
+			}
 			if key, field := d.refusal(c.method, c.path, c.body); key != c.key || field != c.field {
 				t.Errorf("refused with %s at %s, want %s at %s", key, field, c.key, c.field)
 			}
