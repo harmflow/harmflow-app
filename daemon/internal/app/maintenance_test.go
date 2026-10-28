@@ -192,7 +192,7 @@ func TestCleanKeepsCompletedAndNeedsAttentionWorktrees(t *testing.T) {
 	w.reported("drafts", "o/r#1", "completed", w.ended("drafts", domain.StatusCompleted))
 	stuck := w.worktree("drafts", "r-2")
 	w.reported("drafts", "o/r#2", "needs_attention", w.ended("drafts", domain.StatusNeedsAttention))
-	// Past its resume limit after a failure, an item needs attention although its last execution failed.
+	// Past its retry limit after a failure, an item needs attention although its last execution failed.
 	stalled := w.worktree("drafts", "r-3")
 	failed := w.ended("drafts", domain.StatusFailed)
 	w.selected("drafts", "o/r#3", failed)
