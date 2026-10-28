@@ -79,8 +79,11 @@ export const api = {
   refreshHarnesses: () => call<Harness[]>("POST", "/harnesses/refresh"),
   setHarnessPath: (id: HarnessId, path: string | null) => call<Harness>("PUT", `/harnesses/${id}`, { path }),
   tools: () => call<Tool[]>("GET", "/tools"),
-  /** What a task can cite; a harness that finds the user's items per workspace, as Codex its skills, lists workspace's. */
-  catalog: (workspace?: string) => call<Catalog>("GET", `/catalog${query({ workspace })}`),
+  /**
+   * What a task can cite; a harness that finds the user's items per workspace, as Codex and Claude Code their skills,
+   * lists the ones of the task's workspace path, or of the folder HarmFlow runs the task in when it sets none.
+   */
+  catalog: (workspace?: string, task?: string) => call<Catalog>("GET", `/catalog${query({ workspace, task })}`),
 
   tasks: () => call<TaskSummary[]>("GET", "/tasks"),
   task: (id: string) => call<Task>("GET", `/tasks/${enc(id)}`),

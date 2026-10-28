@@ -16,6 +16,18 @@ describe("daemonText", () => {
     expect(daemonText(text)).toBe('a skill "lint" não foi encontrada para Codex (na configuração do Codex)');
   });
 
+  it("names the workspace a skill was looked for in, beside the harness's configuration", () => {
+    const where = "the Claude Code configuration and the workspace /w";
+    const text = {
+      message: `skill "release-notes" cannot be found for Claude Code (${where})`,
+      messageKey: "skill_not_found" as const,
+      params: { name: "release-notes", harness: "Claude Code", where, source: "harness_workspace", workspace: "/w" },
+    };
+    expect(daemonText(text)).toBe(
+      'a skill "release-notes" não foi encontrada para Claude Code (na configuração do Claude Code e no workspace /w)',
+    );
+  });
+
   it("translates what a text names: a status, a cron field, a screen, the settings that widen a tool list", () => {
     expect(daemonText({ message: "", messageKey: "execution_ended", params: { status: "cancelled" } })).toBe(
       "a execução já terminou (Cancelada)",

@@ -45,7 +45,7 @@ var declaredModels = []string{domain.DefaultModel, "fable", "opus", "sonnet", "h
 
 // Adapter is the HarnessAdapter of the Claude Code CLI. It looks for the CLI on PathEnv, then in KnownLocations, and
 // runs its probes with Env; the user's agents and skills are read from the configuration directory under Home, or
-// CLAUDE_CONFIG_DIR.
+// CLAUDE_CONFIG_DIR, and the user's skills from the workspace's .claude/skills as well.
 type Adapter struct {
 	Home    string // the user's home directory
 	PathEnv string
@@ -55,10 +55,11 @@ type Adapter struct {
 }
 
 var (
-	_ ports.HarnessAdapter     = (*Adapter)(nil)
-	_ ports.HarnessIdentifier  = (*Adapter)(nil)
-	_ ports.QuotaReader        = (*Adapter)(nil)
-	_ ports.ExtraUsageReporter = (*Adapter)(nil)
+	_ ports.HarnessAdapter        = (*Adapter)(nil)
+	_ ports.HarnessIdentifier     = (*Adapter)(nil)
+	_ ports.QuotaReader           = (*Adapter)(nil)
+	_ ports.ExtraUsageReporter    = (*Adapter)(nil)
+	_ ports.WorkspaceFolderReader = (*Adapter)(nil)
 )
 
 // ReportsExtraUsage implements ports.ExtraUsageReporter: every rate-limit report of the stream says whether the session
@@ -237,17 +238,48 @@ func (a *Adapter) ValidateProfile(info ports.HarnessInfo, model, effort string) 
 	return nil
 }
 
-// UserItem implements ports.HarnessAdapter, looking the item up in Claude Code's configuration directory, whatever the
-// workspace.
-func (a *Adapter) UserItem(_ context.Context, _ ports.HarnessInfo, kind, name, _ string) (ports.ResolvedItem, bool, []ports.DiscoveryError, error) {
-	it, ok := catalog.Dir{Root: a.configDir()}.Item(kind, name)
-	return it, ok, nil, nil
+// userDirs are the folders the user's items of a kind are read from for workspace, the one whose item wins a shared
+// name first. A skill is read from Claude Code's configuration directory, then from the workspace's .claude/skills,
+// since Claude Code runs a personal skill over a project's of the same name. An agent is read from the configuration
+// directory, whatever the workspace.
+func (a *Adapter) userDirs(kind, workspace string) []catalog.Dir {
+	dirs := []catalog.Dir{{Root: a.configDir()}}
+	if kind == "skill" && workspace != "" {
+		dirs = append(dirs, catalog.Dir{Root: filepath.Join(workspace, ".claude")})
+	}
+	return dirs
 }
 
-// UserItems implements ports.HarnessAdapter: the agents or skills of Claude Code's configuration directory, whatever the
-// workspace.
-func (a *Adapter) UserItems(_ context.Context, _ ports.HarnessInfo, kind, _ string) ([]ports.ResolvedItem, []ports.DiscoveryError, error) {
-	return catalog.Dir{Root: a.configDir()}.Items(kind), nil, nil
+// ReadsWorkspace implements ports.WorkspaceFolderReader: Claude Code loads the skills of the workspace's .claude/skills
+// as well as the user's.
+func (a *Adapter) ReadsWorkspace(kind string) bool { return kind == "skill" }
+
+// UserItem implements ports.HarnessAdapter: a skill is the one of that name in Claude Code's configuration directory,
+// or else in the workspace's .claude/skills; an agent is looked up in the configuration directory.
+func (a *Adapter) UserItem(_ context.Context, _ ports.HarnessInfo, kind, name, workspace string) (ports.ResolvedItem, bool, []ports.DiscoveryError, error) {
+	for _, d := range a.userDirs(kind, workspace) {
+		if it, ok := d.Item(kind, name); ok {
+			return it, true, nil, nil
+		}
+	}
+	return ports.ResolvedItem{}, false, nil, nil
+}
+
+// UserItems implements ports.HarnessAdapter: the skills of Claude Code's configuration directory and of the workspace's
+// .claude/skills, or the agents of the configuration directory, sorted by name, each name once as UserItem finds it.
+func (a *Adapter) UserItems(_ context.Context, _ ports.HarnessInfo, kind, workspace string) ([]ports.ResolvedItem, []ports.DiscoveryError, error) {
+	var items []ports.ResolvedItem
+	seen := map[string]bool{}
+	for _, d := range a.userDirs(kind, workspace) {
+		for _, it := range d.Items(kind) {
+			if !seen[it.Name] {
+				seen[it.Name] = true
+				items = append(items, it)
+			}
+		}
+	}
+	slices.SortFunc(items, func(x, y ports.ResolvedItem) int { return strings.Compare(x.Name, y.Name) })
+	return items, nil, nil
 }
 
 var readTools = []string{"Read", "Glob", "Grep", "Skill", "Task", "TodoWrite"}

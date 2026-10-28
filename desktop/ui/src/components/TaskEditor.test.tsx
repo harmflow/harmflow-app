@@ -5,7 +5,8 @@
 // same error a save from the form shows on its field. The stand-in decides which error the daemon gives: that the daemon
 // gives a document and its YAML the same one is itest › TestOneSchemaForEveryEntryPoint's. ⌘S saves as the Save button
 // does, from any focus in the editor (harmflow-app#230). A save shows the warnings the daemon gives, such as a fallback
-// that cannot load the task's skill (harmflow-app#216).
+// that cannot load the task's skill (harmflow-app#216). The catalog is asked for with the task's ID, so a task with no
+// workspace path is offered the skills of the folder it runs in, which validation reads (harmflow-app#283).
 import { EditorView } from "@codemirror/view";
 import { isDeepStrictEqual } from "node:util";
 import { act } from "react";
@@ -399,6 +400,17 @@ describe("task editor warnings", () => {
     expect(toasts("success")).toContain("Saved.");
     expect(warnings()).toEqual([fallbackWarningText]);
   });
+});
+
+describe("task editor catalog", () => {
+  it.each(["edit", "create"] as const)(
+    "asks in %s mode for the skills of the folder the task runs in when it sets no workspace path, as validation reads it",
+    async (mode) => {
+      await open(mode);
+      const catalogs = daemon.requests.filter((r) => r.method === "GET" && r.path.startsWith("/catalog")).map((r) => r.path);
+      expect(catalogs).toEqual(["/catalog?task=standup"]);
+    },
+  );
 });
 
 describe("task editor ⌘S", () => {

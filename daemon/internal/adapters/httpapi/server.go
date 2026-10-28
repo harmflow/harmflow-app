@@ -107,7 +107,8 @@ func (s *Server) Handler() http.Handler {
 	h("PUT /api/v1/harnesses/{harnessId}", s.setHarnessPath)
 	h("GET /api/v1/tools", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.App.Tools(r.Context())) })
 	h("GET /api/v1/catalog", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, s.App.Catalog(r.Context(), r.URL.Query().Get("workspace")))
+		q := r.URL.Query()
+		writeJSON(w, 200, s.App.Catalog(r.Context(), q.Get("workspace"), q.Get("task")))
 	})
 
 	h("GET /api/v1/tasks", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.App.ListTasks()) })

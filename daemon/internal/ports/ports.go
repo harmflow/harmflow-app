@@ -267,6 +267,12 @@ type WorkspaceLister interface {
 	ListsPerWorkspace(kind string) bool
 }
 
+// WorkspaceFolderReader is a HarnessAdapter that finds the user's items of a kind in a folder of the workspace as well as
+// in a folder of its configuration, as its harness loads them: ReadsWorkspace says which kinds.
+type WorkspaceFolderReader interface {
+	ReadsWorkspace(kind string) bool
+}
+
 // HarnessCloser is a HarnessAdapter that keeps a process of its harness running between calls; Close ends it.
 type HarnessCloser interface {
 	Close()

@@ -520,6 +520,7 @@ export const esES: Resources = {
   itemSource: {
     builtin: "integrado",
     harness: "en la configuración de {{harness}}",
+    harness_workspace: "en la configuración de {{harness}} y en el espacio de trabajo {{workspace}}",
     skill_list: "en la lista de skills de {{harness}} para {{workspace}}",
     skill_list_errors: "en la lista de skills de {{harness}} para {{workspace}}, que no pudo cargar {{errors}}",
   },
