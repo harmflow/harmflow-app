@@ -1,0 +1,50 @@
+# A pushed version tag, vMAJOR.MINOR.PATCH with digits only, is a release. The desktop and the daemon ship at one
+# version, in one app, so the run first checks that the tag is the version of all six version fields, and fails naming
+# each one that differs. Then it creates the tag's GitHub Release, with notes generated from the changes since the
+# previous release. packaging/README.md, Releasing, says how to cut one.
+#
+# It attaches no macOS build, and keeps none as an artifact: every public macOS build is the App Store's, built
+# elsewhere from this tag, and on a public repository any signed-in user can download a run's artifacts. The community
+# edition is built from the tagged source with `make app`. So the run builds nothing, and uses no environment and no
+# secret beyond its own GITHUB_TOKEN. Actions are pinned as in ci.yml, to the same commits.
+name: Release
+
+on:
+  push:
+    # GitHub's filter syntax: "+" is one or more of what precedes it, and a dot is a dot. There are no pre-release
+    # tags: the App Store build carries the same version, and the store's version string takes digits only.
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Tag is the version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Six version fields
+        env:
+          TAG: ${{ github.ref_name }}
+        run: make check-version TAG="$TAG"
+
+  github-release:
+    name: GitHub Release
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # No checkout: gh reads the repository from --repo. --verify-tag keeps gh from ever creating a tag, and the notes
+      # below come before the generated ones.
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          NOTES: >-
+            The community edition of this version is built from the tagged source with `make app`, as the Releasing
+            section of packaging/README.md says. The macOS build reaches the App Store separately, built from this
+            tag, so this release attaches no build.
+        run: gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --notes "$NOTES"

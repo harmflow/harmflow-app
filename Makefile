@@ -152,6 +152,14 @@ go-toolchain: ## Raise the Go toolchain of daemon/ and tests/ to the newest patc
 check-go-toolchain: ## Fail when the Go toolchain is behind its minor's newest patch, or Go no longer supports the minor
 	.github/scripts/go-toolchain.sh check
 
+# The release workflow runs it on a pushed version tag (packaging/README.md, Releasing). Without TAG it checks the tag
+# of this Makefile's VERSION, so that the six version fields agree.
+TAG ?= v$(VERSION)
+
+.PHONY: check-version
+check-version: ## Fail naming each version field that differs from TAG (v1.2.3), this VERSION's tag by default
+	.github/scripts/check-version.sh "$(TAG)"
+
 .PHONY: dev-daemon
 dev-daemon: daemon ## Run the daemon on a development data directory
 	HARMFLOW_HOME="$(DEV_HOME)" ./build/harmflowd --builtins "$(CURDIR)"
@@ -180,8 +188,9 @@ update-app: ## Bring the local app to the latest main, install it to ~/Applicati
 	@packaging/macos/update-app.sh
 
 .PHONY: test-packaging
-test-packaging: ## Tests of the packaging scripts
+test-packaging: ## Tests of the packaging and release scripts
 	packaging/macos/update-app-test.sh
+	.github/scripts/check-version-test.sh
 
 .PHONY: clean
 clean: ## Remove build output
