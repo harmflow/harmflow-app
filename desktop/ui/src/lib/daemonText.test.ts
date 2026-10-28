@@ -54,6 +54,10 @@ describe("daemonText", () => {
       "o Claude Code soma as regras de permissão das suas configurações de usuário e locais à lista de ferramentas da tarefa, " +
         "e elas permitem mais que a lista ou não puderam ser lidas; as configurações gerenciadas não são verificadas",
     );
+    expect(daemonText({ message: "", messageKey: "restriction_claude_edit_rules", params: { where: "project settings", sources: "project" } })).toBe(
+      "o Claude Code soma as regras de permissão das suas configurações de projeto às permissões da tarefa, e elas permitem " +
+        "editar arquivos fora do workspace e das pastas adicionadas ou não puderam ser lidas; as configurações gerenciadas não são verificadas",
+    );
   });
 
   it("picks the plural form from the count", () => {
