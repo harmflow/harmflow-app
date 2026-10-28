@@ -376,8 +376,9 @@ func TestPrepareReadsTheUserSettingsOfTheConfigurationDirectory(t *testing.T) {
 
 // harmflow-app#287: under workspace_write, an editing allow rule in a settings source HarmFlow can read lifts the limit
 // on file edits when it may reach outside the workspace and the added directories, and the warning names the source;
-// validation reads only the user's settings. Only a rule whose path lies within those directories stays inside: a bare
-// rule, one Claude Code could read another way, and a file that cannot be read or parsed do not.
+// validation reads only the user's settings, against the same directories (harmflow-app#427). Only a rule whose path
+// lies within those directories stays inside: a bare rule, one Claude Code could read another way, and a file that
+// cannot be read or parsed do not.
 func TestPrepareReportsEditRulesThatReachOutside(t *testing.T) {
 	const bareWrite = `{"permissions":{"allow":["Write"]}}`
 	const dir = "<dir>" // a folder where the file would be: it exists, but cannot be read
@@ -411,6 +412,10 @@ func TestPrepareReportsEditRulesThatReachOutside(t *testing.T) {
 		{name: "rules in every source", user: bareWrite, project: bareWrite, local: bareWrite, want: "user_project_local"},
 		{name: "project settings that cannot be read", project: dir, want: "project"},
 		{name: "a rule within the workspace at validation", user: `{"permissions":{"allow":["Edit(/<work>/src/**)"]}}`,
+			policyCheck: true},
+		{name: "a rule within an added directory at validation", user: `{"permissions":{"allow":["Write(/<added>/**)"]}}`,
+			policyCheck: true},
+		{name: "a rule outside the workspace at validation", user: `{"permissions":{"allow":["Write(//etc/**)"]}}`,
 			policyCheck: true, want: "user"},
 		{name: "a path from the working directory at validation", user: `{"permissions":{"allow":["Edit(src/**)"]}}`,
 			policyCheck: true},

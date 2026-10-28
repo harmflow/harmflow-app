@@ -342,7 +342,8 @@ func (a *App) missingItems(ctx context.Context, doc domain.TaskDocument, harness
 }
 
 // policyWarnings names each declared restriction the primary harness, or nothing at all for a script task's program,
-// can enforce.
+// can enforce. The harness is given the task's workspace and repositories as an execution gives them, without the
+// folders that do not resolve.
 func (a *App) policyWarnings(ctx context.Context, doc domain.TaskDocument) []domain.Warning {
 	eff := doc.Effective()
 	if doc.IsScript() {
@@ -353,8 +354,15 @@ func (a *App) policyWarnings(ctx context.Context, doc domain.TaskDocument) []dom
 		return nil
 	}
 	info := a.harnessInfo(ctx, ad.ID())
-	inv, _, err := ad.Prepare(info, ports.RunRequest{WorkDir: os.TempDir(), Permissions: *eff.Spec.Permissions,
-		PolicyCheck: true})
+	work, repos := a.taskFolders(eff, doc.Metadata.ID, a.currentPathEnv())
+	var added []string
+	for _, f := range repos {
+		if f.err == nil {
+			added = append(added, f.path)
+		}
+	}
+	inv, _, err := ad.Prepare(info, ports.RunRequest{WorkDir: work.path, AdditionalDirs: added,
+		Permissions: *eff.Spec.Permissions, PolicyCheck: true})
 	if err != nil {
 		return nil
 	}

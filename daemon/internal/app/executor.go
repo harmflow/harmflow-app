@@ -254,14 +254,11 @@ func (r *run) prepare() error {
 	if issues := a.taskPathIssues(r.def, pe); len(issues) > 0 {
 		return &domain.TextError{Text: refusedPath(issues[0])}
 	}
-	work := filepath.Join(a.d.Paths.Workspace, r.x.TaskID)
-	if p := r.eff.Spec.Workspace.Path; p != "" {
-		resolved, err := pe.writablePath(a, p)
-		if err != nil {
-			return err
-		}
-		work = resolved
+	ws, dirs := a.taskFolders(r.eff, r.x.TaskID, pe)
+	if ws.err != nil {
+		return ws.err
 	}
+	work := ws.path
 	if err := os.MkdirAll(work, 0o700); err != nil {
 		return domain.TextErr("workspace_create_failed", "creating the workspace {{path}}: {{detail}}", "path", work,
 			"detail", err.Error())
@@ -276,11 +273,11 @@ func (r *run) prepare() error {
 			r.writable = append(r.writable, resolved)
 		}
 	}
-	for _, repo := range r.eff.Repositories() {
-		p, err := pe.writablePath(a, repo.LocalPath)
-		if err != nil {
-			return err
+	for i, repo := range r.eff.Repositories() {
+		if dirs[i].err != nil {
+			return dirs[i].err
 		}
+		p := dirs[i].path
 		if st, err := os.Stat(p); err != nil || !st.IsDir() {
 			return domain.TextErr("repository_path_missing", "the local path {{path}} of {{repository}} does not exist",
 				"path", p, "repository", repo.Name)

@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -145,5 +147,69 @@ func TestUncheckedCodexProfileSavesWithAWarning(t *testing.T) {
 	}
 	if uncheckedAt(checked.Warnings, "/spec/harness/preferred") {
 		t.Errorf("a checked profile warns: %+v", checked.Warnings)
+	}
+}
+
+// harmflow-app#427: saving a workspace_write Claude Code task reads the user's editing rules against the task's own
+// folders, resolved as an execution resolves them: its workspace, or HarmFlow's folder for the task when it sets none,
+// and its repositories. A rule within them warns of nothing, and the save creates neither folder. A rule outside them
+// warns, and so does one within HarmFlow's folder for a task whose workspace path does not expand, where no execution
+// would run.
+func TestSavingReadsEditRulesAgainstTheTasksFolders(t *testing.T) {
+	a, config := newClaudeApp(t)
+	home := a.Paths().UserHome
+	repo := mkdir(t, filepath.Join(home, "repo"))
+	ws, _ := domain.ResolvePath(filepath.Join(home, "ws"))
+	resolvedRepo, _ := domain.ResolvePath(repo)
+	const profile = "  permissions:\n    profile: workspace_write\n"
+	const placed = "  workspace:\n    path: ~/ws\n" + profile
+	for i, c := range []struct {
+		name, rule, extra string
+		github, warns     bool
+	}{
+		{name: "a rule within the workspace", rule: "Write(/" + ws + "/src/**)", extra: placed},
+		{name: "a rule within HarmFlow's folder for the task", rule: "Write(/<own>/**)", extra: profile},
+		{name: "a rule within a repository", rule: "Edit(/" + resolvedRepo + "/**)", github: true,
+			extra: profile + fmt.Sprintf("  github:\n    repositories:\n      - name: o/r\n        localPath: %q\n", repo)},
+		{name: "a rule outside the workspace", rule: "Write(//etc/**)", extra: placed, warns: true},
+		{name: "a rule beside the workspace", rule: "Write(/" + ws + "-other/**)", extra: placed, warns: true},
+		{name: "a workspace path that does not expand", rule: "Write(/<own>/**)", warns: true,
+			extra: "  workspace:\n    path: ${HARMFLOW_UNDEFINED_FOLDER}/ws\n" + profile},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			id := fmt.Sprintf("edits-%d", i)
+			own := filepath.Join(a.Paths().Workspace, id)
+			rule := strings.ReplaceAll(c.rule, "<own>", own)
+			settings := fmt.Sprintf(`{"permissions":{"allow":[%q]}}`, rule)
+			if err := os.WriteFile(filepath.Join(config, "settings.json"), []byte(settings), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			doc := taskYAML(id, c.extra)
+			if c.github {
+				doc = strings.Replace(doc, "type: general", "type: github", 1)
+			}
+			saved, err := a.CreateTask(t.Context(), TaskInput{YAML: doc})
+			if err != nil {
+				t.Fatalf("CreateTask(%s): %v", id, err)
+			}
+			var edits []domain.Warning
+			for _, w := range saved.Warnings {
+				if w.Key == "restriction_claude_edit_rules" {
+					edits = append(edits, w)
+				}
+			}
+			switch {
+			case !c.warns && len(edits) > 0:
+				t.Errorf("CreateTask(%s) with the user rule %s warns %+v, want no warning about file edits", id, rule, edits)
+			case c.warns && (len(edits) != 1 || edits[0].Params["sources"] != "user"):
+				t.Errorf("CreateTask(%s) with the user rule %s warns %+v, want one about file edits naming the user settings",
+					id, rule, edits)
+			}
+			for _, p := range []string{own, filepath.Join(home, "ws")} {
+				if _, err := os.Lstat(p); !errors.Is(err, fs.ErrNotExist) {
+					t.Errorf("CreateTask(%s) left %s with Lstat error %v, want it not created", id, p, err)
+				}
+			}
+		})
 	}
 }
