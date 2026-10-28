@@ -36,7 +36,8 @@ var binary string
 const builtAt = "2026-10-22T20:30:05Z"
 
 // starterEnv names the daemon binary when the test binary runs as the short-lived parent of
-// TestDaemonOutlivesItsStarter rather than as the tests; starterEnv+"_PID" names the file it writes the daemon's PID to.
+// TestDaemonOutlivesItsStarter rather than as the tests; starterEnv+"_PID" names the file it writes the daemon's PID to,
+// and starterEnv+"_LATE", when set, a duration it waits after starting the daemon before it writes the PID.
 const starterEnv = "HARMFLOW_TEST_STARTER"
 
 func TestMain(m *testing.M) {
@@ -3236,18 +3237,21 @@ func TestDaemonOutlivesItsStarter(t *testing.T) {
 
 // runStarter is the test binary run as the short-lived parent of TestDaemonOutlivesItsStarter. It starts the daemon as
 // the desktop's start command does (desktop/src-tauri/src/daemon.rs): in a process group of its own, with its standard
-// streams on /dev/null, never waited for. It writes the daemon's PID, then stays until it is ended or its standard
-// input closes.
+// streams on /dev/null, never waited for. It writes the daemon's PID, late when starterEnv+"_LATE" says so, as a parent
+// a loaded machine slows down would, then stays until it is ended or its standard input closes.
 func runStarter(bin string, args []string) int {
 	pidFile := os.Getenv(starterEnv + "_PID")
+	late, _ := time.ParseDuration(os.Getenv(starterEnv + "_LATE"))
 	_ = os.Unsetenv(starterEnv)
 	_ = os.Unsetenv(starterEnv + "_PID")
+	_ = os.Unsetenv(starterEnv + "_LATE")
 	cmd := exec.Command(bin, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	time.Sleep(late)
 	if err := os.WriteFile(pidFile+".tmp", []byte(strconv.Itoa(cmd.Process.Pid)), 0o600); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -3292,6 +3296,19 @@ func startDetachedDaemon(t *testing.T, home string) (*daemon, int, func()) {
 	}
 	t.Cleanup(endParent)
 	var pid int
+	// When the wait below gives up, the parent may still have started the daemon, or start it before it is ended: in
+	// a process group of its own, which ending the parent's leaves running, and with no watchdog. Once the parent is
+	// ended and can start nothing more, the daemon is found by its home, whether the parent wrote its PID or not.
+	t.Cleanup(func() {
+		if pid != 0 {
+			return
+		}
+		endParent()
+		left, _ := daemonsOn(home)
+		for _, p := range left {
+			stopDetachedDaemon(p)
+		}
+	})
 	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline) && pid == 0; time.Sleep(50 * time.Millisecond) {
 		data, _ := os.ReadFile(pidFile)
 		pid, _ = strconv.Atoi(string(data))
@@ -3303,13 +3320,7 @@ func startDetachedDaemon(t *testing.T, home string) (*daemon, int, func()) {
 	// The parent ends first, so that the daemon, once stopped, is reaped rather than left a zombie of the parent.
 	t.Cleanup(func() {
 		endParent()
-		_ = syscall.Kill(pid, syscall.SIGTERM)
-		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
-			if syscall.Kill(pid, 0) != nil {
-				return
-			}
-		}
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		stopDetachedDaemon(pid)
 	})
 	d := &daemon{t: t, home: home}
 	if d.base, d.token = awaitRuntime(home, 20*time.Second); d.base == "" {
@@ -3317,6 +3328,18 @@ func startDetachedDaemon(t *testing.T, home string) (*daemon, int, func()) {
 	}
 	d.useFakeHarnesses()
 	return d, pid, endParent
+}
+
+// stopDetachedDaemon stops the daemon with the PID, which is no child of the test: SIGTERM, then SIGKILL to its process
+// group once 10 seconds have passed.
+func stopDetachedDaemon(pid int) {
+	_ = syscall.Kill(pid, syscall.SIGTERM)
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		if syscall.Kill(pid, 0) != nil {
+			return
+		}
+	}
+	_ = syscall.Kill(-pid, syscall.SIGKILL)
 }
 
 // logLine is a line of an execution's JSONL log, or an event of its replay, as these tests compare them.
