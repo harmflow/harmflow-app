@@ -27,6 +27,7 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/fsstore"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/codex"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/schema"
+	"github.com/harmflow/harmflow-app/daemon/internal/adapters/workspace"
 	"github.com/harmflow/harmflow-app/daemon/internal/contracts"
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
@@ -439,7 +440,8 @@ func (e *env) start(t *testing.T, configure ...func(*env)) {
 	}
 	a, err := New(Deps{Paths: e.paths, Version: "test", Clock: e.clock, Wake: e.wake, Location: time.UTC, Tasks: tasks,
 		State: state, Executions: execs, Events: e.events, Validator: v, Harnesses: []ports.HarnessAdapter{e.claude, e.codex},
-		Service: e.service, TickInterval: time.Hour, TimeoutUnit: e.timeoutUnit, Logger: log.New(io.Discard, "", 0)})
+		Service: e.service, Workspace: &workspace.Reader{}, TickInterval: time.Hour, TimeoutUnit: e.timeoutUnit,
+		Logger: log.New(io.Discard, "", 0)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1391,6 +1393,150 @@ func TestFailoverKeepsTheWorkspaceAndInput(t *testing.T) {
 	}
 	if want := "The previous attempt ran on claude-code and ended: quota exhausted. Its last message: Wrote notes.txt"; !strings.Contains(second.Context, want) {
 		t.Errorf("the second attempt's context does not hold %q:\n%s", want, second.Context)
+	}
+}
+
+// checkpointBeforeCodex runs task, whose Claude Code attempt runs script and exhausts its quota, and returns the first
+// attempt's checkpoint as the record held it when Codex was being prepared, before its attempt started, and the
+// context Codex got.
+func (e *env) checkpointBeforeCodex(task, script string) (*domain.Checkpoint, string) {
+	e.t.Helper()
+	e.claude.setScript(func(ports.RunRequest) string { return script + "; echo 'END quota'" })
+	var mu sync.Mutex
+	var seen *domain.Checkpoint
+	var sent string
+	e.codex.setScript(func(req ports.RunRequest) string {
+		x, err := e.app.GetExecution(req.ExecutionID)
+		mu.Lock()
+		defer mu.Unlock()
+		if err == nil && len(x.Attempts) == 2 { // the second attempt is recorded before its harness is prepared
+			seen = x.Attempts[0].Checkpoint
+		}
+		sent = req.Context
+		return "echo 'END ok'"
+	})
+	r, _ := e.app.RunTask(task)
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	if len(x.Attempts) != 2 || x.Attempts[0].Outcome != domain.AttemptQuotaExhausted {
+		e.t.Fatalf("attempts %+v, want a quota ending, then Codex", x.Attempts)
+	}
+	if x.Attempts[1].Checkpoint != nil {
+		e.t.Errorf("the last attempt's checkpoint = %+v, want none: no switch followed it", x.Attempts[1].Checkpoint)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	return seen, sent
+}
+
+// writeOld writes a file whose modification time is an hour before now, as one left before the attempt.
+func writeOld(t *testing.T, path string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte("old\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// gitIn runs git in dir with no user or system configuration, failing the test when it fails.
+func gitIn(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=HarmFlow", "-c",
+		"user.email=harmflow@example.invalid"}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
+	}
+}
+
+// harmflow-app#214: the attempt creates a work item's worktree directly under its workspace, as the built-in skills do,
+// commits a file there, and leaves another written by a shell command, which no adapter event reports, before its
+// quota ends. Before Codex starts, the first attempt's checkpoint lists both with their status, measured from the
+// commit the worktree was created from, and Codex's context names them. The file the worktree started with is not
+// listed.
+func TestCheckpointListsShellWrittenFilesInAWorktree(t *testing.T) {
+	e := newEnv(t)
+	origin := t.TempDir()
+	gitIn(t, origin, "init", "-q", "-b", "main")
+	if err := os.WriteFile(filepath.Join(origin, "README.md"), []byte("base\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, origin, "add", "README.md")
+	gitIn(t, origin, "commit", "-q", "-m", "base")
+	e.create("worktree", codexFallback)
+	git := `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -c user.name=HarmFlow -c user.email=harmflow@example.invalid`
+	c, sent := e.checkpointBeforeCodex("worktree", git+` -C '`+origin+`' worktree add -q -b fix/1-shell "$PWD/harmflow-1" main && `+
+		`cd harmflow-1 && echo fix > fix.txt && `+git+` add fix.txt && `+git+` commit -q -m fix && `+
+		`sed -i.bak 's/base/changed/' README.md && rm README.md.bak && echo wip > wip.txt`)
+	if c == nil {
+		t.Fatalf("no checkpoint on the first attempt before Codex started; Codex's context:\n%s", sent)
+	}
+	want := []domain.CheckpointFile{{Path: "harmflow-1/README.md", Status: domain.FileModified},
+		{Path: "harmflow-1/fix.txt", Status: domain.FileAdded}, {Path: "harmflow-1/wip.txt", Status: domain.FileUntracked}}
+	if !slices.Equal(c.Files, want) || c.More != 0 || c.ScanLimited {
+		t.Errorf("checkpoint %+v, want the files %+v", c, want)
+	}
+	// The workspace itself is a plain folder, so the part outside the worktree was scanned.
+	if !c.Scanned {
+		t.Errorf("checkpoint %+v: the workspace outside the worktree is not marked as scanned", c)
+	}
+	for _, f := range []string{"harmflow-1/README.md (modified)", "harmflow-1/fix.txt (added)", "harmflow-1/wip.txt (untracked)"} {
+		if !strings.Contains(sent, f) {
+			t.Errorf("Codex's context does not name %q:\n%s", f, sent)
+		}
+	}
+}
+
+// harmflow-app#214: in a workspace that is not a Git repository, the attempt writes a file from a shell command before
+// its quota ends. Before Codex starts, the checkpoint lists it, found by its modification time, and not the file left
+// there before the attempt; Codex's context names it and says what a scan cannot see.
+func TestCheckpointListsAShellWrittenFileOutsideGit(t *testing.T) {
+	e := newEnv(t)
+	e.create("plain", codexFallback)
+	work := filepath.Join(e.paths.Workspace, "plain")
+	if err := os.MkdirAll(work, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeOld(t, filepath.Join(work, "old.txt"))
+	c, sent := e.checkpointBeforeCodex("plain", "mkdir -p notes && echo half > notes/partial.txt")
+	if c == nil {
+		t.Fatalf("no checkpoint on the first attempt before Codex started; Codex's context:\n%s", sent)
+	}
+	want := []domain.CheckpointFile{{Path: "notes/partial.txt", Status: domain.FileModified}}
+	if !slices.Equal(c.Files, want) || !c.Scanned || c.ScanLimited || c.More != 0 {
+		t.Errorf("checkpoint %+v, want the scanned files %+v", c, want)
+	}
+	for _, s := range []string{"notes/partial.txt (modified)",
+		"a file it deleted, or one whose modification time was kept, is not listed"} {
+		if !strings.Contains(sent, s) {
+			t.Errorf("Codex's context does not hold %q:\n%s", s, sent)
+		}
+	}
+}
+
+// harmflow-app#214: the session context names at most the checkpoint's files, counts the rest, and says when the
+// scan stopped at its limit.
+func TestCheckpointText(t *testing.T) {
+	files := make([]domain.CheckpointFile, domain.MaxCheckpointFiles+2)
+	for i := range files {
+		files[i] = domain.CheckpointFile{Path: fmt.Sprintf("f%04d.txt", i), Status: domain.FileModified}
+	}
+	c := domain.NewCheckpoint(files)
+	c.Scanned, c.ScanLimited = true, true
+	text := checkpointText(c)
+	for _, s := range []string{"f0000.txt (modified)", "f0499.txt (modified), and 2 more.",
+		fmt.Sprintf("stopped at its limit of %d files and folders", domain.CheckpointScanLimit)} {
+		if !strings.Contains(text, s) {
+			t.Errorf("checkpointText does not hold %q:\n%s", s, text)
+		}
+	}
+	if strings.Contains(text, "f0500.txt") {
+		t.Errorf("checkpointText names a file past the first %d:\n%s", domain.MaxCheckpointFiles, text)
+	}
+	if got := checkpointText(domain.NewCheckpoint(nil)); got != "No file it changed was found in the workspace." {
+		t.Errorf("checkpointText(no files) = %q", got)
 	}
 }
 

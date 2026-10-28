@@ -1979,6 +1979,43 @@ func TestFailoverAcrossHarnesses(t *testing.T) {
 	}
 }
 
+// harmflow-app#214: Claude Code writes partial.txt from the shell, which its stream does not report, then exhausts its
+// quota. The first attempt's checkpoint lists the file, found in the plain workspace by its modification time, though
+// the execution's changedFiles, which the harness reported, do not. Codex's session context, composed before its
+// attempt started, names the file and says what the scan cannot see.
+func TestFailoverCheckpointListsAShellWrittenFile(t *testing.T) {
+	d := startDaemon(t, t.TempDir())
+	d.call("POST", "/tasks", map[string]any{"yaml": task("checkpoint", "SCENARIO=quota PARTIAL=1",
+		"    fallback:\n      candidates:\n        - provider: codex\n")}, 201)
+	run := d.call("POST", "/tasks/checkpoint/run", nil, 202)
+	x := d.waitStatus(run["executionId"].(string), "completed", "failed")
+	attempts, _ := x["attempts"].([]any)
+	if x["status"] != "completed" || len(attempts) != 2 {
+		t.Fatalf("status %v attempts %v error %v", x["status"], attempts, x["errorMessage"])
+	}
+	a1, a2 := attempts[0].(map[string]any), attempts[1].(map[string]any)
+	cp, _ := a1["checkpoint"].(map[string]any)
+	files, _ := cp["files"].([]any)
+	if len(files) != 1 || cp["scanned"] != true || cp["scanLimited"] != nil || cp["more"] != nil {
+		t.Fatalf("the first attempt's checkpoint = %v, want partial.txt alone, scanned", cp)
+	}
+	if f, _ := files[0].(map[string]any); f["path"] != "partial.txt" || f["status"] != "modified" {
+		t.Errorf("the checkpoint's file = %v, want partial.txt modified", f)
+	}
+	if a2["checkpoint"] != nil {
+		t.Errorf("the last attempt's checkpoint = %v, want none: no switch followed it", a2["checkpoint"])
+	}
+	if changed, _ := x["changedFiles"].([]any); slices.Contains(changed, any("partial.txt")) {
+		t.Errorf("changedFiles %v hold partial.txt, which the fake harness never reports", changed)
+	}
+	c2, _ := a2["sessionContext"].(string)
+	for _, s := range []string{"partial.txt (modified)", "a file it deleted, or one whose modification time was kept, is not listed"} {
+		if !strings.Contains(c2, s) {
+			t.Errorf("Codex's session context does not hold %q:\n%s", s, c2)
+		}
+	}
+}
+
 // A failover whose attempts both reported their usage. Claude Code's cost is the one its CLI printed; Codex's, at the
 // model its configuration sets, is estimated from the price table and stamped on the attempt.
 func TestFailoverCostsReportedAndEstimated(t *testing.T) {

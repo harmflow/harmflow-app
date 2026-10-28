@@ -306,6 +306,24 @@ type ToolProber interface {
 	Probe(ctx context.Context) []ToolInfo
 }
 
+// WorkspaceReader reads, from an execution's workspace itself, which files an attempt changed there, whatever wrote
+// them: the checkpoint taken before a switch.
+type WorkspaceReader interface {
+	// Mark is where a later Changes measures from, taken as an attempt starts: the time, and the HEAD of each Git
+	// repository at the workspace's root or directly under it.
+	Mark(ctx context.Context, workspace string) WorkspaceMark
+	// Changes lists the files changed in the workspace since mark.
+	Changes(ctx context.Context, workspace string, mark WorkspaceMark) *domain.Checkpoint
+}
+
+// WorkspaceMark is what a WorkspaceReader measures the changes of an attempt from: when the attempt started, by the
+// machine's own clock, which file modification times follow, and the HEAD commit of each Git repository then, by its
+// path relative to the workspace, "." for the workspace's root.
+type WorkspaceMark struct {
+	At    time.Time
+	Heads map[string]string
+}
+
 // ToolInfo is what a ToolProber found of one tool, git or gh: where it is, its version, and its authentication.
 type ToolInfo struct {
 	ID               string            `json:"id"`
