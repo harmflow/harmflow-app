@@ -222,32 +222,63 @@ func TestUpgradeReadsTheLegacyGitHubType(t *testing.T) {
 	}
 }
 
-// Past the limits an item needs a human.
+// An item needs a human past its retry limit, or at its resume limit while a later cycle would still resume it; an
+// item its last allowed resumption ended keeps its status.
 func TestWorkItemLimits(t *testing.T) {
 	limits := WorkItemLimits{MaxResumeAttempts: 3, MaxFailedRetries: 3}
-	w := &WorkItem{Key: "o/r#1"}
-	now := time.Now()
-	for i := 0; i < 3; i++ {
-		w.ApplyInterruption("x", "pushed", limits, now)
-		if w.Status != WorkItemFailed {
-			t.Fatalf("after %d interruptions: %s", i+1, w.Status)
-		}
-	}
-	w.ApplyInterruption("x", "pushed", limits, now)
-	if w.Status != WorkItemNeedsAttention {
-		t.Errorf("after 4 interruptions: %s, want needs_attention", w.Status)
-	}
-	r := &WorkItem{Key: "o/r#2"}
-	failing := WorkItemResult{Key: "o/r#2", Kind: "resume", Outcome: "completed", Tests: &TestsResult{Status: "failed"}}
-	for i := 0; i < 3; i++ {
-		r.ApplyResult(failing, "x", limits, now)
-	}
-	if r.Status != WorkItemInProgress {
-		t.Errorf("a draft PR with failing tests should stay resumable, got %s", r.Status)
-	}
-	r.ApplyResult(failing, "x", limits, now)
-	if r.Status != WorkItemNeedsAttention {
-		t.Errorf("past the resume limit: %s", r.Status)
+	noResume := WorkItemLimits{MaxResumeAttempts: 0, MaxFailedRetries: 3}
+	pr := &PullRequestRef{URL: "https://github.com/o/r/pull/9"}
+	draft := WorkItemResult{Key: "o/r#1", Kind: "new", Outcome: "completed", PullRequest: pr,
+		Tests: &TestsResult{Status: "failed"}}
+	passingDraft := WorkItemResult{Key: "o/r#1", Kind: "new", Outcome: "completed", PullRequest: pr,
+		Tests: &TestsResult{Status: "passed"}}
+	failing := WorkItemResult{Key: "o/r#1", Kind: "resume", Outcome: "completed", Tests: &TestsResult{Status: "failed"}}
+	passing := WorkItemResult{Key: "o/r#1", Kind: "resume", Outcome: "completed", Tests: &TestsResult{Status: "passed"}}
+	closing := WorkItemResult{Key: "o/r#1", Kind: "resume", Outcome: "closed"}
+	broken := WorkItemResult{Key: "o/r#1", Kind: "resume", Outcome: "failed"}
+	for _, c := range []struct {
+		name          string
+		limits        WorkItemLimits
+		results       []WorkItemResult
+		interruptions int // applied after the results
+		want          WorkItemStatus
+	}{
+		{"three interruptions with no pull request", limits, nil, 3, WorkItemFailed},
+		{"four interruptions with no pull request", limits, nil, 4, WorkItemNeedsAttention},
+		{"an interruption with no pull request and no resumption allowed", noResume, nil, 1, WorkItemFailed},
+		{"a first draft with failing tests", limits, []WorkItemResult{draft}, 0, WorkItemInProgress},
+		{"two failing resumptions", limits, []WorkItemResult{draft, failing, failing}, 0, WorkItemInProgress},
+		{"three failing resumptions", limits, []WorkItemResult{draft, failing, failing, failing}, 0,
+			WorkItemNeedsAttention},
+		{"a failed resumption before the limit", limits, []WorkItemResult{draft, broken}, 0, WorkItemFailed},
+		{"a failed last allowed resumption", limits, []WorkItemResult{draft, failing, failing, broken}, 0,
+			WorkItemNeedsAttention},
+		{"an interruption before the resume limit", limits, []WorkItemResult{draft}, 1, WorkItemFailed},
+		{"an interruption after the last allowed resumption", limits,
+			[]WorkItemResult{draft, failing, failing, passing}, 1, WorkItemNeedsAttention},
+		{"a last allowed resumption whose tests pass", limits, []WorkItemResult{draft, failing, failing, passing}, 0,
+			WorkItemCompleted},
+		{"a last allowed resumption that closes the item", limits,
+			[]WorkItemResult{draft, failing, failing, closing}, 0, WorkItemClosed},
+		{"a first draft with failing tests and no resumption allowed", noResume, []WorkItemResult{draft}, 0,
+			WorkItemNeedsAttention},
+		{"a first draft whose tests pass and no resumption allowed", noResume, []WorkItemResult{passingDraft}, 0,
+			WorkItemCompleted},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			w := &WorkItem{Key: "o/r#1"}
+			now := time.Now()
+			for _, r := range c.results {
+				w.ApplyResult(r, "x", c.limits, now)
+			}
+			for range c.interruptions {
+				w.ApplyInterruption("x", "pushed", c.limits, now)
+			}
+			if w.Status != c.want {
+				t.Errorf("ApplyResult %d times and ApplyInterruption %d times with %+v: Status = %s, want %s",
+					len(c.results), c.interruptions, c.limits, w.Status, c.want)
+			}
+		})
 	}
 }
 
