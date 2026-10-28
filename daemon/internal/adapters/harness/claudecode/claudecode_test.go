@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -720,8 +721,15 @@ func TestDetectSkipsAFileThatIsNotClaudeCode(t *testing.T) {
 	if err := os.WriteFile(plain, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for path, key := range map[string]string{"/bin/sh": "harness_not_identified", impostor: "harness_not_identified",
-		plain: "harness_path_not_executable", real: ""} {
+	cases := map[string]string{impostor: "harness_not_identified", plain: "harness_path_not_executable", real: ""}
+	// macOS's /bin/sh is bash, which answers --version as a program that is not ClaudeCode; on Linux it is often dash,
+	// which fails --version, so the case runs on macOS only.
+	if runtime.GOOS == "darwin" {
+		cases["/bin/sh"] = "harness_not_identified"
+	} else {
+		t.Log("Identify(/bin/sh) is checked on macOS only, where /bin/sh is bash")
+	}
+	for path, key := range cases {
 		got := ""
 		if err := a.Identify(context.Background(), path); err != nil {
 			got = domain.TextOf(err).Key
