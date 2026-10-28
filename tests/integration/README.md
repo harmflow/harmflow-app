@@ -23,6 +23,7 @@ in this table.
 |---|---|---|
 | `TestClaudeCodeRefusesMakeInATask` (`claude_code_test.go`) | `HARMFLOW_TEST_CLAUDE_CODE=1` | A signed-in `claude` on the `PATH` |
 | `TestFailedIssueIsRetriedUntilItsLimit` (`queue_retry_test.go`) | `HARMFLOW_TEST_CLAUDE_CODE=1` | A signed-in `claude` on the `PATH`, and an installed `gh` signed in with access to the sandbox repository its fixtures live in, which `queueRepo` names. The test also clones that repository over HTTPS, so `git` needs access too (for example through `gh auth setup-git`). The repository holds three open issues labelled `queue-test`, the oldest of them linked by an unmanaged draft pull request; the test fails when it finds anything else |
+| `TestNoWorkExecutionRemovesEndedWorktrees` (`worktree_removal_test.go`) | `HARMFLOW_TEST_CLAUDE_CODE=1` | What `TestFailedIssueIsRetriedUntilItsLimit` needs, its fixtures included. The test also clones `harmflow/harmflow-app`, whose latest merged pull requests give it an issue that ended, and writes nothing to either repository |
 
 Run one of them on its own:
 

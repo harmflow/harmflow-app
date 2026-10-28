@@ -114,4 +114,5 @@ For each selected item, append one line to `progress.jsonl`:
 ```
 
 If nothing is eligible, the execution's outcome is `no_work`: write `report.json` with
-`{"outcome":"no_work","summary":"<what was checked>"}` and stop. That is a normal outcome, not a failure.
+`{"outcome":"no_work","summary":"<what was checked>"}`, its `workItems` holding the items whose worktree
+hf-github-worktree §3 found ended, and stop. That is a normal outcome, not a failure.
