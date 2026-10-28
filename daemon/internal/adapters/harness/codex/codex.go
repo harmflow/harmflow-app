@@ -37,8 +37,9 @@ const (
 var requiredFlags = []string{"--json", "--sandbox", "--cd", "--skip-git-repo-check"}
 
 // Adapter is the HarnessAdapter of the Codex CLI. It looks for the CLI on PathEnv, then in KnownLocations, and runs its
-// probes with Env; the user's agents, its models cache, and its configuration are read from the Codex home under Home,
-// or CODEX_HOME. The user's skills are the ones Codex's app server lists, from one server it keeps running until Close.
+// probes with Env, each within ProbeTimeout; the user's agents, its models cache, and its configuration are read from
+// the Codex home under Home, or CODEX_HOME. The user's skills are the ones Codex's app server lists, from one server it
+// keeps running until Close.
 type Adapter struct {
 	Home    string
 	PathEnv string
@@ -47,6 +48,9 @@ type Adapter struct {
 	KnownLocations []string
 	// ClientVersion is the version HarmFlow names itself with to the app server.
 	ClientVersion string
+	// ProbeTimeout limits each probe of the CLI: its --version, its help texts, and its sign-in status. Zero is each
+	// probe's own limit, 15 seconds, or 20 for the sign-in.
+	ProbeTimeout time.Duration
 
 	mu          sync.Mutex
 	server      *appServer
@@ -143,13 +147,13 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 		info.Readiness = "version_identified"
 	}
 	// Help that cannot be read lists no flags, so each feature reads as missing.
-	help, _, _ := procutil.Output(ctx, 15*time.Second, a.Env, info.Path, "exec", "--help")
+	help, _, _ := procutil.Output(ctx, a.probeTimeout(15*time.Second), a.Env, info.Path, "exec", "--help")
 	for _, f := range append(requiredFlags, "--add-dir", "--ephemeral", "--model", "--color") {
 		info.Features[f] = strings.Contains(help, f)
 	}
 	// The app server lists the user's skills. Codex 0.163.0 marks the command experimental, though skills/list is in its
 	// stable schema; the help lists it either way.
-	top, _, _ := procutil.Output(ctx, 15*time.Second, a.Env, info.Path, "--help")
+	top, _, _ := procutil.Output(ctx, a.probeTimeout(15*time.Second), a.Env, info.Path, "--help")
 	info.Features["app-server"] = strings.Contains(top, "app-server")
 	info.VersionSupport = "supported"
 	for _, f := range requiredFlags {
@@ -174,7 +178,7 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 
 	// Signed out only when the CLI says so, which it does exiting 1; a probe killed at its timeout, or failing
 	// otherwise, leaves the sign-in unknown.
-	status, statusErr, err := procutil.Output(ctx, 20*time.Second, a.Env, info.Path, "login", "status")
+	status, statusErr, err := procutil.Output(ctx, a.probeTimeout(20*time.Second), a.Env, info.Path, "login", "status")
 	switch {
 	case strings.Contains(strings.ToLower(status+statusErr), "not logged in"):
 		info.Authentication = "invalid"
@@ -199,12 +203,20 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 	return info
 }
 
+// probeTimeout is the limit of a probe whose own limit is def: ProbeTimeout, when it is set.
+func (a *Adapter) probeTimeout(def time.Duration) time.Duration {
+	if a.ProbeTimeout == 0 {
+		return def
+	}
+	return a.ProbeTimeout
+}
+
 // identifies reports whether the output of --version names Codex, as "codex-cli 0.163.0" does.
 func identifies(out string) bool { return strings.Contains(strings.ToLower(out), "codex") }
 
 // Identify checks that path is an executable file whose --version output names Codex.
 func (a *Adapter) Identify(ctx context.Context, path string) error {
-	_, err := procutil.IdentifyHarness(ctx, a.Env, path, Name, "codex", identifies)
+	_, err := procutil.IdentifyHarness(ctx, a.probeTimeout(procutil.VersionTimeout), a.Env, path, Name, "codex", identifies)
 	return err
 }
 
@@ -213,7 +225,7 @@ func (a *Adapter) Identify(ctx context.Context, path string) error {
 func (a *Adapter) firstIdentified(ctx context.Context, candidates []string) (string, string, error) {
 	var first error
 	for _, c := range candidates {
-		out, err := procutil.IdentifyHarness(ctx, a.Env, c, Name, "codex", identifies)
+		out, err := procutil.IdentifyHarness(ctx, a.probeTimeout(procutil.VersionTimeout), a.Env, c, Name, "codex", identifies)
 		if err == nil {
 			return out, c, nil
 		}

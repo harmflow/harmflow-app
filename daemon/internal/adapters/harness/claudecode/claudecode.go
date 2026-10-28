@@ -938,7 +938,7 @@ func identifies(out string) bool { return strings.Contains(out, "Claude Code") }
 
 // Identify checks that path is an executable file whose --version output names Claude Code.
 func (a *Adapter) Identify(ctx context.Context, path string) error {
-	_, err := procutil.IdentifyHarness(ctx, a.Env, path, Name, "claude", identifies)
+	_, err := procutil.IdentifyHarness(ctx, procutil.VersionTimeout, a.Env, path, Name, "claude", identifies)
 	return err
 }
 
@@ -947,7 +947,7 @@ func (a *Adapter) Identify(ctx context.Context, path string) error {
 func (a *Adapter) firstIdentified(ctx context.Context, candidates []string) (string, string, error) {
 	var first error
 	for _, c := range candidates {
-		out, err := procutil.IdentifyHarness(ctx, a.Env, c, Name, "claude", identifies)
+		out, err := procutil.IdentifyHarness(ctx, procutil.VersionTimeout, a.Env, c, Name, "claude", identifies)
 		if err == nil {
 			return out, c, nil
 		}

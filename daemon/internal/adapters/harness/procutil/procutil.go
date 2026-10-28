@@ -430,14 +430,17 @@ func Executable(path string) bool {
 	return err == nil && info.Mode().IsRegular() && info.Mode()&0o111 != 0
 }
 
+// VersionTimeout is the limit of a harness's --version probe, unless its adapter is given another.
+const VersionTimeout = 15 * time.Second
+
 // IdentifyHarness checks that path is the harness named harness: an executable file whose --version output, which it
-// returns, names it as names says, where cli is the command's own name. A file that prints a harness's name passes:
-// this catches a wrong file, not an impostor.
-func IdentifyHarness(ctx context.Context, env []string, path, harness, cli string, names func(string) bool) (string, error) {
+// returns, names it as names says, where cli is the command's own name, and timeout limits the probe. A file that
+// prints a harness's name passes: this catches a wrong file, not an impostor.
+func IdentifyHarness(ctx context.Context, timeout time.Duration, env []string, path, harness, cli string, names func(string) bool) (string, error) {
 	if !Executable(path) {
 		return "", domain.TextErr("harness_path_not_executable", "no executable file at {{path}}", "path", path)
 	}
-	out, _, err := Output(ctx, 15*time.Second, env, path, "--version")
+	out, _, err := Output(ctx, timeout, env, path, "--version")
 	if err != nil {
 		return "", domain.TextErr("command_failed", "{{command}} failed: {{detail}}", "command", cli+" --version",
 			"detail", err.Error())
