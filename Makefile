@@ -81,11 +81,11 @@ test-desktop: ## Type check and unit tests of the desktop
 
 .PHONY: check-imports
 check-imports: ## Fail on Go imports outside the Go guide's three groups, as CI does
-	go -C tests run ./imports $(CURDIR)/daemon $(CURDIR)/tests
+	go -C tests run ./imports "$(CURDIR)/daemon" "$(CURDIR)/tests"
 
 .PHONY: check-file-names
 check-file-names: ## Fail on tracked file and folder names outside CLAUDE.md's File names rules, as CI does
-	go -C tests run ./filenames $(CURDIR)
+	go -C tests run ./filenames "$(CURDIR)"
 
 .PHONY: test-integration
 test-integration: daemon ## Tests across the daemon's process boundary, with fake harnesses
@@ -98,13 +98,13 @@ coverage: coverage-daemon coverage-desktop ## Read the tests' coverage of the da
 
 .PHONY: coverage-daemon
 coverage-daemon: ## Statements per package of the daemon, unit and integration data merged, held at their floors
-	rm -rf $(COVERAGE)/daemon $(COVERAGE)/daemon.out
-	mkdir -p $(COVERAGE)/daemon/unit $(COVERAGE)/daemon/integration
-	go -C daemon test -count=1 -covermode=atomic -coverpkg=./... ./... -args -test.gocoverdir=$(COVERAGE)/daemon/unit
-	GOCOVERDIR=$(COVERAGE)/daemon/integration go -C tests test -count=1 ./...
-	go tool covdata textfmt -i=$(COVERAGE)/daemon/unit,$(COVERAGE)/daemon/integration -o $(COVERAGE)/daemon.out
-	go -C tests run ./coverage -floors $(CURDIR)/daemon/coverage-floors.txt -hold=$(if $(HOLD_FLOORS),true,false) \
-		$(COVERAGE)/daemon.out
+	rm -rf "$(COVERAGE)/daemon" "$(COVERAGE)/daemon.out"
+	mkdir -p "$(COVERAGE)/daemon/unit" "$(COVERAGE)/daemon/integration"
+	go -C daemon test -count=1 -covermode=atomic -coverpkg=./... ./... -args -test.gocoverdir="$(COVERAGE)/daemon/unit"
+	GOCOVERDIR="$(COVERAGE)/daemon/integration" go -C tests test -count=1 ./...
+	go tool covdata textfmt -i="$(COVERAGE)/daemon/unit,$(COVERAGE)/daemon/integration" -o "$(COVERAGE)/daemon.out"
+	go -C tests run ./coverage -floors "$(CURDIR)/daemon/coverage-floors.txt" -hold=$(if $(HOLD_FLOORS),true,false) \
+		"$(COVERAGE)/daemon.out"
 
 .PHONY: coverage-desktop
 coverage-desktop: ## Unit tests of the interface and the shell, held at their floors (needs cargo-llvm-cov)
@@ -151,15 +151,15 @@ check-go-toolchain: ## Fail when the Go toolchain is behind its minor's newest p
 
 .PHONY: dev-daemon
 dev-daemon: daemon ## Run the daemon on a development data directory
-	HARMFLOW_HOME=$(DEV_HOME) ./build/harmflowd --builtins $(CURDIR)
+	HARMFLOW_HOME="$(DEV_HOME)" ./build/harmflowd --builtins "$(CURDIR)"
 
 .PHONY: dev-ui
 dev-ui: ## Serve the interface in a browser, proxied to the development daemon
-	HARMFLOW_HOME=$(DEV_HOME) pnpm -C desktop dev
+	HARMFLOW_HOME="$(DEV_HOME)" pnpm -C desktop dev
 
 .PHONY: dev-desktop
 dev-desktop: sidecar ## Run the desktop shell against the development daemon
-	HARMFLOW_HOME=$(DEV_HOME) HARMFLOW_DAEMON_BIN=$(CURDIR)/build/harmflowd HARMFLOW_BUILTINS_DIR=$(CURDIR) \
+	HARMFLOW_HOME="$(DEV_HOME)" HARMFLOW_DAEMON_BIN="$(CURDIR)/build/harmflowd" HARMFLOW_BUILTINS_DIR="$(CURDIR)" \
 		pnpm -C desktop tauri dev
 
 .PHONY: app
