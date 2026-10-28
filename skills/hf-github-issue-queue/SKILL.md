@@ -95,12 +95,25 @@ with what you kept and say so in the report's `summary`.
 
 An issue is **already processed**, and is not new work, when any of these holds:
 
-- a pull request links it — it appears in a pull request's `closingIssuesReferences`, or a pull request body says
-  `Closes #<n>`, `Fixes #<n>`, or `Resolves #<n>`;
 - it appears in `context.json` `workItems` or `recentExecutions`, whatever its status. A `failed` item §1 takes as
   work to retry is retried there, never taken here as new work.
+- a pull request links it, in any state: an open draft, an open pull request ready for review, a closed one, or a
+  merged one, whoever opened it. GitHub links a pull request to the issue its body closes with `Closes #<n>`,
+  `Fixes #<n>`, or `Resolves #<n>`, or that its Development sidebar names. §1's listing holds only open drafts, so
+  never infer the link from it: read the issue's links with the query of §1's retry lookup, which reads closed pull
+  requests too, and count the issue processed when `nodes` holds any pull request.
+
+  ```bash
+  gh api graphql -F owner=OWNER -F repo=REPO -F n=<issue> -f query='query($owner: String!, $repo: String!, $n: Int!) {
+    repository(owner: $owner, name: $repo) { issue(number: $n) { state
+      closedByPullRequestsReferences(first: 10, includeClosedPrs: true) { nodes { number } } } } }'
+  ```
 
 Exclusions the prompt states apply on top of that. No issue is safe just because it is the first one open.
+
+Check an issue in this order: the prompt's criteria, then the history, then the query, so that the query runs only on
+the few issues that could become new work. Neither exception to this check is new work: a managed draft pull request
+is resumed under §1, and a `failed` item no pull request links is retried under §1.
 
 ## 3. Order and select
 
