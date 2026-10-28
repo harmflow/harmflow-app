@@ -42,20 +42,21 @@ A floor moves by hand, never by itself: Vitest's `autoUpdate` is not used.
 Either way, the floor is the lower of two readings of the same tree, so a reading that varies between runs never sets
 a floor the next honest build misses.
 
-## Reading of 2026-10-23
+## Reading of 2026-10-28, on Linux
 
-The floors come from this reading. Each floor equals its ratio. Where the runs differ, the table holds the lower:
-`internal/adapters/harness/procutil` read 342 statements in every run on the Mac, and 341, 341, and 340 on the runner,
-which is the figure here: its clean-up of a harness's process tree takes paths that depend on timing. And
-`internal/adapters/httpapi` read 270 on the runner and 269, recorded, on the Mac. Every other figure was the same in
-every run.
+The daemon's and the shell's floors come from this reading, taken on CI's Linux runner, where CI holds them: this
+repository's CI checks Linux only. Each floor equals its ratio. Two runs of the same tree, CI's and the Coverage
+workflow's, read the same figures. A test that needs another platform skips on Linux (`GO-CODE-GUIDE.md`, "Tests by
+platform"), so what only that platform runs is not counted here; *Floors lowered* below says which floors fell for it.
+The interface's floors keep their reading, of 2026-10-23, below. The readings before this one, on macOS, are in this
+file's history.
 
 | | |
 |---|---|
-| Code | `8430c5a` for the daemon and the shell; `1ace9c7` for the interface. The change that sets the floors touches none of the measured code. |
-| Machines | macOS 26.7.1, arm64, three runs; and CI's `macos-latest` runner, three runs ([1](https://github.com/harmflow/harmflow-app/actions/runs/39960071580), [2](https://github.com/harmflow/harmflow-app/actions/runs/39961213526), [3](https://github.com/harmflow/harmflow-app/actions/runs/39963361192)) |
-| Commands | `make coverage-daemon`, `pnpm -C desktop test:coverage`, and `cargo llvm-cov` in `desktop/src-tauri` — together, `make coverage` |
-| Tools | Go 1.24.4 · Node 24.2.0, pnpm 10.6.5, Vitest 5.0.5 with `@vitest/coverage-v8` 5.0.5 · rustc 1.93.0, cargo-llvm-cov 0.9.1 |
+| Code | `243f308`, the merge of `db33f7d` onto `main` at `a26bb4e` that the pull request's checks run. The change that sets the floors touches none of the measured code. |
+| Machines | CI's `ubuntu-latest` runner, two runs: [CI](https://github.com/harmflow/harmflow-app/actions/runs/40715413147) and [Coverage](https://github.com/harmflow/harmflow-app/actions/runs/40715413000) |
+| Commands | `make coverage-daemon` and `make coverage-desktop`, as CI runs them |
+| Tools | Go 1.26.10 · Node 26.12.1 · rustc 1.99.1, cargo-llvm-cov 0.9.1 |
 
 ### Daemon — statements per package
 
@@ -66,34 +67,66 @@ each daemon writes its counters when it exits. Both sides count in `atomic` mode
 
 | Package | Covered | Total | Ratio | Floor |
 |---|---:|---:|---:|---:|
-| `cmd/harmflowd` | 148 | 195 | 75.89% | 75.89% |
-| `internal/adapters/catalog` | 39 | 74 | 52.70% | 52.70% |
-| `internal/adapters/eventlog` | 190 | 217 | 87.55% | 87.55% |
-| `internal/adapters/fsstore` | 94 | 130 | 72.30% | 72.30% |
-| `internal/adapters/harness/classify` | 9 | 19 | 47.36% | 47.36% |
-| `internal/adapters/harness/claudecode` | 335 | 369 | 90.78% | 90.78% |
-| `internal/adapters/harness/codex` | 276 | 312 | 88.46% | 88.46% |
-| `internal/adapters/harness/procutil` | 340 | 394 | 86.29% | 86.29% |
-| `internal/adapters/httpapi` | 269 | 358 | 75.13% | 75.13% |
+| `cmd/harmflowd` | 165 | 213 | 77.46% | 77.46% |
+| `internal/adapters/catalog` | 89 | 97 | 91.75% | 91.75% |
+| `internal/adapters/eventlog` | 192 | 216 | 88.88% | 88.88% |
+| `internal/adapters/fsstore` | 96 | 132 | 72.72% | 72.72% |
+| `internal/adapters/harness/classify` | 10 | 19 | 52.63% | 52.63% |
+| `internal/adapters/harness/claudecode` | 437 | 458 | 95.41% | 95.41% |
+| `internal/adapters/harness/codex` | 455 | 492 | 92.47% | 92.47% |
+| `internal/adapters/harness/procutil` | 248 | 426 | 58.21% | 58.21% |
+| `internal/adapters/httpapi` | 285 | 365 | 78.08% | 78.08% |
 | `internal/adapters/launchd` | 28 | 30 | 93.33% | 93.33% |
-| `internal/adapters/schema` | 124 | 153 | 81.04% | 81.04% |
-| `internal/adapters/secret` | 46 | 54 | 85.18% | 85.18% |
+| `internal/adapters/schema` | 175 | 198 | 88.38% | 88.38% |
+| `internal/adapters/secret` | 26 | 55 | 47.27% | 47.27% |
 | `internal/adapters/sysinfo` | 0 | 70 | 0.00% | 0.00% |
 | `internal/adapters/tools` | 0 | 39 | 0.00% | 0.00% |
 | `internal/adapters/wake` | 14 | 14 | 100.00% | 100.00% |
-| `internal/app` | 2056 | 2421 | 84.92% | 84.92% |
-| `internal/domain` | 512 | 554 | 92.41% | 92.41% |
+| `internal/adapters/workspace` | 107 | 126 | 84.92% | 84.92% |
+| `internal/app` | 2490 | 2851 | 87.33% | 87.33% |
+| `internal/domain` | 587 | 627 | 93.62% | 93.62% |
 | `internal/ports` | 3 | 4 | 75.00% | 75.00% |
+
+### Shell — `desktop/src-tauri`
+
+The unit tests. Covered is the total less the missed count `cargo llvm-cov` reports. Branch counts need a nightly
+toolchain and are not read. The shell's code for macOS alone (`#[cfg(target_os = "macos")]`) does not build on Linux,
+and is in neither count.
+
+| Counter | Covered | Total | Ratio | Floor |
+|---|---:|---:|---:|---:|
+| Lines | 287 | 920 | 31.19% | 31.19% |
+| Functions | 48 | 165 | 29.09% | 29.09% |
+
+### Floors lowered
+
+Both on 2026-10-28, when the floors moved to Linux, where this repository's CI checks. Every other floor rose with the
+reading.
+
+| Package | Was | Now | Why |
+|---|---:|---:|---|
+| `internal/adapters/harness/procutil` | 86.29% | 58.21% | The daemon reads the process table on macOS only. On Linux `tree_darwin.go` does not build, and the tests that find and end what a harness left outside its group skip (`needProcessTable`), so the clean-up paths that read the table run on macOS alone |
+| `internal/adapters/secret` | 85.18% | 47.27% | The Keychain store calls `/usr/bin/security`, which only macOS has. The integration tests that run it against a throwaway keychain skip on Linux, so only the checks that need no keychain count |
+
+## The interface's reading, of 2026-10-23
+
+The interface's floors come from this reading. Its tests run no code of one platform alone, and on Linux at `243f308`
+it reads above every floor (79.01% of statements).
+
+| | |
+|---|---|
+| Code | `1ace9c7` |
+| Machines | macOS 26.7.1, arm64, two runs, identical. The interface's counts were the same on the Mac and CI's runner at `8430c5a`, the reading before |
+| Commands | `pnpm -C desktop test:coverage` |
+| Tools | Node 24.2.0, pnpm 10.6.5, Vitest 5.0.5 with `@vitest/coverage-v8` 5.0.5 |
 
 ### Interface — `desktop/ui`
 
 The unit tests. Every source file under `src/` counts, those no test imports included, except
 `src/api/generated.ts`, `src/main.tsx`, and the test files.
 
-Read again at `1ace9c7`, two runs on the Mac, identical: `790fde7` added code to the interface and its reading fell
-below the one of `8430c5a` (1531 of 2341 statements), before any floor held. The interface's counts were the same on
-the Mac and the runner at `8430c5a`. At `1ace9c7` the daemon reads at or above every floor, higher in several packages,
-and the shell is unchanged; their floors stay those of `8430c5a`, and the daemon's headroom waits for the next reading.
+`790fde7` added code to the interface and its reading fell below the one of `8430c5a` (1531 of 2341 statements),
+before any floor held, so it was read again at `1ace9c7`.
 
 | Counter | Covered | Total | Ratio | Floor |
 |---|---:|---:|---:|---:|
@@ -101,20 +134,6 @@ and the shell is unchanged; their floors stay those of `8430c5a`, and the daemon
 | Branches | 1333 | 2173 | 61.34% | 61.34% |
 | Functions | 519 | 875 | 59.31% | 59.31% |
 | Lines | 1330 | 1966 | 67.65% | 67.65% |
-
-### Shell — `desktop/src-tauri`
-
-The unit tests. Covered is the total less the missed count `cargo llvm-cov` reports. Branch counts need a nightly
-toolchain and are not read.
-
-| Counter | Covered | Total | Ratio | Floor |
-|---|---:|---:|---:|---:|
-| Lines | 218 | 793 | 27.49% | 27.49% |
-| Functions | 36 | 144 | 25.00% | 25.00% |
-
-### Floors lowered
-
-None yet.
 
 ## Taking a reading
 

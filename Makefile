@@ -18,8 +18,8 @@ APP_STAMP := desktop/src-tauri/target.noindex/release/bundle/macos/HarmFlow.app.
 LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuiltAt=$(BUILT_AT)
 COVERAGE := $(CURDIR)/build/coverage
 # The shell's coverage floors, in percent; COVERAGE.md holds the reading they come from.
-RUST_FLOOR_LINES := 27.49
-RUST_FLOOR_FUNCTIONS := 25.00
+RUST_FLOOR_LINES := 31.19
+RUST_FLOOR_FUNCTIONS := 29.09
 # cargo llvm-cov fails below a floor without saying which, so its summary is read again to name the counter that fell,
 # its floor, and its ratio, truncated to two decimals as the floors are.
 RUST_FLOOR_VIOLATIONS := def pct: "\(. / 100 | floor).\(. % 100 | tostring | if length < 2 then "0" + . else . end)"; \
