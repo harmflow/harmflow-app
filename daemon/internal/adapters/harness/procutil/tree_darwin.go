@@ -8,6 +8,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// readsProcessTable is true on macOS, whose process table sysctl reads.
+const readsProcessTable = true
+
 // sZomb is the state of a process that has exited and waits for its parent to reap it (SZOMB in <sys/proc.h>).
 const sZomb = 5
 
