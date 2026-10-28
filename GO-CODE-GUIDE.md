@@ -49,6 +49,7 @@ change is done when every rule in this file holds in the code it adds or changes
 | Texts for the user | Every text the daemon writes for the user is in en-US and carries a key from the contract's closed `MessageKey` set, with its params. A text the daemon does not author, such as the agent's words, tool output, or a tool's own error, gets no key |
 | Modules | One Go module per Go part |
 | Tests | Unit tests sit next to their code; tests that cross parts sit in `tests/` |
+| Tests by platform | CI runs on Linux only, and every other platform is checked outside this repository, so a test states where it runs. A test of code that builds on one platform alone sits in a file with that code's suffix (`tree_darwin_test.go` beside `tree_darwin.go`) and builds nowhere else. A test of behavior every platform shares, which needs what only some builds have, calls a helper named for that need, which skips with the reason (`needProcessTable`). The helper asks the code that has the answer (`procutil.ReadsProcessTable`); a test in `tests/`, which cannot import the daemon's packages, reads the system there, and nowhere else. A case whose fixture differs by system, such as `/bin/sh` being bash or dash, skips in a subtest of its own, naming the difference. No test skips for any other reason |
 | Coverage | Each package is held at its last measured floor in `daemon/coverage-floors.txt`, as [`COVERAGE.md`](COVERAGE.md) describes. A new package needs no floor, and lowering a floor is a committed diff that gives its reason |
 
 ## Chosen where the guides disagree

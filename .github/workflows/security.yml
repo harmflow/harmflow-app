@@ -3,8 +3,8 @@
 # touched still fails a run, and whether the Go toolchain is the newest patch of its minor, which Dependabot does not
 # raise. CI runs the same scan and audits on each change, scoped to it.
 #
-# Every job runs on Linux, as CI does, so govulncheck reads the daemon as it is built for Linux; the macOS build's
-# audit runs outside this repository. Actions are pinned as in ci.yml, to the same commits.
+# Every job runs on Linux, as CI does, so govulncheck reads the daemon as it is built for Linux; every other
+# platform's audit runs outside this repository. Actions are pinned as in ci.yml, to the same commits.
 name: Security
 
 on:
