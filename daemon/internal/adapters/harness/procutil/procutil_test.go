@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -698,22 +699,65 @@ func TestAKilledHarnessEndsWithTheSignal(t *testing.T) {
 		var lines []string
 		p := startShell(t, `trap '' TERM; echo started; sleep 300; echo next`, testEnv(), executionID(t),
 			func(b []byte) { lines = append(lines, string(b)) })
-		waitFor(t, "the harness to run sleep", func() bool {
-			table, err := processTable()
-			if err != nil {
-				return false
-			}
-			for _, c := range table {
-				if c.ppid == p.Pid() && c.name == "sleep" && !c.zombie {
-					return true
-				}
-			}
-			return false
-		})
+		waitForSleep(t, p)
 		cancelAndWait(p, 100*time.Millisecond)
 		if p.ExitCode() != 137 || p.Signal() != "SIGKILL" || len(lines) != 1 {
 			t.Fatalf("stop %d: exit %d, signal %q, stdout lines %q; want exit 137, SIGKILL, [started]", i+1, p.ExitCode(),
 				p.Signal(), lines)
 		}
 	}
+}
+
+// A harness that SIGTERM ends records the signal's exit on every stop, and runs no command once the stop has begun: it
+// gets SIGTERM before its child does. Signalled with its group, a shell whose child died first ran its next command and
+// exited 0 in more than half of the stops, so ten stops catch that nearly always. The grace period is long enough for a
+// loaded host, and a harness that ends on SIGTERM never waits for it.
+func TestATerminatedHarnessEndsWithTheSignal(t *testing.T) {
+	needProcessTable(t)
+	for i := range 10 {
+		var lines []string
+		p := startShell(t, `echo started; sleep 300; echo "after $?"; echo next`, testEnv(), executionID(t),
+			func(b []byte) { lines = append(lines, string(b)) })
+		waitForSleep(t, p)
+		cancelAndWait(p, time.Minute)
+		if p.ExitCode() != 143 || p.Signal() != "SIGTERM" || len(lines) != 1 {
+			t.Fatalf("stop %d: exit %d, signal %q, stdout lines %q; want exit 143, SIGTERM, [started]", i+1, p.ExitCode(),
+				p.Signal(), lines)
+		}
+	}
+}
+
+// A harness that traps SIGTERM sees it once, though its child gets SIGTERM too. The trap interrupts the harness's wait
+// for its child; the harness then waits a second for a second SIGTERM, which would interrupt that wait and run the trap
+// again, and exits. Sent to the harness and then to its group, SIGTERM ran the trap twice on the first stop, so three
+// stops are enough.
+func TestAHarnessThatTrapsSIGTERMSeesItOnce(t *testing.T) {
+	needProcessTable(t)
+	for i := range 3 {
+		var lines []string
+		p := startShell(t, `trap 'echo TERM' TERM; echo started; sleep 300 & wait $!; sleep 1 & wait $!; echo done`,
+			testEnv(), executionID(t), func(b []byte) { lines = append(lines, string(b)) })
+		waitForSleep(t, p)
+		cancelAndWait(p, time.Minute)
+		if want := []string{"started", "TERM", "done"}; !slices.Equal(lines, want) {
+			t.Fatalf("stop %d: stdout lines %q, want %q", i+1, lines, want)
+		}
+	}
+}
+
+// waitForSleep waits until the harness runs sleep as its child.
+func waitForSleep(t *testing.T, p *Process) {
+	t.Helper()
+	waitFor(t, "the harness to run sleep", func() bool {
+		table, err := processTable()
+		if err != nil {
+			return false
+		}
+		for _, c := range table {
+			if c.ppid == p.Pid() && c.name == "sleep" && !c.zombie {
+				return true
+			}
+		}
+		return false
+	})
 }

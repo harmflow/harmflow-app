@@ -54,7 +54,7 @@ const executionIDVariable = "HARMFLOW_EXECUTION_ID"
 // as well. Every process found gets SIGTERM, and the grace period applies to all of them: once all have exited, or the
 // grace period has elapsed, each one still alive gets SIGKILL, even when the harness exited first. A process forked
 // meanwhile is found by scanning again before SIGKILL, up to killRounds times, until a scan finds no new process. A
-// harness still running gets SIGKILL before the others, so it ends with the signal's exit.
+// harness still running gets each signal before the others, so it ends with the signal's exit, and it gets SIGTERM once.
 //
 // A process is known by its pid and start time, both checked again before every signal, so a reused pid is never
 // signalled. The daemon and the processes it runs under are never signalled.
@@ -250,40 +250,55 @@ func (e *ender) protected(table map[int]procInfo) map[int]bool {
 	return never
 }
 
-// signal sends sig to every process found that still runs, after checking its pid and start time again. The harness's
-// group gets it in one call, as a signal to the group always did: signalled one by one, a shell whose child died first
-// could run its next command, such as one that reports success, before its own signal came. Each process found outside
-// the group gets it next.
+// signal sends sig to every process found that still runs, after checking its pid and start time again.
 //
-// SIGKILL reaches the harness alone before its group. The kernel signals a group's members one at a time, so a child
-// killed first can still let the harness, a shell waiting for it, run its next command and exit 0 before its own
-// SIGKILL comes; with SIGKILL already pending, the harness ends with the signal's exit, whatever its children do.
-// SIGTERM goes to the group alone, so a harness that handles it gets it once.
+// A harness still running gets it alone, before any other process. The kernel signals a group's members one at a time,
+// so a child signalled first could die and let the harness, a shell waiting for it, run its next command, such as one
+// that reports success, and exit 0 before its own signal came; with the signal already pending, the harness ends with
+// the signal's exit, or runs its handler, before anything its children do reaches it.
+//
+// SIGKILL then reaches the harness's group in one call, which a process forked into the group since the last scan
+// cannot miss, and each process found outside the group next. SIGTERM, which a harness may handle, must reach it once,
+// and a signal to its group would bring it again: while the harness runs, every other process found gets SIGTERM on its
+// own, the older before the younger, so a process gets it before the processes it started, as the harness does. A
+// process forked into the group after the last scan misses SIGTERM, and the scans before SIGKILL find it. Once the
+// harness has exited, its group gets SIGTERM in one call, as it gets SIGKILL.
 func (e *ender) signal(sig syscall.Signal) {
-	if sig == syscall.SIGKILL {
-		harness := ident{e.tree.Pid, e.start}
-		if t, ok := e.found[harness]; ok && !t.unsignalled && running(harness) {
-			t.send(harness.pid, sig)
-		}
+	harness := ident{e.tree.Pid, e.start}
+	alone := false
+	if t, ok := e.found[harness]; ok && !t.unsignalled && running(harness) {
+		alone = t.send(harness.pid, sig)
 	}
+	group := e.group && (sig == syscall.SIGKILL || !alone)
 	// The group's members found running just before its signal get it, though one may die of it, and be reaped, before
 	// the loop below reads it again.
 	var members []*target
-	if e.group {
+	if group {
 		for id, t := range e.found {
 			if p, ok := processInfo(id.pid); ok && p.start == id.start && !p.zombie && p.pgid == e.tree.Group {
 				members = append(members, t)
 			}
 		}
 	}
-	grouped := e.group && syscall.Kill(-e.tree.Group, sig) == nil
+	grouped := group && syscall.Kill(-e.tree.Group, sig) == nil
 	if grouped {
 		for _, t := range members {
 			t.signalled = true
 		}
 	}
-	for id, t := range e.found {
-		if t.unsignalled {
+	var ids []ident
+	for id := range e.found {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		if ids[i].start != ids[j].start {
+			return ids[i].start < ids[j].start
+		}
+		return ids[i].pid < ids[j].pid
+	})
+	for _, id := range ids {
+		t := e.found[id]
+		if t.unsignalled || alone && sig == syscall.SIGTERM && id == harness {
 			continue
 		}
 		p, ok := processInfo(id.pid)
@@ -298,14 +313,16 @@ func (e *ender) signal(sig syscall.Signal) {
 	}
 }
 
-// send sends sig to the process, whose pid and start time the caller has just checked.
-func (t *target) send(pid int, sig syscall.Signal) {
+// send sends sig to the process, whose pid and start time the caller has just checked, and reports whether it did.
+func (t *target) send(pid int, sig syscall.Signal) bool {
 	switch err := syscall.Kill(pid, sig); {
 	case err == nil:
 		t.signalled = true
+		return true
 	case errors.Is(err, syscall.EPERM):
 		t.unsignalled = true
 	}
+	return false
 }
 
 // await waits until no process found runs any more, or until d has elapsed.
