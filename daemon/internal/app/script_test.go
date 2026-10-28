@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -302,6 +303,9 @@ func TestScriptStopEndsItsProcesses(t *testing.T) {
 // it polls, 50 times at most, until the kernel names the child sleep: ps's ucomm, padded to 16 columns, reads the name
 // the log gives.
 func TestScriptExitEndsWhatTheProgramLeft(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("finding what a program left needs the process table, which the daemon reads on macOS only")
+	}
 	e := newEnv(t)
 	dir := t.TempDir()
 	e.createScript("leaves", fmt.Sprintf(`  script:

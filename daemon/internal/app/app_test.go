@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -4470,6 +4471,9 @@ func TestRecoveryAfterACrashMatchesTheLog(t *testing.T) {
 // as Claude Code runs a tool command. The record names the harness from the moment it started, and the log names each
 // process ended, ahead of the interruption.
 func TestRecoveryEndsTheHarnessACrashLeft(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("naming and ending what a crash left needs the process table, which the daemon reads on macOS only")
+	}
 	e := newEnv(t)
 	e.create("crashed", "")
 	// macOS has no setsid command; Perl's POSIX::setsid stands in for it.
