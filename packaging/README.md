@@ -85,6 +85,28 @@ To check that `open -a HarmFlow` starts the installed copy, with another bundle 
 4. Run `open -a HarmFlow`, then `ps -axww -o comm= | grep harmflow-desktop`: the window's executable is
    `~/Applications/HarmFlow.app/Contents/MacOS/harmflow-desktop`.
 
+## Releasing
+
+A version tag, `vMAJOR.MINOR.PATCH` with digits only, is a release. Pushing one runs
+`.github/workflows/release.yml`, which checks that the tag is the version of all six version fields, then creates the
+tag's GitHub Release, with notes generated from the changes since the previous release. It builds and attaches
+nothing: the community edition is built from the tagged source with `make app`, and the macOS build reaches the App
+Store separately, built from the same tag.
+
+To cut a release:
+
+1. Bump the six version fields in one commit: `VERSION` in `Makefile`, `Version` in `daemon/cmd/harmflowd/main.go`,
+   and `version` in `desktop/src-tauri/tauri.conf.json`, `desktop/src-tauri/Cargo.toml` (its `[package]` table),
+   `desktop/package.json`, and `desktop/ui/package.json`. `desktop/src-tauri/Cargo.lock` repeats the Cargo version:
+   `cargo update --workspace --manifest-path desktop/src-tauri/Cargo.toml` refreshes it for the same commit.
+   `make check-version TAG=v<version>` names every field that differs from the tag, as the workflow does.
+2. Make sure CI is green on that commit.
+3. Push the tag: `git tag v<version> <commit>`, then `git push origin v<version>`.
+4. Check that the Release run passed and that the GitHub Release exists.
+
+A failed release is fixed with a new patch version, never by moving a tag. A tag ruleset lets only the owner create
+`v*` tags, and lets nobody move or delete one.
+
 ## Linux and Windows
 
 Not started; the MVP's first target is macOS.
