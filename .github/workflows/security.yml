@@ -3,9 +3,8 @@
 # touched still fails a run, and whether the Go toolchain is the newest patch of its minor, which Dependabot does not
 # raise. CI runs the same scan and audits on each change, scoped to it.
 #
-# The audits run on macOS, the MVP's only platform, so govulncheck reads the daemon as it is built for it. gitleaks
-# reads the history and the toolchain check the Go module proxy, neither a build, so both run on Linux. Actions are
-# pinned as in ci.yml, to the same commits.
+# Every job runs on Linux, as CI does, so govulncheck reads the daemon as it is built for Linux; the macOS build's
+# audit runs outside this repository. Actions are pinned as in ci.yml, to the same commits.
 name: Security
 
 on:
@@ -40,8 +39,8 @@ jobs:
         run: gitleaks git --config .gitleaks.toml --redact --no-banner
 
   dependencies:
-    name: Dependencies (macOS)
-    runs-on: macos-latest
+    name: Dependencies (Linux)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0

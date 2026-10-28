@@ -1,6 +1,7 @@
 # A pull request runs only the parts it touches, a change in contracts/ runs every part, and main runs everything.
-# The full macOS, Linux, and Windows matrix starts when the Linux and Windows ports exist; until then every job runs
-# on macOS, the MVP's only platform.
+# Every job runs on Linux. The macOS build is built and checked outside this repository, and development stays on
+# macOS: a test that needs macOS skips here, naming what it needs. make test-packaging, which tests the Mac's own
+# make update-app, is a local check on the Mac.
 #
 # Every action is pinned to a full commit SHA, with the release it corresponds to in a comment, so a moved tag cannot
 # change what CI runs; a new action follows the same rule. Dependabot (.github/dependabot.yml) proposes the updates.
@@ -30,7 +31,6 @@ jobs:
       daemon: ${{ steps.parts.outputs.daemon }}
       integration: ${{ steps.parts.outputs.integration }}
       desktop: ${{ steps.parts.outputs.desktop }}
-      packaging: ${{ steps.parts.outputs.packaging }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -52,13 +52,12 @@ jobs:
             echo "$files" | grep -Eq '^(contracts/|Makefile$|\.github/)' && return 0
             echo "$files" | grep -Eq "$1"
           }
-          for part in contracts daemon integration desktop packaging; do
+          for part in contracts daemon integration desktop; do
             case $part in
               contracts)   pattern='^(contracts/|daemon/internal/contracts/|desktop/ui/src/api/generated\.ts$)' ;;
               daemon)      pattern='^daemon/' ;;
               integration) pattern='^(daemon/|tests/|agents/|skills/)' ;;
               desktop)     pattern='^(desktop/|agents/|skills/)' ;;
-              packaging)   pattern='^packaging/' ;;
             esac
             if touched "$pattern"; then echo "$part=true" >> "$GITHUB_OUTPUT"; else echo "$part=false" >> "$GITHUB_OUTPUT"; fi
           done
@@ -122,10 +121,10 @@ jobs:
       - run: make check-generated
 
   daemon:
-    name: Daemon (macOS)
+    name: Daemon (Linux)
     needs: changes
     if: needs.changes.outputs.daemon == 'true'
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -142,15 +141,16 @@ jobs:
         env:
           GOFLAGS: -race
       # The known vulnerabilities the code calls, in its modules and in the Go it is built with (govulncheck). Last, so
-      # a new advisory leaves the tests' results in place.
+      # a new advisory leaves the tests' results in place. It reads the Linux build; the macOS build's audit runs
+      # outside this repository.
       - name: Vulnerabilities
         run: make audit-daemon
 
   integration:
-    name: Integration (macOS)
+    name: Integration (Linux)
     needs: changes
     if: needs.changes.outputs.integration == 'true'
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -164,12 +164,19 @@ jobs:
         run: make audit-tests
 
   desktop:
-    name: Desktop (macOS)
+    name: Desktop (Linux)
     needs: changes
     if: needs.changes.outputs.desktop == 'true'
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Tauri's Linux prerequisites, as its documentation lists them for Debian and Ubuntu: WebKitGTK for the window,
+      # the app-indicator library for the tray, and what the rest of its Linux build links.
+      - name: Linux packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           package_json_file: desktop/package.json
@@ -205,12 +212,3 @@ jobs:
       # The advisories against the interface's and the shell's dependencies; -k runs the second when the first fails.
       - name: Vulnerabilities
         run: make -k audit-desktop
-
-  packaging:
-    name: Packaging (macOS)
-    needs: changes
-    if: needs.changes.outputs.packaging == 'true'
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: make test-packaging

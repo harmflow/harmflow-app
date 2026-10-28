@@ -3,7 +3,8 @@
 # without any load, and three times beside a fixed CPU load. A test that fails here is a defect of that test, and
 # these runs are the repetitions and the heaviest load the suites are held to; a development machine runs a test once
 # and adds no load. It is no check: it never runs on a pull request or a push, and no ruleset requires it. A job fails
-# only when a test does, and it writes no file, floor, or issue. Like CI, it runs on macOS, the MVP's only platform.
+# only when a test does, and it writes no file, floor, or issue. Like CI, it runs on Linux, and a test that needs macOS
+# skips here.
 #
 # The load and the repetitions are each job's row of the matrix below; .github/scripts/stress.sh runs each step.
 # Actions are pinned as in ci.yml, to the same commits.
@@ -23,8 +24,8 @@ concurrency:
 
 jobs:
   stress:
-    name: Daemon and integration ${{ matrix.title }} (macOS)
-    runs-on: macos-latest
+    name: Daemon and integration ${{ matrix.title }} (Linux)
+    runs-on: ubuntu-latest
     timeout-minutes: 150
     strategy:
       fail-fast: false
