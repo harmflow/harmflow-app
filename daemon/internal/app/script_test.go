@@ -326,13 +326,20 @@ func TestScriptExitEndsWhatTheProgramLeft(t *testing.T) {
 // A program that exits on its own keeps the result its exit status gives, though a cancel comes while the process it
 // left running, which ignores SIGTERM, is ended over the grace period.
 func TestScriptExitKeepsItsResultThroughACancel(t *testing.T) {
+	// The execution ends only once the grace is over, since the leftover outlasts it, so the wait is the grace and a
+	// margin for the kill and the execution's end. Unloaded, the end came within 0.1 s of the grace. At a load average of
+	// 95 to 167 it came up to 7.8 s after it: the daemon's steps around the grace stretched with the load (identifying
+	// the program and logging its start, when the cancel came first; starting the stop; waiting out the grace itself),
+	// while the kill and the records of the end stayed under 0.1 s. The margin is about four times that.
+	const grace = 2 * time.Second
+	const killAndEnd = 30 * time.Second
 	e := newEnv(t)
 	dir := t.TempDir()
 	e.createScript("late", fmt.Sprintf(`  script:
     command: [/bin/sh, -c, "(trap '' TERM; exec sleep 600) >/dev/null 2>&1 & echo $! > %[1]s/child; echo $$ > %[1]s/program"]
   execution:
-    cancelGraceSeconds: 2
-`, dir))
+    cancelGraceSeconds: %[2]d
+`, dir, int(grace/time.Second)))
 	res, err := e.app.RunTask("late")
 	if err != nil || res.Outcome != "started" {
 		t.Fatalf("run late: %v %+v", err, res)
@@ -342,7 +349,7 @@ func TestScriptExitKeepsItsResultThroughACancel(t *testing.T) {
 	if err := e.app.CancelExecution(res.ExecutionID); err != nil {
 		t.Fatal(err)
 	}
-	x := e.wait(res.ExecutionID, domain.StatusCompleted)
+	x := e.waitWithin(grace+killAndEnd, res.ExecutionID, domain.StatusCompleted)
 	e.idle("late")
 	if x.Attempts[0].Outcome != domain.AttemptSucceeded {
 		t.Errorf("attempt %+v", x.Attempts[0])
