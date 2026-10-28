@@ -17,6 +17,11 @@ SIDECAR := desktop/src-tauri/binaries/harmflowd-$(TRIPLE)
 APP_STAMP := desktop/src-tauri/target.noindex/release/bundle/macos/HarmFlow.app.commit
 LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuiltAt=$(BUILT_AT)
 COVERAGE := $(CURDIR)/build/coverage
+# The time limit of a run of the tests module, which test-integration and coverage-daemon both pass to go test, so a
+# local run and CI run under the same one. go test's default of 10 minutes is too short for the integration package on
+# a heavily loaded machine, where a full run reached it less than halfway through; this one is sized from full runs
+# measured under load, with a margin. Each test still fails within its own waits: the limit only bounds the package.
+INTEGRATION_TIMEOUT := 30m
 # The shell's coverage floors, in percent; COVERAGE.md holds the reading they come from.
 RUST_FLOOR_LINES := 31.19
 RUST_FLOOR_FUNCTIONS := 29.09
@@ -92,7 +97,7 @@ check-file-names: ## Fail on tracked file and folder names outside CLAUDE.md's F
 
 .PHONY: test-integration
 test-integration: daemon ## Tests across the daemon's process boundary, with fake harnesses
-	go -C tests test -count=1 $(TEST_FLAGS) ./...
+	go -C tests test -count=1 -timeout $(INTEGRATION_TIMEOUT) $(TEST_FLAGS) ./...
 
 # Coverage is held by a ratchet, never by a target: each target fails when a part reads below its floor.
 # COVERAGE.md holds the reading the floors come from.
@@ -104,7 +109,7 @@ coverage-daemon: ## Statements per package of the daemon, unit and integration d
 	rm -rf "$(COVERAGE)/daemon" "$(COVERAGE)/daemon.out"
 	mkdir -p "$(COVERAGE)/daemon/unit" "$(COVERAGE)/daemon/integration"
 	go -C daemon test -count=1 -covermode=atomic -coverpkg=./... ./... -args -test.gocoverdir="$(COVERAGE)/daemon/unit"
-	GOCOVERDIR="$(COVERAGE)/daemon/integration" go -C tests test -count=1 ./...
+	GOCOVERDIR="$(COVERAGE)/daemon/integration" go -C tests test -count=1 -timeout $(INTEGRATION_TIMEOUT) ./...
 	go tool covdata textfmt -i="$(COVERAGE)/daemon/unit,$(COVERAGE)/daemon/integration" -o "$(COVERAGE)/daemon.out"
 	go -C tests run ./coverage -floors "$(CURDIR)/daemon/coverage-floors.txt" -hold=$(if $(HOLD_FLOORS),true,false) \
 		"$(COVERAGE)/daemon.out"
