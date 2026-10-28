@@ -73,6 +73,28 @@ func (e pathEnv) writablePath(a *App, p string) (string, error) {
 	return real, nil
 }
 
+// folder is a path of a task resolved as the harness is given it, or why it does not resolve, when path is "".
+type folder struct {
+	path string
+	err  error
+}
+
+// taskFolders resolves the folders an execution of a task works in, as the harness is given them: its workspace, the
+// task's workspace path or, when it sets none, HarmFlow's folder under id, and each repository's local path, in the
+// order of Repositories. It creates none of them. An execution refuses to start on a folder that does not resolve, and
+// validation leaves it out.
+func (a *App) taskFolders(doc domain.TaskDocument, id string, e pathEnv) (work folder, repos []folder) {
+	work.path = filepath.Join(a.d.Paths.Workspace, id)
+	if w := doc.Spec.Workspace; w != nil && w.Path != "" {
+		work.path, work.err = e.writablePath(a, w.Path)
+	}
+	for _, repo := range doc.Repositories() {
+		p, err := e.writablePath(a, repo.LocalPath)
+		repos = append(repos, folder{path: p, err: err})
+	}
+	return work, repos
+}
+
 // taskPathIssues checks the paths of doc that let a harness write, whatever its permission profile, and the form of a
 // script's program and working directory. A path whose variables are undefined is skipped: its
 // own warning says so, and the check runs once it expands. The daemon's own workspace, used when a task sets none, is

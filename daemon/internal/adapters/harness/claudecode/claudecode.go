@@ -470,7 +470,7 @@ var settingsSources = []struct{ name, file string }{
 
 // wideningSources names, in the order of settingsSources, the settings sources that widen what the task allows: those
 // with an allow rule widens reports, and those whose file exists but cannot be read or parsed, since it cannot be
-// checked. Validation reads only the user's settings: its working directory is not the task's.
+// checked. Validation reads only the user's settings; the workspace's own are read when each execution starts.
 func (a *Adapter) wideningSources(req ports.RunRequest, widens func(source, rule string) bool) []string {
 	var out []string
 	for _, s := range settingsSources {
@@ -509,10 +509,7 @@ func (a *Adapter) allowlistRestriction(req ports.RunRequest, covered []string) p
 // rule that may reach outside those directories lifts the limit. In doubt, a rule reaches outside: only one whose path
 // lies within the working directory or an added directory stays inside, and a bare rule does not.
 func (a *Adapter) editRestriction(req ports.RunRequest) ports.Restriction {
-	roots := append([]string{req.ExecutionDir}, req.AdditionalDirs...)
-	if !req.PolicyCheck {
-		roots = append(roots, req.WorkDir)
-	}
+	roots := append([]string{req.ExecutionDir, req.WorkDir}, req.AdditionalDirs...)
 	widening := a.wideningSources(req, func(source, r string) bool {
 		return containsStr(editTools, toolName(r)) && !a.editRuleInside(r, source != "user", roots)
 	})

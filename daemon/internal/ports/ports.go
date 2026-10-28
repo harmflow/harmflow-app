@@ -156,8 +156,9 @@ type RunRequest struct {
 	Permissions    domain.Permissions
 	ExecutionDir   string
 	Env            []string
-	// PolicyCheck marks a request that validation makes only to learn the restrictions: no attempt starts, and WorkDir
-	// stands in for a working directory, so nothing in it describes the task.
+	// PolicyCheck marks a request that validation makes only to learn the restrictions: no attempt starts. WorkDir and
+	// AdditionalDirs are the task's, resolved as an execution resolves them, though they may not exist yet; a folder that
+	// does not resolve is left out, and WorkDir is then empty.
 	PolicyCheck bool
 }
 
