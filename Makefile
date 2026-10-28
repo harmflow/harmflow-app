@@ -33,6 +33,9 @@ HOLD_FLOORS ?= 1
 RUST_FLOOR_FLAGS := $(if $(HOLD_FLOORS),--fail-under-lines $(RUST_FLOOR_LINES) --fail-under-functions $(RUST_FLOOR_FUNCTIONS))
 VITEST_FLOOR_FLAGS := $(if $(HOLD_FLOORS),,--coverage.thresholds.statements=0 --coverage.thresholds.branches=0 \
 	--coverage.thresholds.functions=0 --coverage.thresholds.lines=0)
+# More go test flags for test-daemon and test-integration, passed after their own so that a repeated flag wins: the
+# nightly Stress workflow sets its -count and -timeout here. Empty, the two targets run as they always did.
+TEST_FLAGS ?=
 
 .PHONY: help
 help: ## List the targets
@@ -71,7 +74,7 @@ test: test-daemon test-desktop test-integration test-packaging ## Run every test
 .PHONY: test-daemon
 test-daemon: ## Unit tests of the daemon
 	go -C daemon vet ./...
-	go -C daemon test ./...
+	go -C daemon test $(TEST_FLAGS) ./...
 
 .PHONY: test-desktop
 test-desktop: ## Type check and unit tests of the desktop
@@ -89,7 +92,7 @@ check-file-names: ## Fail on tracked file and folder names outside CLAUDE.md's F
 
 .PHONY: test-integration
 test-integration: daemon ## Tests across the daemon's process boundary, with fake harnesses
-	go -C tests test -count=1 ./...
+	go -C tests test -count=1 $(TEST_FLAGS) ./...
 
 # Coverage is held by a ratchet, never by a target: each target fails when a part reads below its floor.
 # COVERAGE.md holds the reading the floors come from.
