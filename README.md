@@ -99,7 +99,7 @@
 | You need | Version | For |
 |---|---|---|
 | Go | 1.24 | the daemon |
-| Node with pnpm | 24 · 10 | the interface |
+| Node with pnpm | 26 · 10 | the interface |
 | Rust | stable | the desktop shell |
 | Claude Code or Codex | signed in | running tasks |
 | Git and the GitHub CLI (`gh`) | signed in | the GitHub task type |
