@@ -34,14 +34,16 @@ type WorkItem struct {
 	UpdatedAt       time.Time      `json:"updatedAt"`
 }
 
-// Limits of a task's work items.
+// WorkItemLimits are the limits of a task's work items. An item resumed MaxResumeAttempts times is not resumed again,
+// and an item whose failures exceed MaxFailedRetries is not retried again; either one needs a human.
 type WorkItemLimits struct {
 	MaxResumeAttempts int
 	MaxFailedRetries  int
 }
 
 // ApplyResult folds one execution's result for the item into the ledger entry. A failure counts toward the retry
-// limit, a resumption toward the resume limit; past either, the item needs a human.
+// limit, a resumption toward the resume limit. The item needs a human past the retry limit, or at the resume limit
+// while a later cycle would still resume it.
 func (w *WorkItem) ApplyResult(r WorkItemResult, executionID string, limits WorkItemLimits, now time.Time) {
 	if r.Title != "" {
 		w.Title = r.Title
@@ -99,7 +101,13 @@ func (w *WorkItem) enforceLimits(l WorkItemLimits) {
 	if w.Status == WorkItemClosed || w.Status == WorkItemCompleted {
 		return
 	}
-	if w.Failures > l.MaxFailedRetries || w.Resumes > l.MaxResumeAttempts {
+	if w.Failures > l.MaxFailedRetries || (w.Resumes >= l.MaxResumeAttempts && w.resumable()) {
 		w.Status = WorkItemNeedsAttention
 	}
+}
+
+// resumable reports whether a later cycle would resume the item: its draft pull request's tests failed, or it failed
+// with a pull request. An item that failed with none is retried instead, under the retry limit alone.
+func (w *WorkItem) resumable() bool {
+	return w.Status == WorkItemInProgress || (w.Status == WorkItemFailed && w.PullRequestURL != "")
 }
