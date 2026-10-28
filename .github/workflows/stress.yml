@@ -1,10 +1,11 @@
-# Runs the daemon's unit tests and the integration suite every night beside a fixed CPU load, and shows in the run's
-# summary how each suite did under it. A test that fails here is a defect of that test, and this load is the heaviest
-# the suites are held to; a development machine adds none. It is no check: it never runs on a pull request or a push,
-# and no ruleset requires it. The job fails only when a test does, and it writes no file, floor, or issue. Like CI, it
-# runs on macOS, the MVP's only platform.
+# Runs the daemon's unit tests and the integration suite every night in two jobs, and shows in each run summary how
+# each suite did: repeated ten times with nothing beside them, which catches a test whose result depends on timing
+# without any load, and three times beside a fixed CPU load. A test that fails here is a defect of that test, and
+# these runs are the repetitions and the heaviest load the suites are held to; a development machine runs a test once
+# and adds no load. It is no check: it never runs on a pull request or a push, and no ruleset requires it. A job fails
+# only when a test does, and it writes no file, floor, or issue. Like CI, it runs on macOS, the MVP's only platform.
 #
-# The load and the repetitions are the env block below; .github/scripts/stress.sh runs each step.
+# The load and the repetitions are each job's row of the matrix below; .github/scripts/stress.sh runs each step.
 # Actions are pinned as in ci.yml, to the same commits.
 name: Stress
 
@@ -22,13 +23,25 @@ concurrency:
 
 jobs:
   stress:
-    name: Daemon and integration under load (macOS)
+    name: Daemon and integration ${{ matrix.title }} (macOS)
     runs-on: macos-latest
     timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        # Busy processes per core of the runner, and how many times each suite runs.
+        include:
+          - mode: repeated
+            title: repeated, no load
+            load-per-core: 0
+            count: 10
+          - mode: loaded
+            title: under load
+            load-per-core: 2
+            count: 3
     env:
-      # Busy processes per core of the runner, and how many times each suite runs.
-      LOAD_PER_CORE: 2
-      COUNT: 3
+      LOAD_PER_CORE: ${{ matrix.load-per-core }}
+      COUNT: ${{ matrix.count }}
       # go test's limit for each suite's whole run, all its repetitions included.
       DAEMON_TIMEOUT: 45m
       INTEGRATION_TIMEOUT: 90m
@@ -57,7 +70,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:
-          name: stress-logs
+          name: stress-logs-${{ matrix.mode }}
           path: build/stress/
           retention-days: 30
           if-no-files-found: ignore

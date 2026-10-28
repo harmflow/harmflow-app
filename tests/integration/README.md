@@ -33,22 +33,23 @@ HARMFLOW_TEST_CLAUDE_CODE=1 go -C tests test -count=1 -run TestClaudeCodeRefuses
 **They run only on a local development machine** where a harness is installed and signed in. The GitHub Actions
 runners have no real harness, so in CI these tests always skip: a green CI run says nothing about them.
 
-## Under load
+## Repeated and under load
 
 The nightly [Stress workflow](../../.github/workflows/stress.yml) runs the daemon's unit tests, with `-race`, and
-these tests three times each, beside busy processes twice the runner's cores. **A test that fails there is a defect of
-that test, and that load is the heaviest the suites are held to.** A development machine adds no load beside a test:
-a change is proved with the tests it touches, a test of timing also alone and repeated, and the whole suites are the
-pull request's checks. The workflow never runs on a pull request and gates nothing. Its run summary shows each suite's
-result, duration, and load average, and the failing tests with their messages. Start it by hand with
-`gh workflow run stress.yml`.
+these tests in two jobs: ten times each with nothing beside them, which catches a test whose result depends on timing,
+and three times each beside busy processes twice the runner's cores. **A test that fails there is a defect of that
+test, and those runs are the repetitions and the heaviest load the suites are held to.** A development machine runs a
+change's tests once and adds no load beside them: a change is proved with the tests it touches, and the whole suites
+are the pull request's checks. The workflow never runs on a pull request and gates nothing. Each job's run summary
+shows each suite's result, duration, and load average, and the failing tests with their messages. Start it by hand
+with `gh workflow run stress.yml`.
 
 `make test-daemon` and `make test-integration` take more `go test` flags in `TEST_FLAGS`, passed after their own so
-that a repeated flag wins. The workflow sets its `-count` and `-timeout` there, and a test of timing is repeated alone
-the same way:
+that a repeated flag wins. The workflow sets its `-count` and `-timeout` there, and one test runs on its own the same
+way:
 
 ```bash
-make test-integration TEST_FLAGS="-run TestRunStreamAndReplay -count=10"
+make test-integration TEST_FLAGS="-run TestRunStreamAndReplay"
 ```
 
 ## Internal variables
