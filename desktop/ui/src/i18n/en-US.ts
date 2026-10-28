@@ -361,6 +361,8 @@ export const enUS = {
       "Claude Code does not block network access from shell commands; only its web tools are removed",
     restriction_claude_allow_rules:
       "Claude Code adds the allow rules of its $t(claudeSettings.{{sources}}) to the task's tool list, and they allow more than the list or could not be read; managed settings are not checked",
+    restriction_claude_edit_rules:
+      "Claude Code adds the allow rules of its $t(claudeSettings.{{sources}}) to the task's permissions, and they allow file edits outside the workspace and the added directories or could not be read; managed settings are not checked",
     restriction_codex_tool_lists: "Codex has no per-tool allow or deny list; the custom tool lists are not enforced",
     harness_version_untested: "{{harness}} {{version}} is newer than the versions HarmFlow was tested with",
     harness_version_unknown: "{{harness}} reported no version number, so HarmFlow cannot tell whether it was tested with it",
@@ -510,8 +512,8 @@ export const enUS = {
     plugin_list: "{{harness}}'s plugins for {{workspace}}",
     plugin_list_errors: "{{harness}}'s plugins for {{workspace}}, which could not load {{errors}}",
   },
-  // The Claude Code settings sources whose allow rules widen a task's tool list, as restriction_claude_allow_rules
-  // names them.
+  // The Claude Code settings sources whose allow rules widen a task's tool list or its file edits, as
+  // restriction_claude_allow_rules and restriction_claude_edit_rules name them.
   claudeSettings: {
     user: "user settings",
     project: "project settings",

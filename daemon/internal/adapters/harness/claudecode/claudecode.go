@@ -323,7 +323,8 @@ func (a *Adapter) UserItems(ctx context.Context, info ports.HarnessInfo, kind, w
 
 var readTools = []string{"Read", "Glob", "Grep", "Skill", "Task", "TodoWrite"}
 var webTools = []string{"WebFetch", "WebSearch"}
-var writeTools = []string{"Bash", "Edit", "Write", "MultiEdit", "NotebookEdit"}
+var editTools = []string{"Edit", "Write", "MultiEdit", "NotebookEdit"}
+var writeTools = append([]string{"Bash"}, editTools...)
 
 // Prepare implements ports.HarnessAdapter: a `claude -p` invocation with stream-json output, the model, effort, and
 // context asked for, the built-in skills as a session-only plugin, the built-in agents defined for the session, and
@@ -433,15 +434,16 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 		restrictions = append(restrictions, shellRestrictions(mode == "acceptEdits" && hasShell(allowed), network,
 			*perm.RestrictToWorkspace)...)
 	default: // workspace_write
-		tools := append(append([]string{}, readTools...), writeTools...)
+		// The editing tools get no allow rule: a bare one allows them on any path, and acceptEdits alone approves their
+		// edits in the working directory and the added directories.
+		tools := append(append([]string{}, readTools...), "Bash")
 		if network {
 			tools = append(tools, webTools...)
 		} else {
 			args = append(args, "--disallowedTools", strings.Join(webTools, ","))
 		}
 		args = append(args, "--permission-mode", "acceptEdits", "--allowedTools", strings.Join(tools, ","))
-		restrictions = append(restrictions, ports.Restriction{Name: "edit_directories", Enforced: true,
-			Text: domain.Text{Message: "file edits are limited to the workspace and the added directories"}})
+		restrictions = append(restrictions, a.editRestriction(req))
 		restrictions = append(restrictions, shellRestrictions(true, network, *perm.RestrictToWorkspace)...)
 	}
 	if req.ExecutionDir != "" {
@@ -466,13 +468,11 @@ var settingsSources = []struct{ name, file string }{
 	{"local", filepath.Join(".claude", "settings.local.json")},
 }
 
-// allowlistRestriction says whether the custom profile's tool list is enforced. Claude Code merges the allow rules of
-// every settings source it loads into the list it is given, so an allow rule that covered, the task's allowed and
-// denied tools, does not hold widens the list. A rule is covered only when it is identical to an entry, and a file that
-// exists but cannot be read or parsed widens the list too, since it cannot be checked. Validation reads only the user's
-// settings: its working directory is not the task's.
-func (a *Adapter) allowlistRestriction(req ports.RunRequest, covered []string) ports.Restriction {
-	var widening []string
+// wideningSources names, in the order of settingsSources, the settings sources that widen what the task allows: those
+// with an allow rule widens reports, and those whose file exists but cannot be read or parsed, since it cannot be
+// checked. Validation reads only the user's settings: its working directory is not the task's.
+func (a *Adapter) wideningSources(req ports.RunRequest, widens func(source, rule string) bool) []string {
+	var out []string
 	for _, s := range settingsSources {
 		path := filepath.Join(req.WorkDir, s.file)
 		switch {
@@ -482,10 +482,18 @@ func (a *Adapter) allowlistRestriction(req ports.RunRequest, covered []string) p
 			continue
 		}
 		rules, err := allowRules(path)
-		if err != nil || slices.ContainsFunc(rules, func(r string) bool { return !slices.Contains(covered, r) }) {
-			widening = append(widening, s.name)
+		if err != nil || slices.ContainsFunc(rules, func(r string) bool { return widens(s.name, r) }) {
+			out = append(out, s.name)
 		}
 	}
+	return out
+}
+
+// allowlistRestriction says whether the custom profile's tool list is enforced. Claude Code merges the allow rules of
+// every settings source it loads into the list it is given, so an allow rule that covered, the task's allowed and
+// denied tools, does not hold widens the list. A rule is covered only when it is identical to an entry.
+func (a *Adapter) allowlistRestriction(req ports.RunRequest, covered []string) ports.Restriction {
+	widening := a.wideningSources(req, func(_, r string) bool { return !slices.Contains(covered, r) })
 	if len(widening) == 0 {
 		return ports.Restriction{Name: "tool_allowlist", Enforced: true,
 			Text: domain.Text{Message: "Claude Code allows the listed tools, and the commands it judges read-only"}}
@@ -494,6 +502,87 @@ func (a *Adapter) allowlistRestriction(req ports.RunRequest, covered []string) p
 		Text: domain.T("restriction_claude_allow_rules",
 			"Claude Code adds the allow rules of its {{where}} to the task's tool list, and they allow more than the list or could not be read; managed settings are not checked",
 			"where", settingsPhrase(widening), "sources", strings.Join(widening, "_"))}
+}
+
+// editRestriction says whether workspace_write's file edits are limited to the workspace and the added directories.
+// acceptEdits limits them so, but Claude Code adds the allow rules of every settings source it loads, and an editing
+// rule that may reach outside those directories lifts the limit. In doubt, a rule reaches outside: only one whose path
+// lies within the working directory or an added directory stays inside, and a bare rule does not.
+func (a *Adapter) editRestriction(req ports.RunRequest) ports.Restriction {
+	roots := append([]string{req.ExecutionDir}, req.AdditionalDirs...)
+	if !req.PolicyCheck {
+		roots = append(roots, req.WorkDir)
+	}
+	widening := a.wideningSources(req, func(source, r string) bool {
+		return containsStr(editTools, toolName(r)) && !a.editRuleInside(r, source != "user", roots)
+	})
+	if len(widening) == 0 {
+		return ports.Restriction{Name: "edit_directories", Enforced: true,
+			Text: domain.Text{Message: "file edits are limited to the workspace and the added directories"}}
+	}
+	return ports.Restriction{Name: "edit_directories", Enforced: false,
+		Text: domain.T("restriction_claude_edit_rules",
+			"Claude Code adds the allow rules of its {{where}} to the task's permissions, and they allow file edits outside the workspace and the added directories or could not be read; managed settings are not checked",
+			"where", settingsPhrase(widening), "sources", strings.Join(widening, "_"))}
+}
+
+// editRuleInside reports whether an editing rule's path stays within the working directory or one of roots, read in
+// Claude Code's forms: //path from the filesystem root, ~/path from the home folder, and any other path from the
+// working directory. A /path is read from the settings file's folder or the project root, as versions differ, so it
+// stays inside only in the working directory's own settings, as a path from that directory. A bare rule, Tool(*),
+// another user's ~, and a path that climbs out with .. reach outside.
+func (a *Adapter) editRuleInside(rule string, workspaceSettings bool, roots []string) bool {
+	pattern, ok := strings.CutPrefix(rule, toolName(rule)+"(")
+	if !ok || !strings.HasSuffix(pattern, ")") {
+		return false
+	}
+	pattern = strings.TrimSuffix(pattern, ")")
+	base := ""
+	switch {
+	case pattern == "" || pattern == "*":
+		return false
+	case strings.HasPrefix(pattern, "//"):
+		base, pattern = "/", pattern[2:]
+	case strings.HasPrefix(pattern, "~/"):
+		base, pattern = a.Home, pattern[2:]
+	case strings.HasPrefix(pattern, "~"):
+		return false
+	case strings.HasPrefix(pattern, "/"):
+		if !workspaceSettings {
+			return false
+		}
+		pattern = pattern[1:]
+	}
+	dir, ok := fixedDir(pattern)
+	if !ok {
+		return false
+	}
+	if base == "" {
+		return filepath.IsLocal(filepath.Join(".", dir))
+	}
+	return within(filepath.Join(base, dir), roots)
+}
+
+// fixedDir is the part of a path pattern before its first segment with a wildcard, which every path it matches lies
+// in. ok is false when a segment after the wildcard climbs with .., out of that part.
+func fixedDir(pattern string) (dir string, ok bool) {
+	segments := strings.Split(pattern, "/")
+	for i, s := range segments {
+		if strings.ContainsAny(s, `*?[{\`) {
+			return strings.Join(segments[:i], "/"), !slices.Contains(segments[i:], "..")
+		}
+	}
+	return pattern, true
+}
+
+// within reports whether path is one of dirs or lies below one.
+func within(path string, dirs []string) bool {
+	for _, d := range dirs {
+		if rel, err := filepath.Rel(d, path); d != "" && err == nil && filepath.IsLocal(rel) {
+			return true
+		}
+	}
+	return false
 }
 
 // allowRules are the permissions.allow rules of a Claude Code settings file; a missing file has none.

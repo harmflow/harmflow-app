@@ -196,8 +196,10 @@ func TestParseAuthAndOthers(t *testing.T) {
 	}
 }
 
-// Each profile is translated to Claude Code's own flags, and what they cannot confine is named.
+// Each profile is translated to Claude Code's own flags, and what they cannot confine is named. workspace_write gives
+// the editing tools no allow rule (harmflow-app#287): a bare one would allow them on any path.
 func TestPrepareTranslatesPermissions(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "") // the user's settings are read from Home, which has none
 	a := &Adapter{Home: t.TempDir()}
 	info := ports.HarnessInfo{Path: "/bin/claude", Features: map[string]bool{"--no-session-persistence": true}}
 	perm := domain.TaskDocument{}.Effective().Spec.Permissions
@@ -229,6 +231,22 @@ func TestPrepareTranslatesPermissions(t *testing.T) {
 	if !strings.Contains(args, "--permission-mode acceptEdits") || !strings.Contains(args, "--add-dir /repo") ||
 		!strings.Contains(args, "--disallowedTools WebFetch,WebSearch") {
 		t.Errorf("workspace_write args: %s", args)
+	}
+	i := slices.Index(inv.Args, "--allowedTools")
+	if i < 0 || i+1 == len(inv.Args) {
+		t.Fatalf("workspace_write args = %s, want --allowedTools", args)
+	}
+	allowedTools := strings.Split(inv.Args[i+1], ",")
+	for _, tool := range []string{"Edit", "Write", "MultiEdit", "NotebookEdit"} {
+		if slices.Contains(allowedTools, tool) {
+			t.Errorf("workspace_write --allowedTools = %s, want no bare %s rule", inv.Args[i+1], tool)
+		}
+	}
+	if !slices.Contains(allowedTools, "Bash") || !slices.Contains(allowedTools, "Read") {
+		t.Errorf("workspace_write --allowedTools = %s, want the reading tools and Bash", inv.Args[i+1])
+	}
+	if r, _ := restriction(inv.Restrictions, "edit_directories"); !r.Enforced {
+		t.Errorf("edit_directories = %+v, want enforced with no settings files", r)
 	}
 	unenforced := map[string]bool{}
 	for _, r := range inv.Restrictions {
@@ -356,8 +374,89 @@ func TestPrepareReadsTheUserSettingsOfTheConfigurationDirectory(t *testing.T) {
 	}
 }
 
-// Only the custom profile hands Claude Code a list for the user's rules to widen: read_only and workspace_write read
-// no settings file and report what they did before.
+// harmflow-app#287: under workspace_write, an editing allow rule in a settings source HarmFlow can read lifts the limit
+// on file edits when it may reach outside the workspace and the added directories, and the warning names the source;
+// validation reads only the user's settings. Only a rule whose path lies within those directories stays inside: a bare
+// rule, one Claude Code could read another way, and a file that cannot be read or parsed do not.
+func TestPrepareReportsEditRulesThatReachOutside(t *testing.T) {
+	const bareWrite = `{"permissions":{"allow":["Write"]}}`
+	const dir = "<dir>" // a folder where the file would be: it exists, but cannot be read
+	cases := []struct {
+		name                 string
+		user, project, local string // a settings file's content, <work>, <added>, and <exec> naming those folders; "" for no file
+		policyCheck          bool
+		want                 string // the sources param of edits not limited; "" for limited edits
+	}{
+		{name: "a Write rule outside the workspace", user: `{"permissions":{"allow":["Write(//etc/**)"]}}`, want: "user"},
+		{name: "a bare Edit rule", project: `{"permissions":{"allow":["Read","Edit"]}}`, want: "project"},
+		{name: "settings that are not JSON", local: `{"permissions":`, want: "local"},
+		{name: "a rule within the workspace", user: `{"permissions":{"allow":["Edit(/<work>/src/**)"]}}`},
+		{name: "rules within an added directory",
+			user: `{"permissions":{"allow":["Write(/<added>/**)","MultiEdit(/<added>/docs/*.md)","Edit(~/repo/**)"]}}`},
+		{name: "a rule within the execution folder", local: `{"permissions":{"allow":["Edit(/<exec>/**)"]}}`},
+		{name: "no settings files"},
+		{name: "paths from the working directory",
+			project: `{"permissions":{"allow":["Edit(src/**)","Write(./*.go)","NotebookEdit(**)","Edit(docs/../README.md)"]}}`},
+		{name: "a path from the working directory that climbs out", project: `{"permissions":{"allow":["Edit(../other/**)"]}}`,
+			want: "project"},
+		{name: "a climb after a wildcard", local: `{"permissions":{"allow":["Edit(src/*/../../../x)"]}}`, want: "local"},
+		{name: "a folder beside the workspace", user: `{"permissions":{"allow":["Edit(/<work>-other/**)"]}}`, want: "user"},
+		{name: "a rule on any path", user: `{"permissions":{"allow":["Edit(*)"]}}`, want: "user"},
+		{name: "a home folder outside the added directories", user: `{"permissions":{"allow":["Edit(~/notes/**)"]}}`,
+			want: "user"},
+		{name: "another user's home folder", user: `{"permissions":{"allow":["Edit(~root/**)"]}}`, want: "user"},
+		{name: "a / path in the workspace's settings", project: `{"permissions":{"allow":["Edit(/src/**)"]}}`},
+		{name: "a / path in the user's settings", user: `{"permissions":{"allow":["Edit(/src/**)"]}}`, want: "user"},
+		{name: "rules of other tools", user: `{"permissions":{"allow":["Bash(*)","Read(//etc/**)","WebFetch"]}}`},
+		{name: "rules in every source", user: bareWrite, project: bareWrite, local: bareWrite, want: "user_project_local"},
+		{name: "project settings that cannot be read", project: dir, want: "project"},
+		{name: "a rule within the workspace at validation", user: `{"permissions":{"allow":["Edit(/<work>/src/**)"]}}`,
+			policyCheck: true, want: "user"},
+		{name: "a path from the working directory at validation", user: `{"permissions":{"allow":["Edit(src/**)"]}}`,
+			policyCheck: true},
+		{name: "project and local rules at validation", project: bareWrite, local: bareWrite, policyCheck: true},
+	}
+	where := map[string]string{"user": "user settings", "project": "project settings", "local": "local settings",
+		"user_project_local": "user, project, and local settings"}
+	info := ports.HarnessInfo{Path: "/bin/claude", Features: map[string]bool{}}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			config, work, home, exec := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+			added := filepath.Join(home, "repo")
+			t.Setenv("CLAUDE_CONFIG_DIR", config)
+			folders := strings.NewReplacer("<work>", work, "<added>", added, "<exec>", exec)
+			writeSettings(t, filepath.Join(config, "settings.json"), folders.Replace(c.user))
+			writeSettings(t, filepath.Join(work, ".claude", "settings.json"), folders.Replace(c.project))
+			writeSettings(t, filepath.Join(work, ".claude", "settings.local.json"), folders.Replace(c.local))
+			perm := *domain.TaskDocument{}.Effective().Spec.Permissions
+			perm.Profile = domain.ProfileWorkspaceWrite
+			a := &Adapter{Home: home}
+			inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: work, AdditionalDirs: []string{added}, Permissions: perm,
+				ExecutionDir: exec, PolicyCheck: c.policyCheck})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r, ok := restriction(inv.Restrictions, "edit_directories")
+			switch {
+			case !ok:
+				t.Fatalf("Prepare restrictions = %+v, want one named edit_directories", inv.Restrictions)
+			case c.want == "":
+				if !r.Enforced {
+					t.Errorf("edit_directories = %+v, want enforced", r)
+				}
+			case r.Enforced || r.Text.Key != "restriction_claude_edit_rules" || r.Text.Params["sources"] != c.want:
+				t.Errorf("edit_directories = %+v, want not enforced, restriction_claude_edit_rules naming %s", r, c.want)
+			case !strings.Contains(r.Text.Message, "its "+where[c.want]+" ") ||
+				!strings.Contains(r.Text.Message, "managed settings are not checked"):
+				t.Errorf("edit_directories text = %q, want it to name the %s and say managed settings are not checked",
+					r.Text.Message, where[c.want])
+			}
+		})
+	}
+}
+
+// Only the custom profile hands Claude Code a list for the user's rules to widen: read_only and workspace_write report
+// no tool list, whatever rules the settings hold.
 func TestPrepareChecksAllowRulesOnlyForTheCustomProfile(t *testing.T) {
 	config := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", config)

@@ -367,6 +367,8 @@ export const esES: Resources = {
       "Claude Code no bloquea el acceso a la red desde los comandos de shell; solo quita sus herramientas web",
     restriction_claude_allow_rules:
       "Claude Code suma las reglas de permiso de su $t(claudeSettings.{{sources}}) a la lista de herramientas de la tarea, y permiten más que la lista o no se pudieron leer; la configuración administrada no se comprueba",
+    restriction_claude_edit_rules:
+      "Claude Code suma las reglas de permiso de su $t(claudeSettings.{{sources}}) a los permisos de la tarea, y permiten editar archivos fuera del espacio de trabajo y de las carpetas añadidas o no se pudieron leer; la configuración administrada no se comprueba",
     restriction_codex_tool_lists:
       "Codex no tiene listas de herramientas permitidas o denegadas; las listas personalizadas no se aplican",
     harness_version_untested: "{{harness}} {{version}} es más reciente que las versiones con las que se probó HarmFlow",
