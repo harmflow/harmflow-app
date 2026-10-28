@@ -45,16 +45,18 @@ a floor the next honest build misses.
 ## Reading of 2026-10-28, on Linux
 
 The daemon's and the shell's floors come from this reading, taken on CI's Linux runner, where CI holds them: this
-repository's CI checks Linux only. Each floor equals its ratio. Two runs of the same tree, CI's and the Coverage
-workflow's, read the same figures. A test that needs another platform skips on Linux (`GO-CODE-GUIDE.md`, "Tests by
+repository's CI checks Linux only. Each floor equals its ratio. Where the runs differ, the table holds the lower:
+`internal/app` read 2490 statements in the first two runs and 2489 in the third, which is the figure here, since its
+timing-dependent paths do not run the same way every time. Every other figure was the same in every run. A test that
+needs another platform skips on Linux (`GO-CODE-GUIDE.md`, "Tests by
 platform"), so what only that platform runs is not counted here; *Floors lowered* below says which floors fell for it.
 The interface's floors keep their reading, of 2026-10-23, below. The readings before this one, on macOS, are in this
 file's history.
 
 | | |
 |---|---|
-| Code | `243f308`, the merge of `db33f7d` onto `main` at `a26bb4e` that the pull request's checks run. The change that sets the floors touches none of the measured code. |
-| Machines | CI's `ubuntu-latest` runner, two runs: [CI](https://github.com/harmflow/harmflow-app/actions/runs/40715413147) and [Coverage](https://github.com/harmflow/harmflow-app/actions/runs/40715413000) |
+| Code | `243f308`, the merge of `db33f7d` onto `main` at `a26bb4e` that the pull request's checks run, and `b2e36f7`, the same merge of `d733ab5`, which changed only the floors. The changes that set the floors touch none of the measured code. |
+| Machines | CI's `ubuntu-latest` runner, three runs: at `243f308`, [CI](https://github.com/harmflow/harmflow-app/actions/runs/40715413147) and [Coverage](https://github.com/harmflow/harmflow-app/actions/runs/40715413000); at `b2e36f7`, [CI](https://github.com/harmflow/harmflow-app/actions/runs/40716810888) |
 | Commands | `make coverage-daemon` and `make coverage-desktop`, as CI runs them |
 | Tools | Go 1.26.10 · Node 26.12.1 · rustc 1.99.1, cargo-llvm-cov 0.9.1 |
 
@@ -83,7 +85,7 @@ each daemon writes its counters when it exits. Both sides count in `atomic` mode
 | `internal/adapters/tools` | 0 | 39 | 0.00% | 0.00% |
 | `internal/adapters/wake` | 14 | 14 | 100.00% | 100.00% |
 | `internal/adapters/workspace` | 107 | 126 | 84.92% | 84.92% |
-| `internal/app` | 2490 | 2851 | 87.33% | 87.33% |
+| `internal/app` | 2489 | 2851 | 87.30% | 87.30% |
 | `internal/domain` | 587 | 627 | 93.62% | 93.62% |
 | `internal/ports` | 3 | 4 | 75.00% | 75.00% |
 

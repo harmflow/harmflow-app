@@ -19,6 +19,6 @@ internal/adapters/sysinfo 0.00
 internal/adapters/tools 0.00
 internal/adapters/wake 100.00
 internal/adapters/workspace 84.92
-internal/app 87.33
+internal/app 87.30
 internal/domain 93.62
 internal/ports 75.00
