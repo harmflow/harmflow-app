@@ -1,7 +1,8 @@
 # A pull request runs only the parts it touches, a change in contracts/ runs every part, and main runs everything.
-# Every job runs on Linux. The macOS build is built and checked outside this repository, and development stays on
-# macOS: a test that needs macOS skips here, naming what it needs. make test-packaging, which tests the Mac's own
-# make update-app, is a local check on the Mac.
+# This repository's CI checks Linux only: every job runs on Linux, and every other platform is built and checked
+# outside this repository. Development stays on macOS. A test that needs another platform skips here, naming what it
+# needs (GO-CODE-GUIDE.md, "Tests by platform"). make test-packaging, which tests the Mac's own make update-app, is a
+# local check on the Mac.
 #
 # Every action is pinned to a full commit SHA, with the release it corresponds to in a comment, so a moved tag cannot
 # change what CI runs; a new action follows the same rule. Dependabot (.github/dependabot.yml) proposes the updates.
@@ -141,7 +142,7 @@ jobs:
         env:
           GOFLAGS: -race
       # The known vulnerabilities the code calls, in its modules and in the Go it is built with (govulncheck). Last, so
-      # a new advisory leaves the tests' results in place. It reads the Linux build; the macOS build's audit runs
+      # a new advisory leaves the tests' results in place. It reads the Linux build; every other platform's audit runs
       # outside this repository.
       - name: Vulnerabilities
         run: make audit-daemon

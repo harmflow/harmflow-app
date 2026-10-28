@@ -117,6 +117,10 @@ make dev-ui        # in a second terminal: the interface at http://localhost:142
 Dependabot proposes monthly updates to the Go, pnpm, and Cargo dependencies and to the CI actions; a major update comes
 in its own pull request and is reviewed on its own.
 
+This repository's CI checks Linux only, for the code as it is published here; every other platform is built and
+checked outside this repository. Development stays on macOS. A test that needs another platform skips on Linux and
+says why, as [`GO-CODE-GUIDE.md`](GO-CODE-GUIDE.md) describes under "Tests by platform".
+
 ## Commands
 
 | Command | What it does |
