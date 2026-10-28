@@ -32,16 +32,19 @@ follows it.
 1. Write `{"type":"step.started","phase":"preparing","message":"Reading the task context"}` to `progress.jsonl`.
 2. Check that `gh auth status` and `git --version` succeed. If they fail, write the report with outcome `failed`
    and stop.
-3. Build the queue with the skill **hf-github-issue-queue**. If it finds no eligible work, write the report
-   with outcome `no_work` and stop — that is a normal result, not a failure.
-4. For each selected work item, up to the task's `maxItemsPerCycle`:
+3. Remove the worktrees of the work items that ended, with §3 of the skill **hf-github-worktree**. Every execution
+   does this before it builds the queue, also one that then finds no eligible work.
+4. Build the queue with the skill **hf-github-issue-queue**. If it finds no eligible work, write the report
+   with outcome `no_work`, with the items step 3 closed, and stop — that is a normal result, not a failure.
+5. For each selected work item, up to the task's `maxItemsPerCycle`:
    1. Prepare its worktree and branch with the skill **hf-github-worktree**, which also checks that the base
       branch is protected.
    2. Implement the issue inside that worktree only, following the repository's own conventions (its README,
       CONTRIBUTING, CLAUDE.md or AGENTS.md, and the style of the surrounding code). Keep the change to what the
       issue asks.
    3. Test, commit, push, and open or update the draft pull request with the skill **hf-github-draft-pr**.
-5. Write `report.json` once, at the end, with one entry in `workItems` per item you touched.
+6. Write `report.json` once, at the end, with one entry in `workItems` per item you touched, the items step 3 closed
+   included.
 
 ## Rules that are not negotiable
 

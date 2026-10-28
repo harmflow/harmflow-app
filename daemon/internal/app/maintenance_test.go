@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
+	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
 // workspaces builds the state CleanWorkspaces reads: real Git worktrees under the workspace, and the executions and
@@ -233,6 +235,54 @@ func TestCleanRemovesTheWorktreeOfAClosedItem(t *testing.T) {
 	if len(res.Removed) != 3 {
 		t.Errorf("removed %v, want the three closed items' worktrees", res.Removed)
 	}
+}
+
+// An execution that finds no eligible work still reports the items whose worktrees hf-github-worktree §3 removed, with
+// outcome closed and no work_item.selected line. The ledger reads them closed, so the clean-up agrees with the session:
+// it removes such a worktree had the session left it, and keeps the draft's and the failed item's.
+func TestCleanAgreesWithANoWorkExecutionThatClosedAnItem(t *testing.T) {
+	w := newWorkspaces(t)
+	w.create("idle", "")
+	merged := w.worktree("idle", "r-1")
+	w.reported("idle", "o/r#1", "completed", w.ended("idle", domain.StatusCompleted))
+	draft := w.worktree("idle", "r-2")
+	w.reported("idle", "o/r#2", "completed", w.ended("idle", domain.StatusCompleted))
+	failed := w.worktree("idle", "r-3")
+	x := w.ended("idle", domain.StatusFailed)
+	w.selected("idle", "o/r#3", x)
+	w.app.failWorkItem("idle", "o/r#3", x.ID, "", defaultLimits)
+
+	w.claude.setScript(func(req ports.RunRequest) string {
+		report := fmt.Sprintf(`{"outcome":"no_work","summary":"nothing eligible","workItems":[{"key":"o/r#1",`+
+			`"repository":"o/r","worktreePath":"%s","outcome":"closed"}]}`, merged)
+		return fmt.Sprintf(`printf '%%s' '%s' > %s/report.json; echo 'END ok'`, report, req.ExecutionDir)
+	})
+	run, err := w.app.RunTask("idle")
+	if err != nil || run.Outcome != "started" {
+		t.Fatalf("RunTask(idle) = %+v, %v, want started", run, err)
+	}
+	w.wait(run.ExecutionID, domain.StatusNoWork)
+	// The task stops running a moment after its execution ends, and a running task keeps every worktree.
+	w.poll(10*time.Second, func() bool {
+		w.app.mu.Lock()
+		defer w.app.mu.Unlock()
+		_, running := w.app.running["idle"]
+		return !running
+	})
+
+	got := map[string]domain.WorkItemStatus{}
+	for _, item := range w.app.Queue().WorkItems {
+		got[item.Key] = item.Status
+	}
+	want := map[string]domain.WorkItemStatus{"o/r#1": domain.WorkItemClosed, "o/r#2": domain.WorkItemCompleted,
+		"o/r#3": domain.WorkItemFailed}
+	if !maps.Equal(got, want) {
+		t.Errorf("the ledger after the no_work execution = %v, want %v", got, want)
+	}
+	res := w.app.CleanWorkspaces()
+	w.gone(res, merged)
+	w.present(res, draft, "draft pull request is still in progress")
+	w.present(res, failed, "until its execution's log expires")
 }
 
 // The clean-up never removes what it has no record of: a worktree no work item or report names, in a task's workspace

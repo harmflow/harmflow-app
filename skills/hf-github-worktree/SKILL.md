@@ -77,12 +77,30 @@ code. Work only inside the worktree.
 ## 3. Remove worktrees whose item ended
 
 A worktree is removed when its item ended — its pull request was merged or closed, or its issue was closed. Keep the
-worktree of a draft pull request still in progress, and of an item that failed, for diagnosis.
+worktree of a draft pull request still in progress, and of an item that failed, for diagnosis: **Clean workspaces**
+removes that one once its execution's log expires.
+
+Every execution does this, whether or not it selects work, so a worktree never outlives its item while the task finds
+nothing to do. Go through the task's work items in `context.json` `workItems` whose repository is one of
+`task.parameters.repositories`, whether or not their worktree is still on disk. Skip an item that reads `closed`,
+whose end is already recorded, and one that reads `failed`. For each other item, read its pull requests from its
+`branch`, when it records one, and its issue. Each call prints one word:
 
 ```bash
-gh pr view <branch> --repo OWNER/REPO --json state      # MERGED or CLOSED → ended
-gh issue view <n> --repo OWNER/REPO --json state        # CLOSED → ended
-git -C <local path> worktree remove --force <worktree path>
+gh api "repos/OWNER/REPO/pulls?head=OWNER:BRANCH&state=all" --jq 'if length == 0 then "none" elif any(.[]; .state == "open") then "open" elif any(.[]; .merged_at != null) then "merged" else "closed" end'
+gh api repos/OWNER/REPO/issues/ISSUE --jq .state
 ```
 
-Report an ended item with outcome `closed`.
+The item ended when the first prints `merged` or `closed`, or the second prints `closed`. A call that fails says
+nothing, and the worktree stays. Remove the worktree of an item that ended, when it is on disk, at the path §2 gives
+it; the work branch stays, local and remote:
+
+```bash
+git -C "<local path>" worktree remove --force "<worktree path>"
+git -C "<local path>" worktree prune
+```
+
+Report each item that ended in `report.json` `workItems` with the outcome `closed`, and only its `key`,
+`repository`, and `worktreePath`. Give it no `kind`, `pullRequest`, or `tests`, which would count a resumption or
+make its pull request the execution's, and list it after any item the execution selected, whose record takes the
+first item as its own. Write no `work_item.selected` line for it, which would put the item back in progress.
