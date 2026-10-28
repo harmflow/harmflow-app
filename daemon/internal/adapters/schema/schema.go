@@ -31,10 +31,12 @@ type Issue struct {
 	Code   string `json:"code,omitempty"`
 }
 
-// Validator holds the task, execution report, and event schemas, compiled, and the task schema's identifier.
+// Validator holds the task, execution report, and event schemas, compiled, and the task schema's identifier and skill
+// name.
 type Validator struct {
 	task       *jsonschema.Schema
 	identifier *jsonschema.Schema
+	skillName  *jsonschema.Schema
 	report     *jsonschema.Schema
 	event      *jsonschema.Schema
 }
@@ -65,6 +67,10 @@ func New() (*Validator, error) {
 	if err != nil {
 		return nil, err
 	}
+	skillName, err := c.Compile(contracts.TaskSchemaURL + "#/$defs/skillName")
+	if err != nil {
+		return nil, err
+	}
 	report, err := c.Compile(contracts.ReportSchemaURL)
 	if err != nil {
 		return nil, err
@@ -73,7 +79,7 @@ func New() (*Validator, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Validator{task: task, identifier: identifier, report: report, event: event}, nil
+	return &Validator{task: task, identifier: identifier, skillName: skillName, report: report, event: event}, nil
 }
 
 var yamlLine = regexp.MustCompile(`line (\d+)(?::|,)?\s*(?:column (\d+))?`)
@@ -241,9 +247,15 @@ func (v *Validator) ValidateTask(doc any, node *yaml.Node) []Issue {
 	return collect(v.task.Validate(doc), node)
 }
 
-// ValidIdentifier says whether name is an identifier of task.schema.json, the name a task cites an agent or a skill by.
+// ValidIdentifier says whether name is an identifier of task.schema.json, the name a task cites an agent by.
 func (v *Validator) ValidIdentifier(name string) bool {
 	return v.identifier.Validate(name) == nil
+}
+
+// ValidSkillName says whether name is a skill name of task.schema.json, the name a task cites a skill by: an
+// identifier, or a plugin's skill as `<plugin>:<skill>`.
+func (v *Validator) ValidSkillName(name string) bool {
+	return v.skillName.Validate(name) == nil
 }
 
 // ValidateReport checks report.json against execution-report.schema.json.

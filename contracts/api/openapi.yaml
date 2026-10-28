@@ -775,6 +775,7 @@ components:
         - codex_app_server_exited
         - codex_app_server_timed_out
         - codex_app_server_error
+        - claude_plugin_output_unrecognized
         - fallback_repeats_preferred
         - extra_usage_unenforced
         - path_variable_unterminated

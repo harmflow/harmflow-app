@@ -20,6 +20,8 @@ Usage: claude [options]
 HELP
     exit 0 ;;
   auth) echo '{"loggedIn": true}'; exit 0 ;;
+  # The plugin list the daemon reads for a plugin's skills: no plugin installed.
+  plugin) echo '[]'; exit 0 ;;
 esac
 # The usage report the daemon reads before an attempt, with no session: a plan window well within its limit.
 if [ "$1 $2" = "-p /usage" ]; then

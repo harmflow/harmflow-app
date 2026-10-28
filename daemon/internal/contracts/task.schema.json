@@ -31,6 +31,11 @@
       "type": "string",
       "pattern": "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$"
     },
+    "skillName": {
+      "description": "The name a task cites a skill by: an identifier, or the name of a skill a plugin installed, <plugin>:<skill>, exactly as its harness reports it, uppercase letters and spaces included. Each part of a plugin skill's name has 1 to 64 characters, the limit Codex and Claude Code set for a name, holds no colon or slash, and may hold whitespace only between its other characters, since neither harness reports a name that begins or ends with it.",
+      "type": "string",
+      "pattern": "^([a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?|[^\\s:/\\\\]([^:/\\\\]{0,62}[^\\s:/\\\\])?:[^\\s:/\\\\]([^:/\\\\]{0,62}[^\\s:/\\\\])?)$"
+    },
     "metadata": {
       "type": "object",
       "additionalProperties": false,
@@ -109,9 +114,10 @@
           "uniqueItems": true
         },
         "skills": {
+          "description": "Skills cited by name: built-in ones carry the hf- prefix, the user's are the ones the task's harness finds for its workspace, a plugin's skill by the name its harness reports.",
           "type": "array",
           "items": {
-            "$ref": "#/$defs/identifier"
+            "$ref": "#/$defs/skillName"
           },
           "uniqueItems": true
         },

@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/catalog"
@@ -45,13 +46,17 @@ var declaredModels = []string{domain.DefaultModel, "fable", "opus", "sonnet", "h
 
 // Adapter is the HarnessAdapter of the Claude Code CLI. It looks for the CLI on PathEnv, then in KnownLocations, and
 // runs its probes with Env; the user's agents and skills are read from the configuration directory under Home, or
-// CLAUDE_CONFIG_DIR, and the user's skills from the workspace's .claude/skills as well.
+// CLAUDE_CONFIG_DIR, the user's skills from the workspace's .claude/skills as well, and a plugin's skills from the
+// CLI's own plugin commands.
 type Adapter struct {
 	Home    string // the user's home directory
 	PathEnv string
 	Env     []string
 	// KnownLocations are searched after PATH; nil is the usual install locations, an empty list none.
 	KnownLocations []string
+
+	mu      sync.Mutex
+	plugins map[string]pluginListing // by CLI path and workspace, kept until ReloadUserItems
 }
 
 var (
@@ -60,6 +65,8 @@ var (
 	_ ports.QuotaReader           = (*Adapter)(nil)
 	_ ports.ExtraUsageReporter    = (*Adapter)(nil)
 	_ ports.WorkspaceFolderReader = (*Adapter)(nil)
+	_ ports.PluginLister          = (*Adapter)(nil)
+	_ ports.ItemReloader          = (*Adapter)(nil)
 )
 
 // ReportsExtraUsage implements ports.ExtraUsageReporter: every rate-limit report of the stream says whether the session
@@ -254,9 +261,27 @@ func (a *Adapter) userDirs(kind, workspace string) []catalog.Dir {
 // as well as the user's.
 func (a *Adapter) ReadsWorkspace(kind string) bool { return kind == "skill" }
 
-// UserItem implements ports.HarnessAdapter: a skill is the one of that name in Claude Code's configuration directory,
-// or else in the workspace's .claude/skills; an agent is looked up in the configuration directory.
-func (a *Adapter) UserItem(_ context.Context, _ ports.HarnessInfo, kind, name, workspace string) (ports.ResolvedItem, bool, []ports.DiscoveryError, error) {
+// UserItem implements ports.HarnessAdapter: a plugin's skill, `<plugin>:<skill>`, is one of the skills of the plugins
+// Claude Code has enabled for workspace, which a CLI that was not detected cannot list; another skill is the one of
+// that name in Claude Code's configuration directory, or else in the workspace's .claude/skills; an agent is looked up
+// in the configuration directory.
+func (a *Adapter) UserItem(ctx context.Context, info ports.HarnessInfo, kind, name, workspace string) (ports.ResolvedItem, bool, []ports.DiscoveryError, error) {
+	if kind == "skill" && strings.Contains(name, ":") {
+		if !info.Detected || info.Path == "" {
+			return ports.ResolvedItem{}, false, nil,
+				domain.TextErr("harness_not_detected", "{{harness}} was not detected on this machine", "harness", Name)
+		}
+		skills, problems, err := a.pluginSkills(ctx, info, workspace)
+		if err != nil {
+			return ports.ResolvedItem{}, false, nil, err
+		}
+		for _, it := range skills {
+			if it.Name == name {
+				return it, true, problems, nil
+			}
+		}
+		return ports.ResolvedItem{}, false, problems, nil
+	}
 	for _, d := range a.userDirs(kind, workspace) {
 		if it, ok := d.Item(kind, name); ok {
 			return it, true, nil, nil
@@ -265,21 +290,35 @@ func (a *Adapter) UserItem(_ context.Context, _ ports.HarnessInfo, kind, name, w
 	return ports.ResolvedItem{}, false, nil, nil
 }
 
-// UserItems implements ports.HarnessAdapter: the skills of Claude Code's configuration directory and of the workspace's
-// .claude/skills, or the agents of the configuration directory, sorted by name, each name once as UserItem finds it.
-func (a *Adapter) UserItems(_ context.Context, _ ports.HarnessInfo, kind, workspace string) ([]ports.ResolvedItem, []ports.DiscoveryError, error) {
+// UserItems implements ports.HarnessAdapter: the skills of Claude Code's configuration directory, of the workspace's
+// .claude/skills, and of the plugins it has enabled for workspace, or the agents of the configuration directory, sorted
+// by name, each name once as UserItem finds it. A plugin list that cannot be read is the error, beside the other
+// skills.
+func (a *Adapter) UserItems(ctx context.Context, info ports.HarnessInfo, kind, workspace string) ([]ports.ResolvedItem, []ports.DiscoveryError, error) {
 	var items []ports.ResolvedItem
 	seen := map[string]bool{}
+	add := func(it ports.ResolvedItem) {
+		if !seen[it.Name] {
+			seen[it.Name] = true
+			items = append(items, it)
+		}
+	}
 	for _, d := range a.userDirs(kind, workspace) {
 		for _, it := range d.Items(kind) {
-			if !seen[it.Name] {
-				seen[it.Name] = true
-				items = append(items, it)
-			}
+			add(it)
+		}
+	}
+	var problems []ports.DiscoveryError
+	var err error
+	if kind == "skill" {
+		var skills []ports.ResolvedItem
+		skills, problems, err = a.pluginSkills(ctx, info, workspace)
+		for _, it := range skills {
+			add(it)
 		}
 	}
 	slices.SortFunc(items, func(x, y ports.ResolvedItem) int { return strings.Compare(x.Name, y.Name) })
-	return items, nil, nil
+	return items, problems, err
 }
 
 var readTools = []string{"Read", "Glob", "Grep", "Skill", "Task", "TodoWrite"}

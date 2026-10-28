@@ -329,6 +329,7 @@ export const enUS = {
     skill_list_unreadable: "{{harness}}'s skill list for {{workspace}} could not be read: {{detail}}",
     fallback_skill_list_unreadable:
       "{{harness}} is not a valid fallback: its skill list for {{workspace}} could not be read: {{detail}}",
+    claude_plugin_output_unrecognized: "{{command}} printed nothing HarmFlow can read",
     codex_app_server_missing: "Codex {{version}} has no app server",
     codex_app_server_start_failed: "Codex's app server could not start: {{detail}}",
     codex_app_server_exited: "Codex's app server exited",
@@ -506,6 +507,8 @@ export const enUS = {
     harness_workspace: "the {{harness}} configuration and the workspace {{workspace}}",
     skill_list: "{{harness}}'s skill list for {{workspace}}",
     skill_list_errors: "{{harness}}'s skill list for {{workspace}}, which could not load {{errors}}",
+    plugin_list: "{{harness}}'s plugins for {{workspace}}",
+    plugin_list_errors: "{{harness}}'s plugins for {{workspace}}, which could not load {{errors}}",
   },
   // The Claude Code settings sources whose allow rules widen a task's tool list, as restriction_claude_allow_rules
   // names them.

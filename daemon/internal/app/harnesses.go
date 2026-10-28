@@ -212,7 +212,8 @@ type itemLookup struct {
 }
 
 // resolveItem finds an agent or skill by name for a harness: built-ins by the hf- prefix, the user's as the harness
-// finds them for workspace.
+// finds them for workspace, a plugin's `<plugin>:<skill>` among the plugins it has enabled there when it lists them
+// apart from its folders.
 func (a *App) resolveItem(ctx context.Context, kind, name, harness, workspace string) itemLookup {
 	m := missingItem{kind: kind, name: name, source: "harness"}
 	if strings.HasPrefix(name, BuiltinPrefix) {
@@ -228,6 +229,8 @@ func (a *App) resolveItem(ctx context.Context, kind, name, harness, workspace st
 	m.where = "the " + ad.Name() + " configuration"
 	if l, ok := ad.(ports.WorkspaceLister); ok && l.ListsPerWorkspace(kind) {
 		m.where, m.source, m.workspace = ad.Name()+"'s "+kind+" list for "+workspace, kind+"_list", workspace
+	} else if p, ok := ad.(ports.PluginLister); ok && p.ListsPlugins(kind) && strings.Contains(name, ":") {
+		m.where, m.source, m.workspace = ad.Name()+"'s plugins for "+workspace, "plugin_list", workspace
 	} else if r, ok := ad.(ports.WorkspaceFolderReader); ok && r.ReadsWorkspace(kind) {
 		m.where, m.source, m.workspace = m.where+" and the workspace "+workspace, "harness_workspace", workspace
 	}
@@ -283,9 +286,9 @@ type CatalogProblem struct {
 // that find it for the folder of a task with this workspace path and ID, sorted by name. That folder is the one
 // validation and an execution look the task's items up for: the workspace path, expanded, otherwise the folder HarmFlow
 // runs the task in, and HarmFlow's workspace root for neither. A user's item is left out when a task cannot cite it: its
-// name has the hf- prefix, or is not an identifier of the task schema, as a plugin's `<plugin>:<skill>` is not. A
-// user's agent that more than one harness holds is copied from the first of them by name. What a harness could not
-// list is in Problems.
+// name has the hf- prefix, or is not a name the task schema gives its kind. A skill's is an identifier or a plugin's
+// `<plugin>:<skill>`, listed as the harness reports it; an agent's is an identifier. A user's agent that more than one
+// harness holds is copied from the first of them by name. What a harness could not list is in Problems.
 func (a *App) Catalog(ctx context.Context, workspace, task string) Catalog {
 	c := Catalog{Agents: []CatalogEntry{}, Skills: []CatalogEntry{}, Problems: []CatalogProblem{}}
 	workspace = a.taskFolder(workspace, task)
@@ -308,7 +311,7 @@ func (a *App) Catalog(ctx context.Context, workspace, task string) Catalog {
 					Text: domain.Text{Message: p.Message}})
 			}
 			for _, it := range items {
-				if strings.HasPrefix(it.Name, BuiltinPrefix) || !a.d.Validator.ValidIdentifier(it.Name) {
+				if strings.HasPrefix(it.Name, BuiltinPrefix) || !a.citable(kind, it.Name) {
 					continue
 				}
 				e := entries[it.Name]
@@ -336,6 +339,14 @@ func (a *App) Catalog(ctx context.Context, workspace, task string) Catalog {
 		{ID: domain.TypeScriptTask, ParametersKey: &scriptKey, DefaultAgents: []string{}, DefaultSkills: []string{}},
 	}
 	return c
+}
+
+// citable says whether a task can cite an item of kind by name, as the task schema names it.
+func (a *App) citable(kind, name string) bool {
+	if kind == "skill" {
+		return a.d.Validator.ValidSkillName(name)
+	}
+	return a.d.Validator.ValidIdentifier(name)
 }
 
 // agentCopy is what selecting the agent it copies into a task; nil for a skill, or an agent whose file cannot be read.

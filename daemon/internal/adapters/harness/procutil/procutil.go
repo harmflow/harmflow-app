@@ -476,9 +476,15 @@ const probeWaitDelay = time.Second
 // Output runs a short probe command with a timeout. The probe's own exit status decides: a child that keeps its output
 // open is cut off after probeWaitDelay, and what was read by then is returned.
 func Output(ctx context.Context, timeout time.Duration, env []string, name string, args ...string) (string, string, error) {
+	return OutputIn(ctx, timeout, env, "", name, args...)
+}
+
+// OutputIn runs a short probe command as Output does, in the folder dir, or in the daemon's own when dir is empty.
+func OutputIn(ctx context.Context, timeout time.Duration, env []string, dir, name string, args ...string) (string, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir = dir
 	if env != nil {
 		cmd.Env = env
 	}
