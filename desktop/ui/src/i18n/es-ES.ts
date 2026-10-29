@@ -267,6 +267,10 @@ export const esES: Resources = {
     settings_allowed_folder_invalid: "se rechaza la carpeta permitida {{folder}}: {{detail}}",
     settings_change_breaks_task: "este cambio dejaría {{field}} de la tarea {{task}} fuera de las rutas permitidas: {{detail}}",
     harness_not_identified: "{{path}} no es {{harness}}: la salida de --version no lo nombra",
+    template_not_found: "no hay ninguna plantilla {{template}}",
+    template_read_only: "{{template}} es el identificador de una plantilla integrada: las plantillas integradas vienen con HarmFlow, que nunca escribe ninguna",
+    template_invalid: "la plantilla {{template}} no es válida: {{file}}",
+    template_language_invalid: 'language debe ser pt-BR, en-US o es-ES, no "{{language}}"',
     yaml_syntax: "error de sintaxis YAML: {{detail}}",
     document_empty: "el documento está vacío",
     document_not_json: "el documento no es un JSON válido: {{detail}}",
@@ -296,6 +300,8 @@ export const esES: Resources = {
     id_file_mismatch: 'metadata.id "{{id}}" debe coincidir con el nombre del archivo {{file}}.yaml',
     task_file_invalid: "el archivo de la tarea {{file}} no supera la validación",
     task_file_error: "{{file}}: {{detail}}",
+    template_id_not_builtin: 'el identificador de una plantilla integrada empieza por hf-, y "{{id}}" no',
+    template_type_unknown: '"{{type}}" no es un tipo de tarea; el tipo de una plantilla es uno de {{types}}',
     schedule_missing:
       "una programación necesita una expresión cron o un intervalo; quítala para una tarea solo manual",
     schedule_empty: "una programación necesita una expresión cron o un intervalo",
@@ -896,12 +902,7 @@ export const esES: Resources = {
     importScriptConfirm: "Importar desactivada",
     templates: {
       title: "Nueva tarea",
-      github: "Implementar issues de GitHub",
-      githubHint: "Selecciona issues, las implementa en un worktree, ejecuta las pruebas y abre un pull request en borrador.",
-      general: "Tarea general",
-      generalHint: "Cualquier automatización cuyo comportamiento vive en su prompt, sus agentes y sus skills.",
-      script: "Tarea de script",
-      scriptHint: "Ejecuta un programa o un script tuyo según una programación — en lugar de un agente de launchd, del Programador de tareas o de cron.",
+      none: "HarmFlow no encontró plantillas para empezar una tarea.",
     },
     types: {
       github: "GitHub",

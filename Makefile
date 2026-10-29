@@ -95,6 +95,10 @@ check-imports: ## Fail on Go imports outside the Go guide's three groups, as CI 
 check-file-names: ## Fail on tracked file and folder names outside CLAUDE.md's File names rules, as CI does
 	go -C tests run ./filenames "$(CURDIR)"
 
+.PHONY: check-template-texts
+check-template-texts: ## Fail when a built-in template's text is written in the daemon's or the desktop's source, as CI does
+	go -C tests test -count=1 ./templates
+
 .PHONY: test-integration
 test-integration: daemon ## Tests across the daemon's process boundary, with fake harnesses
 	go -C tests test -count=1 -timeout $(INTEGRATION_TIMEOUT) $(TEST_FLAGS) ./...

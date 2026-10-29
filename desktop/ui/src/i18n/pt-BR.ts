@@ -267,6 +267,10 @@ export const ptBR: Resources = {
     settings_allowed_folder_invalid: "a pasta permitida {{folder}} foi recusada: {{detail}}",
     settings_change_breaks_task: "esta mudança deixaria {{field}} da tarefa {{task}} fora dos caminhos permitidos: {{detail}}",
     harness_not_identified: "{{path}} não é o {{harness}}: a saída de --version não o nomeia",
+    template_not_found: "não há modelo {{template}}",
+    template_read_only: "{{template}} é o identificador de um modelo embutido: os modelos embutidos vêm com o HarmFlow, que nunca grava um",
+    template_invalid: "o modelo {{template}} é inválido: {{file}}",
+    template_language_invalid: 'language deve ser pt-BR, en-US ou es-ES, não "{{language}}"',
     yaml_syntax: "erro de sintaxe YAML: {{detail}}",
     document_empty: "o documento está vazio",
     document_not_json: "o documento não é um JSON válido: {{detail}}",
@@ -296,6 +300,8 @@ export const ptBR: Resources = {
     id_file_mismatch: 'metadata.id "{{id}}" deve corresponder ao nome do arquivo {{file}}.yaml',
     task_file_invalid: "o arquivo da tarefa {{file}} não passa na validação",
     task_file_error: "{{file}}: {{detail}}",
+    template_id_not_builtin: 'o identificador de um modelo embutido começa com hf-, e "{{id}}" não começa',
+    template_type_unknown: '"{{type}}" não é um tipo de tarefa; o tipo de um modelo é um de {{types}}',
     schedule_missing:
       "um agendamento precisa de uma expressão cron ou de um intervalo; remova-o para uma tarefa só manual",
     schedule_empty: "um agendamento precisa de uma expressão cron ou de um intervalo",
@@ -902,12 +908,7 @@ export const ptBR: Resources = {
     importScriptConfirm: "Importar desativada",
     templates: {
       title: "Nova tarefa",
-      github: "Implementar issues do GitHub",
-      githubHint: "Seleciona issues, implementa num worktree, executa os testes e abre um pull request em rascunho.",
-      general: "Tarefa geral",
-      generalHint: "Qualquer automação cujo comportamento vive no prompt, nos agentes e nas skills.",
-      script: "Tarefa de script",
-      scriptHint: "Executa um programa ou script seu num agendamento — no lugar de um agente do launchd, do Agendador de Tarefas ou do cron.",
+      none: "O HarmFlow não encontrou modelos para iniciar uma tarefa.",
     },
     types: {
       github: "GitHub",

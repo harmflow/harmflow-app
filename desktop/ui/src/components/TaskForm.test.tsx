@@ -561,8 +561,8 @@ describe("task form document", () => {
     readFileSync(join(__dirname, "..", "..", "..", "..", "tests", "integration", "testdata", "task-form-document.json"), "utf8"),
   );
   const entry = (name: string, kind: "agent" | "skill", source: "builtin" | "user") => ({ name, kind, source, harnesses: ["claude-code", "codex"] });
-  // The catalog declares no task type, so the template brings no agent, skill, or origin of its own and every list is
-  // filled through its control. Its entries let a whole name typed in a picker add the chip.
+  // The template's draft selects no agent, so it brings no agent, skill, or origin of its own and every list is filled
+  // through its control. The catalog's entries let a whole name typed in a picker add the chip.
   const catalog: Catalog = {
     agents: [entry("issue-reviewer", "agent", "user")],
     skills: ["hf-github-issue-queue", "hf-github-worktree", "hf-github-draft-pr"].map((name) => entry(name, "skill", "builtin")),
@@ -647,7 +647,21 @@ describe("task form document", () => {
   }
 
   it("sends, once every section is filled through its controls, the document the daemon writes as a file", async () => {
-    await openScreen({ kind: "new", template: "github" });
+    // The daemon's draft of a GitHub template that selects no agent: one repository row for the editor to ask for.
+    daemon.answers.set("POST /templates/hf-github-issues/draft", {
+      document: {
+        apiVersion: "harmflow/v1alpha1",
+        kind: "Task",
+        metadata: { id: "implement-github-issues", name: "Implement GitHub issues" },
+        spec: {
+          enabled: true,
+          type: "github",
+          harness: { preferred: { provider: "claude-code" } },
+          github: { repositories: [{ baseBranch: "main" }] },
+        },
+      },
+    });
+    await openScreen({ kind: "new", template: "hf-github-issues" });
 
     // General. The name writes an identifier of its own until the identifier is typed.
     await enter(control("Name"), "Every section");

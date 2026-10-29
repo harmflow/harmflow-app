@@ -13,7 +13,8 @@ import { ImportDialog } from "./screens/ImportDialog";
 import { DaemonDownScreen, OnboardingScreen } from "./screens/OnboardingScreen";
 import { OverviewScreen } from "./screens/OverviewScreen";
 import { SettingsScreen, isSettingsSection, type SettingsSection } from "./screens/SettingsScreen";
-import { TasksScreen, TemplatePicker, type TaskView } from "./screens/TasksScreen";
+import { TemplatePicker } from "./components/Templates";
+import { TasksScreen, type TaskView } from "./screens/TasksScreen";
 import { actions, setNotificationHandler, startSync, useStore } from "./state/store";
 
 const ONBOARDED_KEY = "harmflow.onboarded";

@@ -4,22 +4,23 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
 import { native } from "../api/native";
-import type { Task, TaskSummary } from "../api/types";
+import type { Task, TaskSummary, TemplateLanguage } from "../api/types";
 import { HarnessLabel } from "../components/Shell";
 import { Icon } from "../components/Icon";
 import { TaskEditor, type LeaveCheck } from "../components/TaskEditor";
+import { TemplatePicker } from "../components/Templates";
 import { toast } from "../components/toast";
-import { Banner, Button, Chip, EmptyState, IconButton, Modal, Select, StatusChip, TextInput, Toggle, cx } from "../components/ui";
-import { copyTypeAgent } from "../lib/agentCopy";
+import { Banner, Button, Chip, EmptyState, IconButton, Select, StatusChip, TextInput, Toggle, cx } from "../components/ui";
 import { daemonText } from "../lib/daemonText";
 import { formatRelative } from "../lib/format";
 import { useNow } from "../lib/hooks";
-import { newTaskDocument, type TemplateKind } from "../lib/taskForm";
+import type { Doc } from "../lib/taskForm";
 import { actions, useStore } from "../state/store";
 import { ImportDialog } from "./ImportDialog";
 
-/** A new task's `pick` counts the template picks, so that each one opens an editor of its own. */
-export type TaskView = { kind: "list" } | { kind: "new"; template: TemplateKind; pick?: number } | { kind: "edit"; id: string };
+/** A new task names the template it starts from; its `pick` counts the template picks, so that each one opens an editor of
+ * its own. */
+export type TaskView = { kind: "list" } | { kind: "new"; template: string; pick?: number } | { kind: "edit"; id: string };
 
 type Filter = "all" | "enabled" | "disabled" | "warnings";
 
@@ -54,30 +55,32 @@ function NewTask({
   onSaved,
   onLeaveCheck,
 }: {
-  template: TemplateKind;
+  template: string;
   onDone: () => void;
   onSaved: (t: Task) => void;
   onLeaveCheck?: (check: LeaveCheck | null) => void;
 }) {
-  const { t } = useTranslation();
-  const catalog = useStore((s) => s.catalog);
-  const initial = useMemo(
-    () =>
-      copyTypeAgent(
-        newTaskDocument(
-          template,
-          catalog,
-          template === "github"
-            ? t("tasks.templates.github")
-            : template === "script"
-              ? t("tasks.templates.script")
-              : t("tasks.templates.general"),
-        ),
-        catalog,
-      ),
-    // A template is built once per editor; later catalog loads must not reset the user's input.
-    [template],
-  );
+  const { i18n } = useTranslation();
+  const [initial, setInitial] = useState<Doc | null>(null);
+  // The daemon builds the document once per editor, named in the interface's language; a pick that replaces this one
+  // mounts an editor of its own, and the answer this one still waits for is dropped.
+  useEffect(() => {
+    let current = true;
+    api.draftTask(template, i18n.language as TemplateLanguage).then(
+      (draft) => {
+        if (current) setInitial(draft.document as Doc);
+      },
+      (e: Error) => {
+        if (!current) return;
+        toast(e.message, "danger");
+        onDone();
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [template]);
+  if (!initial) return null;
   return (
     <div className="screen">
       <TaskEditor mode="create" initial={initial} onClose={onDone} onSaved={onSaved} onLeaveCheck={onLeaveCheck} />
@@ -97,37 +100,6 @@ function EditTask({ id, onDone, onLeaveCheck }: { id: string; onDone: () => void
     <div className="screen">
       <TaskEditor key={task.id} mode="edit" task={task} onClose={onDone} onSaved={(saved) => setTask(saved)} onLeaveCheck={onLeaveCheck} />
     </div>
-  );
-}
-
-export function TemplatePicker({ onPick, onClose }: { onPick: (k: TemplateKind) => void; onClose: () => void }) {
-  const { t } = useTranslation();
-  return (
-    <Modal title={t("tasks.templates.title")} onClose={onClose}>
-      <div className="templates">
-        <button type="button" className="template" onClick={() => onPick("github")}>
-          <span className="template__icon">
-            <Icon name="code" size={24} />
-          </span>
-          <strong>{t("tasks.templates.github")}</strong>
-          <span className="muted">{t("tasks.templates.githubHint")}</span>
-        </button>
-        <button type="button" className="template" onClick={() => onPick("general")}>
-          <span className="template__icon template__icon--violet">
-            <Icon name="sparkle" size={24} />
-          </span>
-          <strong>{t("tasks.templates.general")}</strong>
-          <span className="muted">{t("tasks.templates.generalHint")}</span>
-        </button>
-        <button type="button" className="template" onClick={() => onPick("script")}>
-          <span className="template__icon">
-            <Icon name="terminal" size={24} />
-          </span>
-          <strong>{t("tasks.templates.script")}</strong>
-          <span className="muted">{t("tasks.templates.scriptHint")}</span>
-        </button>
-      </div>
-    </Modal>
   );
 }
 

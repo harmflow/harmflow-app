@@ -162,6 +162,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the task templates, each with its validity
+         * @description The built-in templates, which ship with HarmFlow, sorted by identifier. An invalid one is listed with the errors of its file, and is never offered for creating a task.
+         */
+        get: operations["listTemplates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/templates/{templateId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                templateId: components["parameters"]["TemplateId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Change a template
+         * @description Built-in templates are read-only: an identifier with the hf- prefix, a built-in template's or one no template has yet, is refused, and nothing is written.
+         */
+        put: operations["updateTemplate"];
+        post?: never;
+        /**
+         * Delete a template
+         * @description Built-in templates are read-only, so a built-in template's identifier is refused.
+         */
+        delete: operations["deleteTemplate"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/templates/{templateId}/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                templateId: components["parameters"]["TemplateId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Build a new task's document from a template, writing nothing
+         * @description The task is named after the template in the language the request names, and gets an identifier no task has. When the template selects an agent, the document starts as that agent's copy, with its origin, as selecting the agent in the task editor makes it, and then takes the fields the template sets itself, which keep the template's values; when this machine lacks the agent, the document holds no prompt. The document is not validated: the values the template leaves unset are for the task editor to ask for, and saving the task validates it as any task.
+         */
+        post: operations["draftTaskFromTemplate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tasks": {
         parameters: {
             query?: never;
@@ -580,7 +648,7 @@ export interface components {
          * @description Names a text the daemon writes for the user. The desktop shows it in the interface's language, filling it with its params; the message beside it is the same text in en-US, shown for a key the desktop does not know. The agent's text, tool output, and a tool's own error get no key and stay as they are. A text is a message with messageKey and params, or a field such as errorMessage with errorKey and errorParams.
          * @enum {string}
          */
-        MessageKey: "host_forbidden" | "origin_forbidden" | "token_required" | "route_not_found" | "body_not_json" | "task_not_found" | "execution_not_found" | "harness_not_found" | "task_exists" | "task_file_exists" | "base_revision_required" | "task_changed_on_disk" | "task_invalid" | "task_disabled" | "task_being_deleted" | "daemon_stopping" | "execution_ended" | "executions_running" | "harness_path_not_absolute" | "harness_path_not_executable" | "settings_language_invalid" | "settings_notification_level_invalid" | "settings_log_retention_invalid" | "settings_path_variable_invalid" | "settings_allowed_folder_invalid" | "settings_change_breaks_task" | "harness_not_identified" | "yaml_syntax" | "document_empty" | "document_not_json" | "document_not_representable" | "task_input_missing" | "schema_type" | "schema_const" | "schema_enum" | "schema_required" | "schema_additional_properties" | "schema_pattern" | "schema_min_length" | "schema_max_length" | "schema_minimum" | "schema_maximum" | "schema_min_items" | "schema_unique_items" | "schema_not" | "schema_false" | "id_immutable" | "type_immutable" | "id_file_mismatch" | "task_file_invalid" | "task_file_error" | "schedule_missing" | "schedule_empty" | "schedule_cron_and_interval" | "timezone_unknown" | "interval_invalid" | "interval_unit_invalid" | "cron_seconds" | "cron_field_count" | "cron_step_invalid" | "cron_value_invalid" | "cron_value_out_of_range" | "harness_unknown" | "claude_model_unknown" | "claude_effort_unsupported" | "claude_effort_invalid" | "codex_model_unknown" | "codex_effort_invalid" | "codex_profile_unchecked" | "harness_not_detected" | "harness_not_ready" | "agent_not_found" | "skill_not_found" | "agent_missing" | "skill_missing" | "fallback_agent_missing" | "fallback_skill_missing" | "skill_list_unreadable" | "fallback_skill_list_unreadable" | "codex_app_server_missing" | "codex_app_server_start_failed" | "codex_app_server_exited" | "codex_app_server_timed_out" | "codex_app_server_error" | "claude_plugin_output_unrecognized" | "fallback_repeats_preferred" | "extra_usage_unenforced" | "path_variable_unterminated" | "path_variable_undefined" | "path_not_absolute" | "path_forbidden_home" | "path_forbidden_place" | "path_outside_allowed_area" | "script_program_relative" | "script_working_directory_relative" | "local_path_missing" | "script_system_not_declared" | "script_program_not_found" | "script_working_directory_missing" | "script_imported_disabled" | "restriction_claude_shell_workspace" | "restriction_claude_shell_network" | "restriction_claude_allow_rules" | "restriction_claude_edit_rules" | "restriction_codex_tool_lists" | "restriction_script_unenforced" | "script_leftovers_ended" | "harness_version_untested" | "harness_version_unknown" | "quota_unread" | "repository_unprotected" | "report_not_json" | "report_schema_invalid" | "step_checking_harness" | "step_preparing_workspace" | "step_starting_harness" | "step_switching_harness" | "step_waiting_rate_limit" | "step_preparing_program" | "step_running_program" | "attempt_first" | "attempt_rate_limit_retry" | "attempt_failover" | "daemon_started" | "daemon_signal" | "daemon_stop_requested" | "local_api_stopped" | "task_delete_pending" | "task_changed_externally" | "task_changed_externally_invalid" | "task_removed_externally" | "task_was_disabled" | "task_was_deleted" | "task_file_removed" | "task_gone" | "firing_queued" | "firing_coalesced" | "firing_skipped" | "firings_missed_catch_up" | "firings_missed_skipped" | "cancel_requested" | "cancelled_before_start" | "execution_cancelled" | "execution_timed_out" | "execution_status" | "daemon_stopped_execution" | "execution_dir_failed" | "workspace_create_failed" | "repository_path_missing" | "context_write_failed" | "harness_started" | "harness_session" | "harness_exited" | "harness_exit_code" | "harness_start_failed" | "harness_ended_with_error" | "harness_unavailable" | "harness_unavailable_readiness" | "harness_rate_limited" | "harness_quota_exhausted" | "quota_exhausted" | "quota_exhausted_until" | "extra_usage_stopped" | "harness_switched" | "no_alternative_harness" | "no_alternative_harness_detail" | "skill_delivery_failed" | "agent_delivery_failed" | "tool_succeeded" | "tool_failed" | "tool_declined" | "tests_failed" | "script_started" | "script_exit_code" | "script_signaled" | "script_start_failed" | "script_write_failed" | "process_ended" | "process_left_ended" | "process_interrupted_ended" | "task_path_refused" | "detection_running" | "harness_manual_path_invalid" | "claude_not_found" | "codex_not_found" | "git_not_found" | "gh_not_found" | "command_failed" | "harness_feature_missing" | "harness_help_timed_out" | "harness_version_below_minimum" | "claude_not_signed_in" | "quota_report_unrecognized" | "not_signed_in" | "authentication_unverified" | "codex_requirements_disallow" | "gh_auth_problem";
+        MessageKey: "host_forbidden" | "origin_forbidden" | "token_required" | "route_not_found" | "body_not_json" | "task_not_found" | "execution_not_found" | "harness_not_found" | "task_exists" | "task_file_exists" | "base_revision_required" | "task_changed_on_disk" | "task_invalid" | "task_disabled" | "task_being_deleted" | "daemon_stopping" | "execution_ended" | "executions_running" | "harness_path_not_absolute" | "harness_path_not_executable" | "settings_language_invalid" | "settings_notification_level_invalid" | "settings_log_retention_invalid" | "settings_path_variable_invalid" | "settings_allowed_folder_invalid" | "settings_change_breaks_task" | "harness_not_identified" | "template_not_found" | "template_read_only" | "template_invalid" | "template_language_invalid" | "yaml_syntax" | "document_empty" | "document_not_json" | "document_not_representable" | "task_input_missing" | "schema_type" | "schema_const" | "schema_enum" | "schema_required" | "schema_additional_properties" | "schema_pattern" | "schema_min_length" | "schema_max_length" | "schema_minimum" | "schema_maximum" | "schema_min_items" | "schema_unique_items" | "schema_not" | "schema_false" | "id_immutable" | "type_immutable" | "id_file_mismatch" | "task_file_invalid" | "task_file_error" | "template_id_not_builtin" | "template_type_unknown" | "schedule_missing" | "schedule_empty" | "schedule_cron_and_interval" | "timezone_unknown" | "interval_invalid" | "interval_unit_invalid" | "cron_seconds" | "cron_field_count" | "cron_step_invalid" | "cron_value_invalid" | "cron_value_out_of_range" | "harness_unknown" | "claude_model_unknown" | "claude_effort_unsupported" | "claude_effort_invalid" | "codex_model_unknown" | "codex_effort_invalid" | "codex_profile_unchecked" | "harness_not_detected" | "harness_not_ready" | "agent_not_found" | "skill_not_found" | "agent_missing" | "skill_missing" | "fallback_agent_missing" | "fallback_skill_missing" | "skill_list_unreadable" | "fallback_skill_list_unreadable" | "codex_app_server_missing" | "codex_app_server_start_failed" | "codex_app_server_exited" | "codex_app_server_timed_out" | "codex_app_server_error" | "claude_plugin_output_unrecognized" | "fallback_repeats_preferred" | "extra_usage_unenforced" | "path_variable_unterminated" | "path_variable_undefined" | "path_not_absolute" | "path_forbidden_home" | "path_forbidden_place" | "path_outside_allowed_area" | "script_program_relative" | "script_working_directory_relative" | "local_path_missing" | "script_system_not_declared" | "script_program_not_found" | "script_working_directory_missing" | "script_imported_disabled" | "restriction_claude_shell_workspace" | "restriction_claude_shell_network" | "restriction_claude_allow_rules" | "restriction_claude_edit_rules" | "restriction_codex_tool_lists" | "restriction_script_unenforced" | "script_leftovers_ended" | "harness_version_untested" | "harness_version_unknown" | "quota_unread" | "repository_unprotected" | "report_not_json" | "report_schema_invalid" | "step_checking_harness" | "step_preparing_workspace" | "step_starting_harness" | "step_switching_harness" | "step_waiting_rate_limit" | "step_preparing_program" | "step_running_program" | "attempt_first" | "attempt_rate_limit_retry" | "attempt_failover" | "daemon_started" | "daemon_signal" | "daemon_stop_requested" | "local_api_stopped" | "task_delete_pending" | "task_changed_externally" | "task_changed_externally_invalid" | "task_removed_externally" | "task_was_disabled" | "task_was_deleted" | "task_file_removed" | "task_gone" | "firing_queued" | "firing_coalesced" | "firing_skipped" | "firings_missed_catch_up" | "firings_missed_skipped" | "cancel_requested" | "cancelled_before_start" | "execution_cancelled" | "execution_timed_out" | "execution_status" | "daemon_stopped_execution" | "execution_dir_failed" | "workspace_create_failed" | "repository_path_missing" | "context_write_failed" | "harness_started" | "harness_session" | "harness_exited" | "harness_exit_code" | "harness_start_failed" | "harness_ended_with_error" | "harness_unavailable" | "harness_unavailable_readiness" | "harness_rate_limited" | "harness_quota_exhausted" | "quota_exhausted" | "quota_exhausted_until" | "extra_usage_stopped" | "harness_switched" | "no_alternative_harness" | "no_alternative_harness_detail" | "skill_delivery_failed" | "agent_delivery_failed" | "tool_succeeded" | "tool_failed" | "tool_declined" | "tests_failed" | "script_started" | "script_exit_code" | "script_signaled" | "script_start_failed" | "script_write_failed" | "process_ended" | "process_left_ended" | "process_interrupted_ended" | "task_path_refused" | "detection_running" | "harness_manual_path_invalid" | "claude_not_found" | "codex_not_found" | "git_not_found" | "gh_not_found" | "command_failed" | "harness_feature_missing" | "harness_help_timed_out" | "harness_version_below_minimum" | "claude_not_signed_in" | "quota_report_unrecognized" | "not_signed_in" | "authentication_unverified" | "codex_requirements_disallow" | "gh_auth_problem";
         /** @description Values the desktop interpolates into the translated text of a messageKey; a count param picks its plural form. A param that quotes another text the daemon wrote has a param named after it with Key appended, its key, and params prefixed with its name and a dot, its params, so it is translated in place too. */
         MessageParams: {
             [key: string]: string;
@@ -746,14 +814,52 @@ export interface components {
             agents: components["schemas"]["CatalogEntry"][];
             skills: components["schemas"]["CatalogEntry"][];
             problems: components["schemas"]["CatalogProblem"][];
+            /** @description The task types, each with the key of its parameters block in a task's spec, null for a type with none. */
             taskTypes: {
                 id: string;
                 parametersKey: string | null;
-                defaultAgents: string[];
-                defaultSkills: string[];
-                /** @description The agent a new task of the type selects: the task starts as that agent's copy, with the agent as its origin. Absent for a type that selects none. */
-                selectedAgent?: string;
             }[];
+        };
+        /** @description A text in each language of the interface. */
+        LocalizedText: {
+            "pt-BR": string;
+            "en-US": string;
+            "es-ES": string;
+        };
+        /** @description A task template, with its validity. A valid one has every field; an invalid one is listed with the errors of its file, which validation locates by line and column when it can, and has the fields its file gives. */
+        Template: {
+            /** @description The template's identifier, which is its file's name without the extension. */
+            id: string;
+            /** @enum {string} */
+            source: "builtin";
+            /** @description The template's file. */
+            path: string;
+            /** @description The task type of the tasks created from it. */
+            type?: string;
+            name?: components["schemas"]["LocalizedText"];
+            description?: components["schemas"]["LocalizedText"];
+            /** @description The agent the tasks created from it select. */
+            selectedAgent?: string;
+            validation: components["schemas"]["ValidationResult"];
+        };
+        /** @description The template document of contracts/schemas/template.schema.json. */
+        TemplateDocument: {
+            [key: string]: unknown;
+        };
+        /** @description Either the YAML text or the document of a template. */
+        TemplateInput: {
+            yaml?: string;
+            document?: components["schemas"]["TemplateDocument"];
+        };
+        NewTaskRequest: {
+            /**
+             * @description The language of the interface, whose name of the template the task takes.
+             * @enum {string}
+             */
+            language: "pt-BR" | "en-US" | "es-ES";
+        };
+        NewTask: {
+            document: components["schemas"]["TaskDocument"];
         };
         /** @description The task document of contracts/schemas/task.schema.json. */
         TaskDocument: {
@@ -1270,6 +1376,7 @@ export interface components {
     parameters: {
         TaskId: string;
         ExecutionId: string;
+        TemplateId: string;
         HarnessId: "claude-code" | "codex";
     };
     requestBodies: never;
@@ -1481,6 +1588,97 @@ export interface operations {
                     "application/json": components["schemas"]["Catalog"];
                 };
             };
+        };
+    };
+    listTemplates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every template. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Template"][];
+                };
+            };
+        };
+    };
+    updateTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                templateId: components["parameters"]["TemplateId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TemplateInput"];
+            };
+        };
+        responses: {
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    deleteTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                templateId: components["parameters"]["TemplateId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    draftTaskFromTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                templateId: components["parameters"]["TemplateId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewTaskRequest"];
+            };
+        };
+        responses: {
+            /** @description The new task's document. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewTask"];
+                };
+            };
+            /** @description The request names no language of the interface. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Invalid"];
         };
     };
     listTasks: {

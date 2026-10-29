@@ -14,7 +14,7 @@ import { ValidationPanel } from "../components/TaskEditor";
 import { TaskForm } from "../components/TaskForm";
 import i18n from "../i18n";
 import { formatBytes, formatDateTime } from "../lib/format";
-import { newTaskDocument } from "../lib/taskForm";
+import { slugify, type Doc } from "../lib/taskForm";
 import { getState, patchStateForTests } from "../state/store";
 import { ExecutionsScreen } from "./ExecutionsScreen";
 import { HistoryScreen } from "./HistoryScreen";
@@ -22,6 +22,16 @@ import { OnboardingScreen } from "./OnboardingScreen";
 import { OverviewScreen } from "./OverviewScreen";
 import { SettingsScreen } from "./SettingsScreen";
 import { TasksScreen } from "./TasksScreen";
+
+/** A new task's document as the daemon drafts it from a built-in template of type, before the user fills it in. */
+function newDoc(type: "github" | "general" | "script", name: string): Doc {
+  const spec: Doc =
+    type === "script"
+      ? { enabled: true, type, script: {} }
+      : { enabled: true, type, harness: { preferred: { provider: "claude-code" } } };
+  if (type === "github") spec.github = { repositories: [{ baseBranch: "main" }] };
+  return { apiVersion: "harmflow/v1alpha1", kind: "Task", metadata: { id: slugify(name), name }, spec };
+}
 
 // The daemon as the client sees it: an answer per route, and every request it received.
 const daemon = vi.hoisted(() => ({ answers: new Map<string, unknown>(), requests: [] as string[] }));
@@ -326,7 +336,7 @@ describe("screens", () => {
     expect(html).toContain("<dt>Última verificação</dt><dd>—</dd>");
     for (const hidden of ["Não detectado", "Não instalado", "<dd>Não</dd>"]) expect(html).not.toContain(hidden);
     const form = renderToString(
-      <TaskForm doc={newTaskDocument("general", undefined, "A")} onChange={() => {}} mode="create" harnesses={[harness, checking]} errorPaths={new Set()} />,
+      <TaskForm doc={newDoc("general", "A")} onChange={() => {}} mode="create" harnesses={[harness, checking]} errorPaths={new Set()} />,
     ).replace(/<!-- -->/g, "");
     expect(form).toContain("Codex — Verificando…");
   });
@@ -387,14 +397,14 @@ describe("screens", () => {
   it("asks for repositories only for the GitHub type", () => {
     const form = (doc: Record<string, unknown>) =>
       renderToString(<TaskForm doc={doc} onChange={() => {}} mode="create" harnesses={[harness]} errorPaths={new Set()} />);
-    expect(form(newTaskDocument("github", undefined, "A"))).toContain("Repositórios");
-    expect(form(newTaskDocument("general", undefined, "B"))).not.toContain("Repositórios");
+    expect(form(newDoc("github", "A"))).toContain("Repositórios");
+    expect(form(newDoc("general", "B"))).not.toContain("Repositórios");
   });
 
   it("labels the type GitHub and presents its repositories and limits as any GitHub task's", () => {
     // No catalog: the task selects no built-in implementer, and its form is the same.
     const html = renderToString(
-      <TaskForm doc={newTaskDocument("github", undefined, "Merge")} onChange={() => {}} mode="create" harnesses={[harness]} errorPaths={new Set()} />,
+      <TaskForm doc={newDoc("github", "Merge")} onChange={() => {}} mode="create" harnesses={[harness]} errorPaths={new Set()} />,
     );
     for (const shown of ["Parâmetros do tipo — GitHub", "Itens descobertos por ciclo", "Itens processados por execução", "Novas tentativas de um item que falhou"]) {
       expect(html).toContain(shown);
@@ -406,7 +416,7 @@ describe("screens", () => {
 
   it("asks a script task for its program, and for no prompt, agents, or harness", () => {
     const html = renderToString(
-      <TaskForm doc={newTaskDocument("script", undefined, "Auditoria")} onChange={() => {}} mode="create" harnesses={[harness]} errorPaths={new Set()} />,
+      <TaskForm doc={newDoc("script", "Auditoria")} onChange={() => {}} mode="create" harnesses={[harness]} errorPaths={new Set()} />,
     );
     for (const shown of ["Programa e argumentos", "Diretório de trabalho", "Variáveis de ambiente", "Executa em", "macOS", "Windows"]) {
       expect(html).toContain(shown);

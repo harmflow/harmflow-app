@@ -17,6 +17,7 @@ import type {
   Settings,
   Stats,
   TaskSummary,
+  Template,
   Tool,
 } from "../api/types";
 
@@ -36,6 +37,8 @@ export interface State {
   harnesses: Harness[];
   tools: Tool[];
   catalog?: Catalog;
+  /** The task templates, in the daemon's order, the invalid ones included. */
+  templates?: Template[];
   diagnostics?: Diagnostics;
   unread: Notification[];
   events: Record<string, HarmflowEvent[]>;
@@ -190,6 +193,11 @@ export const actions = {
     if (catalog) setState({ catalog });
   },
 
+  async refreshTemplates() {
+    const templates = await settle(api.templates());
+    if (templates) setState({ templates });
+  },
+
   async refreshNotifications() {
     const unread = await settle(api.notifications(true));
     if (unread) setState({ unread });
@@ -208,6 +216,7 @@ export const actions = {
       actions.refreshSettings(),
       actions.refreshHarnesses(),
       actions.refreshCatalog(),
+      actions.refreshTemplates(),
       actions.refreshNotifications(),
     ]);
   },

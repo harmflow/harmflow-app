@@ -57,8 +57,8 @@ jobs:
             case $part in
               contracts)   pattern='^(contracts/|daemon/internal/contracts/|desktop/ui/src/api/generated\.ts$)' ;;
               daemon)      pattern='^daemon/' ;;
-              integration) pattern='^(daemon/|tests/|agents/|skills/)' ;;
-              desktop)     pattern='^(desktop/|agents/|skills/)' ;;
+              integration) pattern='^(daemon/|tests/|agents/|skills/|templates/)' ;;
+              desktop)     pattern='^(desktop/|agents/|skills/|templates/)' ;;
             esac
             if touched "$pattern"; then echo "$part=true" >> "$GITHUB_OUTPUT"; else echo "$part=false" >> "$GITHUB_OUTPUT"; fi
           done
@@ -74,6 +74,10 @@ jobs:
           go-version-file: tests/go.mod
           cache-dependency-path: tests/go.sum
       - run: make check-file-names
+      # Every run too: a template's text can be written into the daemon's or the desktop's source by a change to
+      # either, and only its file may hold it.
+      - name: Template texts
+        run: make check-template-texts
 
   # Every change runs it, whatever parts it touches: a secret can land in any path. A pull request scans its own
   # commits, and a push to main every commit it brought, so each commit of a rebase merge is read. The weekly Security
