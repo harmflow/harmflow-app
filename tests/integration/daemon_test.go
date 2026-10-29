@@ -968,20 +968,18 @@ func TestTaskLifecycle(t *testing.T) {
 	}
 }
 
-// Disabling a task over the API rewrites spec.enabled in its file and no other key, and takes away its next firing: the
-// minute boundary that comes while it is disabled starts no execution. Enabling it gives it a next firing again, which
-// starts a scheduled execution.
-func TestDisablingAndEnablingChangeTheFileAndTheFirings(t *testing.T) {
-	// It waits for real minute boundaries, so it runs in parallel with the other tests that do: their waits overlap.
-	t.Parallel()
-	d := startDaemon(t, t.TempDir())
+// saveToggledTask saves on d the task "toggled", which fires every minute, for a test that disables it next. It returns
+// the save's answer and inFile, which checks that the task's file reads spec.enabled as want and is the saved file in
+// every other key.
+func saveToggledTask(t *testing.T, d *daemon) (created map[string]any, inFile func(step string, want bool)) {
+	t.Helper()
 	// The task is disabled before the minute boundary its save announces, so a save in the last seconds of a minute
 	// waits for the next one: that boundary must not fire the task before the disable reaches it.
 	if left := time.Until(time.Now().Truncate(time.Minute).Add(time.Minute)); left < 10*time.Second {
 		time.Sleep(left + time.Second)
 	}
 	// Its notices are off, so no notification follows the scheduled run.
-	created := d.call("POST", "/tasks", map[string]any{"yaml": task("toggled", "SCENARIO=ok",
+	created = d.call("POST", "/tasks", map[string]any{"yaml": task("toggled", "SCENARIO=ok",
 		"  schedule:\n    cron: \"* * * * *\"\n    timezone: UTC\n  notifications:\n    native:\n      enabled: false\n")}, 201)
 	if created["enabled"] != true || created["nextFireAt"] == nil {
 		t.Fatalf("the saved task reads enabled %v, next firing %v; want enabled, with a next firing", created["enabled"],
@@ -996,8 +994,7 @@ func TestDisablingAndEnablingChangeTheFileAndTheFirings(t *testing.T) {
 	if spec, _ := original["spec"].(map[string]any); spec != nil {
 		delete(spec, "enabled")
 	}
-	// inFile checks that the task's file reads spec.enabled as want, and is the saved file in every other key.
-	inFile := func(step string, want bool) {
+	return created, func(step string, want bool) {
 		t.Helper()
 		data, err := os.ReadFile(file)
 		if err != nil {
@@ -1014,6 +1011,15 @@ func TestDisablingAndEnablingChangeTheFileAndTheFirings(t *testing.T) {
 				saved)
 		}
 	}
+}
+
+// Disabling a task over the API rewrites spec.enabled in its file and no other key, and takes away its next firing: the
+// minute boundary that comes while it is disabled starts no execution.
+func TestDisablingChangesTheFileAndSkipsTheFiring(t *testing.T) {
+	// It waits for a real minute boundary, so it runs in parallel with the other tests that do: their waits overlap.
+	t.Parallel()
+	d := startDaemon(t, t.TempDir())
+	created, inFile := saveToggledTask(t, d)
 
 	disabled := d.call("POST", "/tasks/toggled/disable", nil, 200)
 	got := d.call("GET", "/tasks/toggled", nil, 200)
@@ -1052,9 +1058,20 @@ func TestDisablingAndEnablingChangeTheFileAndTheFirings(t *testing.T) {
 		t.Errorf("the firing while disabled is recorded as %v, want skipped because the task was disabled", skipped)
 	}
 	if runs := d.list("/executions?taskId=toggled"); len(runs) != 0 {
-		t.Fatalf("the disabled task has executions %v across the minute boundary %v, want none", runs,
+		t.Errorf("the disabled task has executions %v across the minute boundary %v, want none", runs,
 			skipped["scheduledFor"])
 	}
+}
+
+// Enabling a disabled task over the API rewrites spec.enabled in its file and no other key, and gives it a next firing
+// again, which starts a scheduled execution. The daemon's unit tests enable a task after a firing it skipped; this one
+// enables it before the next boundary, so that it waits for the same boundary as the disabling test.
+func TestEnablingChangesTheFileAndRunsTheNextFiring(t *testing.T) {
+	// It waits for a real minute boundary, so it runs in parallel with the other tests that do: their waits overlap.
+	t.Parallel()
+	d := startDaemon(t, t.TempDir())
+	_, inFile := saveToggledTask(t, d)
+	d.call("POST", "/tasks/toggled/disable", nil, 200)
 
 	enabled := d.call("POST", "/tasks/toggled/enable", nil, 200)
 	next, err := time.Parse(time.RFC3339, fmt.Sprint(enabled["nextFireAt"]))
@@ -1063,7 +1080,7 @@ func TestDisablingAndEnablingChangeTheFileAndTheFirings(t *testing.T) {
 			enabled["enabled"], enabled["nextFireAt"], err)
 	}
 	inFile("after the enable", true)
-	deadline = next.Add(60 * time.Second)
+	deadline := next.Add(60 * time.Second)
 	var runs []map[string]any
 	for len(runs) == 0 {
 		if time.Now().After(deadline) {
