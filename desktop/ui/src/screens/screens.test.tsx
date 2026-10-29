@@ -208,7 +208,7 @@ describe("screens", () => {
     expect(renderToString(<OverviewScreen onOpenExecution={() => {}} onNewTask={() => {}} onOpenTask={() => {}} />)).toContain("Daemon");
     expect(renderToString(<TasksScreen view={{ kind: "list" }} onView={() => {}} onOpenExecution={() => {}} />)).toContain("Implement GitHub issues");
     expect(renderToString(<HistoryScreen openId={null} onOpen={() => {}} />)).toContain("Estado");
-    expect(renderToString(<SettingsScreen />)).toContain("Agentes instalados");
+    expect(renderToString(<SettingsScreen />)).toContain("Ferramentas de IA");
     expect(renderToString(<OnboardingScreen onFinish={() => {}} onCreateTask={() => {}} onImport={() => {}} />)).toContain("Boas-vindas");
   });
 
@@ -480,6 +480,20 @@ describe("the executions screen's cards", () => {
     }
   });
 
+  it("names what runs the execution, an AI tool or a program, under one label", async () => {
+    const script: ExecutionSummary = { ...running, id: "exec-script", taskType: "script", harness: "", model: undefined };
+    await render(
+      <>
+        <ExecutionCard execution={running} selected={false} onSelect={() => {}} now={Date.now()} onCancel={() => {}} cancelling={false} />
+        <ExecutionCard execution={script} selected={false} onSelect={() => {}} now={Date.now()} onCancel={() => {}} cancelling={false} />
+      </>,
+    );
+    const runBy = [...host!.querySelectorAll(".exec-card__fields > div")]
+      .filter((field) => field.querySelector("dt")!.textContent === "Executada por")
+      .map((field) => field.querySelector("dd")!.textContent);
+    expect(runBy).toEqual(["Claude Code", "Programa"]);
+  });
+
   it("disables the card's Cancel for a finished execution", async () => {
     const onCancel = vi.fn();
     await render(<ExecutionCard execution={finished} selected={false} onSelect={() => {}} now={Date.now()} onCancel={onCancel} cancelling={false} />);
@@ -575,7 +589,7 @@ describe("settings sections", () => {
     }));
     expect(groups).toEqual([
       { heading: "Interface", sections: ["Geral", "Notificações"] },
-      { heading: "Agentes e tarefas", sections: ["Agentes instalados", "Caminhos"] },
+      { heading: "Execução", sections: ["Ferramentas de IA", "Caminhos"] },
       { heading: "Este computador", sections: ["Daemon", "Armazenamento", "Segurança"] },
     ]);
     expect(nav.lastElementChild!.textContent).toBe("Sobre");
@@ -603,7 +617,7 @@ describe("settings sections", () => {
   it.each([
     ["general", ["Idioma", "Barra de menus"], ["Mostrar o HarmFlow na barra de menus", "Manter o HarmFlow na barra de menus ao sair com ⌘Q"]],
     ["notifications", ["Avisos"], ["Nível de notificação"]],
-    ["agents", ["Agentes", "Ferramentas"], ["Detectar de novo", "Claude Code", "Definir caminho"]],
+    ["agents", ["Ferramentas de IA", "Ferramentas de linha de comando"], ["Detectar de novo", "Claude Code", "Definir caminho"]],
     ["paths", ["Variáveis de caminho", "Pastas permitidas"], ["PROJECTS_ROOT", "/srv/repos", "Adicionar variável", "Adicionar pasta"]],
     ["daemon", ["Estado", "Inicialização"], ["Em execução agora", "Parar o daemon", "Iniciar o daemon automaticamente com o sistema"]],
     ["storage", ["Logs", "Workspaces", "Diretórios"], ["Manter logs de execução por (dias)", "Limpar workspaces", "Disco usado pelo HarmFlow"]],

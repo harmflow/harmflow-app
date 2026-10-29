@@ -5,7 +5,7 @@ export const ptBR: Resources = {
     name: "HarmFlow",
     tagline: "Agentes locais, resultados reais.",
     quote: "Agendamentos que cumprem a palavra. Resultados que você revisa.",
-    quoteSignature: "HarmFlow // orquestração para os agentes em que você já confia.",
+    quoteSignature: "HarmFlow // orquestração para as ferramentas de IA em que você já confia.",
   },
   nav: {
     overview: "Visão geral",
@@ -99,7 +99,7 @@ export const ptBR: Resources = {
     executions: {
       breadcrumb: "execuções",
       title: "Execuções em tempo real",
-      subtitle: "Acompanhe seus agentes em execução e o progresso das tarefas agendadas.",
+      subtitle: "Acompanhe suas execuções em andamento e o progresso das tarefas agendadas.",
     },
     overview: {
       breadcrumb: "visão geral",
@@ -194,7 +194,7 @@ export const ptBR: Resources = {
     },
     harness: {
       started: "Harness iniciado",
-      message: "Mensagem do agente",
+      message: "Mensagem da sessão",
       output: "Saída do harness",
       exited: "Harness encerrado",
       quota_exhausted: "Cota do harness esgotada",
@@ -588,7 +588,7 @@ export const ptBR: Resources = {
     goToTasks: "Ir para tarefas",
     card: {
       task: "Tarefa",
-      agent: "Agente",
+      agent: "Executada por",
       repository: "Repositório",
       start: "Início",
       step: "Etapa",
@@ -631,9 +631,9 @@ export const ptBR: Resources = {
         noHarness: "Uma tarefa de script executa um programa, não um harness: não tem modelo, prompt nem custo.",
       },
       chat: {
-        agent: "Agente",
-        noMessages: "Nenhuma mensagem do agente ainda.",
-        messagesExpired: "As mensagens do agente foram apagadas com o log expirado.",
+        agent: "Sessão",
+        noMessages: "Nenhuma mensagem da sessão ainda.",
+        messagesExpired: "As mensagens da sessão foram apagadas com o log expirado.",
       },
       eventDetails: "Detalhes do evento",
       noEventSelected: "Selecione um evento para ver seus detalhes.",
@@ -682,7 +682,7 @@ export const ptBR: Resources = {
       workItems: "Itens de trabalho",
       running: "em execução",
       commandStatus: { running: "Executando", succeeded: "Bem-sucedido", failed: "Falhou", declined: "Recusado" },
-      noConversation: "Somente observação: o HarmFlow nunca envia entrada a um agente em execução.",
+      noConversation: "Somente observação: o HarmFlow nunca envia entrada a uma sessão em execução.",
       definitionRevision: "Definição",
       costs: {
         cost: "Custo estimado",
@@ -737,7 +737,7 @@ export const ptBR: Resources = {
         emptyHint: "O harness não informou uso: a tentativa terminou antes de informar, ou esta versão do harness não o informa.",
         note: "Uma estimativa a preços de tabela da API. Num plano por assinatura os tokens não são cobrados um a um: isto é o que custariam na API.",
         noteAsOf: "Uma estimativa a preços de tabela da API de {{date}}. Num plano por assinatura os tokens não são cobrados um a um: isto é o que custariam na API.",
-        noteRunning: "Os tokens de entrada e de cache se atualizam enquanto o agente trabalha; o custo aparece quando a tentativa termina.",
+        noteRunning: "Os tokens de entrada e de cache se atualizam enquanto a sessão trabalha; o custo aparece quando a tentativa termina.",
         noteAttemptPartial: "A tentativa {{number}} terminou antes de o {{harness}} informar a contagem final: seus tokens de entrada e de cache são parciais, sem saída nem custo.",
         noteAttemptUnpriced: "Tentativa {{number}}: a tabela de preços não tem preço para {{model}}.",
         noteAttemptNoModel: "Tentativa {{number}}: o {{harness}} não informa seu modelo, e sua configuração não define nenhum.",
@@ -1104,7 +1104,7 @@ export const ptBR: Resources = {
     sections: {
       general: "Geral",
       notifications: "Notificações",
-      agents: "Agentes instalados",
+      agents: "Ferramentas de IA",
       paths: "Caminhos",
       daemon: "Daemon",
       storage: "Armazenamento",
@@ -1112,13 +1112,13 @@ export const ptBR: Resources = {
       about: "Sobre",
     },
     sectionList: "Seções das configurações",
-    groups: { interface: "Interface", agents: "Agentes e tarefas", computer: "Este computador" },
+    groups: { interface: "Interface", agents: "Execução", computer: "Este computador" },
     subheads: {
       language: "Idioma",
       menuBar: "Barra de menus",
       notices: "Avisos",
-      agents: "Agentes",
-      tools: "Ferramentas",
+      agents: "Ferramentas de IA",
+      tools: "Ferramentas de linha de comando",
       variables: "Variáveis de caminho",
       allowedFolders: "Pastas permitidas",
       status: "Estado",
@@ -1203,11 +1203,11 @@ export const ptBR: Resources = {
     scope: {
       title: "Tudo roda neste computador",
       body:
-        "O HarmFlow agenda, executa e monitora automações realizadas pelos harnesses de agentes que você já instalou — Claude Code e Codex. Ele nunca os instala, atualiza ou faz login neles.",
+        "O HarmFlow agenda, executa e monitora automações realizadas pelas ferramentas de IA que você já instalou — Claude Code e Codex. Ele nunca as instala, atualiza ou faz login nelas.",
       points: {
         local: "Tarefas, estado e logs ficam nesta máquina.",
         permissions:
-          "Cada tarefa declara o que seu agente pode tocar; o HarmFlow aplica isso pelos controles do próprio harness e avisa quando uma restrição não pode ser aplicada.",
+          "Cada tarefa declara o que sua sessão pode tocar; o HarmFlow aplica isso pelos controles do próprio harness e avisa quando uma restrição não pode ser aplicada.",
         github: "O trabalho no GitHub usa o seu login do gh e do Git. O implementador de issues embutido nunca faz merge de um pull request.",
         api: "O painel fala com o daemon por uma API local autenticada.",
       },
@@ -1232,7 +1232,7 @@ export const ptBR: Resources = {
     },
     done: {
       title: "Tudo pronto",
-      body: "As execuções em tempo real são a tela principal: cada agente em execução, seus eventos e a fila.",
+      body: "As execuções em tempo real são a tela principal: cada execução em andamento, seus eventos e a fila.",
       go: "Ir para as execuções em tempo real",
     },
   },

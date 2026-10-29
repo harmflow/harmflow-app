@@ -474,11 +474,11 @@ describe("settings sections", () => {
     expect(item("General").getAttribute("aria-current")).toBeNull();
     expect([...host!.querySelectorAll(".settings__section .panel__title")].map((h) => h.textContent)).toEqual(["Logs", "Workspaces", "Directories"]);
 
-    await act(async () => item("Installed agents").click());
-    expect(breadcrumb()).toBe(">_ settings / installed agents");
+    await act(async () => item("AI tools").click());
+    expect(breadcrumb()).toBe(">_ settings / ai tools");
     await act(async () => void i18n.changeLanguage("pt-BR"));
     try {
-      expect(breadcrumb()).toBe(">_ configurações / agentes instalados");
+      expect(breadcrumb()).toBe(">_ configurações / ferramentas de ia");
     } finally {
       await act(async () => void i18n.changeLanguage("en-US"));
     }
@@ -800,7 +800,7 @@ describe("unsaved changes", () => {
     },
     {
       draft: "a harness's path set by hand (its Save)",
-      section: "Installed agents",
+      section: "AI tools",
       hold: async () => {
         await click(button(host!, "Set path"));
         await type(host!.querySelector<HTMLInputElement>(".inventory .inline-form input")!, "/opt/claude/bin/claude");

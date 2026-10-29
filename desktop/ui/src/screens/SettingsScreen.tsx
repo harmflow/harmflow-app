@@ -1,5 +1,5 @@
 // Settings, divided into sections: a list of them on the left, and the open one beside it. Interface: the language, the
-// menu bar, and notifications. Agents and tasks: the installed agents and tools, and the paths a task may use. This
+// menu bar, and notifications. Execution: the AI tools and the command-line tools, and the paths a task may use. This
 // computer: the daemon, storage, and local API security. About stands alone at the foot of the list.
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
