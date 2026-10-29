@@ -1,6 +1,7 @@
 package procutil
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -23,7 +24,7 @@ import (
 
 // helperVariable makes the test binary stand in for a program that is not an Apple platform binary, whose environment
 // KERN_PROCARGS2 returns: "daemonize" starts a daemon and exits, the first half of a double fork; "daemon" ignores
-// SIGTERM and sleeps.
+// SIGTERM and sleeps; "agent" records each line written to a FIFO, as a helper such as ssh-agent serves its socket.
 const helperVariable = "PROCUTIL_HELPER"
 
 func TestMain(m *testing.M) {
@@ -41,6 +42,17 @@ func TestMain(m *testing.M) {
 		signal.Ignore(syscall.SIGTERM)
 		time.Sleep(10 * time.Minute)
 		os.Exit(0)
+	case "agent":
+		ended := make(chan error, 1)
+		go func() {
+			ended <- agent(os.Getenv("PROCUTIL_FIFO"), os.Getenv("PROCUTIL_USES"), os.Getenv("PROCUTIL_PIDFILE"))
+		}()
+		select {
+		case <-ended:
+			os.Exit(2)
+		case <-time.After(10 * time.Minute):
+			os.Exit(0)
+		}
 	}
 	// The readers of a process's output are goroutines; none may outlive the test that started it.
 	goleak.VerifyTestMain(m)
@@ -52,6 +64,31 @@ func writePid(path string, pid int) error {
 		return err
 	}
 	return os.Rename(path+".tmp", path)
+}
+
+// agent appends each line written to the FIFO at fifo to the file uses. It writes its pid to pidFile once the FIFO is
+// open, so a writer's open no longer waits for it; it opens the FIFO for reading and writing, so its reads never end
+// when a writer closes, and it returns only when a read or a write fails. It does not ignore SIGTERM: any signal the
+// daemon sent it would end it.
+func agent(fifo, uses, pidFile string) error {
+	f, err := os.OpenFile(fifo, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	out, err := os.OpenFile(uses, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	if err := writePid(pidFile, os.Getpid()); err != nil {
+		return err
+	}
+	s := bufio.NewScanner(f)
+	for s.Scan() {
+		if _, err := out.WriteString(s.Text() + "\n"); err != nil {
+			return err
+		}
+	}
+	return s.Err()
 }
 
 // Cancelling ends the whole process tree after the grace period, even a child that ignores SIGTERM.
@@ -530,6 +567,61 @@ func TestStopLeavesAnotherExecutionsProcess(t *testing.T) {
 		if _, ok := endedOne(p.Ended(), o.pid); ok {
 			t.Errorf("ended %+v names process %d, which carries another execution's id", p.Ended(), o.pid)
 		}
+	}
+}
+
+// A helper the user started, as a user's own ssh-agent runs, keeps running when an execution whose harness used it is
+// cancelled: it is not the harness's descendant, it runs in a session of its own, and its environment carries no
+// execution's id. The test binary stands in for it, so the scan can read that environment. The harness's own daemon,
+// which carries the execution's id, shows that the scan ran.
+func TestStopLeavesAHelperTheUserStarted(t *testing.T) {
+	needProcessTable(t)
+	dir := t.TempDir()
+	fifo, uses := filepath.Join(dir, "agent"), filepath.Join(dir, "uses")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatalf("Mkfifo(%s): %v", fifo, err)
+	}
+	cmd := exec.Command(os.Args[0])
+	cmd.Env = testEnv(helperVariable+"=agent", "PROCUTIL_FIFO="+fifo, "PROCUTIL_USES="+uses,
+		"PROCUTIL_PIDFILE="+filepath.Join(dir, "agent.pid"))
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	// Reaped even when an assertion fails, so no run leaves a process behind for the next test's scan.
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	helper := waitForPid(t, nil, filepath.Join(dir, "agent.pid"))
+	id := executionID(t)
+	pidFile := filepath.Join(dir, "daemon.pid")
+	env := testEnv(executionIDVariable+"="+id, helperVariable+"=daemonize", "PROCUTIL_PIDFILE="+pidFile)
+	p := startShell(t, `echo use > "$2"; "$1"; echo started; sleep 300`, env, id, nil, os.Args[0], fifo)
+	ours := waitForPid(t, p, pidFile)
+	waitFor(t, "launchd to adopt the daemon", func() bool {
+		info, ok := processInfo(ours.pid)
+		return ok && info.ppid == 1
+	})
+	waitFor(t, "the helper to record the harness's use", func() bool {
+		data, err := os.ReadFile(uses)
+		return err == nil && string(data) == "use\n"
+	})
+	cancelAndWait(p, 300*time.Millisecond)
+	if !running(helper) {
+		t.Errorf("the helper %d the user started was ended", helper.pid)
+	}
+	if _, ok := endedOne(p.Ended(), helper.pid); ok {
+		t.Errorf("ended %+v names the helper %d the user started", p.Ended(), helper.pid)
+	}
+	if running(ours) {
+		t.Errorf("this execution's daemon %d survived", ours.pid)
+	}
+	if _, ok := endedOne(p.Ended(), ours.pid); !ok {
+		t.Errorf("ended %+v, want this execution's daemon %d", p.Ended(), ours.pid)
+	}
+	if _, ok := endedOne(p.Ended(), p.Pid()); !ok {
+		t.Errorf("ended %+v, want the harness %d", p.Ended(), p.Pid())
 	}
 }
 
