@@ -12,9 +12,9 @@ read and held on their own, and the three instruments are never averaged.
 
 | Part | Floors | Held by | CI job |
 |---|---|---|---|
-| Daemon, each Go package | [`daemon/coverage-floors.txt`](daemon/coverage-floors.txt) | `make coverage-daemon` | `integration` |
-| Interface, `desktop/ui` | `thresholds` in [`desktop/ui/vite.config.ts`](desktop/ui/vite.config.ts) | `pnpm -C desktop test:coverage` | `desktop` |
-| Shell, `desktop/src-tauri` | `RUST_FLOOR_LINES` and `RUST_FLOOR_FUNCTIONS` in the [`Makefile`](Makefile) | `make coverage-desktop` | `desktop` |
+| Daemon, each Go package | [`daemon/coverage-floors.txt`](/daemon/coverage-floors.txt) | `make coverage-daemon` | `integration` |
+| Interface, `desktop/ui` | `thresholds` in [`desktop/ui/vite.config.ts`](/desktop/ui/vite.config.ts) | `pnpm -C desktop test:coverage` | `desktop` |
+| Shell, `desktop/src-tauri` | `RUST_FLOOR_LINES` and `RUST_FLOOR_FUNCTIONS` in the [`Makefile`](/Makefile) | `make coverage-desktop` | `desktop` |
 
 A Go package with no line in `daemon/coverage-floors.txt` is held at 0, so a new package never fails the build for
 want of a floor. A floor whose package no longer has statements fails until its line is removed or renamed. A
@@ -26,7 +26,7 @@ ERROR: Coverage for lines (67.7%) does not meet global threshold (99%)
 coverage: desktop/src-tauri: lines 27.49% (218 of 793) is below its floor of 99.00%
 ```
 
-The nightly [Coverage workflow](.github/workflows/coverage.yml) reads `main` and shows each reading beside its floor,
+The nightly [Coverage workflow](/.github/workflows/coverage.yml) reads `main` and shows each reading beside its floor,
 with the headroom above it, in its run's summary. It is a view, not the check: it runs with `HOLD_FLOORS=` empty, so it
 fails only when a test does, and the floors stay held by CI.
 
@@ -48,7 +48,7 @@ The daemon's and the shell's floors come from this reading, taken on CI's Linux 
 repository's CI checks Linux only. Each floor equals its ratio. Where the runs differ, the table holds the lower:
 `internal/app` read 2490 statements in the first two runs and 2489 in the third, which is the figure here, since its
 timing-dependent paths do not run the same way every time. Every other figure was the same in every run. A test that
-needs another platform skips on Linux (`GO-CODE-GUIDE.md`, "Tests by
+needs another platform skips on Linux (`go-code-guide.md`, "Tests by
 platform"), so what only that platform runs is not counted here; *Floors lowered* below says which floors fell for it.
 The interface's floors keep their reading, of 2026-10-23, below. The readings before this one, on macOS, are in this
 file's history.

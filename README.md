@@ -119,7 +119,7 @@ in its own pull request and is reviewed on its own.
 
 This repository's CI checks Linux only, for the code as it is published here; every other platform is built and
 checked outside this repository. Development stays on macOS. A test that needs another platform skips on Linux and
-says why, as [`GO-CODE-GUIDE.md`](GO-CODE-GUIDE.md) describes under "Tests by platform". The workflows, the scripts they
+says why, as [`docs/go-code-guide.md`](docs/go-code-guide.md) describes under "Tests by platform". The workflows, the scripts they
 run, and the Dependabot groups are described in [`docs/ci.md`](docs/ci.md).
 
 ## Commands
@@ -129,7 +129,7 @@ run, and the Dependabot groups are described in [`docs/ci.md`](docs/ci.md).
 | `make help` | List every target |
 | `make deps` | Install the desktop's JavaScript dependencies |
 | `make test` | Run the daemon, desktop, and integration tests |
-| `make coverage` | Read the tests' coverage of the daemon, the interface, and the shell, and fail below a floor; the floors and their reading are in [`COVERAGE.md`](COVERAGE.md) |
+| `make coverage` | Read the tests' coverage of the daemon, the interface, and the shell, and fail below a floor; the floors and their reading are in [`docs/coverage.md`](docs/coverage.md) |
 | `make dev-daemon` | Run the daemon on `.harmflow-dev/home` |
 | `make dev-ui` | Serve the interface in a browser, proxied to that daemon (`http://localhost:1420`) |
 | `make dev-desktop` | Run the desktop shell against that daemon |
