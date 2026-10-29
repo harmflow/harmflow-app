@@ -817,9 +817,11 @@ func TestHealthNamesTheBuildTime(t *testing.T) {
 // scheduled task while autostart reads off, so "running now" and "starts at login" are two states. HOME is a throwaway
 // directory: the daemon's user agent would lie under it, never in the developer's own LaunchAgents.
 func TestHandStartedDaemonFiresWithAutostartOff(t *testing.T) {
+	// It waits for a real minute boundary, so it runs in parallel with the other tests that do: their waits overlap.
+	t.Parallel()
 	userHome := t.TempDir()
-	t.Setenv("HOME", userHome)
-	d := startDaemon(t, t.TempDir())
+	// The daemon's HOME alone: a parallel test cannot set the test process's environment.
+	d := startDaemon(t, t.TempDir(), "HOME="+userHome)
 	plist := filepath.Join(userHome, "Library", "LaunchAgents", "com.harmflow.daemon.plist")
 	autostartOff := func(step string) {
 		t.Helper()
@@ -970,6 +972,8 @@ func TestTaskLifecycle(t *testing.T) {
 // minute boundary that comes while it is disabled starts no execution. Enabling it gives it a next firing again, which
 // starts a scheduled execution.
 func TestDisablingAndEnablingChangeTheFileAndTheFirings(t *testing.T) {
+	// It waits for real minute boundaries, so it runs in parallel with the other tests that do: their waits overlap.
+	t.Parallel()
 	d := startDaemon(t, t.TempDir())
 	// The task is disabled before the minute boundary its save announces, so a save in the last seconds of a minute
 	// waits for the next one: that boundary must not fire the task before the disable reaches it.
@@ -3214,6 +3218,8 @@ func TestFiringsSurviveAKill(t *testing.T) {
 // A scheduled task runs from its firing to completed while no client is connected. On the daemon's side, a client that
 // connects only afterwards lists the execution, recovers its whole history, and resumes the stream after it.
 func TestScheduledRunWithDashboardClosed(t *testing.T) {
+	// It waits for a real minute boundary, so it runs in parallel with the other tests that do: their waits overlap.
+	t.Parallel()
 	d := startDaemon(t, t.TempDir())
 	// The task the late client runs to cause a new event; with no schedule, it never fires.
 	d.call("POST", "/tasks", map[string]any{"yaml": task("late", "SCENARIO=ok", "")}, 201)
