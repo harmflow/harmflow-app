@@ -892,13 +892,21 @@ func TestFailureLeavesTheOthersRunning(t *testing.T) {
 
 // A harness that exits on its own keeps the outcome its exit gives, though a cancel comes while the process it left
 // running, which ignores SIGTERM, is ended over the grace period; that process is gone once the execution ends.
+//
+// $! is the subshell the harness forks, which ignores SIGTERM only once it has run its trap, and the daemon sends
+// SIGTERM to what the harness left as soon as the harness exits. Under load the harness could exit before that trap
+// ran: the subshell died of the SIGTERM, nothing was left for the grace period, and the execution ended before the
+// cancel came. So the subshell marks its trap in place before it execs sleep, and the harness polls for the mark, 100
+// times at most, before it writes the child's pid and exits; a trap never set fails the wait for that pid rather than
+// the cancel.
 func TestHarnessExitKeepsItsOutcomeThroughACancel(t *testing.T) {
 	e := newEnv(t)
 	e.create("late", "  execution:\n    cancelGraceSeconds: 2\n")
 	dir := t.TempDir()
 	e.claude.setScript(func(ports.RunRequest) string {
-		return fmt.Sprintf("(trap '' TERM; exec sleep 600) >/dev/null 2>&1 & echo $! > %[1]s/child; "+
-			"echo $$ > %[1]s/harness; echo 'END ok'", dir)
+		return fmt.Sprintf("(trap '' TERM; : > %[1]s/trapped; exec sleep 600) >/dev/null 2>&1 & c=$!; i=0; "+
+			"while [ ! -e %[1]s/trapped ] && [ $i -lt 100 ]; do sleep 0.05; i=$((i+1)); done; "+
+			"[ -e %[1]s/trapped ] && echo $c > %[1]s/child; echo $$ > %[1]s/harness; echo 'END ok'", dir)
 	})
 	r, err := e.app.RunTask("late")
 	if err != nil || r.Outcome != "started" {
