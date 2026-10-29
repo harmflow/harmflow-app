@@ -104,12 +104,19 @@ test-integration: daemon ## Tests across the daemon's process boundary, with fak
 .PHONY: coverage
 coverage: coverage-daemon coverage-desktop ## Read the tests' coverage of the daemon, the interface, and the shell
 
+# The unit tests run beside the integration package, which takes longest, so the target lasts about as long as that
+# package alone; the suites are held to heavier load in the nightly Stress workflow. The integration output comes as it
+# runs, and the unit tests' is held in a file and printed once both have ended, so neither is interleaved with the
+# other. Either run failing fails the target, after both have ended.
 .PHONY: coverage-daemon
 coverage-daemon: ## Statements per package of the daemon, unit and integration data merged, held at their floors
 	rm -rf "$(COVERAGE)/daemon" "$(COVERAGE)/daemon.out"
 	mkdir -p "$(COVERAGE)/daemon/unit" "$(COVERAGE)/daemon/integration"
-	go -C daemon test -count=1 -covermode=atomic -coverpkg=./... ./... -args -test.gocoverdir="$(COVERAGE)/daemon/unit"
-	GOCOVERDIR="$(COVERAGE)/daemon/integration" go -C tests test -count=1 -timeout $(INTEGRATION_TIMEOUT) ./...
+	go -C daemon test -count=1 -covermode=atomic -coverpkg=./... ./... -args -test.gocoverdir="$(COVERAGE)/daemon/unit" \
+		> "$(COVERAGE)/daemon/unit.log" 2>&1 & unit=$$!; \
+	GOCOVERDIR="$(COVERAGE)/daemon/integration" go -C tests test -count=1 -timeout $(INTEGRATION_TIMEOUT) ./...; \
+	integration=$$?; wait $$unit; unit=$$?; cat "$(COVERAGE)/daemon/unit.log"; \
+	test $$unit -eq 0 && test $$integration -eq 0
 	go tool covdata textfmt -i="$(COVERAGE)/daemon/unit,$(COVERAGE)/daemon/integration" -o "$(COVERAGE)/daemon.out"
 	go -C tests run ./coverage -floors "$(CURDIR)/daemon/coverage-floors.txt" -hold=$(if $(HOLD_FLOORS),true,false) \
 		"$(COVERAGE)/daemon.out"
