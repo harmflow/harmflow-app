@@ -1,0 +1,27 @@
+apiVersion: harmflow/v1alpha1
+kind: TaskTemplate
+metadata:
+  id: hf-github-issues
+  name:
+    pt-BR: Implementar issues do GitHub
+    en-US: Implement GitHub issues
+    es-ES: Implementar issues de GitHub
+  description:
+    pt-BR: Seleciona issues, implementa num worktree, executa os testes e abre um pull request em rascunho.
+    en-US: Selects issues, implements them in a worktree, runs the tests, and opens a draft pull request.
+    es-ES: Selecciona issues, las implementa en un worktree, ejecuta las pruebas y abre un pull request en borrador.
+spec:
+  type: github
+  # The task starts as the built-in agent's copy, which is its prompt.
+  selectedAgent: hf-github-issue-implementer
+  skills:
+    - hf-github-issue-queue
+    - hf-github-worktree
+    - hf-github-draft-pr
+  harness:
+    preferred:
+      provider: claude-code
+  github:
+    # One repository for the task editor to ask for.
+    repositories:
+      - baseBranch: main

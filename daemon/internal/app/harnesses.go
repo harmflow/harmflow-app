@@ -170,14 +170,10 @@ type AgentCopy struct {
 }
 
 // TaskTypeInfo is a task type as the editor offers it: the key of its parameters block in a task's spec, nil for a type
-// with none, the agents and skills a new task of the type starts with, and the agent it selects, whose copy becomes its
-// prompt.
+// with none. What a new task of the type starts with is a template's.
 type TaskTypeInfo struct {
-	ID            string   `json:"id"`
-	ParametersKey *string  `json:"parametersKey"`
-	DefaultAgents []string `json:"defaultAgents"`
-	DefaultSkills []string `json:"defaultSkills"`
-	SelectedAgent string   `json:"selectedAgent,omitempty"`
+	ID            string  `json:"id"`
+	ParametersKey *string `json:"parametersKey"`
 }
 
 // Catalog is what a task can cite: the agents and skills, built in or the user's, and the task types; Problems are what
@@ -191,14 +187,6 @@ type Catalog struct {
 
 // BuiltinPrefix starts the name of every built-in agent or skill, and of no user's one HarmFlow lists.
 const BuiltinPrefix = "hf-"
-
-// BuiltinIssueAgent is the built-in issue implementer, which a new GitHub task selects by default and need not keep: it
-// carries out the task and uses BuiltinIssueSkills.
-const BuiltinIssueAgent = "hf-github-issue-implementer"
-
-// BuiltinIssueSkills are the built-in skills of the issue implementer, a new GitHub task's default skills. With
-// BuiltinIssueAgent, they are the MVP's only built-in set.
-var BuiltinIssueSkills = []string{"hf-github-issue-queue", "hf-github-worktree", "hf-github-draft-pr"}
 
 func (a *App) builtinDir() catalog.Dir { return catalog.Dir{Root: a.d.Paths.Builtins, Builtin: true} }
 
@@ -333,10 +321,9 @@ func (a *App) Catalog(ctx context.Context, workspace, task string) Catalog {
 	}
 	key, scriptKey := "github", "script"
 	c.TaskTypes = []TaskTypeInfo{
-		{ID: domain.TypeGitHub, ParametersKey: &key, DefaultAgents: []string{},
-			DefaultSkills: append([]string{}, BuiltinIssueSkills...), SelectedAgent: BuiltinIssueAgent},
-		{ID: domain.TypeGeneral, ParametersKey: nil, DefaultAgents: []string{}, DefaultSkills: []string{}},
-		{ID: domain.TypeScriptTask, ParametersKey: &scriptKey, DefaultAgents: []string{}, DefaultSkills: []string{}},
+		{ID: domain.TypeGitHub, ParametersKey: &key},
+		{ID: domain.TypeGeneral, ParametersKey: nil},
+		{ID: domain.TypeScriptTask, ParametersKey: &scriptKey},
 	}
 	return c
 }

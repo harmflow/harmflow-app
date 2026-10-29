@@ -72,7 +72,7 @@ var allowlist = []allowance{
 	{"internal/app/script.go", "internal/adapters/harness/procutil", "a script's program is found, started, identified, and ended with procutil, not through a port"},
 	{"internal/app/tasks.go", "internal/adapters/eventlog", "an exported task is redacted with eventlog.Redact"},
 	{"internal/app/tasks.go", "internal/adapters/schema", "an imported script task's YAML is parsed again with schema.ParseYAML"},
-	{"internal/app/validate.go", "internal/adapters/schema", "task validation returns schema.Issue and uses ParseYAML, FromJSON, and LocatePointer"},
+	{"internal/app/validate.go", "internal/adapters/schema", "task and template validation return schema.Issue and use ParseYAML, FromJSON, and LocatePointer"},
 }
 
 // violation is one failure: an import against its package's rule, a stale allowlist entry, or a package no rule

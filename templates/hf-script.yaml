@@ -1,0 +1,16 @@
+apiVersion: harmflow/v1alpha1
+kind: TaskTemplate
+metadata:
+  id: hf-script
+  name:
+    pt-BR: Tarefa de script
+    en-US: Script task
+    es-ES: Tarea de script
+  description:
+    pt-BR: Executa um programa ou script seu num agendamento — no lugar de um agente do launchd, do Agendador de Tarefas ou do cron.
+    en-US: Runs a program or a script of yours on a schedule — in place of a launchd agent, the Task Scheduler, or cron.
+    es-ES: Ejecuta un programa o un script tuyo según una programación — en lugar de un agente de launchd, del Programador de tareas o de cron.
+spec:
+  type: script
+  # A program for the task editor to ask for, as an argument list.
+  script: {}

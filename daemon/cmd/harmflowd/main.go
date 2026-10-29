@@ -275,7 +275,8 @@ func acquireLock(path string, flock func(fd, how int) error) (*os.File, error) {
 	return f, nil
 }
 
-// findBuiltins locates the built-in agents and skills: inside the app bundle, next to the binary, or in a checkout.
+// findBuiltins locates the built-in agents, skills, and task templates: inside the app bundle, next to the binary, or in
+// a checkout. The templates sit beside the agents and skills, which tell the directory apart.
 func findBuiltins(flagValue string) string {
 	if flagValue != "" {
 		return flagValue

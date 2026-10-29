@@ -24,6 +24,7 @@ tags:
   - name: daemon
   - name: harnesses
   - name: tasks
+  - name: templates
   - name: executions
   - name: events
   - name: queue
@@ -187,6 +188,83 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Catalog" }
+
+  /templates:
+    get:
+      tags: [templates]
+      operationId: listTemplates
+      summary: List the task templates, each with its validity
+      description: >-
+        The built-in templates, which ship with HarmFlow, sorted by identifier. An invalid one is listed with the
+        errors of its file, and is never offered for creating a task.
+      responses:
+        "200":
+          description: Every template.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Template" }
+
+  /templates/{templateId}:
+    parameters:
+      - $ref: "#/components/parameters/TemplateId"
+    put:
+      tags: [templates]
+      operationId: updateTemplate
+      summary: Change a template
+      description: >-
+        Built-in templates are read-only: an identifier with the hf- prefix, a built-in template's or one no template
+        has yet, is refused, and nothing is written.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TemplateInput" }
+      responses:
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [templates]
+      operationId: deleteTemplate
+      summary: Delete a template
+      description: Built-in templates are read-only, so a built-in template's identifier is refused.
+      responses:
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /templates/{templateId}/draft:
+    parameters:
+      - $ref: "#/components/parameters/TemplateId"
+    post:
+      tags: [templates]
+      operationId: draftTaskFromTemplate
+      summary: Build a new task's document from a template, writing nothing
+      description: >-
+        The task is named after the template in the language the request names, and gets an identifier no task has.
+        When the template selects an agent, the document starts as that agent's copy, with its origin, as selecting
+        the agent in the task editor makes it, and then takes the fields the template sets itself, which keep the
+        template's values; when this machine lacks the agent, the document holds no prompt. The document is not
+        validated: the values the template leaves unset are for the task editor to ask for, and saving the task
+        validates it as any task.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NewTaskRequest" }
+      responses:
+        "200":
+          description: The new task's document.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NewTask" }
+        "400":
+          description: The request names no language of the interface.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Invalid" }
 
   /tasks:
     get:
@@ -650,6 +728,11 @@ components:
       in: path
       required: true
       schema: { type: string }
+    TemplateId:
+      name: templateId
+      in: path
+      required: true
+      schema: { type: string }
     HarnessId:
       name: harnessId
       in: path
@@ -715,6 +798,10 @@ components:
         - settings_allowed_folder_invalid
         - settings_change_breaks_task
         - harness_not_identified
+        - template_not_found
+        - template_read_only
+        - template_invalid
+        - template_language_invalid
         # Task syntax
         - yaml_syntax
         - document_empty
@@ -742,6 +829,8 @@ components:
         - id_file_mismatch
         - task_file_invalid
         - task_file_error
+        - template_id_not_builtin
+        - template_type_unknown
         - schedule_missing
         - schedule_empty
         - schedule_cron_and_interval
@@ -1101,20 +1190,68 @@ components:
         skills: { type: array, items: { $ref: "#/components/schemas/CatalogEntry" } }
         problems: { type: array, items: { $ref: "#/components/schemas/CatalogProblem" } }
         taskTypes:
+          description: The task types, each with the key of its parameters block in a task's spec, null for a type with none.
           type: array
           items:
             type: object
-            required: [id, parametersKey, defaultAgents, defaultSkills]
+            required: [id, parametersKey]
             properties:
               id: { type: string }
               parametersKey: { type: [string, "null"] }
-              defaultAgents: { type: array, items: { type: string } }
-              defaultSkills: { type: array, items: { type: string } }
-              selectedAgent:
-                description: >-
-                  The agent a new task of the type selects: the task starts as that agent's copy, with the agent as
-                  its origin. Absent for a type that selects none.
-                type: string
+
+    LocalizedText:
+      description: A text in each language of the interface.
+      type: object
+      required: [pt-BR, en-US, es-ES]
+      properties:
+        pt-BR: { type: string }
+        en-US: { type: string }
+        es-ES: { type: string }
+
+    Template:
+      description: >-
+        A task template, with its validity. A valid one has every field; an invalid one is listed with the errors of
+        its file, which validation locates by line and column when it can, and has the fields its file gives.
+      type: object
+      required: [id, source, path, validation]
+      properties:
+        id:
+          type: string
+          description: The template's identifier, which is its file's name without the extension.
+        source: { type: string, enum: [builtin] }
+        path: { type: string, description: The template's file. }
+        type: { type: string, description: The task type of the tasks created from it. }
+        name: { $ref: "#/components/schemas/LocalizedText" }
+        description: { $ref: "#/components/schemas/LocalizedText" }
+        selectedAgent: { type: string, description: The agent the tasks created from it select. }
+        validation: { $ref: "#/components/schemas/ValidationResult" }
+
+    TemplateDocument:
+      description: The template document of contracts/schemas/template.schema.json.
+      type: object
+      additionalProperties: true
+
+    TemplateInput:
+      description: Either the YAML text or the document of a template.
+      type: object
+      properties:
+        yaml: { type: string }
+        document: { $ref: "#/components/schemas/TemplateDocument" }
+
+    NewTaskRequest:
+      type: object
+      required: [language]
+      properties:
+        language:
+          description: The language of the interface, whose name of the template the task takes.
+          type: string
+          enum: [pt-BR, en-US, es-ES]
+
+    NewTask:
+      type: object
+      required: [document]
+      properties:
+        document: { $ref: "#/components/schemas/TaskDocument" }
 
     TaskDocument:
       description: The task document of contracts/schemas/task.schema.json.

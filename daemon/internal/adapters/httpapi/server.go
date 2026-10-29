@@ -111,6 +111,11 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, 200, s.App.Catalog(r.Context(), q.Get("workspace"), q.Get("task")))
 	})
 
+	h("GET /api/v1/templates", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.App.Templates()) })
+	h("PUT /api/v1/templates/{templateId}", s.updateTemplate)
+	h("DELETE /api/v1/templates/{templateId}", s.deleteTemplate)
+	h("POST /api/v1/templates/{templateId}/draft", s.draftTask)
+
 	h("GET /api/v1/tasks", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.App.ListTasks()) })
 	h("POST /api/v1/tasks", s.createTask)
 	h("POST /api/v1/tasks/validate", s.validateTask)
@@ -303,6 +308,31 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 201, v)
+}
+
+// updateTemplate reads no body: no template can be changed yet, as UpdateTemplate says.
+func (s *Server) updateTemplate(w http.ResponseWriter, r *http.Request) {
+	fail(w, s.App.UpdateTemplate(r.PathValue("templateId")))
+}
+
+func (s *Server) deleteTemplate(w http.ResponseWriter, r *http.Request) {
+	fail(w, s.App.DeleteTemplate(r.PathValue("templateId")))
+}
+
+func (s *Server) draftTask(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Language string `json:"language"`
+	}
+	if err := decode(r, &body); err != nil {
+		fail(w, err)
+		return
+	}
+	v, err := s.App.DraftTask(r.Context(), r.PathValue("templateId"), body.Language)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, 200, v)
 }
 
 func (s *Server) validateTask(w http.ResponseWriter, r *http.Request) {

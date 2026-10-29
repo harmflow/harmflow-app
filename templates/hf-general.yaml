@@ -1,0 +1,17 @@
+apiVersion: harmflow/v1alpha1
+kind: TaskTemplate
+metadata:
+  id: hf-general
+  name:
+    pt-BR: Tarefa geral
+    en-US: General task
+    es-ES: Tarea general
+  description:
+    pt-BR: Qualquer automação cujo comportamento vive no prompt, nos agentes e nas skills.
+    en-US: Any automation whose behavior lives in its prompt, agents, and skills.
+    es-ES: Cualquier automatización cuyo comportamiento vive en su prompt, sus agentes y sus skills.
+spec:
+  type: general
+  harness:
+    preferred:
+      provider: claude-code

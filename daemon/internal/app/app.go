@@ -145,6 +145,7 @@ type App struct {
 
 	mu            sync.Mutex
 	tasks         map[string]*taskEntry
+	templates     []*Template // the built-in templates, sorted by identifier, read at start
 	executions    map[string]*domain.Execution
 	running       map[string]*runHandle // by task id
 	inventory     map[string]ports.HarnessInfo
@@ -266,6 +267,7 @@ func (a *App) Start(ctx context.Context) error {
 	if err := a.loadTasks(ctx); err != nil {
 		return err
 	}
+	a.loadTemplates()
 	a.loadSchedule()
 	if err := a.recover(ctx); err != nil {
 		return err
