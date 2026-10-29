@@ -1647,6 +1647,162 @@ func TestCheckpointText(t *testing.T) {
 	}
 }
 
+// codexContext runs task, whose Claude Code attempt runs script and exhausts its quota, and returns the context.json
+// Codex got, after checking it against context.schema.json, and the session context Codex got.
+func (e *env) codexContext(task, script string) ([]byte, string) {
+	e.t.Helper()
+	e.claude.setScript(func(ports.RunRequest) string { return script + "\necho 'END quota'" })
+	var mu sync.Mutex
+	var sent string
+	e.codex.setScript(func(req ports.RunRequest) string {
+		mu.Lock()
+		defer mu.Unlock()
+		sent = req.Context
+		return "echo 'END ok'"
+	})
+	r, _ := e.app.RunTask(task)
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	if len(x.Attempts) != 2 || x.Attempts[0].Outcome != domain.AttemptQuotaExhausted {
+		e.t.Fatalf("attempts %+v, want a quota ending, then Codex", x.Attempts)
+	}
+	// The file is written again before each attempt, so the last one's is what it holds once the execution ended.
+	data, err := os.ReadFile(filepath.Join(x.ExecutionDir, "context.json"))
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	doc, err := schema.FromJSON(data)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	if issues := e.app.d.Validator.ValidateContext(doc); len(issues) > 0 {
+		e.t.Errorf("Codex's context.json does not fit context.schema.json: %+v\n%s", issues, data)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	return data, sent
+}
+
+// previousWorkItems reads the work items of each previous attempt from data, a context.json.
+func previousWorkItems(t *testing.T, data []byte) [][]attemptWorkItem {
+	t.Helper()
+	var doc struct {
+		PreviousAttempts []struct {
+			WorkItems []attemptWorkItem `json:"workItems"`
+		} `json:"previousAttempts"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	var out [][]attemptWorkItem
+	for _, p := range doc.PreviousAttempts {
+		out = append(out, p.WorkItems)
+	}
+	return out
+}
+
+// progressLines is a shell command that appends lines to the execution's progress.jsonl.
+func progressLines(lines ...string) string {
+	return `printf '%s\n' '` + strings.Join(lines, `' '`) + `' >> "$HARMFLOW_EXECUTION_DIR/progress.jsonl"`
+}
+
+// harmflow-app#308: the first attempt selects a work item, creates its worktree directly under the workspace on the
+// branch it reports, commits there, leaves a file a shell command wrote, reports a failed test run, prints the test
+// output, and ends on an exhausted quota without a report. The context.json Codex gets carries, for that work item,
+// the branch with the commit its worktree is at, the failed result with its summary, and the files the checkpoint
+// listed in the worktree, and not the test output; the session context points at it.
+func TestFailoverContextCarriesTheWorkItem(t *testing.T) {
+	e := newEnv(t)
+	origin := t.TempDir()
+	gitIn(t, origin, "init", "-q", "-b", "main")
+	if err := os.WriteFile(filepath.Join(origin, "README.md"), []byte("base\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, origin, "add", "README.md")
+	gitIn(t, origin, "commit", "-q", "-m", "base")
+	e.create("context", codexFallback)
+	git := `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -c user.name=HarmFlow -c user.email=harmflow@example.invalid`
+	const output = "--- FAIL: TestParse (0.00s) parse_test.go:12: got 1, want 2"
+	data, sent := e.codexContext("context", strings.Join([]string{
+		progressLines(`{"type":"work_item.selected","workItem":"o/r#5","repository":"o/r","message":"Fix the parser"}`),
+		git + ` -C '` + origin + `' worktree add -q -b fix/5-parser "$PWD/r-5" main`,
+		`cd r-5 && echo fix > fix.go && ` + git + ` add fix.go && ` + git + ` commit -q -m fix && echo wip > wip.txt`,
+		progressLines(`{"type":"workspace.changed","branch":"fix/5-parser","message":"Created the branch fix/5-parser"}`,
+			`{"type":"test.completed","status":"failed","message":"1 failed: TestParse"}`),
+		"echo '" + output + "'", "echo 'The tests failed.'",
+	}, " && "))
+	work := filepath.Join(e.paths.Workspace, "context")
+	cmd := exec.Command("git", "-C", filepath.Join(work, "r-5"), "rev-parse", "HEAD")
+	head, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD in the worktree: %v", err)
+	}
+	want := [][]attemptWorkItem{{{Key: "o/r#5", Repository: "o/r", Branch: "fix/5-parser",
+		HeadCommit: strings.TrimSpace(string(head)), Tests: &attemptTests{Status: "failed", Summary: "1 failed: TestParse"},
+		ChangedFiles: []domain.CheckpointFile{{Path: "r-5/fix.go", Status: domain.FileAdded},
+			{Path: "r-5/wip.txt", Status: domain.FileUntracked}}}}}
+	if got := previousWorkItems(t, data); !reflect.DeepEqual(got, want) {
+		t.Errorf("previous attempts' work items = %+v, want %+v\n%s", got, want, data)
+	}
+	if bytes.Contains(data, []byte("parse_test.go:12")) {
+		t.Errorf("context.json holds the test output, which stays in the log:\n%s", data)
+	}
+	if want := "previousAttempts in context.json gives what it reported and left"; !strings.Contains(sent, want) {
+		t.Errorf("Codex's session context does not hold %q:\n%s", want, sent)
+	}
+}
+
+// harmflow-app#308: an attempt that selects a work item and reports neither a branch nor a test result before its quota
+// ends leaves its work item with its key and repository alone: no branch or commit is guessed, and a file written in
+// the plain workspace, which no branch's folder holds, is not given to it.
+func TestFailoverContextLeavesOutWhatWasNotReported(t *testing.T) {
+	e := newEnv(t)
+	e.create("unreported", codexFallback)
+	data, _ := e.codexContext("unreported", strings.Join([]string{
+		progressLines(`{"type":"work_item.selected","workItem":"o/r#6","repository":"o/r","message":"Fix the loader"}`),
+		"echo half > partial.txt", "echo 'Halfway.'",
+	}, " && "))
+	want := [][]attemptWorkItem{{{Key: "o/r#6", Repository: "o/r"}}}
+	if got := previousWorkItems(t, data); !reflect.DeepEqual(got, want) {
+		t.Errorf("previous attempts' work items = %+v, want %+v\n%s", got, want, data)
+	}
+}
+
+// harmflow-app#308: an attempt that selected no work item lists none.
+func TestFailoverContextWithoutAWorkItem(t *testing.T) {
+	e := newEnv(t)
+	e.create("plain", codexFallback)
+	data, _ := e.codexContext("plain", "echo 'Wrote nothing.'")
+	if got := previousWorkItems(t, data); len(got) != 1 || got[0] != nil {
+		t.Errorf("previous attempts' work items = %+v, want one attempt with none\n%s", got, data)
+	}
+}
+
+// harmflow-app#308: a work item's files are the checkpoint's files in the folder that has its branch checked out, by
+// the folder's whole name; the workspace's root holds those in no other repository's folder.
+func TestFilesIn(t *testing.T) {
+	c := domain.NewCheckpoint([]domain.CheckpointFile{{Path: "README.md", Status: domain.FileModified},
+		{Path: "notes/a.txt", Status: domain.FileModified}, {Path: "r-5/fix.go", Status: domain.FileAdded},
+		{Path: "r-50/other.go", Status: domain.FileModified}})
+	heads := []ports.RepositoryHead{{Path: "."}, {Path: "r-5"}, {Path: "r-50"}}
+	for _, tc := range []struct {
+		dir  string
+		want []string
+	}{
+		{"r-5", []string{"r-5/fix.go"}},
+		{"r-50", []string{"r-50/other.go"}},
+		{".", []string{"README.md", "notes/a.txt"}},
+		{"absent", nil},
+	} {
+		var got []string
+		for _, f := range filesIn(c, tc.dir, heads) {
+			got = append(got, f.Path)
+		}
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("filesIn(%q) = %q, want %q", tc.dir, got, tc.want)
+		}
+	}
+}
+
 // harmflow-app#216: a fallback that cannot load the task's skill is not valid. The task saves with a warning that names
 // Codex and the skill, and a run that exhausts Claude Code's quota does not switch to Codex.
 func TestFallbackMissingASkillIsNotValid(t *testing.T) {

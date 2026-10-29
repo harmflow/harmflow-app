@@ -1,7 +1,7 @@
 // Package workspace reads which files an attempt changed in its execution's workspace, from the workspace itself: Git
 // for each repository at the workspace's root or directly under it, where the built-in skills create a work item's
 // worktree, and a scan of modification times for the rest. It lists paths with their status and reads no file's
-// content.
+// content. It also names what each of those repositories has checked out.
 package workspace
 
 import (
@@ -88,6 +88,32 @@ func (r *Reader) Changes(ctx context.Context, workspace string, mark ports.Works
 	c := domain.NewCheckpoint(append(files, scanned...))
 	c.Scanned, c.ScanLimited = true, limited
 	return c
+}
+
+// Heads implements ports.WorkspaceReader: each repository's HEAD commit, and the branch git symbolic-ref names. A
+// repository git cannot read, or one with no commit yet, is left out.
+func (r *Reader) Heads(ctx context.Context, workspace string) []ports.RepositoryHead {
+	git := r.git()
+	if git == "" {
+		return nil
+	}
+	var heads []ports.RepositoryHead
+	for _, rel := range repositories(workspace) {
+		dir := filepath.Join(workspace, rel)
+		out, _, err := procutil.Output(ctx, gitTimeout, r.env(), git, "-C", dir, "rev-parse", "--verify", "--quiet", "HEAD")
+		commit := strings.TrimSpace(out)
+		if err != nil || commit == "" {
+			continue
+		}
+		// A detached HEAD names no branch, and symbolic-ref fails on it.
+		branch, _, err := procutil.Output(ctx, gitTimeout, r.env(), git, "-C", dir, "symbolic-ref", "--quiet", "--short",
+			"HEAD")
+		if err != nil {
+			branch = ""
+		}
+		heads = append(heads, ports.RepositoryHead{Path: rel, Branch: strings.TrimSpace(branch), Commit: commit})
+	}
+	return heads
 }
 
 func (r *Reader) git() string {

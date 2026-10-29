@@ -902,6 +902,40 @@ func TestSchemaErrorsAreTranslatable(t *testing.T) {
 	}
 }
 
+// A pointer is located at the key that names its value, or at the item it names in a list. One the tree does not hold
+// falls back to the deepest ancestor found: a key the mapping lacks, an index out of range or not a number, a step past
+// a scalar. The empty pointer is the document itself, and with no tree there is no location.
+func TestLocatePointer(t *testing.T) {
+	text := valid + "  skills:\n    - release-notes\n"
+	_, node, issues := ParseYAML([]byte(text))
+	if len(issues) > 0 {
+		t.Fatalf("ParseYAML(%q) issues = %+v, want none", text, issues)
+	}
+	for _, c := range []struct {
+		name, pointer string
+		line, column  int
+	}{
+		{"an item", "/spec/skills/0", 13, 7},
+		{"a key", "/spec/harness", 9, 3},
+		{"a key the mapping lacks", "/spec/colour", 6, 1},
+		{"an index out of range", "/spec/skills/1", 12, 3},
+		{"an index that is not a number", "/spec/skills/first", 12, 3},
+		{"a step past a scalar", "/spec/type/general", 7, 3},
+		{"the empty pointer", "", 1, 1},
+		{"the root", "/", 1, 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			line, column := LocatePointer(node, c.pointer)
+			if line != c.line || column != c.column {
+				t.Errorf("LocatePointer(%q) = %d, %d, want %d, %d", c.pointer, line, column, c.line, c.column)
+			}
+		})
+	}
+	if line, column := LocatePointer(nil, "/spec"); line != 0 || column != 0 {
+		t.Errorf("LocatePointer(nil, %q) = %d, %d, want 0, 0", "/spec", line, column)
+	}
+}
+
 func TestReportSchema(t *testing.T) {
 	v, _ := New()
 	good, _ := FromJSON([]byte(`{"outcome":"no_work","summary":"nothing eligible"}`))

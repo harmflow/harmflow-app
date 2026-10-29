@@ -25,7 +25,8 @@ follows it.
 - **`context.json`** in the execution directory holds the task's parameters (`task.parameters`: repositories with
   their local paths and base branches, queue limits and order, resume strategy, test-repair attempts), its history
   (`workItems`, `recentExecutions`, `interruptedExecutions`), and, when this session continues an earlier attempt,
-  `previousAttempts`. Read it first.
+  `previousAttempts`, which give each work item an attempt worked its branch with the head commit, its last test
+  result, and the files changed in its worktree. `context.schema.json` beside it describes each field. Read it first.
 
 ## Procedure
 

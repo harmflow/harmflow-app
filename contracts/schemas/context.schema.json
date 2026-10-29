@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harmflow.com/schemas/v1alpha1/context.schema.json",
+  "title": "HarmFlow session context",
+  "description": "context.json, which the daemon writes in an execution's directory before each attempt: the task's parameters and history, for the session's agents and skills to skip processed work, resume, and reconcile. The daemon writes it again for each attempt of the execution, so a later attempt finds what the earlier ones did. A list with nothing to hold may be null.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "harmflow", "task", "execution", "paths", "workItems", "interruptedExecutions", "recentExecutions", "previousAttempts"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "harmflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version"],
+      "properties": { "version": { "type": "string" } }
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "type", "parameters"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "parameters": { "description": "The block of the task's type, as task.schema.json describes it; null for a type that has none.", "type": ["object", "null"] }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "trigger", "attempt", "timeoutAt"],
+      "properties": {
+        "id": { "type": "string" },
+        "trigger": { "type": "string", "enum": ["manual", "schedule", "catch_up"] },
+        "attempt": { "description": "The number of the attempt this file was written for, from 1.", "type": "integer", "minimum": 1 },
+        "timeoutAt": { "description": "When the execution's one timeout, shared by all its attempts, ends it.", "type": ["string", "null"] }
+      }
+    },
+    "paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["executionDir", "workspace", "report", "progress", "repositories"],
+      "properties": {
+        "executionDir": { "type": "string" },
+        "workspace": { "description": "The working directory of every attempt of the execution.", "type": "string" },
+        "report": { "type": "string" },
+        "progress": { "type": "string" },
+        "repositories": {
+          "description": "The local path of each repository the task works, by its owner/name.",
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "workItems": {
+      "description": "The task's work-item ledger, from every execution.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/ledgerItem" }
+    },
+    "interruptedExecutions": {
+      "description": "The task's executions a daemon stop or crash interrupted.",
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["executionId", "workItem", "lastOperation", "endedAt"],
+        "properties": {
+          "executionId": { "type": "string" },
+          "workItem": { "type": "string" },
+          "lastOperation": { "description": "The last external operation it applied, to reconcile before repeating it.", "type": "string" },
+          "endedAt": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "recentExecutions": {
+      "description": "The task's last 50 executions that ended, newest first.",
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["executionId", "status", "createdAt"],
+        "properties": {
+          "executionId": { "type": "string" },
+          "status": { "type": "string" },
+          "createdAt": { "type": "string" },
+          "workItem": { "type": "string" },
+          "pullRequestUrl": { "type": "string" }
+        }
+      }
+    },
+    "previousAttempts": {
+      "description": "The attempts of this execution before the current one, which a failover or a rate-limit retry ended, oldest first.",
+      "type": ["array", "null"],
+      "items": { "$ref": "#/$defs/previousAttempt" }
+    }
+  },
+  "$defs": {
+    "ledgerItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["taskId", "key", "status", "resumes", "failures", "updatedAt"],
+      "properties": {
+        "taskId": { "type": "string" },
+        "key": { "description": "Stable key, such as owner/repo#123.", "type": "string" },
+        "title": { "type": "string" },
+        "repository": { "type": "string" },
+        "status": { "type": "string", "enum": ["in_progress", "completed", "failed", "needs_attention", "closed"] },
+        "resumes": { "type": "integer", "minimum": 0 },
+        "failures": { "type": "integer", "minimum": 0 },
+        "branch": { "type": "string" },
+        "pullRequestUrl": { "type": "string" },
+        "testsStatus": { "type": "string" },
+        "lastExecutionId": { "type": "string" },
+        "lastOperation": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "previousAttempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["number", "harness", "outcome"],
+      "properties": {
+        "number": { "type": "integer", "minimum": 1 },
+        "harness": { "type": "string" },
+        "model": { "type": "string" },
+        "outcome": { "type": "string" },
+        "error": { "type": "string" },
+        "lastOperation": { "type": "string" },
+        "lastMessage": { "description": "The end of the attempt's last message.", "type": "string" },
+        "workItems": {
+          "description": "The work items the attempt worked: those it selected or reported a branch or a test result for, and the execution's current one.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/attemptWorkItem" }
+        }
+      }
+    },
+    "attemptWorkItem": {
+      "description": "What an attempt reported of one work item and left in the workspace, read from its progress lines and from its checkpoint, so it is here when the attempt ended without a report. A value the attempt never reported, or that the workspace could not give, is absent.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key"],
+      "properties": {
+        "key": { "type": "string", "minLength": 1 },
+        "repository": { "type": "string" },
+        "branch": { "description": "The branch the attempt last reported in a workspace.changed line, or the one an earlier attempt reported.", "type": "string" },
+        "headCommit": { "description": "The commit the branch was at when the attempt ended, in the repository of the workspace that has it checked out. Read before a switch to another harness.", "type": "string" },
+        "tests": {
+          "description": "The last test.completed line the attempt wrote for the work item. The full test output stays in the execution's log.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": {
+            "status": { "type": "string", "enum": ["passed", "failed", "not_run"] },
+            "summary": { "description": "The line's message, cut to its first 1000 bytes.", "type": "string" }
+          }
+        },
+        "changedFiles": {
+          "description": "The files the checkpoint before a switch listed in the folder that has the branch checked out, by their path relative to the workspace. The checkpoint lists 500 files at most, and the session context counts the rest.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "status"],
+            "properties": {
+              "path": { "type": "string" },
+              "status": { "type": "string", "enum": ["added", "modified", "deleted", "untracked"] }
+            }
+          }
+        }
+      }
+    }
+  }
+}
