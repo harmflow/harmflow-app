@@ -119,7 +119,8 @@ in its own pull request and is reviewed on its own.
 
 This repository's CI checks Linux only, for the code as it is published here; every other platform is built and
 checked outside this repository. Development stays on macOS. A test that needs another platform skips on Linux and
-says why, as [`GO-CODE-GUIDE.md`](GO-CODE-GUIDE.md) describes under "Tests by platform".
+says why, as [`GO-CODE-GUIDE.md`](GO-CODE-GUIDE.md) describes under "Tests by platform". The workflows, the scripts they
+run, and the Dependabot groups are described in [`docs/ci.md`](docs/ci.md).
 
 ## Commands
 
