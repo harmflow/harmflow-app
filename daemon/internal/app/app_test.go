@@ -411,6 +411,8 @@ type env struct {
 	startCtx context.Context
 	// timeoutUnit is what a task's timeoutMinutes counts, when a test sets it; a minute otherwise.
 	timeoutUnit time.Duration
+	// records is the execution repository the App starts on, which a configure may wrap.
+	records ports.ExecutionRepository
 }
 
 // newEnv starts an App on fake harnesses; configure sets up the env, its fakes included, before the App starts.
@@ -440,6 +442,7 @@ func (e *env) start(t *testing.T, configure ...func(*env)) {
 	tasks, _ := fsstore.NewTasks(e.paths.Tasks)
 	state, _ := fsstore.NewState(e.paths.State)
 	execs, _ := fsstore.NewExecutions(e.paths.Executions)
+	e.records = execs
 	events, _ := eventlog.New(e.paths.Logs, time.Now)
 	v, err := schema.New()
 	if err != nil {
@@ -450,7 +453,7 @@ func (e *env) start(t *testing.T, configure ...func(*env)) {
 		c(e)
 	}
 	a, err := New(Deps{Paths: e.paths, Version: "test", Clock: e.clock, Wake: e.wake, Location: time.UTC, Tasks: tasks,
-		State: state, Executions: execs, Events: e.events, Validator: v, Harnesses: []ports.HarnessAdapter{e.claude, e.codex},
+		State: state, Executions: e.records, Events: e.events, Validator: v, Harnesses: []ports.HarnessAdapter{e.claude, e.codex},
 		Service: e.service, Workspace: &workspace.Reader{}, TickInterval: time.Hour, TimeoutUnit: e.timeoutUnit,
 		Logger: log.New(io.Discard, "", 0)})
 	if err != nil {
@@ -468,13 +471,13 @@ func (e *env) start(t *testing.T, configure ...func(*env)) {
 }
 
 // restart stops the daemon, if it still runs, and starts a new App on the same data directory, fake clock, and
-// stand-in harnesses, as a daemon restart does. The scheduler loop of a test ticks hourly, so the clock may move
-// before the restart as if the daemon were already down.
-func (e *env) restart(t *testing.T) *env {
+// stand-in harnesses, as a daemon restart does; configure is as for newEnv. The scheduler loop of a test ticks hourly,
+// so the clock may move before the restart as if the daemon were already down.
+func (e *env) restart(t *testing.T, configure ...func(*env)) *env {
 	t.Helper()
 	e.app.Stop(domain.Text{Message: "restart"})
 	n := &env{t: t, clock: e.clock, wake: e.wake, claude: e.claude, codex: e.codex, home: e.home, paths: e.paths}
-	n.start(t)
+	n.start(t, configure...)
 	return n
 }
 
@@ -2387,9 +2390,11 @@ func TestSaveWhileTheExecutionChanges(t *testing.T) {
 	e.claude.setScript(func(ports.RunRequest) string { return "echo 'END ok'" })
 	r, _ := e.app.RunTask("save")
 	e.wait(r.ExecutionID, domain.StatusCompleted)
-	e.app.mu.Lock()
-	x := e.app.executions[r.ExecutionID]
-	e.app.mu.Unlock()
+	// The execution ended, so the daemon holds its summary: the record changed and saved here is the one on disk.
+	x, err := e.app.d.Executions.Load(r.ExecutionID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -4852,6 +4857,7 @@ func TestRedactsWhatWasKeptBefore(t *testing.T) {
 	token := "ghp_" + strings.Repeat("e", 36)
 	x := domain.NewExecution(domain.TaskDocument{Metadata: domain.TaskMetadata{ID: "old"}}, domain.TriggerManual, nil,
 		time.Now())
+	x.SchemaVersion = "2" // saved before text was redacted on arrival
 	x.Status = domain.StatusCompleted
 	x.Summary = "Pushed with " + token
 	x.LastOperation = "git push https://x-access-token:" + token + "@github.com/o/r"
@@ -5166,7 +5172,11 @@ func (c *countedExecutions) Save(x *domain.Execution) error {
 	return nil
 }
 
-func (c *countedExecutions) LoadAll() ([]*domain.Execution, error) { return nil, nil }
+func (c *countedExecutions) Load(string) (*domain.Execution, error) { return nil, ports.ErrNotFound }
+
+func (c *countedExecutions) Summaries() ([]*domain.ExecutionSummary, error) { return nil, nil }
+
+func (c *countedExecutions) HoldIndex() func() { return func() {} }
 
 func (c *countedExecutions) count(id string) int {
 	c.mu.Lock()

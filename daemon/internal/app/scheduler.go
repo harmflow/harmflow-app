@@ -408,7 +408,7 @@ func (a *App) fire(taskID string, trigger domain.Trigger, scheduledFor *time.Tim
 			return FiringResult{Outcome: "coalesced", ExecutionID: waiting.ID}, nil
 		}
 		x := domain.NewExecution(doc, trigger, scheduledFor, now)
-		a.executions[x.ID] = x
+		a.addExecutionLocked(x)
 		status := x.Status
 		a.mu.Unlock()
 		a.persistExecution(x)
@@ -419,7 +419,7 @@ func (a *App) fire(taskID string, trigger domain.Trigger, scheduledFor *time.Tim
 		return FiringResult{Outcome: "queued", ExecutionID: x.ID}, nil
 	}
 	x := domain.NewExecution(doc, trigger, scheduledFor, now)
-	a.executions[x.ID] = x
+	a.addExecutionLocked(x)
 	h := a.claimLocked(taskID)
 	status := x.Status
 	a.mu.Unlock()

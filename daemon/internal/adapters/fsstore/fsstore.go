@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
@@ -243,12 +244,43 @@ func (s *State) Save(name string, v any) error {
 	return WriteAtomic(filepath.Join(s.dir, name+".json"), append(data, '\n'), 0o600)
 }
 
-// Executions is the ExecutionRepository: one JSON record per execution, kept with no time limit.
+// Executions is the ExecutionRepository: one JSON record per execution, kept with no time limit, and beside them the
+// index, IndexFile, which holds the summary of each record with the size and modification time of the file it was read
+// from. The records are the source of truth: the index is derived from them, and rebuilt from them where it is
+// missing, unreadable, or behind them.
 type Executions struct {
 	dir string
+
+	mu sync.Mutex
+	// index is the summaries Summaries read or rebuilt, by execution id; nil until then. A save made before leaves the
+	// index file behind its record, which the next Summaries catches up with.
+	index map[string]indexEntry
+	// holds counts the HoldIndex calls not yet released. While one is, a save that would write the index file sets
+	// pending instead, and the last release writes it.
+	holds   int
+	pending bool
 }
 
 var _ ports.ExecutionRepository = (*Executions)(nil)
+
+// IndexFile is the name of the index of the execution records, in their directory; no execution id is "index".
+const IndexFile = "index.json"
+
+// indexVersion is the schemaVersion of the index; an index at any other is rebuilt.
+const indexVersion = "1"
+
+type indexDocument struct {
+	SchemaVersion string       `json:"schemaVersion"`
+	Executions    []indexEntry `json:"executions"`
+}
+
+// indexEntry is a record's summary, with the size and modification time of the file it summarizes: a file that no
+// longer has both is read again.
+type indexEntry struct {
+	Size    int64                    `json:"size"`
+	ModTime time.Time                `json:"modTime"`
+	Summary *domain.ExecutionSummary `json:"summary"`
+}
 
 // NewExecutions returns the repository of the execution records in dir, creating the directory when it is missing.
 func NewExecutions(dir string) (*Executions, error) {
@@ -258,36 +290,175 @@ func NewExecutions(dir string) (*Executions, error) {
 	return &Executions{dir: dir}, nil
 }
 
-// Save implements ports.ExecutionRepository: it writes the record, indented, as <id>.json.
+func (e *Executions) path(id string) string { return filepath.Join(e.dir, id+".json") }
+
+// Save implements ports.ExecutionRepository: it writes the record, indented, as <id>.json, then its summary into the
+// index. The index file is written when the record is of an execution that has ended, or by the release of a
+// HoldIndex under way: the daemon reads every other record whole at start, and finds a record the index is behind by
+// its size and modification time.
 func (e *Executions) Save(x *domain.Execution) error {
 	data, err := json.MarshalIndent(x, "", "  ")
 	if err != nil {
 		return err
 	}
-	return WriteAtomic(filepath.Join(e.dir, x.ID+".json"), append(data, '\n'), 0o600)
+	path := e.path(x.ID)
+	if err := WriteAtomic(path, append(data, '\n'), 0o600); err != nil {
+		return err
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.index == nil {
+		return nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		// The record is saved; without its size and time, its entry would only mislead, and Summaries reads it again.
+		delete(e.index, x.ID)
+		return nil
+	}
+	e.index[x.ID] = indexEntry{Size: info.Size(), ModTime: info.ModTime(), Summary: x.Summarize()}
+	if x.Status.IsTerminal() {
+		if e.holds > 0 {
+			e.pending = true
+		} else {
+			e.writeIndexLocked()
+		}
+	}
+	return nil
 }
 
-// LoadAll implements ports.ExecutionRepository: every record of the directory, by file name. A file it cannot read
-// or decode, or a record with no id, is left out.
-func (e *Executions) LoadAll() ([]*domain.Execution, error) {
+// HoldIndex implements ports.ExecutionRepository. A release left uncalled, as a stop in the middle of a pass leaves,
+// loses no history: the next start finds the index behind the records and catches up.
+func (e *Executions) HoldIndex() (release func()) {
+	e.mu.Lock()
+	e.holds++
+	e.mu.Unlock()
+	return func() {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		if e.holds--; e.holds == 0 && e.pending {
+			e.pending = false
+			e.writeIndexLocked()
+		}
+	}
+}
+
+// Load implements ports.ExecutionRepository.
+func (e *Executions) Load(id string) (*domain.Execution, error) {
+	if id == "" || filepath.Base(id) != id || id+".json" == IndexFile {
+		return nil, ports.ErrNotFound
+	}
+	return readExecution(e.path(id))
+}
+
+func readExecution(path string) (*domain.Execution, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, ports.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	var x domain.Execution
+	if err := json.Unmarshal(data, &x); err != nil {
+		return nil, fmt.Errorf("execution record %s: %w", filepath.Base(path), err)
+	}
+	if x.ID == "" {
+		return nil, fmt.Errorf("execution record %s has no id", filepath.Base(path))
+	}
+	return &x, nil
+}
+
+// Summaries implements ports.ExecutionRepository, sorted by execution id. It reads the index, then lists the records:
+// one the index has with the same size and modification time is summarized from the index, and only the others are
+// read and decoded. A file it cannot read or decode, or a record with no id, is left out. When the index was missing,
+// unreadable, or behind the records, it is written again.
+func (e *Executions) Summaries() ([]*domain.ExecutionSummary, error) {
 	entries, err := os.ReadDir(e.dir)
 	if err != nil {
 		return nil, err
 	}
-	var out []*domain.Execution
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	old, ok := e.readIndexLocked()
+	stale := !ok
+	index := map[string]indexEntry{}
+	reused := 0
 	for _, ent := range entries {
-		if ent.IsDir() || filepath.Ext(ent.Name()) != ".json" || strings.HasPrefix(ent.Name(), ".") {
+		name := ent.Name()
+		if ent.IsDir() || filepath.Ext(name) != ".json" || strings.HasPrefix(name, ".") || name == IndexFile {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(e.dir, ent.Name()))
+		info, err := ent.Info()
 		if err != nil {
 			continue
 		}
-		var x domain.Execution
-		if err := json.Unmarshal(data, &x); err != nil || x.ID == "" {
+		id := strings.TrimSuffix(name, ".json")
+		if en, ok := old[id]; ok && en.Summary != nil && en.Size == info.Size() && en.ModTime.Equal(info.ModTime()) {
+			index[id] = en
+			reused++
 			continue
 		}
-		out = append(out, &x)
+		stale = true
+		x, err := readExecution(filepath.Join(e.dir, name))
+		if err != nil {
+			continue
+		}
+		index[id] = indexEntry{Size: info.Size(), ModTime: info.ModTime(), Summary: x.Summarize()}
+	}
+	if reused != len(old) { // a record the index holds is gone
+		stale = true
+	}
+	e.index = index
+	if stale {
+		e.writeIndexLocked()
+	}
+	var out []*domain.ExecutionSummary
+	for _, id := range sortedIDs(index) {
+		out = append(out, index[id].Summary)
 	}
 	return out, nil
+}
+
+// readIndexLocked returns the index file's entries by execution id, and false when the file is missing, unreadable, or
+// of another version, which leaves every record to be read.
+func (e *Executions) readIndexLocked() (map[string]indexEntry, bool) {
+	data, err := os.ReadFile(filepath.Join(e.dir, IndexFile))
+	if err != nil {
+		return nil, false
+	}
+	var doc indexDocument
+	if err := json.Unmarshal(data, &doc); err != nil || doc.SchemaVersion != indexVersion {
+		return nil, false
+	}
+	m := map[string]indexEntry{}
+	for _, en := range doc.Executions {
+		if en.Summary != nil && en.Summary.ID != "" {
+			m[en.Summary.ID] = en
+		}
+	}
+	return m, true
+}
+
+// writeIndexLocked writes the index atomically. A failure is left unsaid: the records are saved, and the next start
+// finds the index behind them and catches up.
+func (e *Executions) writeIndexLocked() {
+	doc := indexDocument{SchemaVersion: indexVersion, Executions: []indexEntry{}}
+	for _, id := range sortedIDs(e.index) {
+		doc.Executions = append(doc.Executions, e.index[id])
+	}
+	data, err := json.Marshal(doc)
+	if err != nil {
+		return
+	}
+	_ = WriteAtomic(filepath.Join(e.dir, IndexFile), append(data, '\n'), 0o600)
+}
+
+func sortedIDs(m map[string]indexEntry) []string {
+	ids := make([]string, 0, len(m))
+	for id := range m {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }

@@ -35,29 +35,51 @@ func (a *App) maintenanceLoop(ctx context.Context) {
 func (a *App) ApplyRetention() {
 	a.retentionMu.Lock()
 	defer a.retentionMu.Unlock()
+	// Each log expired saves its record, which writes the whole index: held, the index is written once, at the end.
+	release := a.d.Executions.HoldIndex()
+	defer release()
+	type candidate struct {
+		id      string
+		endedAt time.Time
+		held    *domain.Execution // the record held whole, nil for an execution held as its summary
+	}
 	a.mu.Lock()
 	days := a.settings.LogRetentionDays
-	var candidates []*domain.Execution
+	var candidates []candidate
 	for _, x := range a.executions {
 		if x.Status.IsTerminal() && !x.LogExpired && x.EndedAt != nil {
-			candidates = append(candidates, x)
+			candidates = append(candidates, candidate{x.ID, *x.EndedAt, x})
+		}
+	}
+	for _, s := range a.ended {
+		if !s.LogExpired && s.EndedAt != nil {
+			candidates = append(candidates, candidate{s.ID, *s.EndedAt, nil})
 		}
 	}
 	a.mu.Unlock()
 	cutoff := a.now().Add(-time.Duration(days) * 24 * time.Hour)
-	for _, x := range candidates {
-		mod, ok := a.d.Events.LogModTime(x.ID)
+	for _, c := range candidates {
+		mod, ok := a.d.Events.LogModTime(c.id)
 		if !ok {
-			mod = *x.EndedAt
+			mod = c.endedAt
 		}
 		if mod.After(cutoff) {
 			continue
 		}
-		if err := a.d.Events.DeleteLog(x.ID); err != nil {
-			a.log.Printf("deleting the log of execution %s: %v", x.ID, err)
+		if err := a.d.Events.DeleteLog(c.id); err != nil {
+			a.log.Printf("deleting the log of execution %s: %v", c.id, err)
 		}
-		if err := os.RemoveAll(filepath.Join(a.d.Paths.Runs, x.ID)); err != nil {
-			a.log.Printf("deleting the directory of execution %s: %v", x.ID, err)
+		if err := os.RemoveAll(filepath.Join(a.d.Paths.Runs, c.id)); err != nil {
+			a.log.Printf("deleting the directory of execution %s: %v", c.id, err)
+		}
+		x := c.held
+		if x == nil {
+			var err error
+			if x, err = a.d.Executions.Load(c.id); err != nil {
+				a.log.Printf("reading execution %s to record that its log expired: %v", c.id, err)
+				continue
+			}
+			normalize(x)
 		}
 		a.mu.Lock()
 		x.LogExpired = true
@@ -156,17 +178,17 @@ func (a *App) customWorkspacesLocked() []string {
 	own := filepath.Clean(a.d.Paths.Workspace)
 	seen := map[string]bool{}
 	var dirs []string
-	for _, x := range a.executions {
-		if x.WorkspacePath == "" || x.Script != nil {
-			continue
+	a.eachSummaryLocked(func(x *domain.ExecutionSummary) {
+		if x.WorkspacePath == "" || x.Script {
+			return
 		}
 		p := filepath.Clean(x.WorkspacePath)
 		if filepath.Dir(p) == own || seen[worktreeKey(p)] {
-			continue
+			return
 		}
 		seen[worktreeKey(p)] = true
 		dirs = append(dirs, p)
-	}
+	})
 	slices.Sort(dirs)
 	return dirs
 }
@@ -194,7 +216,8 @@ func (a *App) worktreeFatesLocked() map[string]worktreeFate {
 		if _, ok := a.running[taskID]; ok {
 			return worktreeFate{reason: "the task is running"}
 		}
-		return fateOf(item, a.executions[item.LastExecutionID])
+		x, _ := a.summaryLocked(item.LastExecutionID)
+		return fateOf(item, x)
 	}
 	for taskID, items := range a.ledger {
 		for key, item := range items {
@@ -203,14 +226,14 @@ func (a *App) worktreeFatesLocked() map[string]worktreeFate {
 				continue
 			}
 			dir := filepath.Join(a.d.Paths.Workspace, taskID)
-			if x := a.executions[item.LastExecutionID]; x != nil && x.WorkspacePath != "" {
+			if x, ok := a.summaryLocked(item.LastExecutionID); ok && x.WorkspacePath != "" {
 				dir = x.WorkspacePath
 			}
 			claim(fates, filepath.Join(dir, name), fateIn(taskID, item))
 		}
 	}
 	reported := map[string]worktreeFate{}
-	for _, x := range a.executions {
+	a.eachSummaryLocked(func(x *domain.ExecutionSummary) {
 		for _, w := range x.WorkItems {
 			if w.WorktreePath == "" {
 				continue
@@ -221,7 +244,7 @@ func (a *App) worktreeFatesLocked() map[string]worktreeFate {
 			}
 			claim(reported, w.WorktreePath, f)
 		}
-	}
+	})
 	for k, f := range reported {
 		if _, ok := fates[k]; !ok {
 			fates[k] = f
@@ -232,7 +255,7 @@ func (a *App) worktreeFatesLocked() map[string]worktreeFate {
 
 // fateOf decides a work item's worktree from the item's status and from its last execution, x, nil when HarmFlow has
 // no record of it.
-func fateOf(item *domain.WorkItem, x *domain.Execution) worktreeFate {
+func fateOf(item *domain.WorkItem, x *domain.ExecutionSummary) worktreeFate {
 	switch item.Status {
 	case domain.WorkItemClosed:
 		return worktreeFate{remove: true}

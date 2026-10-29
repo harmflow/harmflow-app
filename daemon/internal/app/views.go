@@ -1,7 +1,6 @@
 package app
 
 import (
-	"encoding/json"
 	"sort"
 	"strings"
 	"time"
@@ -37,15 +36,18 @@ type ExecutionSummary struct {
 	WarningCount      int                    `json:"warningCount"`
 }
 
-func summarize(x *domain.Execution) ExecutionSummary {
+func summarize(x *domain.Execution) ExecutionSummary { return row(x.Summarize()) }
+
+// row is an execution's row in lists, from its summary.
+func row(s *domain.ExecutionSummary) ExecutionSummary {
 	return ExecutionSummary{
-		ID: x.ID, TaskID: x.TaskID, TaskName: x.TaskName, TaskType: x.TaskType, Status: x.Status, Trigger: x.Trigger,
-		CreatedAt: x.CreatedAt, StartedAt: x.StartedAt, EndedAt: x.EndedAt, Harness: x.Harness, Model: x.Model,
-		AttemptCount: len(x.Attempts), CurrentStep: x.CurrentStep, CurrentStepKey: x.CurrentStepKey,
-		CurrentStepParams: x.CurrentStepParams, Repository: x.Repository, WorkItem: x.WorkItem,
-		PullRequestURL: x.PullRequestURL, TestsStatus: x.TestsStatus, Summary: trimTo(x.Summary, 300),
-		ErrorMessage: trimTo(x.ErrorMessage, 300), ErrorKey: x.ErrorKey, ErrorParams: trimParams(x.ErrorParams, 300),
-		WarningCount: len(x.Warnings),
+		ID: s.ID, TaskID: s.TaskID, TaskName: s.TaskName, TaskType: s.TaskType, Status: s.Status, Trigger: s.Trigger,
+		CreatedAt: s.CreatedAt, StartedAt: s.StartedAt, EndedAt: s.EndedAt, Harness: s.Harness, Model: s.Model,
+		AttemptCount: s.AttemptCount, CurrentStep: s.CurrentStep, CurrentStepKey: s.CurrentStepKey,
+		CurrentStepParams: s.CurrentStepParams, Repository: s.Repository, WorkItem: s.WorkItem,
+		PullRequestURL: s.PullRequestURL, TestsStatus: s.TestsStatus, Summary: trimTo(s.Summary, 300),
+		ErrorMessage: trimTo(s.ErrorMessage, 300), ErrorKey: s.ErrorKey, ErrorParams: trimParams(s.ErrorParams, 300),
+		WarningCount: s.WarningCount,
 	}
 }
 
@@ -71,37 +73,27 @@ type ExecutionFilter struct {
 	Before   *time.Time
 }
 
-// ListExecutions lists the executions the filter selects, newest first.
+// ListExecutions lists the executions the filter selects, newest first: it walks the executions from the newest and
+// stops at the limit.
 func (a *App) ListExecutions(f ExecutionFilter) []ExecutionSummary {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	var list []*domain.Execution
-	for _, x := range a.executions {
-		if f.TaskID != "" && x.TaskID != f.TaskID {
-			continue
-		}
-		if len(f.Statuses) > 0 && !containsString(f.Statuses, string(x.Status)) {
-			continue
-		}
-		if f.Active != nil && x.Status.IsActive() != *f.Active {
-			continue
-		}
-		if f.Before != nil && !x.CreatedAt.Before(*f.Before) {
-			continue
-		}
-		list = append(list, x)
-	}
-	sort.Slice(list, func(i, j int) bool { return list[i].CreatedAt.After(list[j].CreatedAt) })
 	limit := f.Limit
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	if len(list) > limit {
-		list = list[:limit]
-	}
-	out := make([]ExecutionSummary, 0, len(list))
-	for _, x := range list {
-		out = append(out, summarize(x))
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := []ExecutionSummary{}
+	for i := len(a.byCreated) - 1; i >= 0 && len(out) < limit; i-- {
+		s, ok := a.summaryLocked(a.byCreated[i].id)
+		switch {
+		case !ok:
+		case f.TaskID != "" && s.TaskID != f.TaskID:
+		case len(f.Statuses) > 0 && !containsString(f.Statuses, string(s.Status)):
+		case f.Active != nil && s.Status.IsActive() != *f.Active:
+		case f.Before != nil && !s.CreatedAt.Before(*f.Before):
+		default:
+			out = append(out, row(s))
+		}
 	}
 	return out
 }
@@ -126,23 +118,15 @@ type ExecutionView struct {
 	Script             *domain.ScriptRun       `json:"script,omitempty"`
 }
 
-// GetExecution returns a copy of an execution's full record; an unknown execution is CodeNotFound.
+// GetExecution returns a copy of an execution's full record, read from its file once the execution ended; an unknown
+// execution is CodeNotFound.
 func (a *App) GetExecution(id string) (ExecutionView, error) {
-	a.mu.Lock()
-	x, ok := a.executions[id]
-	if !ok {
-		a.mu.Unlock()
-		return ExecutionView{}, newError(CodeNotFound,
-			domain.T("execution_not_found", "no execution {{execution}}", "execution", id))
+	c, err := a.record(id)
+	if err != nil {
+		return ExecutionView{}, err
 	}
-	// A copy through JSON, as persistExecution takes: a record that marshals for the file marshals here, and data is what
-	// json.Marshal just wrote.
-	data, _ := json.Marshal(x)
-	a.mu.Unlock()
-	var c domain.Execution
-	_ = json.Unmarshal(data, &c)
 	return ExecutionView{
-		ExecutionSummary: summarize(&c), ScheduledFor: c.ScheduledFor, CancelRequestedAt: c.CancelRequestedAt,
+		ExecutionSummary: summarize(c), ScheduledFor: c.ScheduledFor, CancelRequestedAt: c.CancelRequestedAt,
 		TimeoutAt: c.TimeoutAt, DefinitionRevision: c.DefinitionRevision, WorkspacePath: c.WorkspacePath,
 		ExecutionDir: c.ExecutionDir, Attempts: c.Attempts, WorkItems: c.WorkItems, Warnings: c.Warnings,
 		ChangedFiles: c.ChangedFiles, Commands: c.Commands, LastOperation: c.LastOperation, LogExpired: c.LogExpired,
@@ -167,16 +151,21 @@ type AttemptOutput struct {
 
 // ExecutionOutput reads the end of each attempt's capture, at most limit bytes of each.
 func (a *App) ExecutionOutput(id string, limit int64) (ExecutionOutput, error) {
+	var attempts []domain.Attempt
+	out := ExecutionOutput{Attempts: []AttemptOutput{}}
 	a.mu.Lock()
-	x, ok := a.executions[id]
-	if !ok {
+	if x := a.executions[id]; x != nil {
+		attempts = append(attempts, x.Attempts...)
+		out.LogExpired = x.LogExpired
 		a.mu.Unlock()
-		return ExecutionOutput{}, newError(CodeNotFound,
-			domain.T("execution_not_found", "no execution {{execution}}", "execution", id))
+	} else {
+		a.mu.Unlock()
+		x, err := a.record(id)
+		if err != nil {
+			return ExecutionOutput{}, err
+		}
+		attempts, out.LogExpired = x.Attempts, x.LogExpired
 	}
-	attempts := append([]domain.Attempt(nil), x.Attempts...)
-	out := ExecutionOutput{Attempts: []AttemptOutput{}, LogExpired: x.LogExpired}
-	a.mu.Unlock()
 	for _, at := range attempts {
 		c, err := a.d.Events.ReadRaw(id, at.Number, limit)
 		if err != nil {
@@ -226,6 +215,35 @@ func (a *App) Stats() Stats {
 	}
 	s := Stats{Activity: Activity{Running: make([]int, hours), Queued: make([]int, hours), Completed: make([]int, hours),
 		Failed: make([]int, hours)}}
+	count := func(status domain.ExecutionStatus, created time.Time, started, ended *time.Time) {
+		if ended != nil && !ended.Before(midnight) {
+			switch status {
+			case domain.StatusCompleted, domain.StatusNoWork:
+				s.CompletedToday++
+			case domain.StatusFailed, domain.StatusInterrupted:
+				s.FailedToday++
+			}
+		}
+		if i := bucket(started); i >= 0 {
+			s.Activity.Running[i]++
+			if started.Sub(created) > 5*time.Second {
+				s.Activity.Queued[i]++
+			}
+		}
+		if i := bucket(ended); i >= 0 {
+			switch status {
+			case domain.StatusCompleted, domain.StatusNoWork:
+				s.Activity.Completed[i]++
+			case domain.StatusFailed, domain.StatusInterrupted:
+				s.Activity.Failed[i]++
+			}
+		}
+	}
+	// What started or ended since the earlier of midnight and the first hour counted is at or after it in a.byEnd.
+	since := midnight
+	if start.Before(since) {
+		since = start
+	}
 	a.mu.Lock()
 	for _, x := range a.executions {
 		switch {
@@ -234,27 +252,11 @@ func (a *App) Stats() Stats {
 		case x.Status == domain.StatusQueued:
 			s.Queued++
 		}
-		if x.EndedAt != nil && !x.EndedAt.Before(midnight) {
-			switch x.Status {
-			case domain.StatusCompleted, domain.StatusNoWork:
-				s.CompletedToday++
-			case domain.StatusFailed, domain.StatusInterrupted:
-				s.FailedToday++
-			}
-		}
-		if i := bucket(x.StartedAt); i >= 0 {
-			s.Activity.Running[i]++
-			if x.StartedAt.Sub(x.CreatedAt) > 5*time.Second {
-				s.Activity.Queued[i]++
-			}
-		}
-		if i := bucket(x.EndedAt); i >= 0 {
-			switch x.Status {
-			case domain.StatusCompleted, domain.StatusNoWork:
-				s.Activity.Completed[i]++
-			case domain.StatusFailed, domain.StatusInterrupted:
-				s.Activity.Failed[i]++
-			}
+		count(x.Status, x.CreatedAt, x.StartedAt, x.EndedAt)
+	}
+	for i := len(a.byEnd) - 1; i >= 0 && !a.byEnd[i].at.Before(since); i-- {
+		if x := a.ended[a.byEnd[i].id]; x != nil {
+			count(x.Status, x.CreatedAt, x.StartedAt, x.EndedAt)
 		}
 	}
 	a.mu.Unlock()
