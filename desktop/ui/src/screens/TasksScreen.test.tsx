@@ -1,21 +1,27 @@
 // @vitest-environment happy-dom
 // Drives the Tasks screen's commands on a task against a stand-in for the daemon's local API: each one sends its
 // request, and the screen shows the answer. What the daemon does with each request is itest › TestTaskLifecycle's,
-// and app › TestDuplicate's and TestDisableAndDeleteWhileRunning's.
-import { act } from "react";
+// and app › TestDuplicate's and TestDisableAndDeleteWhileRunning's. After the task's file changes outside HarmFlow, the
+// list and the editor opened next show the file's definition, and a save builds on its revision (harmflow-app#304):
+// that the daemon answers with the file as it is then is itest › TestTaskLifecycle's and TestFormDocumentIsTheFile's,
+// and app › TestExternalEdits'.
+import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { native } from "../api/native";
-import type { TaskSummary } from "../api/types";
+import type { StreamHandlers } from "../api/transport";
+import type { HarmflowEvent, Task, TaskSummary } from "../api/types";
 import { Toasts } from "../components/toast";
 import i18n from "../i18n";
-import { patchStateForTests } from "../state/store";
+import { patchStateForTests, startSync } from "../state/store";
 import { TasksScreen, type TaskView } from "./TasksScreen";
 
-// The daemon as the client sees it: an answer per method and route, and every request it received with its body.
+// The daemon as the client sees it: an answer per method and route, every request it received with its body, and the
+// stream it feeds.
 const daemon = vi.hoisted(() => ({
   answers: new Map<string, { status: number; body: unknown }>(),
   requests: [] as { method: string; path: string; body: unknown }[],
+  stream: undefined as StreamHandlers | undefined,
 }));
 vi.mock("../api/transport", () => ({
   isTauri: () => false,
@@ -31,7 +37,10 @@ vi.mock("../api/transport", () => ({
       const answer = daemon.answers.get(`GET ${path}`);
       return answer ? { status: answer.status, text: answer.body as string } : { status: 404, text: "" };
     },
-    stream: () => () => {},
+    stream: (handlers: StreamHandlers) => {
+      daemon.stream = handlers;
+      return () => {};
+    },
   },
 }));
 
@@ -75,7 +84,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   daemon.answers.clear();
   daemon.requests.length = 0;
-  patchStateForTests({ tasks: [], tasksLoaded: false });
+  patchStateForTests({ tasks: [], tasksLoaded: false, externalChanges: {} });
 });
 
 /** Lets the stand-in daemon's answers arrive and React render them. */
@@ -266,5 +275,147 @@ describe("the Tasks screen's commands on two tasks", () => {
     ]);
     expect(rows().map((r) => r.querySelector(".task-row__title .mono")?.textContent)).toEqual(["standup-copy"]);
     expect(toggleLabel("standup-copy")).toBe("Disabled");
+  });
+});
+
+describe("the Tasks screen after the task's file changes outside HarmFlow", () => {
+  // The file as the dashboard first reads it, and as a text editor leaves it: another name and prompt, a comment, and
+  // the prompt moved above the schedule.
+  const before = [
+    "apiVersion: harmflow/v1alpha1",
+    "kind: Task",
+    "metadata:",
+    "  id: standup",
+    "  name: Standup notes",
+    "spec:",
+    "  type: general",
+    "  schedule:",
+    '    cron: "0 9 * * 1-5"',
+    "  prompt: Write the standup notes.",
+    "",
+  ].join("\n");
+  const after = [
+    "apiVersion: harmflow/v1alpha1",
+    "kind: Task",
+    "metadata:",
+    "  id: standup",
+    "  name: Standup digest",
+    "spec:",
+    "  type: general",
+    "  # Read out at the start of the call.",
+    "  prompt: Write the standup digest.",
+    "  schedule:",
+    '    cron: "0 9 * * 1-5"',
+    "",
+  ].join("\n");
+
+  const documentOf = (name: string, prompt: string) => ({
+    apiVersion: "harmflow/v1alpha1",
+    kind: "Task",
+    metadata: { id: "standup", name },
+    spec: { type: "general", schedule: { cron: "0 9 * * 1-5" }, prompt },
+  });
+  /** The task as `GET /tasks/standup` answers it: its file's text, and the document parsed from it. */
+  const stored = (revision: string, name: string, prompt: string, yaml: string): Task => ({
+    ...standup,
+    name,
+    revision,
+    document: documentOf(name, prompt),
+    effective: documentOf(name, prompt),
+    yaml,
+    path: "standup.yaml",
+    validation: { valid: true, errors: [], warnings: [] },
+  });
+
+  /** The event the daemon's watcher emits once it loaded the changed file. */
+  const changed: HarmflowEvent = {
+    id: 41,
+    schemaVersion: "1",
+    timestamp: "2026-10-29T09:00:00Z",
+    taskId: "standup",
+    type: "task.changed_externally",
+    severity: "info",
+    message: "the task file was changed outside HarmFlow",
+    messageKey: "task_changed_externally",
+    payload: { revision: "r2" },
+  };
+
+  /** The screen as the app shows it: the view a command asks for is the one shown next. */
+  function Screen() {
+    const [view, setView] = useState<TaskView>({ kind: "list" });
+    return <TasksScreen view={view} onView={setView} onOpenExecution={() => {}} />;
+  }
+
+  // The store's sync starts timers of its own, which a fake clock keeps inside this test.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+  });
+
+  const name = (id: string) => row(id)!.querySelector(".task-row__title strong")!.textContent;
+  const field = (label: string) =>
+    [...host!.querySelectorAll<HTMLElement>("label.field")].find((f) => f.querySelector(".field__label")?.textContent === label)!;
+  const editorButton = (label: string) =>
+    [...host!.querySelectorAll<HTMLButtonElement>(".editor__actions button")].find((b) => b.textContent === label)!;
+
+  /** Types into a text field as React sees it. */
+  async function type(input: HTMLInputElement, value: string) {
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => {
+      setValue.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+
+  // The store's sync starts once per module, as the app starts it once: this is the one test of this file that starts it.
+  it("reads the list again, opens the editor on the file's definition, and saves on the file's revision", async () => {
+    answer("GET", "/tasks", [standup]);
+    answer("GET", "/tasks/standup", stored("r1", "Standup notes", "Write the standup notes.", before));
+    answer("POST", "/schedules/preview", { occurrences: [] });
+    startSync();
+    await settle();
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () =>
+      root!.render(
+        <>
+          <Screen />
+          <Toasts />
+        </>,
+      ),
+    );
+    expect(name("standup")).toBe("Standup notes");
+
+    // The dashboard reads the task at r1 in its editor, and leaves it before the file changes.
+    await click(button("standup", "Edit"));
+    expect(field("Name").querySelector("input")!.value).toBe("Standup notes");
+    await click(editorButton("Close"));
+    expect(rows()).toHaveLength(1);
+
+    // The change: the stand-in answers with the file at r2, and the stream delivers the daemon's event.
+    answer("GET", "/tasks", [{ ...standup, name: "Standup digest", revision: "r2" }]);
+    answer("GET", "/tasks/standup", stored("r2", "Standup digest", "Write the standup digest.", after));
+    daemon.requests.length = 0;
+    act(() => daemon.stream!.onEvent(changed));
+
+    // The list: read again once the store's debounce ends, and its row shows the new name.
+    await act(async () => vi.advanceTimersByTime(400));
+    await settle();
+    expect(daemon.requests).toEqual([req("GET", "/tasks")]);
+    expect(name("standup")).toBe("Standup digest");
+
+    // The editor opened afterwards: it reads the task again, and its form shows the file's values.
+    await click(button("standup", "Edit"));
+    expect(daemon.requests.filter((r) => r.path === "/tasks/standup")).toEqual([req("GET", "/tasks/standup")]);
+    expect(field("Name").querySelector("input")!.value).toBe("Standup digest");
+    expect(field("Prompt").querySelector("textarea")!.value).toBe("Write the standup digest.");
+
+    // The next save: one update, on the revision the file had when the editor read it.
+    answer("PUT", "/tasks/standup", stored("r3", "Standup summary", "Write the standup digest.", after.replace("Standup digest", "Standup summary")));
+    await type(field("Name").querySelector("input")!, "Standup summary");
+    await click(editorButton("Save"));
+    expect(daemon.requests.filter((r) => r.method === "PUT")).toEqual([
+      req("PUT", "/tasks/standup", { document: documentOf("Standup summary", "Write the standup digest."), baseRevision: "r2" }),
+    ]);
+    expect(toasts()).toEqual([{ tone: "success", text: "Saved." }]);
   });
 });
