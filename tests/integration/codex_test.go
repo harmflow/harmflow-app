@@ -86,3 +86,22 @@ func TestCitedUserItemsReachARealCodex(t *testing.T) {
 	agentMarker.check(t)
 	skillMarker.check(t)
 }
+
+// A Codex task cites a built-in skill, and its prompt asks the session to use it by name and says nothing else of it.
+// The real Codex reads the skill from the copy HarmFlow hands it in the execution's directory and follows it, and the
+// user's Codex home keeps its configuration files: the configuration, the agents, and the skills. The signed-in Codex
+// reads the user's own Codex home, so the daemon runs with it, and the test compares that one, and writes nothing into
+// it.
+func TestBuiltinSkillLoadsInARealCodex(t *testing.T) {
+	codex := realCodex(t)
+	home := codexHome(t)
+	builtinSkillLoads(t, realHarness{
+		id:   "codex",
+		path: codex,
+		// The model Codex's configuration sets, at the effort low, as in TestCitedUserItemsReachARealCodex.
+		preferred: map[string]any{"provider": "codex", "effort": "low"},
+		config:    home,
+		files:     []string{"config.toml", "agents", "skills"},
+		env:       []string{"CODEX_HOME=" + home},
+	})
+}
