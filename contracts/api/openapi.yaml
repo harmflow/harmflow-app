@@ -864,6 +864,7 @@ components:
         - agent_delivery_failed
         - tool_succeeded
         - tool_failed
+        - tool_declined
         - tests_failed
         - script_started
         - script_exit_code
@@ -1462,7 +1463,7 @@ components:
                 properties:
                   id: { type: string }
                   command: { type: string }
-                  status: { type: string, enum: [running, succeeded, failed] }
+                  status: { type: string, enum: [running, succeeded, failed, declined] }
                   exitCode: { type: integer }
                   startedAt: { type: string, format: date-time }
                   endedAt: { type: string, format: date-time }

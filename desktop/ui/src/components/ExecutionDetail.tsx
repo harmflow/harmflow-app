@@ -7,6 +7,7 @@ import { api } from "../api/client";
 import { native } from "../api/native";
 import type { Attempt, Execution, ExecutionOutput, ExecutionSummary, HarmflowEvent, MessageKey, MessageParams } from "../api/types";
 import { isActive } from "../api/types";
+import type { Tone } from "../design/tokens";
 import { daemonText, eventText, fieldText } from "../lib/daemonText";
 import { formatBytes, formatDateTime, formatDuration, formatElapsed, formatTime, elapsedMs } from "../lib/format";
 import { useNow } from "../lib/hooks";
@@ -359,7 +360,11 @@ function Timeline({
               </span>
               <span className="tl-item__state">
                 {running ? <span className="spinner" aria-label={t("executions.detail.running")} /> : null}
-                {item.completed && !item.completed.ok ? <Icon name="x" size={14} className="tone-danger" /> : null}
+                {item.completed?.declined ? (
+                  <Icon name="alert" size={14} className="tone-warning" />
+                ) : item.completed && !item.completed.ok ? (
+                  <Icon name="x" size={14} className="tone-danger" />
+                ) : null}
               </span>
             </li>
           );
@@ -653,6 +658,11 @@ function FileList({ files }: { files: string[] }) {
   );
 }
 
+type CommandStatus = Execution["commands"][number]["status"];
+/** A command the harness declined never ran, so it reads apart from a failure. */
+const COMMAND_TONES: Record<CommandStatus, Tone> = { running: "cyan", succeeded: "success", failed: "danger", declined: "warning" };
+const COMMAND_ICONS: Record<CommandStatus, IconName> = { running: "dot", succeeded: "check", failed: "x", declined: "alert" };
+
 function CommandList({ commands, locale }: { commands: Execution["commands"]; locale: string }) {
   const { t } = useTranslation();
   if (commands.length === 0) return <EmptyState icon="prompt" title={t("executions.detail.noCommands")} />;
@@ -672,7 +682,7 @@ function CommandList({ commands, locale }: { commands: Execution["commands"]; lo
           {commands.map((c) => (
             <tr key={c.id}>
               <td>
-                <Chip tone={c.status === "failed" ? "danger" : c.status === "running" ? "cyan" : "success"} icon={c.status === "failed" ? "x" : c.status === "running" ? "dot" : "check"}>
+                <Chip tone={COMMAND_TONES[c.status]} icon={COMMAND_ICONS[c.status]}>
                   {t(`executions.detail.commandStatus.${c.status}`)}
                 </Chip>
               </td>

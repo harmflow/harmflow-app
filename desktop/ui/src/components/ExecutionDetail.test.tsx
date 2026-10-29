@@ -165,6 +165,18 @@ describe("execution detail", () => {
     for (const shown of ["Attempt 1", "Claude Code", "Attempt 2", "Codex"]) expect(attempts).toContain(shown);
   });
 
+  it("shows a command the harness declined apart from a failed one", async () => {
+    const declined: Execution = {
+      ...completed,
+      commands: [{ id: "c2", command: "python3 script.py", status: "declined", startedAt: started, endedAt: ended }],
+    };
+    await open(declined, [], capture());
+    expect(await choose("Commands")).toContain("Declined");
+    const chip = host!.querySelector(".table .chip");
+    expect(chip?.className).toContain("chip--warning");
+    expect(chip?.textContent).not.toContain("Failed");
+  });
+
   it("names the model and effort each attempt's harness reported, and the rest as not reported", async () => {
     await open(completed, [], capture());
     await choose("Attempts");

@@ -443,6 +443,7 @@ export const esES: Resources = {
     agent_delivery_failed: "al entregar el agente {{name}}: {{detail}}",
     tool_succeeded: "{{tool}} terminó correctamente",
     tool_failed: "{{tool}} falló",
+    tool_declined: "{{tool}} fue rechazado",
     tests_failed: "las pruebas fallaron; el pull request en borrador las documenta",
     script_started: "{{program}} iniciado",
     script_exit_code: "el programa terminó con el código {{code}}",
@@ -674,7 +675,7 @@ export const esES: Resources = {
       notRecorded: "No registrado",
       workItems: "Elementos de trabajo",
       running: "en ejecución",
-      commandStatus: { running: "Ejecutando", succeeded: "Correcto", failed: "Fallido" },
+      commandStatus: { running: "Ejecutando", succeeded: "Correcto", failed: "Fallido", declined: "Rechazado" },
       noConversation: "Solo observación: HarmFlow nunca envía entrada a un agente en ejecución.",
       definitionRevision: "Definición",
       costs: {

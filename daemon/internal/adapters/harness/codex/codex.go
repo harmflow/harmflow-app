@@ -689,12 +689,14 @@ func (p *parser) item(kind string, it *item) []ports.HarnessEvent {
 			return []ports.HarnessEvent{{Kind: ports.HarnessToolStarted, ToolID: it.ID, Tool: "shell", Command: unwrapShell(it.Command)}}
 		}
 		if done {
-			isErr := it.Status == "failed" || (it.ExitCode != nil && *it.ExitCode != 0)
+			declined := it.Status == "declined"
+			isErr := !declined && (it.Status == "failed" || (it.ExitCode != nil && *it.ExitCode != 0))
 			return []ports.HarnessEvent{{Kind: ports.HarnessToolDone, ToolID: it.ID, Tool: "shell", ExitCode: it.ExitCode,
-				IsError: isErr, Output: classify.Truncate(it.Output, 4000)}}
+				IsError: isErr, Declined: declined, Output: classify.Truncate(it.Output, 4000)}}
 		}
 	case "file_change":
-		if done {
+		// A change Codex declined, or failed to apply, left the workspace as it was.
+		if done && it.Status != "declined" && it.Status != "failed" {
 			var out []ports.HarnessEvent
 			for _, c := range it.Changes {
 				out = append(out, ports.HarnessEvent{Kind: ports.HarnessFileChanged, Path: c.Path, Message: c.Kind})
@@ -712,7 +714,8 @@ func (p *parser) item(kind string, it *item) []ports.HarnessEvent {
 			return []ports.HarnessEvent{{Kind: ports.HarnessToolStarted, ToolID: it.ID, Tool: name, Message: firstNonEmpty(it.Query, it.Server)}}
 		}
 		if done {
-			return []ports.HarnessEvent{{Kind: ports.HarnessToolDone, ToolID: it.ID, Tool: name, IsError: it.Status == "failed"}}
+			return []ports.HarnessEvent{{Kind: ports.HarnessToolDone, ToolID: it.ID, Tool: name, IsError: it.Status == "failed",
+				Declined: it.Status == "declined"}}
 		}
 	case "error":
 		// Codex reports configuration notices as error items; they do not end the turn. One saying its requirements

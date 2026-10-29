@@ -205,8 +205,9 @@ func (f *fakeHarness) holding() bool {
 }
 
 // fakeParser also reads "USAGE <input tokens>", the usage so far, which is final once the attempt ends well,
-// "CMD <command>", a shell command the session ran to success, and "OVERRIDE <notice>", the harness's notice that its
-// requirements override a setting HarmFlow ran it with. "WAIT network" is a wait for the network, as Codex
+// "CMD <command>", a shell command the session ran to success, "DECLINED <command>", one the harness declined before
+// it ran, and "OVERRIDE <notice>", the harness's notice that its requirements override a setting HarmFlow ran it
+// with. "WAIT network" is a wait for the network, as Codex
 // prints one again and again without exiting: the first of a stretch is an event, and a timeout that ends a wait is a
 // network failure. Any other line is the agent's message, and the last one is what a quota end reports as its final
 // text, as the real adapters do.
@@ -253,6 +254,12 @@ func (p *fakeParser) Line(b []byte) []ports.HarnessEvent {
 		id := "tool-" + strconv.Itoa(p.tools)
 		return []ports.HarnessEvent{{Kind: ports.HarnessToolStarted, ToolID: id, Tool: "Bash", Command: cmd},
 			{Kind: ports.HarnessToolDone, ToolID: id, Tool: "Bash"}}
+	}
+	if cmd, ok := strings.CutPrefix(s, "DECLINED "); ok {
+		p.tools++
+		id := "tool-" + strconv.Itoa(p.tools)
+		return []ports.HarnessEvent{{Kind: ports.HarnessToolStarted, ToolID: id, Tool: "shell", Command: cmd},
+			{Kind: ports.HarnessToolDone, ToolID: id, Tool: "shell", Declined: true}}
 	}
 	p.text = s
 	return []ports.HarnessEvent{{Kind: ports.HarnessMessage, Message: s}}
@@ -588,6 +595,42 @@ func (e *env) idle(task string) {
 }
 
 const slow = "echo working; sleep 30; echo 'END ok'"
+
+// harmflow-app#441: a command the harness declined never ran. Its record and its tool.completed read declined, the
+// event is a warning of its own, and the attempt's last operation stays the last command that ran.
+func TestDeclinedCommand(t *testing.T) {
+	e := newEnv(t)
+	e.create("declined", "")
+	const pushed, declined = "git push -u origin harmflow/7-x", "python3 /outside/script.py"
+	e.claude.setScript(func(ports.RunRequest) string {
+		return "echo 'CMD " + pushed + "'; echo 'DECLINED " + declined + "'; echo 'END ok'"
+	})
+	r, _ := e.app.RunTask("declined")
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	if len(x.Commands) != 2 || x.Commands[0].Status != "succeeded" || x.Commands[1].Command != declined ||
+		x.Commands[1].Status != "declined" || x.Commands[1].EndedAt == nil || x.Commands[1].ExitCode != nil {
+		t.Errorf("commands %+v; want %q succeeded, then %q declined with an end and no exit code", x.Commands, pushed,
+			declined)
+	}
+	if x.LastOperation != pushed {
+		t.Errorf("last operation %q, want %q", x.LastOperation, pushed)
+	}
+	events, _, err := e.app.ExecutionEvents(r.ExecutionID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ends []domain.Event
+	for _, ev := range events {
+		if ev.Type == domain.EventToolCompleted {
+			ends = append(ends, ev)
+		}
+	}
+	if len(ends) != 2 || ends[1].Payload["status"] != "declined" || ends[1].Severity != domain.SeverityWarning ||
+		ends[1].MessageKey != "tool_declined" || ends[1].Message != "shell was declined" {
+		t.Errorf("tool.completed events %+v; want the second declined, a warning, \"shell was declined\" as "+
+			"tool_declined", ends)
+	}
+}
 
 func TestRunAndReport(t *testing.T) {
 	e := newEnv(t)

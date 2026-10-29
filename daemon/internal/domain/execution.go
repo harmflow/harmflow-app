@@ -249,7 +249,8 @@ const (
 )
 
 // CommandRecord is one command the harness ran, recorded when its tool call starts: its status is running until the
-// call ends, then succeeded or failed, and failed if its attempt ends first. Attempt is the number of that attempt.
+// call ends, then succeeded or failed, or declined when the harness refused it before it ran, and failed if its attempt
+// ends first. Attempt is the number of that attempt.
 type CommandRecord struct {
 	ID        string     `json:"id"`
 	Command   string     `json:"command"`

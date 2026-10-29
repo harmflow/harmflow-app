@@ -972,9 +972,16 @@ func (r *run) onHarnessEvent(he ports.HarnessEvent) {
 			Payload: map[string]any{"toolId": he.ToolID, "tool": he.Tool, "command": he.Command, "path": he.Path,
 				"description": he.Message}})
 	case ports.HarnessToolDone:
-		status := "succeeded"
-		if he.IsError {
-			status = "failed"
+		status, sev := "succeeded", domain.SeverityInfo
+		text := domain.T("tool_succeeded", "{{tool}} succeeded", "tool", he.Tool)
+		switch {
+		case he.Declined:
+			// The harness refused the call, so it never ran: neither a failure nor an operation done.
+			status, sev = "declined", domain.SeverityWarning
+			text = domain.T("tool_declined", "{{tool}} was declined", "tool", he.Tool)
+		case he.IsError:
+			status, sev = "failed", domain.SeverityWarning
+			text = domain.T("tool_failed", "{{tool}} failed", "tool", he.Tool)
 		}
 		a.mu.Lock()
 		recorded := false
@@ -983,7 +990,7 @@ func (r *run) onHarnessEvent(he ports.HarnessEvent) {
 			c.Status = status
 			c.EndedAt = &now
 			c.ExitCode = he.ExitCode
-			if !he.IsError {
+			if status == "succeeded" {
 				r.lastOperation = trimTo(c.Command, 300)
 				r.x.LastOperation = r.lastOperation
 				recorded = true
@@ -992,12 +999,6 @@ func (r *run) onHarnessEvent(he ports.HarnessEvent) {
 		a.mu.Unlock()
 		if recorded {
 			r.save(true)
-		}
-		sev := domain.SeverityInfo
-		text := domain.T("tool_succeeded", "{{tool}} succeeded", "tool", he.Tool)
-		if he.IsError {
-			sev = domain.SeverityWarning
-			text = domain.T("tool_failed", "{{tool}} failed", "tool", he.Tool)
 		}
 		payload := map[string]any{"toolId": he.ToolID, "tool": he.Tool, "status": status, "output": he.Output}
 		if he.ExitCode != nil {

@@ -221,6 +221,7 @@ type HarnessEvent struct {
 	Path      string
 	ExitCode  *int
 	IsError   bool
+	Declined  bool // on HarnessToolDone: the harness refused the call before it ran, so IsError stays false
 	Output    string
 	SessionID string
 	// Model and Effort are what the harness says it runs with, on HarnessStarted; empty when it does not say.

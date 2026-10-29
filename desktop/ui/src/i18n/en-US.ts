@@ -432,6 +432,7 @@ export const enUS = {
     agent_delivery_failed: "delivering agent {{name}}: {{detail}}",
     tool_succeeded: "{{tool}} succeeded",
     tool_failed: "{{tool}} failed",
+    tool_declined: "{{tool}} was declined",
     tests_failed: "tests failed; the draft pull request documents them",
     script_started: "{{program}} started",
     script_exit_code: "the program exited with code {{code}}",
@@ -657,7 +658,7 @@ export const enUS = {
       notRecorded: "Not recorded",
       workItems: "Work items",
       running: "running",
-      commandStatus: { running: "Running", succeeded: "Succeeded", failed: "Failed" },
+      commandStatus: { running: "Running", succeeded: "Succeeded", failed: "Failed", declined: "Declined" },
       noConversation: "Observe-only: HarmFlow never sends input to a running agent.",
       definitionRevision: "Definition",
       costs: {

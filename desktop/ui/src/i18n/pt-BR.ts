@@ -441,6 +441,7 @@ export const ptBR: Resources = {
     agent_delivery_failed: "ao entregar o agente {{name}}: {{detail}}",
     tool_succeeded: "{{tool}} concluiu com sucesso",
     tool_failed: "{{tool}} falhou",
+    tool_declined: "{{tool}} foi recusado",
     tests_failed: "os testes falharam; o pull request em rascunho os documenta",
     script_started: "{{program}} iniciado",
     script_exit_code: "o programa terminou com o código {{code}}",
@@ -680,7 +681,7 @@ export const ptBR: Resources = {
       notRecorded: "Não registrado",
       workItems: "Itens de trabalho",
       running: "em execução",
-      commandStatus: { running: "Executando", succeeded: "Bem-sucedido", failed: "Falhou" },
+      commandStatus: { running: "Executando", succeeded: "Bem-sucedido", failed: "Falhou", declined: "Recusado" },
       noConversation: "Somente observação: o HarmFlow nunca envia entrada a um agente em execução.",
       definitionRevision: "Definição",
       costs: {

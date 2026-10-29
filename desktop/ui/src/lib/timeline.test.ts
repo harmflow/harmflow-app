@@ -36,6 +36,14 @@ describe("buildTimeline", () => {
     expect(items[0].completed?.ok).toBe(false);
   });
 
+  it("marks a tool the harness declined apart from a failed one", () => {
+    const items = buildTimeline([
+      ev("tool.started", { payload: { toolId: "t3", tool: "shell", command: "python3 script.py" } }),
+      ev("tool.completed", { severity: "warning", payload: { toolId: "t3", tool: "shell", status: "declined" } }),
+    ]);
+    expect(items[0].completed).toMatchObject({ ok: false, declined: true });
+  });
+
   it("shows the daemon's messages in the interface's language, the agent's and tools' as they are", async () => {
     await i18n.changeLanguage("pt-BR");
     try {

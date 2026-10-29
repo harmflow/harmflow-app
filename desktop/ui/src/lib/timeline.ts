@@ -35,8 +35,8 @@ export interface TimelineItem {
   detail?: string;
   tone: Tone;
   icon: TimelineIcon;
-  /** For a tool step: finished, with success or failure. Undefined while it runs. */
-  completed?: { ok: boolean; at: string };
+  /** For a tool step: finished, with success or failure, or declined by the harness before it ran. Undefined while it runs. */
+  completed?: { ok: boolean; declined?: boolean; at: string };
   attempt?: number;
 }
 
@@ -192,7 +192,8 @@ export function buildTimeline(events: readonly HarmflowEvent[]): TimelineItem[] 
       if (open) {
         const p = payloadOf(e);
         const failed = p.isError === true || p.status === "failed" || (typeof p.exitCode === "number" && p.exitCode !== 0);
-        open.completed = { ok: !failed, at: e.timestamp };
+        const declined = p.status === "declined";
+        open.completed = declined ? { ok: false, declined, at: e.timestamp } : { ok: !failed, at: e.timestamp };
         if (key) openTools.delete(key);
         continue;
       }
