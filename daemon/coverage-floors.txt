@@ -1,7 +1,7 @@
 # The daemon's statement coverage floors, one "<package> <ratio>" line per Go package. make coverage-daemon
 # fails when a package reads below its floor. A package with no line here is held at 0.
 #
-# Each floor is the reading recorded in COVERAGE.md, truncated to two decimals. Move one only with its row there, in
+# Each floor is the reading recorded in docs/coverage.md, truncated to two decimals. Move one only with its row there, in
 # one commit; a lowering also writes its reason there.
 cmd/harmflowd 77.46
 internal/adapters/catalog 91.75

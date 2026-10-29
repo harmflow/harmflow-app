@@ -29,7 +29,7 @@ func TestCheck(t *testing.T) {
 		{
 			name: "names that keep every rule",
 			paths: []string{
-				".github/workflows/ci.yml", ".cargo/config.toml", "CLAUDE.md", "GO-CODE-GUIDE.md", "LICENSE", "Makefile",
+				".github/workflows/ci.yml", ".cargo/config.toml", "CLAUDE.md", "docs/go-code-guide.md", "LICENSE", "Makefile",
 				"README.md", "contracts/README.md", "contracts/schemas/execution-report.schema.json",
 				"daemon/go.mod", "daemon/coverage-floors.txt", "daemon/cmd/harmflowd/main_test.go",
 				"daemon/internal/domain/path_rule.go", "daemon/internal/adapters/harness/procutil/tree_darwin.go",
