@@ -12,10 +12,11 @@ import type {
   ExecutionOutput,
   ExecutionSummary,
   FiringResult,
+  HarmflowEvent,
   Harness,
   HarnessId,
   Health,
-  HarmflowEvent,
+  NewTask,
   Notification,
   Queue,
   ScheduleInput,
@@ -26,6 +27,8 @@ import type {
   Task,
   TaskInput,
   TaskSummary,
+  Template,
+  TemplateLanguage,
   Tool,
   ValidationResult,
 } from "./types";
@@ -84,6 +87,10 @@ export const api = {
    * lists the ones of the task's workspace path, or of the folder HarmFlow runs the task in when it sets none.
    */
   catalog: (workspace?: string, task?: string) => call<Catalog>("GET", `/catalog${query({ workspace, task })}`),
+  templates: () => call<Template[]>("GET", "/templates"),
+  /** The document of a new task from a template, named in language; the daemon writes nothing. */
+  draftTask: (template: string, language: TemplateLanguage) =>
+    call<NewTask>("POST", `/templates/${enc(template)}/draft`, { language }),
 
   tasks: () => call<TaskSummary[]>("GET", "/tasks"),
   task: (id: string) => call<Task>("GET", `/tasks/${enc(id)}`),

@@ -2,7 +2,7 @@
 // its model the task's when the task's harness accepts it, and its skills join the task's. The task keeps the agent's
 // name and the hash of what was copied as its origin only; the copy never follows the agent, and an agent that no
 // longer exists changes nothing.
-import type { Catalog, CatalogEntry } from "../api/types";
+import type { CatalogEntry } from "../api/types";
 import { getIn, setIn, type Doc, type Path } from "./taskForm";
 
 export interface Origin {
@@ -49,16 +49,6 @@ export function leftOut(doc: Doc, copy: AgentCopy): string[] {
   const out = [...copy.omittedFields];
   if (copy.model && !copy.modelHarnesses.includes(preferredHarness(doc))) out.push("model");
   return out;
-}
-
-/**
- * The new task with the agent its type selects copied into it, as choosing that agent does; the task as it is when the
- * type selects none or the catalog carries no copy of it.
- */
-export function copyTypeAgent(doc: Doc, catalog: Catalog | undefined): Doc {
-  const name = catalog?.taskTypes.find((t) => t.id === getIn<string>(doc, ["spec", "type"]))?.selectedAgent;
-  const copy = name ? catalog?.agents.find((a) => a.name === name)?.copy : undefined;
-  return name && copy ? applyAgentCopy(doc, name, copy) : doc;
 }
 
 /**

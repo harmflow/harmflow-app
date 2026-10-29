@@ -3,8 +3,9 @@
 // it again, the choice outlives a restart, and the daemon's connection state is the topbar's alone. ⌘N opens the
 // template picker as the topbar's New task does (harmflow-app#169). ⌘S saves only in a task editor (harmflow-app#230).
 // Every way out of a task editor with unsaved changes asks first, and each template pick opens an editor of its own
-// (harmflow-app#170); a new GitHub task starts as the copy of the agent its type selects (harmflow-app#280). ⌘+, ⌘−,
-// and ⌘0 zoom the dashboard everywhere, and the level outlives a restart (harmflow-app#55).
+// (harmflow-app#170); a new GitHub task starts as the copy of the agent its type selects (harmflow-app#280). Every
+// place a task is created offers the daemon's templates, and a pick has the daemon draft the task (harmflow-app#177).
+// ⌘+, ⌘−, and ⌘0 zoom the dashboard everywhere, and the level outlives a restart (harmflow-app#55).
 // A render error never leaves the window empty, and the interface tells the shell when it has painted (harmflow-app#96).
 import { EditorView } from "@codemirror/view";
 import { readFileSync } from "node:fs";
@@ -14,7 +15,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root as ReactRoot } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { native } from "./api/native";
-import type { Harness, Settings, Task, TaskSummary } from "./api/types";
+import type { Harness, LocalizedText, Settings, Task, TaskSummary, Template } from "./api/types";
 import { Root } from "./App";
 import { rootOptions } from "./components/ErrorBoundary";
 import { YamlEditor } from "./components/YamlEditor";
@@ -48,16 +49,18 @@ vi.mock("./components/Shell", async (importOriginal) => {
   };
 });
 
-// The daemon answers the paths a test sets here, and nothing else.
-const daemon = vi.hoisted(() => ({ answers: new Map<string, unknown>() }));
+// The daemon answers the paths a test sets here, and nothing else, and keeps every request it was sent.
+const daemon = vi.hoisted(() => ({ answers: new Map<string, unknown>(), sent: [] as { method: string; path: string; body: unknown }[] }));
 
 vi.mock("./api/transport", () => ({
   isTauri: () => false,
   EVENT_TYPES: [],
   transport: {
     mode: "http",
-    request: async (_method: string, path: string) =>
-      daemon.answers.has(path) ? { status: 200, body: daemon.answers.get(path) } : { status: 404, body: null },
+    request: async (method: string, path: string, body?: unknown) => {
+      daemon.sent.push({ method, path, body });
+      return daemon.answers.has(path) ? { status: 200, body: daemon.answers.get(path) } : { status: 404, body: null };
+    },
     requestText: async () => ({ status: 404, text: "" }),
     stream: () => () => {},
   },
@@ -78,6 +81,40 @@ const settings: Settings = {
   allowedFolders: [],
   onboardingCompleted: true,
 };
+
+/** A template as GET /templates lists it, valid unless a test says otherwise. */
+const template = (id: string, type: string, name: LocalizedText, valid = true): Template => ({
+  id,
+  source: "builtin",
+  path: `/builtins/templates/${id}.yaml`,
+  type,
+  name,
+  description: { "pt-BR": `Sobre ${name["pt-BR"]}`, "en-US": `About ${name["en-US"]}`, "es-ES": `Sobre ${name["es-ES"]}` },
+  validation: { valid, errors: [], warnings: [] },
+});
+
+const templates: Template[] = [
+  template("hf-general", "general", { "pt-BR": "Tarefa geral", "en-US": "General task", "es-ES": "Tarea general" }),
+  template("hf-github-issues", "github", { "pt-BR": "Implementar issues do GitHub", "en-US": "Implement GitHub issues", "es-ES": "Implementar issues de GitHub" }),
+  template("hf-script", "script", { "pt-BR": "Tarefa de script", "en-US": "Script task", "es-ES": "Tarea de script" }),
+];
+
+/** The document the daemon drafts from a template, named name. */
+function draft(id: string, name: string, spec: Record<string, unknown>) {
+  return { document: { apiVersion: "harmflow/v1alpha1", kind: "Task", metadata: { id, name }, spec: { enabled: true, ...spec } } };
+}
+
+const claudeCode = { preferred: { provider: "claude-code" } };
+
+/** The daemon's drafts of the templates, in en-US. */
+function answerDrafts() {
+  daemon.answers.set("/templates/hf-general/draft", draft("general-task", "General task", { type: "general", harness: claudeCode }));
+  daemon.answers.set(
+    "/templates/hf-github-issues/draft",
+    draft("implement-github-issues", "Implement GitHub issues", { type: "github", harness: claudeCode, github: { repositories: [{ baseBranch: "main" }] } }),
+  );
+  daemon.answers.set("/templates/hf-script/draft", draft("script-task", "Script task", { type: "script", script: {} }));
+}
 
 let root: ReactRoot | undefined;
 let host: HTMLElement | undefined;
@@ -115,12 +152,15 @@ beforeEach(() => {
       activity: { running: [], queued: [], completed: [], failed: [] },
       system: { cpuPercent: 12, memoryUsedBytes: 2.1e9, memoryTotalBytes: 16e9, diskUsedBytes: 48e9, diskTotalBytes: 500e9 },
     },
+    templates,
   });
+  answerDrafts();
 });
 
 afterEach(() => {
   quit();
   daemon.answers.clear();
+  daemon.sent.length = 0;
 });
 
 /** Mounts the interface as main.tsx does, with the same root options. */
@@ -140,6 +180,7 @@ const layout = () => host!.querySelector(".app")?.getAttribute("data-sidebar");
 const sidebar = () => host!.querySelector<HTMLElement>(".sidebar")!;
 const toggle = () => sidebar().querySelector<HTMLButtonElement>(".sidebar__toggle")!;
 const navButton = (label: string) => [...sidebar().querySelectorAll<HTMLButtonElement>(".nav__item")].find((b) => b.textContent?.startsWith(label))!;
+const contentOrCard = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>(".onboarding button")].find((b) => b.textContent?.includes(label))!;
 const tooltip = () => document.body.querySelector(".tooltip")?.textContent ?? null;
 
 /** Presses ⌘B (or the given keys) where focus is; returns whether the app took the key. */
@@ -314,6 +355,87 @@ describe("new task", () => {
     expect(pickers()).toBe(0);
     expect(title()).toBe("Tasks");
     expect([...host!.querySelectorAll<HTMLInputElement>("input")].some((i) => i.value === "General task")).toBe(true);
+  });
+
+  const labels = () => [...host!.querySelectorAll(".template strong")].map((n) => n.textContent);
+  const offered = ["General task", "Implement GitHub issues", "Script task"];
+  const escape = () => act(async () => void window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
+  const contentButton = (label: string) =>
+    [...host!.querySelectorAll<HTMLButtonElement>(".app__content button")].find((b) => b.textContent?.includes(label))!;
+
+  it("offers the daemon's valid templates, in its order, from the topbar, the Tasks screen, and the Overview's empty state", async () => {
+    const broken = template("hf-broken", "general", { "pt-BR": "Quebrado", "en-US": "Broken", "es-ES": "Roto" }, false);
+    patchStateForTests({ templates: [templates[0], broken, templates[1], templates[2]], tasks: [], tasksLoaded: true });
+    await launch();
+    await act(async () => newTaskButton().click());
+    expect(labels()).toEqual(offered);
+    expect(host!.querySelector(".template")!.textContent).toContain("About General task");
+    await escape();
+
+    await act(async () => navButton("Tasks").click());
+    await act(async () => contentButton("New task").click());
+    expect(labels()).toEqual(offered);
+    await escape();
+
+    await act(async () => navButton("Overview").click());
+    await act(async () => contentButton("Create your first task").click());
+    expect(labels()).toEqual(offered);
+  });
+
+  it("offers the same templates in onboarding, and its pick opens the task the daemon drafts", async () => {
+    patchStateForTests({ settings: { ...settings, onboardingCompleted: false } });
+    await launch();
+    for (let step = 1; step < 4; step++) await act(async () => contentOrCard("Next").click());
+    expect(labels()).toEqual(offered);
+    await pick("Script task");
+    expect(title()).toBe("Tasks");
+    expect([...host!.querySelectorAll<HTMLInputElement>("input")].some((i) => i.value === "Script task")).toBe(true);
+    expect(daemon.sent.filter((r) => r.path.endsWith("/draft"))).toEqual([
+      { method: "POST", path: "/templates/hf-script/draft", body: { language: "en-US" } },
+    ]);
+  });
+
+  it("names the templates in the interface's language, switching with it, and has the task drafted in that language", async () => {
+    await launch();
+    await act(async () => newTaskButton().click());
+    expect(labels()).toEqual(offered);
+    await act(async () => void i18n.changeLanguage("pt-BR"));
+    try {
+      expect(labels()).toEqual(["Tarefa geral", "Implementar issues do GitHub", "Tarefa de script"]);
+      expect(host!.querySelector(".template")!.textContent).toContain("Sobre Tarefa geral");
+      await pick("Tarefa geral");
+      expect(daemon.sent.filter((r) => r.path.endsWith("/draft"))).toEqual([
+        { method: "POST", path: "/templates/hf-general/draft", body: { language: "pt-BR" } },
+      ]);
+    } finally {
+      await act(async () => void i18n.changeLanguage("en-US"));
+    }
+  });
+
+  it("loads the templates from the daemon", async () => {
+    patchStateForTests({ templates: undefined });
+    daemon.answers.set("/templates", [templates[2]]);
+    await act(async () => actions.refreshTemplates());
+    expect(getState().templates).toEqual([templates[2]]);
+    await launch();
+    await act(async () => newTaskButton().click());
+    expect(labels()).toEqual(["Script task"]);
+  });
+
+  it("says when the daemon offers no template, and goes back to the list when a draft fails", async () => {
+    patchStateForTests({ templates: [] });
+    await launch();
+    await act(async () => newTaskButton().click());
+    expect(labels()).toEqual([]);
+    expect(host!.querySelector('[role="dialog"]')!.textContent).toContain("HarmFlow found no templates to start a task from.");
+    await escape();
+
+    patchStateForTests({ templates });
+    daemon.answers.delete("/templates/hf-general/draft");
+    await act(async () => newTaskButton().click());
+    await pick("General task");
+    expect(title()).toBe("Tasks");
+    expect(host!.querySelector(".editor")).toBeNull();
   });
 
   it("takes ⌘N from the YAML editor, whose keymap lets it through", async () => {
@@ -633,7 +755,7 @@ describe("unsaved changes", () => {
     expect(unsaved()).toBeNull();
   });
 
-  it("starts a GitHub task as the copy of the agent its type selects, with nothing unsaved", async () => {
+  it("starts a GitHub task as the copy of the agent its template selects, with nothing unsaved", async () => {
     const hash = "sha256:" + "c".repeat(64);
     patchStateForTests({
       catalog: {
@@ -648,11 +770,21 @@ describe("unsaved changes", () => {
         ],
         skills: [],
         problems: [],
-        taskTypes: [
-          { id: "github", parametersKey: "github", defaultAgents: [], defaultSkills: [], selectedAgent: "hf-implementer" },
-        ],
+        taskTypes: [{ id: "github", parametersKey: "github" }],
       },
     });
+    // The daemon drafts the task as the agent's copy.
+    daemon.answers.set(
+      "/templates/hf-github-issues/draft",
+      draft("implement-github-issues", "Implement GitHub issues", {
+        type: "github",
+        prompt: "You implement issues.",
+        origin: { agent: "hf-implementer", hash },
+        skills: ["hf-queue"],
+        harness: claudeCode,
+        github: { repositories: [{ baseBranch: "main" }] },
+      }),
+    );
     try {
       await launch();
       await newTask("Implement GitHub issues");

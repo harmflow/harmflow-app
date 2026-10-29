@@ -5,10 +5,10 @@ import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
 import { native } from "../api/native";
 import { HarnessRow, ToolRow } from "../components/Harnesses";
+import { TemplateButtons } from "../components/Templates";
 import { Icon, Logo } from "../components/Icon";
 import { toast } from "../components/toast";
 import { Banner, Button, Checkbox, Chip, cx } from "../components/ui";
-import type { TemplateKind } from "../lib/taskForm";
 import { actions, useStore } from "../state/store";
 
 const TOTAL = 5;
@@ -19,7 +19,7 @@ export function OnboardingScreen({
   onImport,
 }: {
   onFinish: () => void;
-  onCreateTask: (k: TemplateKind) => void;
+  onCreateTask: (template: string) => void;
   onImport: () => void;
 }) {
   const { t } = useTranslation();
@@ -141,22 +141,7 @@ export function OnboardingScreen({
           <section className="onboarding__step">
             <h2>{t("onboarding.firstTask.title")}</h2>
             <p>{t("onboarding.firstTask.body")}</p>
-            <div className="templates">
-              <button type="button" className="template" disabled={!daemonUp} onClick={() => void complete(() => onCreateTask("github"))}>
-                <span className="template__icon">
-                  <Icon name="code" size={24} />
-                </span>
-                <strong>{t("tasks.templates.github")}</strong>
-                <span className="muted">{t("tasks.templates.githubHint")}</span>
-              </button>
-              <button type="button" className="template" disabled={!daemonUp} onClick={() => void complete(() => onCreateTask("general"))}>
-                <span className="template__icon template__icon--violet">
-                  <Icon name="sparkle" size={24} />
-                </span>
-                <strong>{t("tasks.templates.general")}</strong>
-                <span className="muted">{t("tasks.templates.generalHint")}</span>
-              </button>
-            </div>
+            <TemplateButtons disabled={!daemonUp} onPick={(id) => void complete(() => onCreateTask(id))} />
             <Button icon="upload" disabled={!daemonUp} onClick={() => void complete(onImport)}>
               {t("common.import")}
             </Button>

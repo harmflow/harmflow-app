@@ -1,6 +1,5 @@
 // The task form edits the task document itself, field by field. A field the user clears is removed, so the document —
 // and the YAML the daemon writes from it — holds only what the user set; defaults stay implicit.
-import type { Catalog } from "../api/types";
 
 export type Doc = Record<string, unknown>;
 export type Path = readonly (string | number)[];
@@ -57,7 +56,7 @@ export function setIn<T extends Doc>(doc: T, path: Path, value: unknown): T {
   return container as T;
 }
 
-/** A kebab-case identifier from a name: "Implement GitHub issues" → "implement-github-issues". */
+/** A kebab-case identifier from a name: "Weekly release notes" → "weekly-release-notes". */
 export function slugify(name: string): string {
   return name
     .normalize("NFKD")
@@ -78,37 +77,6 @@ export function linesToList(text: string): string[] {
 
 export function listToLines(list: unknown): string {
   return Array.isArray(list) ? list.join("\n") : "";
-}
-
-export type TemplateKind = "github" | "general" | "script";
-
-const BASE_DOCUMENT = { apiVersion: "harmflow/v1alpha1", kind: "Task" } as const;
-
-/**
- * A new task of a type, with the type's built-in agents and skills as the catalog declares them. The agent the type
- * selects is copied in by copyTypeAgent.
- */
-export function newTaskDocument(kind: TemplateKind, catalog: Catalog | undefined, name: string): Doc {
-  if (kind === "script") {
-    return { ...BASE_DOCUMENT, metadata: { id: slugify(name), name }, spec: { enabled: true, type: "script", script: { command: [""] } } };
-  }
-  const type = catalog?.taskTypes.find((t) => t.id === kind);
-  const spec: Doc = {
-    enabled: true,
-    type: kind,
-    prompt: "",
-    harness: { preferred: { provider: "claude-code" } },
-  };
-  if (type?.defaultAgents.length) spec.agents = [...type.defaultAgents];
-  if (type?.defaultSkills.length) spec.skills = [...type.defaultSkills];
-  if (kind === "github") {
-    spec.github = { repositories: [{ name: "", localPath: "", baseBranch: "main" }] };
-  }
-  return {
-    ...BASE_DOCUMENT,
-    metadata: { id: slugify(name), name },
-    spec,
-  };
 }
 
 /** Which form a script task's program takes: an argument list, or an inline script. */

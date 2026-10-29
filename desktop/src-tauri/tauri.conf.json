@@ -38,7 +38,8 @@
     "externalBin": ["binaries/harmflowd"],
     "resources": {
       "../../agents/": "builtins/agents/",
-      "../../skills/": "builtins/skills/"
+      "../../skills/": "builtins/skills/",
+      "../../templates/": "builtins/templates/"
     },
     "macOS": {
       "minimumSystemVersion": "15.0"

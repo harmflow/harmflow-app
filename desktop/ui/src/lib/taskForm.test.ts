@@ -1,35 +1,18 @@
 import { describe, expect, it } from "vitest";
-import type { Catalog } from "../api/types";
 import { schemaDefault, schemaEnum } from "./schema";
 import {
   envToLines,
   getIn,
   linesToArgs,
   linesToEnv,
-  newTaskDocument,
   programKind,
   scheduleKind,
   setIn,
   setProgramKind,
   setScheduleKind,
   slugify,
+  type Doc,
 } from "./taskForm";
-
-const catalog: Catalog = {
-  agents: [],
-  skills: [],
-  problems: [],
-  taskTypes: [
-    {
-      id: "github",
-      parametersKey: "github",
-      defaultAgents: [],
-      defaultSkills: ["hf-github-issue-queue", "hf-github-draft-pr"],
-      selectedAgent: "hf-github-issue-implementer",
-    },
-    { id: "general", parametersKey: null, defaultAgents: [], defaultSkills: [] },
-  ],
-};
 
 describe("form ↔ document", () => {
   it("writes a field at its path without touching the rest", () => {
@@ -62,27 +45,6 @@ describe("form ↔ document", () => {
     expect(getIn(doc, ["spec", "schedule"])).toEqual({ timezone: "America/Sao_Paulo" });
   });
 
-  it("builds a GitHub task from the catalog, with repositories only for that type", () => {
-    const github = newTaskDocument("github", catalog, "Implement GitHub issues");
-    expect(github).toMatchObject({
-      apiVersion: "harmflow/v1alpha1",
-      kind: "Task",
-      metadata: { id: "implement-github-issues", name: "Implement GitHub issues" },
-      spec: {
-        type: "github",
-        prompt: "",
-        skills: ["hf-github-issue-queue", "hf-github-draft-pr"],
-        github: { repositories: [{ baseBranch: "main" }] },
-      },
-    });
-    // The agent the type selects is not a subagent, and is copied in by copyTypeAgent.
-    expect(getIn(github, ["spec", "agents"])).toBeUndefined();
-    expect(getIn(github, ["spec", "origin"])).toBeUndefined();
-    const general = newTaskDocument("general", catalog, "Triagem de e-mail");
-    expect(getIn(general, ["spec", "github"])).toBeUndefined();
-    expect(getIn(general, ["metadata", "id"])).toBe("triagem-de-e-mail");
-  });
-
   it("makes kebab-case identifiers", () => {
     expect(slugify("  Revisão de PRs — Core!  ")).toBe("revisao-de-prs-core");
   });
@@ -106,14 +68,8 @@ describe("schema", () => {
 });
 
 describe("script tasks", () => {
-  it("starts with an empty argument list and no prompt or harness", () => {
-    const doc = newTaskDocument("script", catalog, "Weekly audit");
-    expect(getIn(doc, ["spec"])).toEqual({ enabled: true, type: "script", script: { command: [""] } });
-    expect(getIn(doc, ["metadata", "id"])).toBe("weekly-audit");
-  });
-
   it("switches between an argument list and an inline script, keeping the rest", () => {
-    let doc = setIn(newTaskDocument("script", catalog, "Job"), ["spec", "script", "workingDirectory"], "~/jobs");
+    let doc: Doc = setIn({ spec: { type: "script", script: {} } }, ["spec", "script", "workingDirectory"], "~/jobs");
     expect(programKind(doc)).toBe("command");
     doc = setProgramKind(doc, "inline");
     expect(getIn(doc, ["spec", "script"])).toEqual({ workingDirectory: "~/jobs", inline: { interpreter: ["/bin/sh"] } });
