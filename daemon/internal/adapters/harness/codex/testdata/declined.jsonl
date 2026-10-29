@@ -1,0 +1,8 @@
+{"type":"thread.started","thread_id":"01a18558-0000-7000-8000-000000000441"}
+{"type":"item.completed","item":{"id":"item_1","type":"error","message":"Configured value for `approval_policy` is disallowed by requirements; falling back to required value OnRequest. Details: invalid value for `approval_policy`: `Never` is not in the allowed set [OnRequest, UnlessTrusted]"}}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_3","type":"agent_message","text":"I'll start with the required command."}}
+{"type":"item.started","item":{"id":"item_4","type":"command_execution","command":"/bin/zsh -lc 'python3 /some/dir/outside-the-workspace/script.py'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_4","type":"command_execution","command":"/bin/zsh -lc 'python3 /some/dir/outside-the-workspace/script.py'","aggregated_output":"","exit_code":null,"status":"declined"}}
+{"type":"item.completed","item":{"id":"item_6","type":"agent_message","text":"The approval review declined the command, so nothing ran."}}
+{"type":"turn.completed","usage":{"input_tokens":71692,"cached_input_tokens":47232,"cache_write_input_tokens":0,"output_tokens":592,"reasoning_output_tokens":226}}

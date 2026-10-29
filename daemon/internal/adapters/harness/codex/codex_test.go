@@ -153,6 +153,75 @@ func TestParseRequirementsOverride(t *testing.T) {
 	}
 }
 
+// harmflow-app#441: a command an approval reviewer declined, as Codex 0.163.0 printed it, never ran. Its end is a
+// declined call, with no exit code, and neither a success nor a failure.
+func TestParseDeclined(t *testing.T) {
+	_, events := replay(t, "declined.jsonl")
+	var done []ports.HarnessEvent
+	for _, e := range events {
+		if e.Kind == ports.HarnessToolStarted && e.Command != "python3 /some/dir/outside-the-workspace/script.py" {
+			t.Errorf("the shell wrapper was not removed: %q", e.Command)
+		}
+		if e.Kind == ports.HarnessToolDone {
+			done = append(done, e)
+		}
+	}
+	if len(done) != 1 || done[0].ToolID != "item_4" || !done[0].Declined || done[0].IsError || done[0].ExitCode != nil {
+		t.Errorf("tool ends %+v, want one for item_4, declined, not an error, with no exit code", done)
+	}
+}
+
+// The end of each tool call Codex reports: a declined call is neither a success nor a failure, whatever its tool.
+func TestParseToolEnd(t *testing.T) {
+	cases := []struct {
+		name                    string
+		item                    string
+		wantError, wantDeclined bool
+	}{
+		{"command succeeded", `{"id":"c","type":"command_execution","exit_code":0,"status":"completed"}`, false, false},
+		{"command exited 1", `{"id":"c","type":"command_execution","exit_code":1,"status":"failed"}`, true, false},
+		{"command failed with no exit", `{"id":"c","type":"command_execution","exit_code":null,"status":"failed"}`, true,
+			false},
+		{"command declined", `{"id":"c","type":"command_execution","exit_code":null,"status":"declined"}`, false, true},
+		{"MCP call succeeded", `{"id":"c","type":"mcp_tool_call","tool":"search","status":"completed"}`, false, false},
+		{"MCP call failed", `{"id":"c","type":"mcp_tool_call","tool":"search","status":"failed"}`, true, false},
+		{"MCP call declined", `{"id":"c","type":"mcp_tool_call","tool":"search","status":"declined"}`, false, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			line := `{"type":"item.completed","item":` + c.item + `}`
+			events := (&parser{}).Line([]byte(line))
+			if len(events) != 1 || events[0].Kind != ports.HarnessToolDone || events[0].IsError != c.wantError ||
+				events[0].Declined != c.wantDeclined {
+				t.Errorf("Line(%s) = %+v, want one tool end with IsError %v and Declined %v", line, events, c.wantError,
+					c.wantDeclined)
+			}
+		})
+	}
+}
+
+// A file change Codex declined or failed to apply changed nothing, so it names no changed file.
+func TestParseFileChangeStatus(t *testing.T) {
+	for _, c := range []struct {
+		status string
+		want   int
+	}{{"completed", 1}, {"", 1}, {"declined", 0}, {"failed", 0}} {
+		t.Run(c.status, func(t *testing.T) {
+			line := `{"type":"item.completed","item":{"id":"f","type":"file_change","changes":[{"path":"/work/a.md",` +
+				`"kind":"update"}],"status":"` + c.status + `"}}`
+			var changed int
+			for _, e := range (&parser{}).Line([]byte(line)) {
+				if e.Kind == ports.HarnessFileChanged {
+					changed++
+				}
+			}
+			if changed != c.want {
+				t.Errorf("Line(%s) changed %d files, want %d", line, changed, c.want)
+			}
+		})
+	}
+}
+
 // The CLI's error is redacted before the 2000-character tail cuts it; cut first, a secret would keep part of itself,
 // too little to match its pattern.
 func TestFinishRedactsBeforeTheTail(t *testing.T) {
