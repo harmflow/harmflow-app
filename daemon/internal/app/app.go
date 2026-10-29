@@ -145,8 +145,12 @@ type App struct {
 
 	mu            sync.Mutex
 	tasks         map[string]*taskEntry
-	templates     []*Template // the built-in templates, sorted by identifier, read at start
-	executions    map[string]*domain.Execution
+	templates     []*Template                         // the built-in templates, sorted by identifier, read at start
+	executions    map[string]*domain.Execution        // with the four below, the executions history.go describes
+	ended         map[string]*domain.ExecutionSummary // by execution id
+	byCreated     []placed
+	byEnd         []placed
+	latest        map[string]placed     // by task id
 	running       map[string]*runHandle // by task id
 	inventory     map[string]ports.HarnessInfo
 	manualPaths   map[string]string
@@ -228,6 +232,7 @@ func New(d Deps) (*App, error) {
 	a := &App{
 		d: d, log: d.Logger, startedAt: d.Clock.Now(),
 		tasks: map[string]*taskEntry{}, executions: map[string]*domain.Execution{}, running: map[string]*runHandle{},
+		ended: map[string]*domain.ExecutionSummary{}, latest: map[string]placed{},
 		inventory: map[string]ports.HarnessInfo{}, manualPaths: map[string]string{}, sched: map[string]*scheduleState{},
 		firings: map[string][]firingRecord{}, ledger: map[string]map[string]*domain.WorkItem{}, accepting: true,
 		adapters: map[string]ports.HarnessAdapter{}, quotas: map[string]quotaReading{}, quotaReads: map[string]*sync.Mutex{},
@@ -406,17 +411,18 @@ func (a *App) Subscribe(after int64) (<-chan domain.Event, bool, func()) {
 // whether retention deleted its log; an unknown execution is CodeNotFound.
 func (a *App) ExecutionEvents(id string, after int64, limit int) ([]domain.Event, bool, error) {
 	a.mu.Lock()
-	_, ok := a.executions[id]
+	ok := a.knownLocked(id)
 	a.mu.Unlock()
 	if !ok {
-		return nil, false, newError(CodeNotFound, domain.T("execution_not_found", "no execution {{execution}}", "execution", id))
+		return nil, false, executionNotFound(id)
 	}
 	return a.d.Events.Replay(id, after, limit)
 }
 
 // persistExecution saves a copy of the record taken under a.mu, since the executor may change it at the same time, and
 // returns the revision of that copy and whether it was written. It waits only for the saves of the same record, so a
-// firing or a cancellation never waits for another execution's save; the caller must not hold a.mu.
+// firing or a cancellation never waits for another execution's save; the caller must not hold a.mu. Once the record of
+// an execution that ended is saved, the daemon holds it as its summary.
 func (a *App) persistExecution(x *domain.Execution) (uint64, bool) {
 	defer a.lockRecord(x.ID)()
 	a.mu.Lock()
@@ -433,6 +439,11 @@ func (a *App) persistExecution(x *domain.Execution) (uint64, bool) {
 	if err != nil {
 		a.log.Printf("saving execution %s: %v", x.ID, err)
 		return 0, false
+	}
+	if snapshot.Status.IsTerminal() {
+		a.mu.Lock()
+		a.keepEndedLocked(x, snapshot.Summarize())
+		a.mu.Unlock()
 	}
 	return revision, true
 }

@@ -207,20 +207,17 @@ func (a *App) viewLocked(id string, full bool) TaskView {
 		v.Repositories = append(v.Repositories, r.Name)
 	}
 	_, v.Running = a.running[id]
-	var last *domain.Execution
+	// A waiting firing has not ended, so the executions held whole have it; the task's newest is kept as executions are
+	// added.
 	for _, x := range a.executions {
-		if x.TaskID != id {
-			continue
-		}
-		if x.Status == domain.StatusQueued {
+		if x.TaskID == id && x.Status == domain.StatusQueued {
 			v.Queued = true
 		}
-		if last == nil || x.CreatedAt.After(last.CreatedAt) {
-			last = x
-		}
 	}
-	if last != nil {
-		v.LastExecution = &ExecutionRef{ID: last.ID, Status: last.Status, CreatedAt: last.CreatedAt, EndedAt: last.EndedAt}
+	if l, ok := a.latest[id]; ok {
+		if last, ok := a.summaryLocked(l.id); ok {
+			v.LastExecution = &ExecutionRef{ID: last.ID, Status: last.Status, CreatedAt: last.CreatedAt, EndedAt: last.EndedAt}
+		}
 	}
 	if full {
 		if e.invalid != nil {

@@ -334,11 +334,14 @@ type ProcessIdentity struct {
 }
 
 // ExecutionSchemaVersion is the schema version of the execution records this daemon writes; Upgrade reads older ones.
-const ExecutionSchemaVersion = "2"
+// A record of schema 3 or later was saved with its text redacted on arrival; an older one may keep a credential, so the
+// daemon redacts it once and saves it again at this version.
+const ExecutionSchemaVersion = "3"
 
 // Upgrade reads a record of an older schema as the current one. In schema 1, an attempt's model and effort were the
 // configured ones, so they move to ConfiguredModel and ConfiguredEffort, and the used ones read not reported. A record
-// of any schema may name its task's type by a legacy name, which reads as the current one.
+// of any schema may name its task's type by a legacy name, which reads as the current one. Upgrade changes no text, so
+// a record of schema 2 or older still needs the redaction pass after it.
 func (x *Execution) Upgrade() {
 	if x.SchemaVersion == "1" {
 		for i := range x.Attempts {
@@ -434,4 +437,70 @@ func (x *Execution) CurrentAttempt() *Attempt {
 		return nil
 	}
 	return &x.Attempts[len(x.Attempts)-1]
+}
+
+// ExecutionSummary is what the daemon holds of an execution that has ended, and what the index of the execution records
+// keeps of each one: the fields the lists, the counters, a task's history, and the clean-up of worktrees read. The full
+// record is read when it is asked for.
+type ExecutionSummary struct {
+	SchemaVersion     string            `json:"schemaVersion"`
+	ID                string            `json:"id"`
+	TaskID            string            `json:"taskId"`
+	TaskName          string            `json:"taskName"`
+	TaskType          string            `json:"taskType"`
+	Status            ExecutionStatus   `json:"status"`
+	Trigger           Trigger           `json:"trigger"`
+	CreatedAt         time.Time         `json:"createdAt"`
+	StartedAt         *time.Time        `json:"startedAt,omitempty"`
+	EndedAt           *time.Time        `json:"endedAt,omitempty"`
+	WorkspacePath     string            `json:"workspacePath,omitempty"`
+	Harness           string            `json:"harness"`
+	Model             string            `json:"model,omitempty"`
+	AttemptCount      int               `json:"attemptCount"`
+	CurrentStep       string            `json:"currentStep,omitempty"`
+	CurrentStepKey    string            `json:"currentStepKey,omitempty"`
+	CurrentStepParams map[string]string `json:"currentStepParams,omitempty"`
+	Repository        string            `json:"repository,omitempty"`
+	WorkItem          string            `json:"workItem,omitempty"`
+	PullRequestURL    string            `json:"pullRequestUrl,omitempty"`
+	TestsStatus       string            `json:"testsStatus,omitempty"`
+	Summary           string            `json:"summary,omitempty"`
+	ErrorMessage      string            `json:"errorMessage,omitempty"`
+	ErrorKey          string            `json:"errorKey,omitempty"`
+	ErrorParams       map[string]string `json:"errorParams,omitempty"`
+	LastOperation     string            `json:"lastOperation,omitempty"`
+	WarningCount      int               `json:"warningCount"`
+	WorkItems         []WorkItemRef     `json:"workItems,omitempty"`
+	LogExpired        bool              `json:"logExpired,omitempty"`
+	// Script is set for a script task's execution, whose working directory is no workspace of worktrees.
+	Script bool `json:"script,omitempty"`
+}
+
+// WorkItemRef is what a summary keeps of a work item an execution's report named: its key, its outcome, and the
+// worktree the report gave it.
+type WorkItemRef struct {
+	Key          string `json:"key"`
+	Outcome      string `json:"outcome,omitempty"`
+	WorktreePath string `json:"worktreePath,omitempty"`
+}
+
+// Skipped reports a result that says the session left the item without working it, as WorkItemResult.Skipped does.
+func (r WorkItemRef) Skipped() bool { return r.Outcome == "skipped" }
+
+// Summarize returns the record's summary. The summary shares the record's maps, which the daemon never changes in
+// place.
+func (x *Execution) Summarize() *ExecutionSummary {
+	s := &ExecutionSummary{
+		SchemaVersion: x.SchemaVersion, ID: x.ID, TaskID: x.TaskID, TaskName: x.TaskName, TaskType: x.TaskType,
+		Status: x.Status, Trigger: x.Trigger, CreatedAt: x.CreatedAt, StartedAt: x.StartedAt, EndedAt: x.EndedAt,
+		WorkspacePath: x.WorkspacePath, Harness: x.Harness, Model: x.Model, AttemptCount: len(x.Attempts),
+		CurrentStep: x.CurrentStep, CurrentStepKey: x.CurrentStepKey, CurrentStepParams: x.CurrentStepParams,
+		Repository: x.Repository, WorkItem: x.WorkItem, PullRequestURL: x.PullRequestURL, TestsStatus: x.TestsStatus,
+		Summary: x.Summary, ErrorMessage: x.ErrorMessage, ErrorKey: x.ErrorKey, ErrorParams: x.ErrorParams,
+		LastOperation: x.LastOperation, WarningCount: len(x.Warnings), LogExpired: x.LogExpired, Script: x.Script != nil,
+	}
+	for _, w := range x.WorkItems {
+		s.WorkItems = append(s.WorkItems, WorkItemRef{Key: w.Key, Outcome: w.Outcome, WorktreePath: w.WorktreePath})
+	}
+	return s
 }

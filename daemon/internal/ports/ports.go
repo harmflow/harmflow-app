@@ -47,10 +47,17 @@ type StateStore interface {
 	Save(name string, v any) error
 }
 
-// ExecutionRepository keeps execution records with no time limit.
+// ExecutionRepository keeps execution records with no time limit, and an index of their summaries derived from them.
 type ExecutionRepository interface {
 	Save(x *domain.Execution) error
-	LoadAll() ([]*domain.Execution, error)
+	// Load returns one execution's full record, as it was saved; ErrNotFound when there is none.
+	Load(id string) (*domain.Execution, error)
+	// Summaries returns the summary of every record from the index, rebuilt from the records where it is missing,
+	// unreadable, or behind them.
+	Summaries() ([]*domain.ExecutionSummary, error)
+	// HoldIndex holds back the writes of the index until release, which writes it once when a save changed it
+	// meanwhile: a pass that saves many records writes the index once, not once per record.
+	HoldIndex() (release func())
 }
 
 // EventLog writes one JSONL file per execution and publishes every event live.

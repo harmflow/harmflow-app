@@ -152,12 +152,12 @@ func (a *App) repairLedger() {
 	a.ledgerRepair = false
 	for task, items := range a.ledger {
 		for key, w := range items {
-			x := a.executions[w.LastExecutionID]
-			if w.Status != domain.WorkItemInProgress || w.TestsStatus == "failed" || x == nil || !x.Status.IsTerminal() ||
+			x, ok := a.summaryLocked(w.LastExecutionID)
+			if w.Status != domain.WorkItemInProgress || w.TestsStatus == "failed" || !ok || !x.Status.IsTerminal() ||
 				x.Status == domain.StatusCancelled {
 				continue
 			}
-			i := slices.IndexFunc(x.WorkItems, func(r domain.WorkItemResult) bool { return r.Key == key })
+			i := slices.IndexFunc(x.WorkItems, func(r domain.WorkItemRef) bool { return r.Key == key })
 			switch {
 			case i < 0:
 				failures = append(failures, failure{task, key, x.ID, x.LastOperation})
@@ -180,33 +180,46 @@ func (a *App) repairLedger() {
 // item is resumed in a later cycle. First it ends the harness that each one's running attempt left, and what that
 // harness started, which the daemon's end does not reach. Waiting firings stay queued; startQueued then drops each one
 // whose task was disabled or deleted while the daemon was down.
+//
+// It reads the summary of each execution from the index of the records, and the whole record only of an execution
+// that has not ended, or of one saved at an older schema: such a record was saved before the agent's text was redacted
+// on arrival and may keep a credential, with no time limit, so it is redacted once and saved again at the current one.
 func (a *App) recover(ctx context.Context) error {
-	all, err := a.d.Executions.LoadAll()
+	summaries, err := a.d.Executions.Summaries()
 	if err != nil {
 		return err
+	}
+	loaded := map[string]*domain.Execution{}
+	for _, s := range summaries {
+		if s.Status.IsTerminal() && s.SchemaVersion == domain.ExecutionSchemaVersion {
+			continue
+		}
+		x, err := a.d.Executions.Load(s.ID)
+		if err != nil {
+			a.log.Printf("reading execution %s: %v", s.ID, err)
+			continue
+		}
+		loaded[s.ID] = x
 	}
 	now := a.now()
 	var interrupted, redacted []*domain.Execution
 	left := map[string]leftHarness{}
 	a.mu.Lock()
-	for _, x := range all {
-		x.Upgrade()
-		// A record saved before the agent's text was redacted on arrival may keep a credential, with no time limit.
-		changed := eventlog.RedactFields(x)
-		if x.Attempts == nil {
-			x.Attempts = []domain.Attempt{}
+	a.ended = map[string]*domain.ExecutionSummary{}
+	for _, s := range summaries {
+		x := loaded[s.ID]
+		if x == nil {
+			if s.Status.IsTerminal() {
+				delete(a.executions, s.ID)
+				a.ended[s.ID] = s
+			}
+			continue
 		}
-		if x.WorkItems == nil {
-			x.WorkItems = []domain.WorkItemResult{}
-		}
-		if x.Warnings == nil {
-			x.Warnings = []domain.Warning{}
-		}
-		if x.ChangedFiles == nil {
-			x.ChangedFiles = []string{}
-		}
-		if x.Commands == nil {
-			x.Commands = []domain.CommandRecord{}
+		older := x.SchemaVersion != domain.ExecutionSchemaVersion
+		normalize(x)
+		if older {
+			eventlog.RedactFields(x)
+			x.Changed()
 		}
 		a.executions[x.ID] = x
 		if x.Status.IsActive() {
@@ -222,12 +235,16 @@ func (a *App) recover(ctx context.Context) error {
 				at.Outcome = domain.AttemptInterrupted
 			}
 			interrupted = append(interrupted, x)
-		} else if changed {
-			x.Changed()
+		} else if older {
 			redacted = append(redacted, x)
 		}
 	}
+	a.relistLocked()
 	a.mu.Unlock()
+	// Each record saved below is of an execution that ended, whose save writes the whole index; on the first start at
+	// this schema that is every record, so the index is held and written once, at the end.
+	release := a.d.Executions.HoldIndex()
+	defer release()
 	for _, x := range redacted {
 		a.persistExecution(x)
 	}

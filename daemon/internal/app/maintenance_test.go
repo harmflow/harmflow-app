@@ -74,7 +74,7 @@ func (w *workspaces) endedIn(task, dir string, status domain.ExecutionStatus, re
 	x.WorkspacePath = dir
 	x.WorkItems = append([]domain.WorkItemResult{}, report...)
 	w.app.mu.Lock()
-	w.app.executions[x.ID] = x
+	w.app.addExecutionLocked(x)
 	w.app.mu.Unlock()
 	return x
 }

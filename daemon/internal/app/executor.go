@@ -378,9 +378,9 @@ func (r *run) writeContext(prev []previousAttempt) error {
 	}
 	var interrupted []map[string]any
 	var history []map[string]any
-	for _, x := range a.executions {
+	a.eachSummaryLocked(func(x *domain.ExecutionSummary) {
 		if x.TaskID != r.x.TaskID || x.ID == r.x.ID || !x.Status.IsTerminal() {
-			continue
+			return
 		}
 		h := map[string]any{"executionId": x.ID, "status": x.Status, "createdAt": x.CreatedAt}
 		if x.WorkItem != "" {
@@ -394,7 +394,7 @@ func (r *run) writeContext(prev []previousAttempt) error {
 			interrupted = append(interrupted, map[string]any{"executionId": x.ID, "workItem": x.WorkItem,
 				"lastOperation": x.LastOperation, "endedAt": x.EndedAt})
 		}
-	}
+	})
 	a.mu.Unlock()
 	sort.Slice(history, func(i, j int) bool {
 		return history[i]["createdAt"].(time.Time).After(history[j]["createdAt"].(time.Time))
@@ -1437,8 +1437,13 @@ func (a *App) CancelExecution(id string) error {
 	a.mu.Lock()
 	x, ok := a.executions[id]
 	if !ok {
+		s, ended := a.ended[id]
 		a.mu.Unlock()
-		return newError(CodeNotFound, domain.T("execution_not_found", "no execution {{execution}}", "execution", id))
+		if !ended {
+			return executionNotFound(id)
+		}
+		return newError(CodeConflict,
+			domain.T("execution_ended", "the execution already ended as {{status}}", "status", string(s.Status)))
 	}
 	if x.Status.IsTerminal() {
 		a.mu.Unlock()
