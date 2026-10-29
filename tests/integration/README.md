@@ -35,15 +35,17 @@ On a machine already busy, a run of the whole package can fail to start a daemon
 
 ## Opt-in tests
 
-A few tests start a real harness instead of a stand-in. Each one starts a real session and spends a little of the
-account's usage, so it skips unless you opt in. A helper named for the CLI decides:
+A few tests start a real harness instead of a stand-in. Most of them start a real session and spend a little of the
+account's usage; the detection tests of `daemon/internal/app` only run the installed CLI's own checks, but need it
+installed. Each one skips unless you opt in. A helper named for the CLI decides:
 
 - `realClaude` (`claude_code_test.go`) skips the test unless `HARMFLOW_TEST_CLAUDE_CODE` is exactly `1` and `claude`
   is on the `PATH`;
 - `realCodex` (`codex_test.go`) skips the test unless `HARMFLOW_TEST_CODEX` is exactly `1` and `codex` is on the
   `PATH`.
 
-Every test that calls one of them belongs in this table.
+A daemon package cannot import these helpers, so `daemon/internal/app` has its own `realClaude` and `realCodex`, which
+read the same variables the same way. Every test that calls one of them belongs in this table.
 
 | Test | Opt in with | Needs |
 |---|---|---|
@@ -52,11 +54,14 @@ Every test that calls one of them belongs in this table.
 | `TestCitedUserItemsReachARealCodex` (`codex_test.go`) | `HARMFLOW_TEST_CODEX=1` | A signed-in `codex` on the `PATH`. The test runs the daemon with Codex's own home (`CODEX_HOME`, or `~/.codex`), writes an agent into its `agents/` under a name unique to the run, and removes it when it ends. The skill it cites is in the workspace's `.agents/skills/` |
 | `TestFailedIssueIsRetriedUntilItsLimit` (`queue_retry_test.go`) | `HARMFLOW_TEST_CLAUDE_CODE=1` | A signed-in `claude` on the `PATH`, and an installed `gh` signed in with access to the sandbox repository its fixtures live in, which `queueRepo` names. The test also clones that repository over HTTPS, so `git` needs access too (for example through `gh auth setup-git`). The repository holds three open issues labelled `queue-test`, the oldest of them linked by an unmanaged draft pull request; the test fails when it finds anything else |
 | `TestNoWorkExecutionRemovesEndedWorktrees` (`worktree_removal_test.go`) | `HARMFLOW_TEST_CLAUDE_CODE=1` | What `TestFailedIssueIsRetriedUntilItsLimit` needs, its fixtures included. The test also clones `harmflow/harmflow-app`, whose latest merged pull requests give it an issue that ended, and writes nothing to either repository |
+| `TestInventoryReportsARealClaudeCodeAndNoCodex` (`daemon/internal/app/detection_test.go`) | `HARMFLOW_TEST_CLAUDE_CODE=1` | An installed `claude` on the `PATH`, signed in or not. The test starts no session: detection runs the CLI's version, help, and sign-in checks with a temporary `HOME`, so they leave the user's configuration and sign-in as they are |
+| `TestInventoryReportsARealCodexAndNoClaudeCode` (`daemon/internal/app/detection_test.go`) | `HARMFLOW_TEST_CODEX=1` | An installed `codex` on the `PATH`, signed in or not, and the `node` that runs an npm install of it. The test starts no session: detection runs the CLI's version, help, and sign-in checks with a temporary `HOME`, so they leave the user's configuration and sign-in as they are |
 
 Run one of them on its own:
 
 ```bash
 HARMFLOW_TEST_CLAUDE_CODE=1 go -C tests test -count=1 -run TestClaudeCodeRefusesMakeInATask ./integration/
+HARMFLOW_TEST_CLAUDE_CODE=1 go -C daemon test -count=1 -run '^TestInventoryReportsARealClaudeCodeAndNoCodex$' ./internal/app/
 ```
 
 A Codex test runs the same way with `HARMFLOW_TEST_CODEX=1`.
