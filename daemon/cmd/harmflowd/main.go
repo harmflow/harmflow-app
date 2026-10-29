@@ -51,7 +51,7 @@ func main() {
 		return
 	}
 	homeFlag := flag.String("home", "", "HarmFlow's data directory (default: $HARMFLOW_HOME or ~/Library/Application Support/HarmFlow)")
-	builtinsFlag := flag.String("builtins", "", "directory holding the built-in agents/ and skills/")
+	builtinsFlag := flag.String("builtins", "", "directory holding the built-in agents/, skills/, and templates/")
 	portFlag := flag.Int("port", 0, "port to listen on; 0 picks a free one")
 	flag.Parse()
 	if err := run(*homeFlag, *builtinsFlag, *portFlag); err != nil {
