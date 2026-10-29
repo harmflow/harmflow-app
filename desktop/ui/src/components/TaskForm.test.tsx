@@ -611,8 +611,9 @@ describe("task form document", () => {
     await settle();
   }
 
+  // A group of checkboxes is a `div.field`; any other field is a `label.field`.
   const field = (label: string) =>
-    [...host!.querySelectorAll<HTMLElement>("label.field")].find((f) => f.querySelector(".field__label")?.textContent === label)!;
+    [...host!.querySelectorAll<HTMLElement>(".field")].find((f) => f.querySelector(".field__label")?.textContent === label)!;
   const control = <E extends Element = HTMLInputElement>(label: string) => field(label).querySelector<E>("input, select, textarea, output")!;
   const toggle = (label: string) =>
     [...host!.querySelectorAll("label.toggle")].find((t) => t.querySelector(".toggle__label")?.textContent === label)!.querySelector("input")!;
@@ -640,18 +641,9 @@ describe("task form document", () => {
   async function click(el: HTMLElement) {
     await act(async () => el.click());
   }
-  /**
-   * Clicks one of a field's checkboxes. A browser toggles that checkbox alone, but happy-dom also passes the click on to
-   * the first control inside the field's own label, so that label is given no control while the click lasts.
-   */
+  /** Clicks one of a field's checkboxes. */
   async function tick(fieldLabel: string, label: string) {
-    const outer = field(fieldLabel);
-    outer.setAttribute("for", "");
-    try {
-      await click(boxes(fieldLabel).find((c) => c.textContent === label)!.querySelector("input")!);
-    } finally {
-      outer.removeAttribute("for");
-    }
+    await click(boxes(fieldLabel).find((c) => c.textContent === label)!.querySelector("input")!);
   }
 
   it("sends, once every section is filled through its controls, the document the daemon writes as a file", async () => {
@@ -803,5 +795,90 @@ describe("task form document", () => {
       delete parent[path.at(-1)!];
     }
     expect(sent("PUT", "/tasks/complete")).toStrictEqual([{ document: expected, baseRevision: "r1" }]);
+  });
+});
+
+// A field that holds a group of checkboxes is a group its caption names, not a label around them: the caption labels
+// no checkbox, so clicking it changes none, and each checkbox is named by its own text alone (harmflow-app#438).
+describe("task form checkbox groups", () => {
+  const onChange = vi.fn();
+
+  function Form({ doc }: { doc: Doc }) {
+    const [value, setValue] = useState(doc);
+    return (
+      <TaskForm
+        doc={value}
+        onChange={(d) => {
+          onChange(d);
+          setValue(d);
+        }}
+        mode="edit"
+        harnesses={[]}
+        errorPaths={new Set()}
+      />
+    );
+  }
+
+  const script: Doc = {
+    apiVersion: "harmflow/v1alpha1",
+    kind: "Task",
+    metadata: { id: "audit", name: "Audit" },
+    spec: { type: "script", script: { command: ["/bin/date"] } },
+  };
+
+  /** The group whose name is the caption: the text of the element its aria-labelledby names. */
+  const group = (caption: string) =>
+    [...host!.querySelectorAll<HTMLElement>('[role="group"]')].find(
+      (g) => document.getElementById(g.getAttribute("aria-labelledby") ?? "")?.textContent === caption,
+    );
+  /**
+   * Every `<label>` around a control, nearest first. A browser names a checkbox by each of them whose first control it
+   * is; happy-dom's `labels` lists the nearest alone, so the outer ones are found here.
+   */
+  const labelsAround = (el: Element) => {
+    const found: HTMLLabelElement[] = [];
+    for (let l = el.closest("label"); l; l = l.parentElement?.closest("label") ?? null) found.push(l);
+    return found;
+  };
+
+  it.each([
+    { caption: "Fail over on", doc: task({}), options: ["Quota exhausted", "Harness unavailable"] },
+    {
+      caption: "Notify me about",
+      doc: task({}),
+      options: [
+        "Execution started",
+        "Execution completed",
+        "Operational failure",
+        "Cancellation",
+        "Needs attention",
+        "Draft PR created",
+        "Draft PR updated",
+        "Tests failed",
+        "Harness unavailable",
+        "No alternative harness",
+      ],
+    },
+    { caption: "Runs on", doc: script, options: ["macOS", "Linux", "Windows"] },
+  ])("names the $caption group by its caption, each checkbox by its own text, and toggles none from the caption", async ({ caption, doc, options }) => {
+    onChange.mockClear();
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(<Form doc={doc} />));
+    await settle();
+
+    const found = group(caption)!;
+    expect(found).toBeDefined();
+    const boxes = [...found.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
+    // A checkbox's name is the text of its labels: its own label alone, with no name set beside it.
+    expect(boxes.map((box) => labelsAround(box).map((l) => l.textContent))).toEqual(options.map((option) => [option]));
+    for (const box of boxes) {
+      expect(box.hasAttribute("aria-label") || box.hasAttribute("aria-labelledby")).toBe(false);
+    }
+
+    const states = boxes.map((box) => box.checked);
+    await act(async () => document.getElementById(found.getAttribute("aria-labelledby")!)!.click());
+    expect(boxes.map((box) => box.checked)).toEqual(states);
+    expect(onChange).not.toHaveBeenCalled();
   });
 });
