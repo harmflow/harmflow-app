@@ -285,6 +285,15 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
               <IntField path={["spec", "execution", "rateLimit", "maxRetries"]} label={t("tasks.fields.rateLimitMaxRetries")} doc={doc} set={set} />
               <IntField path={["spec", "execution", "rateLimit", "initialWaitSeconds"]} label={t("tasks.fields.rateLimitInitialWait")} doc={doc} set={set} />
               <IntField path={["spec", "execution", "rateLimit", "maxWaitSeconds"]} label={t("tasks.fields.rateLimitMaxWait")} doc={doc} set={set} />
+              <div className="field field--toggle">
+                {/* Off removes the key, so the default, which allows none, applies. */}
+                <Toggle
+                  checked={get<boolean>(["spec", "execution", "allowExtraUsage"]) ?? (def(["spec", "execution", "allowExtraUsage"]) as boolean) ?? false}
+                  onChange={(v) => set(["spec", "execution", "allowExtraUsage"], v || undefined)}
+                  label={t("tasks.fields.allowExtraUsage")}
+                />
+                <span className="field__hint">{t("tasks.fields.allowExtraUsageHint")}</span>
+              </div>
             </>
           )}
         </div>

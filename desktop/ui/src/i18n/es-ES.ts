@@ -1035,6 +1035,9 @@ export const esES: Resources = {
       rateLimitMaxRetries: "Reintentos por límite de frecuencia",
       rateLimitInitialWait: "Primera espera (segundos)",
       rateLimitMaxWait: "Espera más larga (segundos)",
+      allowExtraUsage: "Permitir uso extra",
+      allowExtraUsageHint:
+        "Uso facturado más allá de lo que incluye el plan del harness. Desactivado, un intento no empieza en un harness cuyo plan se agotó, y un intento de Claude Code que pasa a consumir uso extra se termina. Activado, ninguna de esas comprobaciones retiene un intento.",
       notificationsEnabled: "Notificaciones nativas",
       notificationEvents: "Notificarme sobre",
       programKind: "Qué ejecuta",
