@@ -968,6 +968,136 @@ func TestTaskLifecycle(t *testing.T) {
 	}
 }
 
+// A task that has run exports as its file and nothing else: none of the values its run left — the execution, the
+// harness's session, the pull request, a path into the daemon's folders, the API's token — and none of the task view's
+// runtime keys. The export validates and imports as a task the API lists and updates, and a later run leaves it as it
+// was.
+func TestExportAfterARunIsTheFile(t *testing.T) {
+	d := startDaemon(t, t.TempDir())
+	// The schedule gives the task's view a next firing, and comes once a year, on a day and at an hour no test waits
+	// for.
+	d.call("POST", "/tasks", map[string]any{"yaml": `apiVersion: harmflow/v1alpha1
+kind: Task
+metadata:
+  id: ran
+  name: Ran
+  description: Opens a pull request and reports it.
+spec:
+  type: general
+  prompt: SCENARIO=report
+  harness:
+    preferred:
+      provider: claude-code
+  schedule:
+    cron: "0 9 1 1 *"
+    timezone: UTC
+`}, 201)
+	id := d.call("POST", "/tasks/ran/run", nil, 202)["executionId"].(string)
+	x := d.waitStatus(id, "completed")
+	attempts, _ := x["attempts"].([]any)
+	if len(attempts) != 1 {
+		t.Fatalf("execution %s has attempts %v, want one", id, x["attempts"])
+	}
+	attempt, _ := attempts[0].(map[string]any)
+	session, _ := attempt["sessionId"].(string)
+	pullRequest, _ := x["pullRequestUrl"].(string)
+	executionDir, _ := x["executionDir"].(string)
+	if attempt["usage"] == nil || session == "" || pullRequest == "" || executionDir == "" {
+		t.Fatalf("execution %s has usage %v, session %q, pull request %q, folder %q; want each", id, attempt["usage"],
+			session, pullRequest, executionDir)
+	}
+	logFile := filepath.Join(d.home, "logs", id+".jsonl")
+	for _, path := range []string{executionDir, logFile} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("what the run left: %v", err)
+		}
+	}
+	if d.token == "" {
+		t.Fatal("the daemon wrote no API token")
+	}
+	view := d.call("GET", "/tasks/ran", nil, 200)
+	last, _ := view["lastExecution"].(map[string]any)
+	revision, _ := view["revision"].(string)
+	next, _ := view["nextFireAt"].(string)
+	if last["id"] != id || revision == "" || next == "" {
+		t.Fatalf("GET /tasks/ran reads last execution %v, revision %q, next firing %q; want %s, a revision, and a next "+
+			"firing", last, revision, next, id)
+	}
+
+	file, err := os.ReadFile(filepath.Join(d.home, "tasks", "ran.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, exported := d.request("GET", "/tasks/ran/export", nil, nil)
+	if status != 200 {
+		t.Fatalf("GET /tasks/ran/export: status %d, want 200: %s", status, exported)
+	}
+	if !bytes.Equal(exported, file) {
+		t.Errorf("GET /tasks/ran/export =\n%s\nwant the task's file:\n%s", exported, file)
+	}
+	for what, value := range map[string]string{
+		"the execution's identifier": id,
+		"the harness's session":      session,
+		"the pull request's URL":     pullRequest,
+		"the execution's folder":     executionDir,
+		"the execution's log":        logFile,
+		"the daemon's home folder":   d.home,
+		"the local API's token":      d.token,
+		"the task's revision":        revision,
+		"the task's next firing":     next,
+	} {
+		if strings.Contains(string(exported), value) {
+			t.Errorf("the export holds %s:\n%s", what, exported)
+		}
+	}
+	if keys := runtimeKeys(yamlAsJSON(t, exported), ""); len(keys) > 0 {
+		t.Errorf("the export holds the task view's runtime keys %v:\n%s", keys, exported)
+	}
+
+	if v := d.call("POST", "/tasks/validate", map[string]any{"yaml": string(exported)}, 200); v["valid"] != true {
+		t.Errorf("POST /tasks/validate of the export = %v, want valid", v)
+	}
+	copied := strings.Replace(string(exported), "\n  id: ran\n", "\n  id: ran-imported\n", 1)
+	imported := d.call("POST", "/tasks/import", map[string]any{"yaml": copied}, 201)
+	if imported["id"] != "ran-imported" || d.listedTask("ran-imported") == nil {
+		t.Fatalf("the imported export reads %v, and GET /tasks lists it as %v; want ran-imported, listed", imported["id"],
+			d.listedTask("ran-imported"))
+	}
+	renamed := strings.Replace(copied, "\n  name: Ran\n", "\n  name: Ran imported\n", 1)
+	updated := d.call("PUT", "/tasks/ran-imported", map[string]any{"yaml": renamed, "baseRevision": imported["revision"]}, 200)
+	if updated["name"] != "Ran imported" {
+		t.Errorf("PUT /tasks/ran-imported answers name %v, want Ran imported", updated["name"])
+	}
+
+	second := d.call("POST", "/tasks/ran/run", nil, 202)["executionId"].(string)
+	d.waitStatus(second, "completed")
+	if status, again := d.request("GET", "/tasks/ran/export", nil, nil); status != 200 || !bytes.Equal(again, exported) {
+		t.Errorf("GET /tasks/ran/export after a second run: status %d,\n%s\nwant 200 and the first export:\n%s", status,
+			again, exported)
+	}
+}
+
+// runtimeKeys lists the keys of a decoded JSON value, at any depth, that a task's view holds its state in and a task
+// document never has.
+func runtimeKeys(v any, path string) []string {
+	var out []string
+	switch t := v.(type) {
+	case map[string]any:
+		for k, x := range t {
+			switch k {
+			case "revision", "nextFireAt", "running", "queued", "deletePending", "lastExecution", "invalid", "warnings":
+				out = append(out, path+"/"+k)
+			}
+			out = append(out, runtimeKeys(x, path+"/"+k)...)
+		}
+	case []any:
+		for i, x := range t {
+			out = append(out, runtimeKeys(x, path+"/"+strconv.Itoa(i))...)
+		}
+	}
+	return out
+}
+
 // saveToggledTask saves on d the task "toggled", which fires every minute, for a test that disables it next. It returns
 // the save's answer and inFile, which checks that the task's file reads spec.enabled as want and is the saved file in
 // every other key.
