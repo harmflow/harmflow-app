@@ -7,7 +7,6 @@ import { Counters, QueuePanel, QuoteCard, RecentHistory } from "../components/As
 import { ExecutionCard, useCancel } from "../components/ExecutionCard";
 import { ExecutionDetail } from "../components/ExecutionDetail";
 import { Button, EmptyState, SectionTitle } from "../components/ui";
-import { useNow } from "../lib/hooks";
 import { actions, useStore } from "../state/store";
 
 export function ExecutionsScreen({
@@ -24,7 +23,6 @@ export function ExecutionsScreen({
   const { t } = useTranslation();
   const all = useStore((s) => s.active);
   const recent = useStore((s) => s.recent);
-  const now = useNow(1000);
   const { cancel, pending } = useCancel();
   const running = useMemo(() => all.filter((e) => isActive(e.status)), [all]);
 
@@ -64,7 +62,6 @@ export function ExecutionsScreen({
                 execution={e}
                 selected={e.id === effective}
                 onSelect={() => onSelect(e.id)}
-                now={now}
                 onCancel={() => void cancel(e.id)}
                 cancelling={!!pending[e.id]}
               />

@@ -12,10 +12,18 @@ import {
 import { useTranslation } from "react-i18next";
 import type { ExecutionStatus } from "../api/types";
 import { toneColor, type Tone } from "../design/tokens";
+import { formatElapsed } from "../lib/format";
+import { useNow } from "../lib/hooks";
 import { Icon, type IconName } from "./Icon";
 
 export function cx(...classes: Array<string | false | null | undefined>): string {
   return classes.filter(Boolean).join(" ");
+}
+
+/** The time since start, ticking every second until end is set: only this label renders again, not its screen. */
+export function Elapsed({ start, end }: { start?: string | null; end?: string | null }) {
+  const now = useNow(end ? null : 1000);
+  return <>{formatElapsed(start, end, now)}</>;
 }
 
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "danger-outline";
