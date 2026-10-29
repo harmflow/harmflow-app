@@ -125,6 +125,7 @@ func neverStarted(t *testing.T, x map[string]any, name string) {
 // Codex below the minimum, and running a task on each, invokes only the probes; each execution fails without starting,
 // and the inventory says why.
 func TestDetectionOnlyProbes(t *testing.T) {
+	t.Parallel()
 	d := startDaemon(t, t.TempDir())
 	claude := standIn(t, "fake-claude", "claude", `auth) echo '{"loggedIn": true}'; exit 0 ;;`,
 		`auth) echo '{"loggedIn": false, "authMethod": "none"}'; exit 1 ;;`)
@@ -156,6 +157,7 @@ func TestDetectionOnlyProbes(t *testing.T) {
 
 // harmflow-app#68: with ready harnesses, the daemon invokes each one for its probes and its runs, and for nothing else.
 func TestReadyHarnessesOnlyProbeAndRun(t *testing.T) {
+	t.Parallel()
 	d := startDaemon(t, t.TempDir())
 	claude, codex := standIn(t, "fake-claude", "claude"), standIn(t, "fake-codex", "codex")
 	d.setHarness("claude-code", claude.path)
@@ -185,6 +187,7 @@ func TestReadyHarnessesOnlyProbeAndRun(t *testing.T) {
 // harmflow-app#68: a signed-out harness is detected, at its version, with an invalid sign-in: not ready, and the
 // diagnostic says to sign in.
 func TestSignedOutHarnessIsNotReady(t *testing.T) {
+	t.Parallel()
 	d := startDaemon(t, t.TempDir())
 	cases := []struct {
 		id, version, key string
@@ -212,6 +215,7 @@ func TestSignedOutHarnessIsNotReady(t *testing.T) {
 
 // harmflow-app#68: the inventory names a path set by hand as such, and a run uses that file.
 func TestManualPathIsTheOneRun(t *testing.T) {
+	t.Parallel()
 	d := startDaemon(t, t.TempDir())
 	claude := standIn(t, "fake-claude", "claude")
 	h := d.setHarness("claude-code", claude.path)
@@ -231,6 +235,7 @@ func TestManualPathIsTheOneRun(t *testing.T) {
 // harmflow-app#68: the inventory never carries a credential, even when a sign-in probe prints one on its output or its
 // error stream.
 func TestInventoryCarriesNoCredential(t *testing.T) {
+	t.Parallel()
 	d := startDaemon(t, t.TempDir())
 	// Built here, so no token-shaped literal is in the repository.
 	secrets := []string{"sk-ant-oat01-" + strings.Repeat("q", 40), "ghp_" + strings.Repeat("x", 36),
@@ -259,6 +264,7 @@ func TestInventoryCarriesNoCredential(t *testing.T) {
 // harmflow-app#68: a version below the minimum is not ready, and a task on it never starts; an untested newer version
 // is ready, and each run on it records one warning naming the version.
 func TestVersionsOutsideTheTestedRange(t *testing.T) {
+	t.Parallel()
 	d := startDaemon(t, t.TempDir())
 	claude := standIn(t, "fake-claude", "claude", "--permission-mode <mode>  ", "")
 	codex := standIn(t, "fake-codex", "codex", `echo "codex-cli 0.163.0"`, `echo "codex-cli 0.999.0"`)

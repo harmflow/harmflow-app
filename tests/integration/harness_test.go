@@ -24,6 +24,7 @@ func (d *daemon) harness(id string) map[string]any {
 // harmflow-app#71: a sign-in the probe could not establish reads unknown, not signed out. The harness is ready with a
 // diagnostic, and a task on it starts, so the first execution proves the sign-in.
 func TestUnknownSignInIsReady(t *testing.T) {
+	t.Parallel()
 	d := startDaemon(t, t.TempDir())
 	path := standInClaude(t, `auth) echo '{"loggedIn": true}'; exit 0 ;;`,
 		`auth) echo "Error: could not reach the credential store" >&2; exit 1 ;;`)
@@ -46,6 +47,7 @@ func TestUnknownSignInIsReady(t *testing.T) {
 // harmflow-app#71: a version the probe could not read is unknown, never supported. The harness runs, and each execution
 // records that its version is unknown, as one on an untested newer version does.
 func TestUnknownVersionRunsWithAWarning(t *testing.T) {
+	t.Parallel()
 	d := startDaemon(t, t.TempDir())
 	path := standInClaude(t, `--version) echo "2.1.239 (Claude Code)"; exit 0 ;;`,
 		`--version) echo "Claude Code (dev build)"; exit 0 ;;`)

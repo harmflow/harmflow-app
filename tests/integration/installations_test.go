@@ -20,6 +20,7 @@ func installed(h map[string]any) map[string]int {
 // and a run uses the second. Choosing the first then makes the next run use the first. Only the stand-ins are checked:
 // a real Codex on the login shell's PATH can be offered too.
 func TestChooseAmongInstallations(t *testing.T) {
+	t.Parallel()
 	first, second := standIn(t, "fake-codex", "codex"), standIn(t, "fake-codex", "codex")
 	d := startDaemon(t, t.TempDir(), "PATH="+filepath.Dir(first.path)+":"+os.Getenv("PATH"))
 

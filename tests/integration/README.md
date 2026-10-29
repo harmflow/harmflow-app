@@ -13,6 +13,26 @@ this target and `make coverage-daemon` alike. The test binary builds its own `ha
 test. By default the tests use the stand-in harnesses in [`testdata`](testdata), `fake-claude` and `fake-codex`, which
 speak the real harnesses' output formats, so they need no harness installed and no account.
 
+## In parallel
+
+Every test calls `t.Parallel()` first, so `go test` runs as many at once as its `-parallel` flag allows, one per CPU
+by default. Most of a test's time is waiting on its daemon (for a scheduler tick, a stand-in harness, a restart), and
+the waits overlap. Each test starts its own daemon on a temporary home. The daemon picks its own port and keeps its
+lock under that home, so no test sees another's tasks, executions, or settings. A new test does the same, and sets
+nothing the whole test process shares, such as its environment.
+
+These tests run alone, without `t.Parallel()`:
+
+- **The tests that call `needProcessTable` or `throwawayKeychain`, which run on macOS only.** Neither CI nor the Stress
+  workflow runs them, so nothing would show whether they hold up beside the others. Each throwaway keychain is also on
+  the user's keychain search list while it lasts.
+- **The opt-in tests below.** CI never runs them, they spend a real account's usage, and two of them use the same
+  fixtures in the sandbox repository.
+- **`TestHoldADaemon`**, which runs only as the helper process of the watchdog tests.
+
+On a machine already busy, a run of the whole package can fail to start a daemon in time. To run fewer at once, use
+`make test-integration TEST_FLAGS="-parallel 2"`.
+
 ## Opt-in tests
 
 A few tests start a real harness instead of a stand-in. Each one starts a real session and spends a little of the

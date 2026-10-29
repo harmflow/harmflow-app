@@ -14,6 +14,7 @@ import (
 // left to Claude Code, which loads them by name from the configuration directory validation read: none is defined for
 // the session or copied into the execution's plugin. The built-in skill is in that plugin.
 func TestCitedItemsReachClaudeCodeByName(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	// The user's items are in the test's own configuration of Claude Code, as in TestFormDocumentIsTheFile.
 	claudeConfig := filepath.Join(home, "claude")

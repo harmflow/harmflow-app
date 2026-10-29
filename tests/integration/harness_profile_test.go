@@ -11,6 +11,7 @@ import (
 // daemon cannot check goes through, with a warning at the profile's path; once the cache is there, the same model is
 // refused.
 func TestUncheckedCodexModelSavesWithAWarning(t *testing.T) {
+	t.Parallel()
 	d := startDaemon(t, t.TempDir())
 	created := d.call("POST", "/tasks", map[string]any{"yaml": task("pick", "Do it.", "")}, 201)
 	unknown := strings.Replace(task("pick", "Do it.", "      model: no-such-model\n"),

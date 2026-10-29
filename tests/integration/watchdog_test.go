@@ -143,6 +143,7 @@ func TestHoldADaemon(t *testing.T) {
 // A daemon a test starts never outlives the test process: a run killed, interrupted, or timed out in the middle of a
 // test leaves no harmflowd behind, whether the test started it as its child or through runStarter.
 func TestNoDaemonOutlivesAnInterruptedRun(t *testing.T) {
+	t.Parallel()
 	self, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
