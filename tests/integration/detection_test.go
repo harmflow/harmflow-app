@@ -3,14 +3,17 @@ package integration
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 )
 
-// cli is a stand-in harness CLI a test wrote, and the log where it records how it was invoked.
+// cli is a harness CLI a test wrote, a stand-in or a wrapper of the real one, and the log where it records how it was
+// invoked.
 type cli struct {
 	path, log string
 }
@@ -211,6 +214,128 @@ func TestSignedOutHarnessIsNotReady(t *testing.T) {
 			}
 		})
 	}
+}
+
+// harmflow-app#327: the real Claude Code, signed out in a configuration directory of the test's own, reads installed at
+// the version it prints, with an invalid sign-in, and not ready; a task on it fails without starting, and the daemon
+// invoked it for its probes alone. The stand-ins above print what the adapter reads; this test shows the real CLI does.
+func TestSignedOutRealClaudeCodeOnlyProbes(t *testing.T) {
+	signedOutOnlyProbes(t, realClaude(t), "claude-code", "Claude Code", "claude_not_signed_in", claudeProbes)
+}
+
+// harmflow-app#327: the same as TestSignedOutRealClaudeCodeOnlyProbes with the real Codex, signed out in the test
+// daemon's own Codex home.
+func TestSignedOutRealCodexOnlyProbes(t *testing.T) {
+	signedOutOnlyProbes(t, realCodex(t), "codex", "Codex", "not_signed_in", codexProbes)
+}
+
+// signedOutOnlyProbes sets the real CLI at installed, through a wrapper that records each invocation, as the harness
+// id, with the daemon signed out of it: Claude Code reads a configuration directory of the test's own, Codex the
+// daemon's own Codex home, and the daemon's environment carries no credential. The harness must read detected, at the
+// version the CLI prints, with an invalid sign-in and the diagnostic key, and not ready; a task on it must fail without
+// starting, naming it; and the CLI must have been invoked for probes alone, and be the same file at the same version
+// after the test. The test never signs in or out, so the user's own sign-in stays as it is.
+func signedOutOnlyProbes(t *testing.T, installed, id, name, key string, probes []string) {
+	home := t.TempDir()
+	// Codex reads no configuration from a home that does not exist, and so cannot say it is signed out.
+	codexHome := filepath.Join(home, "codex")
+	if err := os.MkdirAll(codexHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	env := signedOutEnv(t.TempDir())
+	// The test's own probes run with the environment the daemon runs with, so they read the same state.
+	probeEnv := append(append(os.Environ(), "CODEX_HOME="+codexHome), env...)
+	file, version := resolved(t, installed), versionOf(t, probeEnv, installed)
+
+	d := startDaemon(t, home, env...)
+	wrapper := wrap(t, installed)
+	h := d.setHarness(id, wrapper.path)
+	if h["detected"] != true || h["version"] != version || h["authentication"] != "invalid" ||
+		h["readiness"] != "not_ready" || h["diagnosticKey"] != key || h["diagnostic"] == nil {
+		t.Errorf("PUT /harnesses/%s = detected %v, version %v, authentication %v, readiness %v, diagnostic %v (%v); "+
+			"want detected, %s, invalid, not_ready, %s", id, h["detected"], h["version"], h["authentication"],
+			h["readiness"], h["diagnosticKey"], h["diagnostic"], version, key)
+	}
+
+	x := d.runOn("signedout", id)
+	neverStarted(t, x, name)
+	for _, e := range d.call("GET", "/executions/"+x["id"].(string)+"/events", nil, 200)["events"].([]any) {
+		if e := e.(map[string]any); e["type"] == "execution.started" {
+			t.Errorf("the execution on the signed-out %s logged %v, want it never started", name, e)
+		}
+	}
+	if counts := wrapper.only(t, probes...); len(counts) == 0 {
+		t.Errorf("%s.only(%v) = no probe, want it probed", wrapper.path, probes)
+	}
+	if after := resolved(t, installed); after != file {
+		t.Errorf("%s resolves to %s after the test, want %s, as before it", installed, after, file)
+	}
+	if after := versionOf(t, probeEnv, installed); after != version {
+		t.Errorf("%s --version = %s after the test, want %s, as before it", installed, after, version)
+	}
+}
+
+// signedOutEnv is what the daemon of a signed-out real CLI adds to the test's environment: config as Claude Code's
+// configuration directory, and empty each variable through which either harness takes an API key or a token instead
+// of its sign-in, with every CLAUDE_CODE_ variable, which a run inside a Claude Code session inherits from it.
+func signedOutEnv(config string) []string {
+	env := []string{"CLAUDE_CONFIG_DIR=" + config}
+	for _, name := range []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY",
+		"CODEX_API_KEY"} {
+		env = append(env, name+"=")
+	}
+	for _, kv := range os.Environ() {
+		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, "CLAUDE_CODE_") {
+			env = append(env, name+"=")
+		}
+	}
+	return env
+}
+
+// wrap writes a wrapper of the real CLI at installed, under the CLI's name, which records the first two arguments of
+// each invocation in its log, as a stand-in does, then runs the real CLI with all of them. The log's path is part of
+// the script, as a stand-in's is.
+func wrap(t *testing.T, installed string) cli {
+	t.Helper()
+	// The path the daemon reports is the real one: on macOS the temporary directories are under a symlink.
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := cli{path: filepath.Join(dir, filepath.Base(installed)), log: filepath.Join(dir, "invocations.log")}
+	script := "#!/bin/bash\necho \"$1 $2\" >> '" + c.log + "'\nexec '" + installed + "' \"$@\"\n"
+	if err := os.WriteFile(c.path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// resolved is the file path names, with every link in it resolved: an install links the CLI from its bin folder.
+func resolved(t *testing.T, path string) string {
+	t.Helper()
+	file, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return file
+}
+
+var versionNumber = regexp.MustCompile(`\d+\.\d+\.\d+`)
+
+// versionOf is the version number the CLI at path prints for --version, run with env.
+func versionOf(t *testing.T, env []string, path string) string {
+	t.Helper()
+	cmd := exec.Command(path, "--version")
+	cmd.Env = env
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("%s --version: %v", path, err)
+	}
+	v := versionNumber.FindString(string(out))
+	if v == "" {
+		t.Fatalf("%s --version printed %q, with no version number", path, out)
+	}
+	return v
 }
 
 // harmflow-app#68: the inventory names a path set by hand as such, and a run uses that file.
