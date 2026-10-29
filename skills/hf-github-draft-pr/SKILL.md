@@ -116,6 +116,10 @@ Add the item to `report.json` `workItems`:
  "commits":["<sha>"],"changedFiles":["path"]}
 ```
 
+Write every field the example shows. In `pullRequest`, `draft` is true, since the pull request is always a draft, and
+`created` is true when this execution opened the pull request, false when it updated one already open: HarmFlow
+records which of the two happened from `created`, and reads a pull request without it as updated.
+
 `kind` is `resume` for a managed draft pull request resumed, and `new` for a new issue or a failed one retried
 (hf-github-issue-queue §1). The item's outcome is `completed` when its draft pull request was created or updated,
 even with failing tests; `failed` when the pull request could not be opened (keep the branch and the worktree);
