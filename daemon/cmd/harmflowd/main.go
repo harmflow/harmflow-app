@@ -136,6 +136,7 @@ func run(homeFlag, builtinsFlag string, port int) error {
 			daemonEnv[name] = v
 		}
 	}
+	system := sysinfo.New(paths.Home)
 	a, err := app.New(app.Deps{
 		Paths: paths, Version: Version, Commit: buildCommit(), BuiltAt: buildTime(BuiltAt), Wake: wake.NewMonitor(),
 		Tasks: tasks, State: state, Executions: execs, Events: events, Validator: validator,
@@ -144,7 +145,7 @@ func run(homeFlag, builtinsFlag string, port int) error {
 			&codex.Adapter{Home: userHome, PathEnv: pathEnv, Env: harnessEnv, ClientVersion: Version},
 		},
 		Service:    launchd.NewAgent(userHome, filepath.Join(paths.Logs, "daemon.log")),
-		System:     &sysinfo.Reader{},
+		System:     system,
 		Tools:      &tools.Prober{Home: userHome, PathEnv: pathEnv, Env: harnessEnv},
 		Workspace:  &workspace.Reader{PathEnv: pathEnv, Env: harnessEnv},
 		HarnessEnv: harnessEnv, DaemonExecutable: exe, DaemonArgs: daemonArgs, DaemonEnv: daemonEnv, Logger: logger,
@@ -160,6 +161,8 @@ func run(homeFlag, builtinsFlag string, port int) error {
 	// The daemon's own context: what Start runs under ends when run returns, after Stop.
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
+	system.Start(ctx)
+	defer system.Stop()
 	if err := a.Start(ctx); err != nil {
 		return err
 	}
