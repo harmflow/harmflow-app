@@ -1,16 +1,23 @@
 // @vitest-environment happy-dom
 // Drives the task form in a DOM, against a stand-in for the daemon's local API. Its schedule preview asks for the
 // occurrences in the task's time zone and lists them in that zone, not the host's. The
-// daemon's own computation of the occurrences is itest › TestTaskLifecycle's.
+// daemon's own computation of the occurrences is itest › TestTaskLifecycle's. A new GitHub task with every section
+// filled through its controls saves the document tests/integration/testdata/task-form-document.json holds, which
+// itest › TestFormDocumentIsTheFile writes as a file (harmflow-app#299).
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import type { Catalog, SchedulePreview } from "../api/types";
+import type { Catalog, Harness, SchedulePreview, Task } from "../api/types";
 import i18n from "../i18n";
 import type { Doc } from "../lib/taskForm";
+import { TasksScreen, type TaskView } from "../screens/TasksScreen";
+import { patchStateForTests } from "../state/store";
 import { TaskForm } from "./TaskForm";
 
-// The daemon as the client sees it: an answer per route, and every request it received with its body.
+// The daemon as the client sees it: an answer per method and route, or per route alone, and every request it received
+// with its body as JSON carries it, where a field left undefined is not sent.
 const daemon = vi.hoisted(() => ({
   answers: new Map<string, unknown>(),
   requests: [] as { method: string; path: string; body: unknown }[],
@@ -21,8 +28,9 @@ vi.mock("../api/transport", () => ({
   transport: {
     mode: "http",
     request: async (method: string, path: string, body?: unknown) => {
-      daemon.requests.push({ method, path, body });
-      return daemon.answers.has(path) ? { status: 200, body: daemon.answers.get(path) } : { status: 404, body: null };
+      daemon.requests.push({ method, path, body: body === undefined ? undefined : JSON.parse(JSON.stringify(body)) });
+      const key = [`${method} ${path}`, path].find((k) => daemon.answers.has(k));
+      return key ? { status: 200, body: daemon.answers.get(key) } : { status: 404, body: null };
     },
     requestText: async () => ({ status: 404, text: "" }),
     stream: () => () => {},
@@ -542,5 +550,258 @@ describe("task form schedule builder", () => {
     await type(text, "90m");
     expect(schedule()).toEqual({ interval: "90m" });
     expect(control<HTMLInputElement>("Every")?.value).toBe("90");
+  });
+});
+
+// A new GitHub task, every section filled through its controls, saves the document task-form-document.json holds, which
+// itest › TestFormDocumentIsTheFile writes as an equal file: the two tests cover the way from the form to the file. That
+// document opens back in its controls, and clearing a control removes its key from what is sent, so the default applies.
+describe("task form document", () => {
+  const FORM_DOCUMENT: Doc = JSON.parse(
+    readFileSync(join(__dirname, "..", "..", "..", "..", "tests", "integration", "testdata", "task-form-document.json"), "utf8"),
+  );
+  const entry = (name: string, kind: "agent" | "skill", source: "builtin" | "user") => ({ name, kind, source, harnesses: ["claude-code", "codex"] });
+  // The catalog declares no task type, so the template brings no agent, skill, or origin of its own and every list is
+  // filled through its control. Its entries let a whole name typed in a picker add the chip.
+  const catalog: Catalog = {
+    agents: [entry("issue-reviewer", "agent", "user")],
+    skills: ["hf-github-issue-queue", "hf-github-worktree", "hf-github-draft-pr"].map((name) => entry(name, "skill", "builtin")),
+    problems: [],
+    taskTypes: [],
+  };
+  // The Effort selects list the efforts of the model typed.
+  const harness = (id: Harness["id"], name: string, model: string): Harness => ({
+    id,
+    name,
+    detected: true,
+    installations: [],
+    authentication: "valid",
+    readiness: "ready",
+    models: [{ id: model, efforts: ["low", "high"] }],
+    efforts: ["low", "high"],
+    lastCheckedAt: "2026-10-27T12:00:00Z",
+  });
+  const stored = (document: Doc): Task => ({
+    id: "complete",
+    name: "Every section",
+    type: "github",
+    enabled: false,
+    revision: "r1",
+    harness: "codex",
+    warnings: [],
+    document,
+    effective: document,
+    yaml: JSON.stringify(document, null, 2) + "\n",
+    path: "complete.yaml",
+    validation: { valid: true, errors: [], warnings: [] },
+  });
+
+  beforeAll(() => patchStateForTests({ catalog, harnesses: [harness("claude-code", "Claude Code", "sonnet"), harness("codex", "Codex", "gpt-5.6-terra")] }));
+  afterAll(() => patchStateForTests({ catalog: undefined, harnesses: [], tasks: [], tasksLoaded: false }));
+
+  async function openScreen(view: TaskView) {
+    daemon.answers.set("POST /tasks", stored(FORM_DOCUMENT));
+    daemon.answers.set("GET /tasks", []);
+    daemon.answers.set("GET /tasks/complete", stored(FORM_DOCUMENT));
+    daemon.answers.set("PUT /tasks/complete", stored(FORM_DOCUMENT));
+    daemon.answers.set("/schedules/preview", { occurrences: [] } satisfies SchedulePreview);
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(<TasksScreen view={view} onView={() => {}} onOpenExecution={() => {}} />));
+    await settle();
+  }
+
+  const field = (label: string) =>
+    [...host!.querySelectorAll<HTMLElement>("label.field")].find((f) => f.querySelector(".field__label")?.textContent === label)!;
+  const control = <E extends Element = HTMLInputElement>(label: string) => field(label).querySelector<E>("input, select, textarea, output")!;
+  const toggle = (label: string) =>
+    [...host!.querySelectorAll("label.toggle")].find((t) => t.querySelector(".toggle__label")?.textContent === label)!.querySelector("input")!;
+  const boxes = (fieldLabel: string) => [...field(fieldLabel).querySelectorAll("label.checkbox")];
+  const checked = (fieldLabel: string) => boxes(fieldLabel).filter((c) => c.querySelector("input")!.checked).map((c) => c.textContent);
+  const chips = (label: string) => [...field(label).querySelectorAll(".name-chip > .mono")].map((c) => c.textContent);
+  const repository = () => [...host!.querySelector(".grid-repo:not(.row-list__head)")!.querySelectorAll("input")];
+  /** The preferred harness, then each fallback: its harness, model, and effort controls. */
+  const profiles = () =>
+    [...host!.querySelectorAll("#section-harness .grid-profile")].map((p) => {
+      const [harness, effort] = p.querySelectorAll("select");
+      return { harness: harness!, model: p.querySelector("input")!, effort: effort! };
+    });
+  const button = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === label)!;
+  const sent = (method: string, path: string) => daemon.requests.filter((r) => r.method === method && r.path === path).map((r) => r.body);
+
+  /** Types into a field or chooses an option, as React sees it. */
+  async function enter(el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, value: string) {
+    const proto = el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(el, value);
+      el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }));
+    });
+  }
+  async function click(el: HTMLElement) {
+    await act(async () => el.click());
+  }
+  /**
+   * Clicks one of a field's checkboxes. A browser toggles that checkbox alone, but happy-dom also passes the click on to
+   * the first control inside the field's own label, so that label is given no control while the click lasts.
+   */
+  async function tick(fieldLabel: string, label: string) {
+    const outer = field(fieldLabel);
+    outer.setAttribute("for", "");
+    try {
+      await click(boxes(fieldLabel).find((c) => c.textContent === label)!.querySelector("input")!);
+    } finally {
+      outer.removeAttribute("for");
+    }
+  }
+
+  it("sends, once every section is filled through its controls, the document the daemon writes as a file", async () => {
+    await openScreen({ kind: "new", template: "github" });
+
+    // General. The name writes an identifier of its own until the identifier is typed.
+    await enter(control("Name"), "Every section");
+    expect(control("Identifier").value).toBe("every-section");
+    await enter(control("Identifier"), "complete");
+    await enter(control<HTMLTextAreaElement>("Description"), "Every section of the form, set.");
+    await click(toggle("Enabled"));
+
+    // Prompt.
+    await enter(control<HTMLTextAreaElement>("Prompt"), "Implement the oldest issue labelled ready-for-agent.");
+    await enter(control("Other agents (subagents)"), "issue-reviewer");
+    for (const skill of ["hf-github-issue-queue", "hf-github-worktree", "hf-github-draft-pr"]) await enter(control("Skills"), skill);
+    await enter(control("Workspace"), "~/harmflow-work");
+
+    // The GitHub type: the template's repository row, then the queue and delivery.
+    const [name, localPath, baseBranch] = repository();
+    await enter(name!, "harmflow/example");
+    await enter(localPath!, "${FORM_REPO}");
+    await enter(baseBranch!, "develop");
+    await enter(control<HTMLSelectElement>("Order"), "newest_first");
+    await enter(control("Items discovered per cycle"), "5");
+    await enter(control("Items processed per execution"), "2");
+    await enter(control<HTMLSelectElement>("Resume priority"), "alternate");
+    await enter(control("Resumptions before needs attention"), "1");
+    await enter(control("Retries of a failed item"), "0");
+    await enter(control("Test-repair attempts"), "0");
+
+    // Harness: Codex preferred, then Claude Code, switched to only when a harness is unavailable.
+    await enter(profiles()[0]!.harness, "codex");
+    await enter(profiles()[0]!.model, "gpt-5.6-terra");
+    await enter(profiles()[0]!.effort, "high");
+    await click(button("Add fallback"));
+    await enter(profiles()[1]!.harness, "claude-code");
+    await enter(profiles()[1]!.model, "sonnet");
+    await enter(profiles()[1]!.effort, "high");
+    await tick("Fail over on", "Quota exhausted");
+    await enter(control("Maximum switches"), "2");
+
+    // Schedule: weekdays at 06:30 in São Paulo, skipping missed and overlapping firings.
+    await click([...host!.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((b) => b.textContent === "Cron")!);
+    await enter(control("Time"), "06:30");
+    await enter(control("Time zone"), "America/Sao_Paulo");
+    await enter(control<HTMLSelectElement>("Missed runs"), "skip");
+    await enter(control<HTMLSelectElement>("Overlapping firings"), "skip");
+
+    // Permissions: the custom profile's lists show once it is chosen.
+    await enter(control<HTMLSelectElement>("Profile"), "custom");
+    await enter(control<HTMLSelectElement>("Network"), "deny");
+    await click(toggle("Restrict writes to the workspace"));
+    await enter(control<HTMLTextAreaElement>("Allowed tools"), "Read\nGrep");
+    await enter(control<HTMLTextAreaElement>("Denied tools"), "WebFetch");
+    await enter(control<HTMLTextAreaElement>("Writable paths"), "${FORM_REPO}");
+
+    // Execution.
+    await enter(control("Timeout (minutes), shared by all attempts"), "45");
+    await enter(control("Grace before a cancellation is forced (seconds)"), "10");
+    await enter(control("Rate-limit retries"), "2");
+    await enter(control("First wait (seconds)"), "30");
+    await enter(control("Longest wait (seconds)"), "600");
+
+    // Notifications: off, and of the default events only operational failures kept, with failed tests added.
+    await click(toggle("Native notifications"));
+    for (const event of ["Execution completed", "Needs attention", "Draft PR created", "No alternative harness"]) await tick("Notify me about", event);
+    await tick("Notify me about", "Tests failed");
+
+    await click(button("Save"));
+    await settle();
+    // Strictly equal: a number sent as a string, or a key the form left in, fails.
+    expect(sent("POST", "/tasks")).toStrictEqual([{ document: FORM_DOCUMENT }]);
+  });
+
+  it("shows the document in its controls, and sends no key of a cleared control, so its default applies", async () => {
+    await openScreen({ kind: "edit", id: "complete" });
+    expect(control("Identifier").disabled).toBe(true);
+    const values = (...labels: string[]) => labels.map((label) => control(label).value);
+    const [preferred, fallback] = profiles().map((p) => [p.harness.value, p.model.value, p.effort.value]);
+    expect({
+      general: [...values("Name", "Identifier", "Description"), toggle("Enabled").checked],
+      prompt: [control("Prompt").value, chips("Other agents (subagents)"), chips("Skills"), control("Workspace").value],
+      repository: repository().map((input) => input.value),
+      queue: values(
+        "Order",
+        "Items discovered per cycle",
+        "Items processed per execution",
+        "Resume priority",
+        "Resumptions before needs attention",
+        "Retries of a failed item",
+        "Test-repair attempts",
+      ),
+      harness: [preferred, fallback, checked("Fail over on"), control("Maximum switches").value],
+      schedule: [...values("Repeats", "Time"), control("Cron expression (5 fields)").textContent, ...values("Time zone", "Missed runs", "Overlapping firings")],
+      permissions: [...values("Profile", "Network"), toggle("Restrict writes to the workspace").checked, ...values("Allowed tools", "Denied tools", "Writable paths")],
+      execution: values(
+        "Timeout (minutes), shared by all attempts",
+        "Grace before a cancellation is forced (seconds)",
+        "Rate-limit retries",
+        "First wait (seconds)",
+        "Longest wait (seconds)",
+      ),
+      notifications: [toggle("Native notifications").checked, checked("Notify me about")],
+    }).toEqual({
+      general: ["Every section", "complete", "Every section of the form, set.", false],
+      prompt: [
+        "Implement the oldest issue labelled ready-for-agent.",
+        ["issue-reviewer"],
+        ["hf-github-issue-queue", "hf-github-worktree", "hf-github-draft-pr"],
+        "~/harmflow-work",
+      ],
+      repository: ["harmflow/example", "${FORM_REPO}", "develop"],
+      queue: ["newest_first", "5", "2", "alternate", "1", "0", "0"],
+      harness: [["codex", "gpt-5.6-terra", "high"], ["claude-code", "sonnet", "high"], ["Harness unavailable"], "2"],
+      schedule: ["weekdays", "06:30", "30 6 * * 1-5", "America/Sao_Paulo", "skip", "skip"],
+      permissions: ["custom", "deny", false, "Read\nGrep", "WebFetch", "${FORM_REPO}"],
+      execution: ["45", "10", "2", "30", "600"],
+      notifications: [false, ["Operational failure", "Tests failed"]],
+    });
+
+    // One control of each section cleared. The two lists emptied show their defaults again, as the daemon applies them.
+    await enter(control<HTMLTextAreaElement>("Description"), "");
+    await enter(control("Workspace"), "");
+    await enter(control("Items discovered per cycle"), "");
+    await tick("Fail over on", "Harness unavailable");
+    expect(checked("Fail over on")).toEqual(["Quota exhausted", "Harness unavailable"]);
+    await enter(control("Time zone"), "");
+    await enter(control<HTMLSelectElement>("Network"), "");
+    await enter(control("Timeout (minutes), shared by all attempts"), "");
+    for (const event of ["Operational failure", "Tests failed"]) await tick("Notify me about", event);
+    expect(checked("Notify me about")).toEqual(["Execution completed", "Operational failure", "Needs attention", "Draft PR created", "No alternative harness"]);
+    await click(button("Save"));
+    await settle();
+
+    const expected = structuredClone(FORM_DOCUMENT);
+    for (const path of [
+      ["metadata", "description"],
+      // The workspace held its path alone, so it goes with it.
+      ["spec", "workspace"],
+      ["spec", "github", "queue", "maxDiscoveredPerCycle"],
+      ["spec", "harness", "fallback", "on"],
+      ["spec", "schedule", "timezone"],
+      ["spec", "permissions", "network"],
+      ["spec", "execution", "timeoutMinutes"],
+      ["spec", "notifications", "native", "events"],
+    ]) {
+      const parent = path.slice(0, -1).reduce((node, key) => node[key] as Doc, expected);
+      delete parent[path.at(-1)!];
+    }
+    expect(sent("PUT", "/tasks/complete")).toStrictEqual([{ document: expected, baseRevision: "r1" }]);
   });
 });

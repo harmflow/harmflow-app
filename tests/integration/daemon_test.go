@@ -1142,11 +1142,12 @@ func (d *daemon) listedTask(id string) map[string]any {
 }
 
 // A form document that sets every section is written as a file equal to it, which passes validation and is listed;
-// after an edit outside the daemon, the task the API returns is the file.
+// after an edit outside the daemon, the task the API returns is the file. The document is the one the dashboard's task
+// form sends once every section is filled through its controls, which desktop › TaskForm.test.tsx holds.
 func TestFormDocumentIsTheFile(t *testing.T) {
 	home := t.TempDir()
-	// Codex's models cache, read when the harness is detected, makes the candidate's model and effort ones the daemon
-	// checks rather than only declares.
+	// Codex's models cache, read when the harness is detected, makes the preferred harness's model and effort ones the
+	// daemon checks rather than only declares.
 	codexHome := filepath.Join(home, "codex")
 	if err := os.MkdirAll(codexHome, 0o700); err != nil {
 		t.Fatal(err)
@@ -1169,11 +1170,13 @@ func TestFormDocumentIsTheFile(t *testing.T) {
 	}
 	d := startDaemon(t, home, "CLAUDE_CONFIG_DIR="+claudeConfig)
 	repo := t.TempDir()
-	// Outside the home folder, so an allowed folder.
-	d.call("PATCH", "/settings", map[string]any{"allowedFolders": []any{repo}}, 200)
-	complete := completeTask("complete", repo)
+	// Outside the home folder, so an allowed folder. The document names it by a path variable, which the file keeps as
+	// written: a path variable left undefined would skip the path's check.
+	d.call("PATCH", "/settings", map[string]any{"allowedFolders": []any{repo},
+		"pathVariables": map[string]any{"FORM_REPO": repo}}, 200)
+	complete := formDocument(t, "complete")
 	// An empty list of failover triggers or notified events is a choice the file keeps (harmflow/harmflow-app#83).
-	empty := completeTask("empty-lists", repo)
+	empty := formDocument(t, "empty-lists")
 	spec := empty["spec"].(map[string]any)
 	spec["harness"].(map[string]any)["fallback"].(map[string]any)["on"] = []any{}
 	spec["notifications"].(map[string]any)["native"].(map[string]any)["events"] = []any{}
@@ -1230,40 +1233,22 @@ func TestFormDocumentIsTheFile(t *testing.T) {
 	}
 }
 
-// completeTask is a form document that sets every section to a value other than its default, with a non-empty list
-// wherever the field is a list, and agents, skills, models, and efforts that resolve on the stand-in harnesses.
-func completeTask(id, repo string) map[string]any {
-	return map[string]any{"apiVersion": "harmflow/v1alpha1", "kind": "Task",
-		"metadata": map[string]any{"id": id, "name": "Complete " + id, "description": "Every section of the form, set."},
-		"spec": map[string]any{
-			"enabled": false,
-			"type":    "github",
-			"github": map[string]any{
-				"repositories": []any{map[string]any{"name": "harmflow/example", "localPath": repo, "baseBranch": "develop"}},
-				"queue": map[string]any{"ordering": "newest_first", "maxDiscoveredPerCycle": 5, "maxItemsPerCycle": 2,
-					"resumeStrategy": "alternate", "maxResumeAttempts": 1, "maxFailedRetries": 0},
-				"delivery": map[string]any{"testRepairAttempts": 0},
-			},
-			"prompt":      "Implement the oldest issue labelled ready-for-agent.",
-			"agents":      []any{"issue-reviewer"},
-			"skills":      []any{"hf-github-issue-queue", "hf-github-worktree", "hf-github-draft-pr"},
-			"workspace":   map[string]any{"path": "~/harmflow-work"},
-			"schedule":    map[string]any{"cron": "30 6 * * 1-5", "timezone": "America/Sao_Paulo", "missedRun": map[string]any{"policy": "skip"}},
-			"concurrency": map[string]any{"overlappingRuns": "skip"},
-			"harness": map[string]any{
-				"preferred": map[string]any{"provider": "claude-code", "model": "sonnet", "effort": "high"},
-				"fallback": map[string]any{"on": []any{"harness_unavailable"},
-					"candidates":  []any{map[string]any{"provider": "codex", "model": "gpt-5.6-terra", "effort": "high"}},
-					"maxSwitches": 2},
-			},
-			"permissions": map[string]any{"profile": "custom", "restrictToWorkspace": false, "network": "deny",
-				"custom": map[string]any{"allowedTools": []any{"Read", "Grep"}, "deniedTools": []any{"WebFetch"},
-					"writablePaths": []any{repo}}},
-			"execution": map[string]any{"timeoutMinutes": 45, "cancelGraceSeconds": 10,
-				"rateLimit": map[string]any{"maxRetries": 2, "initialWaitSeconds": 30, "maxWaitSeconds": 600}},
-			"notifications": map[string]any{"native": map[string]any{"enabled": false,
-				"events": []any{"execution.failed", "test.failed"}}},
-		}}
+// formDocument is testdata/task-form-document.json under the id, read anew on each call so that no two documents share
+// a value. It sets every section of the form to a value other than its default, with a non-empty list wherever the
+// field is a list, and agents, skills, models, and efforts that resolve on the stand-in harnesses. Its repository and
+// writable path are the path variable FORM_REPO.
+func formDocument(t *testing.T, id string) map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(), "tests", "integration", "testdata", "task-form-document.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parsing the form's document: %v", err)
+	}
+	doc["metadata"].(map[string]any)["id"] = id
+	return doc
 }
 
 // A new GitHub task selects the built-in issue implementer of this checkout, an agent and not a skill: it is copied

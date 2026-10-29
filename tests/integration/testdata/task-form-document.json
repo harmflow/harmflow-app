@@ -1,0 +1,92 @@
+{
+  "apiVersion": "harmflow/v1alpha1",
+  "kind": "Task",
+  "metadata": {
+    "id": "complete",
+    "name": "Every section",
+    "description": "Every section of the form, set."
+  },
+  "spec": {
+    "enabled": false,
+    "type": "github",
+    "prompt": "Implement the oldest issue labelled ready-for-agent.",
+    "agents": ["issue-reviewer"],
+    "skills": ["hf-github-issue-queue", "hf-github-worktree", "hf-github-draft-pr"],
+    "workspace": {
+      "path": "~/harmflow-work"
+    },
+    "github": {
+      "repositories": [
+        {
+          "name": "harmflow/example",
+          "localPath": "${FORM_REPO}",
+          "baseBranch": "develop"
+        }
+      ],
+      "queue": {
+        "ordering": "newest_first",
+        "maxDiscoveredPerCycle": 5,
+        "maxItemsPerCycle": 2,
+        "resumeStrategy": "alternate",
+        "maxResumeAttempts": 1,
+        "maxFailedRetries": 0
+      },
+      "delivery": {
+        "testRepairAttempts": 0
+      }
+    },
+    "harness": {
+      "preferred": {
+        "provider": "codex",
+        "model": "gpt-5.6-terra",
+        "effort": "high"
+      },
+      "fallback": {
+        "candidates": [
+          {
+            "provider": "claude-code",
+            "model": "sonnet",
+            "effort": "high"
+          }
+        ],
+        "on": ["harness_unavailable"],
+        "maxSwitches": 2
+      }
+    },
+    "schedule": {
+      "cron": "30 6 * * 1-5",
+      "timezone": "America/Sao_Paulo",
+      "missedRun": {
+        "policy": "skip"
+      }
+    },
+    "concurrency": {
+      "overlappingRuns": "skip"
+    },
+    "permissions": {
+      "profile": "custom",
+      "network": "deny",
+      "restrictToWorkspace": false,
+      "custom": {
+        "allowedTools": ["Read", "Grep"],
+        "deniedTools": ["WebFetch"],
+        "writablePaths": ["${FORM_REPO}"]
+      }
+    },
+    "execution": {
+      "timeoutMinutes": 45,
+      "cancelGraceSeconds": 10,
+      "rateLimit": {
+        "maxRetries": 2,
+        "initialWaitSeconds": 30,
+        "maxWaitSeconds": 600
+      }
+    },
+    "notifications": {
+      "native": {
+        "enabled": false,
+        "events": ["execution.failed", "test.failed"]
+      }
+    }
+  }
+}
