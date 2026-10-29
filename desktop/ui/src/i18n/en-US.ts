@@ -5,7 +5,7 @@ export const enUS = {
     name: "HarmFlow",
     tagline: "Local agents, real results.",
     quote: "Schedules that keep their word. Results you can review.",
-    quoteSignature: "HarmFlow // orchestration for the agents you already trust.",
+    quoteSignature: "HarmFlow // orchestration for the AI tools you already trust.",
   },
   nav: {
     overview: "Overview",
@@ -99,7 +99,7 @@ export const enUS = {
     executions: {
       breadcrumb: "executions",
       title: "Live executions",
-      subtitle: "Follow your running agents and the progress of scheduled tasks.",
+      subtitle: "Follow your running executions and the progress of scheduled tasks.",
     },
     overview: {
       breadcrumb: "overview",
@@ -194,7 +194,7 @@ export const enUS = {
     },
     harness: {
       started: "Harness started",
-      message: "Agent message",
+      message: "Session message",
       output: "Harness output",
       exited: "Harness exited",
       quota_exhausted: "Harness quota exhausted",
@@ -565,7 +565,7 @@ export const enUS = {
     goToTasks: "Go to tasks",
     card: {
       task: "Task",
-      agent: "Agent",
+      agent: "Run by",
       repository: "Repository",
       start: "Start",
       step: "Step",
@@ -608,9 +608,9 @@ export const enUS = {
         noHarness: "A script task runs a program, not a harness: it has no model, prompt, or cost.",
       },
       chat: {
-        agent: "Agent",
-        noMessages: "No agent messages yet.",
-        messagesExpired: "The agent's messages were deleted with the expired log.",
+        agent: "Session",
+        noMessages: "No session messages yet.",
+        messagesExpired: "The session's messages were deleted with the expired log.",
       },
       eventDetails: "Event details",
       noEventSelected: "Select an event to see its details.",
@@ -659,7 +659,7 @@ export const enUS = {
       workItems: "Work items",
       running: "running",
       commandStatus: { running: "Running", succeeded: "Succeeded", failed: "Failed", declined: "Declined" },
-      noConversation: "Observe-only: HarmFlow never sends input to a running agent.",
+      noConversation: "Observe-only: HarmFlow never sends input to a running session.",
       definitionRevision: "Definition",
       costs: {
         cost: "Estimated cost",
@@ -714,7 +714,7 @@ export const enUS = {
         emptyHint: "The harness reported no usage: the attempt ended before it reported, or this harness version does not report it.",
         note: "An estimate at API list prices. On a subscription plan the tokens are not billed one by one: this is what they would cost on the API.",
         noteAsOf: "An estimate at API list prices of {{date}}. On a subscription plan the tokens are not billed one by one: this is what they would cost on the API.",
-        noteRunning: "Input and cache tokens update as the agent works; the cost appears when the attempt ends.",
+        noteRunning: "Input and cache tokens update as the session works; the cost appears when the attempt ends.",
         noteAttemptPartial: "Attempt {{number}} ended before {{harness}} reported its final count: its input and cache tokens are partial, with no output or cost.",
         noteAttemptUnpriced: "Attempt {{number}}: the price table has no price for {{model}}.",
         noteAttemptNoModel: "Attempt {{number}}: {{harness}} does not name its model, and its configuration sets none.",
@@ -1081,7 +1081,7 @@ export const enUS = {
     sections: {
       general: "General",
       notifications: "Notifications",
-      agents: "Installed agents",
+      agents: "AI tools",
       paths: "Paths",
       daemon: "Daemon",
       storage: "Storage",
@@ -1089,13 +1089,13 @@ export const enUS = {
       about: "About",
     },
     sectionList: "Settings sections",
-    groups: { interface: "Interface", agents: "Agents and tasks", computer: "This computer" },
+    groups: { interface: "Interface", agents: "Execution", computer: "This computer" },
     subheads: {
       language: "Language",
       menuBar: "Menu bar",
       notices: "Notices",
-      agents: "Agents",
-      tools: "Tools",
+      agents: "AI tools",
+      tools: "Command-line tools",
       variables: "Path variables",
       allowedFolders: "Allowed folders",
       status: "Status",
@@ -1179,10 +1179,10 @@ export const enUS = {
     scope: {
       title: "Everything runs on this computer",
       body:
-        "HarmFlow schedules, runs, and monitors automations carried out by the agent harnesses you already installed — Claude Code and Codex. It never installs, updates, or signs in to them.",
+        "HarmFlow schedules, runs, and monitors automations carried out by the AI tools you already installed — Claude Code and Codex. It never installs, updates, or signs in to them.",
       points: {
         local: "Tasks, state, and logs stay on this machine.",
-        permissions: "Each task declares what its agent may touch; HarmFlow applies it through the harness's own controls and warns when a restriction can't be enforced.",
+        permissions: "Each task declares what its session may touch; HarmFlow applies it through the harness's own controls and warns when a restriction can't be enforced.",
         github: "GitHub work uses your own gh and Git sign-in. The built-in issue implementer never merges a pull request.",
         api: "The dashboard talks to the daemon over an authenticated local API.",
       },
@@ -1208,7 +1208,7 @@ export const enUS = {
     },
     done: {
       title: "All set",
-      body: "Live executions are the main screen: every running agent, its events, and the queue.",
+      body: "Live executions are the main screen: every running execution, its events, and the queue.",
       go: "Go to live executions",
     },
   },

@@ -1,4 +1,4 @@
-// The installed-agents inventory: what was detected, where, at which version, and whether it is ready.
+// The AI tools list: each harness detected, where, at which version, and whether it is ready.
 // Credentials are never shown.
 import { useState } from "react";
 import { useTranslation } from "react-i18next";

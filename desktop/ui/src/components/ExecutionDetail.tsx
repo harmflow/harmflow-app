@@ -59,7 +59,7 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
   }, [detail, events]);
   const prominent = useMemo(() => (events ?? []).filter((e) => PROMINENT.has(e.type)), [events]);
   const outputLines = useMemo(() => (events ?? []).filter((e) => e.type === "script.output"), [events]);
-  // The chat lists each agent message under its attempt, so it counts only those the daemon stamped with one.
+  // The chat lists each session message under its attempt, so it counts only those the daemon stamped with one.
   const agentMessages = useMemo(() => (events ?? []).filter((e) => e.type === "harness.message" && e.attempt), [events]);
 
   if (!exec) {
@@ -195,7 +195,7 @@ function parseIssue(workItem?: string): number | undefined {
 }
 
 /**
- * The conversation alone: for each attempt, the prompt it sent, then the agent messages it received, as the daemon kept
+ * The conversation alone: for each attempt, the prompt it sent, then the session messages it received, as the daemon kept
  * and redacted them — plain text, no Markdown — and no other event nor the session context. The
  * prompts live in the record and the messages in the log, so an expired log leaves the prompts.
  */

@@ -716,7 +716,7 @@ describe("the events timeline from the keyboard", () => {
   });
 });
 
-// A harness task's conversation alone — each attempt's prompt, then the agent messages it received — read only, and
+// A harness task's conversation alone — each attempt's prompt, then the session messages it received — read only, and
 // the view its detail opens on.
 describe("the chat view", () => {
   const at = (minute: number) => `2026-10-21T09:${String(minute).padStart(2, "0")}:00Z`;
@@ -734,7 +734,7 @@ describe("the chat view", () => {
     }));
   const notes = () => [...host!.querySelectorAll(".chat__note")].map((n) => n.textContent);
 
-  it("opens on the chat view: each attempt's prompt, then its agent messages, each with its time, and nothing else", async () => {
+  it("opens on the chat view: each attempt's prompt, then its session messages, each with its time, and nothing else", async () => {
     const x: Execution = {
       ...completed,
       id: "exec-chat",
@@ -775,16 +775,16 @@ describe("the chat view", () => {
         header: expect.stringMatching(/^Attempt 1Claude Code/),
         turns: [
           ["Prompt", "Implement org/core-banking#123.", at(0)],
-          ["Agent", "I will read the issue first.", at(1)],
-          ["Agent", "The tests pass.", at(4)],
+          ["Session","I will read the issue first.", at(1)],
+          ["Session","The tests pass.", at(4)],
         ],
       },
       {
         header: expect.stringMatching(/^Attempt 2Codex/),
         turns: [
           ["Prompt", "Implement org/core-banking#123, from the last commit.", at(5)],
-          ["Agent", "Picking up from the last commit.", at(6)],
-          ["Agent", "Pushed the branch.", at(7)],
+          ["Session","Picking up from the last commit.", at(6)],
+          ["Session","Pushed the branch.", at(7)],
         ],
       },
     ]);
@@ -819,7 +819,7 @@ describe("the chat view", () => {
         header: expect.stringMatching(/^Attempt 1Claude Code/),
         turns: [
           ["Prompt", "Not recorded", started],
-          ["Agent", "Hello.", at(1)],
+          ["Session","Hello.", at(1)],
         ],
       },
     ]);
@@ -832,12 +832,12 @@ describe("the chat view", () => {
     expect(body()).toBe("No attempts yet.");
   });
 
-  it("adds an agent message at the end of the running attempt's conversation as it arrives, with no reload", async () => {
+  it("adds a session message at the end of the running attempt's conversation as it arrives, with no reload", async () => {
     const attempt = { ...base.attempts[0], startedAt: at(0), endedAt: undefined, outcome: "running" as const, prompt: "Implement org/core-banking#123." };
     const running: Execution = { ...base, id: "exec-chat-live", harness: "claude-code", attempts: [attempt] };
     const one = { executionId: running.id, attempt: 1, harness: "claude-code" };
     await open(running, [event(1, "harness.started", { ...one, timestamp: at(0) })], capture());
-    expect(notes()).toEqual(["No agent messages yet."]);
+    expect(notes()).toEqual(["No session messages yet."]);
 
     const reads = () => daemon.requests.filter((r) => r.startsWith(`GET /executions/${running.id}`)).length;
     const before = reads();
@@ -853,8 +853,8 @@ describe("the chat view", () => {
         header: expect.stringMatching(/^Attempt 1Claude Code/),
         turns: [
           ["Prompt", "Implement org/core-banking#123.", at(0)],
-          ["Agent", "Reading the issue.", at(1)],
-          ["Agent", "Running the tests.", at(3)],
+          ["Session","Reading the issue.", at(1)],
+          ["Session","Running the tests.", at(3)],
         ],
       },
     ]);
@@ -864,18 +864,18 @@ describe("the chat view", () => {
     // A failover: the next attempt's message shows under its own number before the record is read again, and its
     // prompt joins it once it is.
     await arrive(event(5, "harness.message", { executionId: running.id, attempt: 2, harness: "codex", timestamp: at(5), message: "Taking over." }));
-    expect(conversation()[1]).toEqual({ header: "Attempt 2Codex", turns: [["Agent", "Taking over.", at(5)]] });
+    expect(conversation()[1]).toEqual({ header: "Attempt 2Codex", turns: [["Session","Taking over.", at(5)]] });
     expect(reads()).toBe(before);
 
     const second = { ...base.attempts[1], startedAt: at(4), endedAt: undefined, outcome: "running" as const, prompt: "Implement org/core-banking#123, resuming." };
     await act(async () => patchStateForTests({ details: { ...getState().details, [running.id]: { ...running, attempts: [{ ...attempt, outcome: "quota_exhausted", endedAt: at(4) }, second] } } }));
     expect(conversation()[1].turns).toEqual([
       ["Prompt", "Implement org/core-banking#123, resuming.", at(4)],
-      ["Agent", "Taking over.", at(5)],
+      ["Session","Taking over.", at(5)],
     ]);
   });
 
-  it("keeps each attempt's prompt once the log has expired, and says the agent's messages left with it", async () => {
+  it("keeps each attempt's prompt once the log has expired, and says the session's messages left with it", async () => {
     const x: Execution = {
       ...completed,
       id: "exec-chat-expired",
@@ -891,12 +891,12 @@ describe("the chat view", () => {
       { header: expect.stringMatching(/^Attempt 1Claude Code/), turns: [["Prompt", "Implement org/core-banking#123.", started]] },
       { header: expect.stringMatching(/^Attempt 2Codex/), turns: [["Prompt", "Implement org/core-banking#123, from the last commit.", started]] },
     ]);
-    expect(notes()).toEqual(["The agent's messages were deleted with the expired log.", "The agent's messages were deleted with the expired log."]);
+    expect(notes()).toEqual(["The session's messages were deleted with the expired log.", "The session's messages were deleted with the expired log."]);
   });
 });
 
 // The detail offers Cancel on a running or queued execution, and nothing that writes to the
-// agent; across every tab, the one request that is not a read is that cancel.
+// session; across every tab, the one request that is not a read is that cancel.
 describe("observe and cancel, no conversation", () => {
   // Toggles that change only the view, such as the timeline's follow checkbox, are not text boxes.
   const editable = () =>

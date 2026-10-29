@@ -5,7 +5,7 @@ export const esES: Resources = {
     name: "HarmFlow",
     tagline: "Agentes locales, resultados reales.",
     quote: "Programaciones que cumplen su palabra. Resultados que puedes revisar.",
-    quoteSignature: "HarmFlow // orquestación para los agentes en los que ya confías.",
+    quoteSignature: "HarmFlow // orquestación para las herramientas de IA en las que ya confías.",
   },
   nav: {
     overview: "Resumen",
@@ -99,7 +99,7 @@ export const esES: Resources = {
     executions: {
       breadcrumb: "ejecuciones",
       title: "Ejecuciones en tiempo real",
-      subtitle: "Sigue a tus agentes en ejecución y el progreso de las tareas programadas.",
+      subtitle: "Sigue tus ejecuciones en curso y el progreso de las tareas programadas.",
     },
     overview: {
       breadcrumb: "resumen",
@@ -194,7 +194,7 @@ export const esES: Resources = {
     },
     harness: {
       started: "Harness iniciado",
-      message: "Mensaje del agente",
+      message: "Mensaje de la sesión",
       output: "Salida del harness",
       exited: "Harness finalizado",
       quota_exhausted: "Cuota del harness agotada",
@@ -582,7 +582,7 @@ export const esES: Resources = {
     goToTasks: "Ir a tareas",
     card: {
       task: "Tarea",
-      agent: "Agente",
+      agent: "Ejecutada por",
       repository: "Repositorio",
       start: "Inicio",
       step: "Paso",
@@ -625,9 +625,9 @@ export const esES: Resources = {
         noHarness: "Una tarea de script ejecuta un programa, no un harness: no tiene modelo, prompt ni coste.",
       },
       chat: {
-        agent: "Agente",
-        noMessages: "Aún no hay mensajes del agente.",
-        messagesExpired: "Los mensajes del agente se borraron con el log caducado.",
+        agent: "Sesión",
+        noMessages: "Aún no hay mensajes de la sesión.",
+        messagesExpired: "Los mensajes de la sesión se borraron con el log caducado.",
       },
       eventDetails: "Detalles del evento",
       noEventSelected: "Selecciona un evento para ver sus detalles.",
@@ -676,7 +676,7 @@ export const esES: Resources = {
       workItems: "Elementos de trabajo",
       running: "en ejecución",
       commandStatus: { running: "Ejecutando", succeeded: "Correcto", failed: "Fallido", declined: "Rechazado" },
-      noConversation: "Solo observación: HarmFlow nunca envía entrada a un agente en ejecución.",
+      noConversation: "Solo observación: HarmFlow nunca envía entrada a una sesión en ejecución.",
       definitionRevision: "Definición",
       costs: {
         cost: "Coste estimado",
@@ -731,7 +731,7 @@ export const esES: Resources = {
         emptyHint: "El harness no informó uso: el intento terminó antes de informarlo, o esta versión del harness no lo informa.",
         note: "Una estimación a precios de lista de la API. En un plan de suscripción los tokens no se cobran uno a uno: esto es lo que costarían en la API.",
         noteAsOf: "Una estimación a precios de lista de la API del {{date}}. En un plan de suscripción los tokens no se cobran uno a uno: esto es lo que costarían en la API.",
-        noteRunning: "Los tokens de entrada y de caché se actualizan mientras el agente trabaja; el coste aparece cuando termina el intento.",
+        noteRunning: "Los tokens de entrada y de caché se actualizan mientras la sesión trabaja; el coste aparece cuando termina el intento.",
         noteAttemptPartial: "El intento {{number}} terminó antes de que {{harness}} informara el recuento final: sus tokens de entrada y de caché son parciales, sin salida ni coste.",
         noteAttemptUnpriced: "Intento {{number}}: la tabla de precios no tiene precio para {{model}}.",
         noteAttemptNoModel: "Intento {{number}}: {{harness}} no indica su modelo, y su configuración no define ninguno.",
@@ -1098,7 +1098,7 @@ export const esES: Resources = {
     sections: {
       general: "General",
       notifications: "Notificaciones",
-      agents: "Agentes instalados",
+      agents: "Herramientas de IA",
       paths: "Rutas",
       daemon: "Daemon",
       storage: "Almacenamiento",
@@ -1106,13 +1106,13 @@ export const esES: Resources = {
       about: "Acerca de",
     },
     sectionList: "Secciones de los ajustes",
-    groups: { interface: "Interfaz", agents: "Agentes y tareas", computer: "Este ordenador" },
+    groups: { interface: "Interfaz", agents: "Ejecución", computer: "Este ordenador" },
     subheads: {
       language: "Idioma",
       menuBar: "Barra de menús",
       notices: "Avisos",
-      agents: "Agentes",
-      tools: "Herramientas",
+      agents: "Herramientas de IA",
+      tools: "Herramientas de línea de comandos",
       variables: "Variables de ruta",
       allowedFolders: "Carpetas permitidas",
       status: "Estado",
@@ -1199,11 +1199,11 @@ export const esES: Resources = {
     scope: {
       title: "Todo se ejecuta en este ordenador",
       body:
-        "HarmFlow programa, ejecuta y supervisa automatizaciones realizadas por los harnesses de agentes que ya instalaste — Claude Code y Codex. Nunca los instala, actualiza ni inicia sesión en ellos.",
+        "HarmFlow programa, ejecuta y supervisa automatizaciones realizadas por las herramientas de IA que ya instalaste — Claude Code y Codex. Nunca las instala, actualiza ni inicia sesión en ellas.",
       points: {
         local: "Las tareas, el estado y los logs se quedan en esta máquina.",
         permissions:
-          "Cada tarea declara qué puede tocar su agente; HarmFlow lo aplica mediante los controles del propio harness y avisa cuando una restricción no se puede aplicar.",
+          "Cada tarea declara qué puede tocar su sesión; HarmFlow lo aplica mediante los controles del propio harness y avisa cuando una restricción no se puede aplicar.",
         github: "El trabajo en GitHub usa tu sesión de gh y Git. El implementador de issues integrado nunca hace merge de un pull request.",
         api: "El panel habla con el daemon mediante una API local autenticada.",
       },
@@ -1229,7 +1229,7 @@ export const esES: Resources = {
     },
     done: {
       title: "Todo listo",
-      body: "Las ejecuciones en tiempo real son la pantalla principal: cada agente en ejecución, sus eventos y la cola.",
+      body: "Las ejecuciones en tiempo real son la pantalla principal: cada ejecución en curso, sus eventos y la cola.",
       go: "Ir a las ejecuciones en tiempo real",
     },
   },
