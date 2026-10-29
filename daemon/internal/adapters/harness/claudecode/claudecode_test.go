@@ -378,13 +378,15 @@ func TestPrepareReadsTheUserSettingsOfTheConfigurationDirectory(t *testing.T) {
 // on file edits when it may reach outside the workspace and the added directories, and the warning names the source;
 // validation reads only the user's settings, against the same directories (harmflow-app#427). Only a rule whose path
 // lies within those directories stays inside: a bare rule, one Claude Code could read another way, and a file that
-// cannot be read or parsed do not.
+// cannot be read or parsed do not. The workspace is given resolved, as the daemon gives it, and a rule's path is
+// resolved before the two are compared, so a rule naming the workspace through a link stays inside and one naming a
+// folder outside through a link does not (harmflow-app#449).
 func TestPrepareReportsEditRulesThatReachOutside(t *testing.T) {
 	const bareWrite = `{"permissions":{"allow":["Write"]}}`
 	const dir = "<dir>" // a folder where the file would be: it exists, but cannot be read
 	cases := []struct {
 		name                 string
-		user, project, local string // settings content; <work>, <added>, <exec> name the folders; "" for no file
+		user, project, local string // settings content; <work>, <added>, <exec>, <link> name the folders; "" for no file
 		policyCheck          bool
 		want                 string // the sources param of edits not limited; "" for limited edits
 	}{
@@ -420,16 +422,35 @@ func TestPrepareReportsEditRulesThatReachOutside(t *testing.T) {
 		{name: "a path from the working directory at validation", user: `{"permissions":{"allow":["Edit(src/**)"]}}`,
 			policyCheck: true},
 		{name: "project and local rules at validation", project: bareWrite, local: bareWrite, policyCheck: true},
+		// <link> and ~/link lead to the workspace, ~/out to a folder outside it and the added directories.
+		{name: "rules naming the workspace through a link",
+			user: `{"permissions":{"allow":["Write(/<link>/**)","Edit(~/link/src/**)"]}}`},
+		{name: "a rule naming a folder outside through a link", user: `{"permissions":{"allow":["Edit(~/out/**)"]}}`,
+			want: "user"},
+		{name: "rules naming the workspace through a link at validation",
+			user: `{"permissions":{"allow":["Write(/<link>/**)","Edit(~/link/src/**)"]}}`, policyCheck: true},
+		{name: "a rule naming a folder outside through a link at validation",
+			user: `{"permissions":{"allow":["Edit(~/out/**)"]}}`, policyCheck: true, want: "user"},
 	}
 	where := map[string]string{"user": "user settings", "project": "project settings", "local": "local settings",
 		"user_project_local": "user, project, and local settings"}
 	info := ports.HarnessInfo{Path: "/bin/claude", Features: map[string]bool{}}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			config, work, home, exec := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
-			added := filepath.Join(home, "repo")
+			config, home, exec := t.TempDir(), t.TempDir(), t.TempDir()
+			work, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			added, link := filepath.Join(home, "repo"), filepath.Join(home, "link")
+			if err := os.Symlink(work, link); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(t.TempDir(), filepath.Join(home, "out")); err != nil {
+				t.Fatal(err)
+			}
 			t.Setenv("CLAUDE_CONFIG_DIR", config)
-			folders := strings.NewReplacer("<work>", work, "<added>", added, "<exec>", exec)
+			folders := strings.NewReplacer("<work>", work, "<added>", added, "<exec>", exec, "<link>", link)
 			writeSettings(t, filepath.Join(config, "settings.json"), folders.Replace(c.user))
 			writeSettings(t, filepath.Join(work, ".claude", "settings.json"), folders.Replace(c.project))
 			writeSettings(t, filepath.Join(work, ".claude", "settings.local.json"), folders.Replace(c.local))
