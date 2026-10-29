@@ -126,20 +126,23 @@ async function settle<T>(p: Promise<T>): Promise<T | undefined> {
 }
 
 export const actions = {
+  // Each part is set as soon as its own request ends, so a slow /stats delays only the stats. A request that fails
+  // leaves its part as it was.
   async refreshExecutions() {
-    const [active, recent, queue, stats] = await Promise.all([
-      settle(api.executions({ active: true, limit: 50 })),
-      settle(api.executions({ limit: 12, status: "completed,no_work,failed,cancelled,interrupted,needs_attention" })),
-      settle(api.queue()),
-      settle(api.stats()),
+    const part = async <K extends keyof State>(key: K, request: Promise<State[K]>) => {
+      const value = await settle(request);
+      if (value !== undefined) setState({ [key]: value } as Partial<State>);
+      touch();
+    };
+    await Promise.all([
+      part("active", api.executions({ active: true, limit: 50 })),
+      part(
+        "recent",
+        api.executions({ limit: 12, status: "completed,no_work,failed,cancelled,interrupted,needs_attention" }),
+      ),
+      part("queue", api.queue()),
+      part("stats", api.stats()),
     ]);
-    setState((s) => ({
-      active: active ?? s.active,
-      recent: recent ?? s.recent,
-      queue: queue ?? s.queue,
-      stats: stats ?? s.stats,
-    }));
-    touch();
   },
 
   async refreshStats() {
