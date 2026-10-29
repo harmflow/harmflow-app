@@ -455,6 +455,8 @@ export const enUS = {
     quota_report_unrecognized: "{{harness}}'s usage report names no plan window HarmFlow can read",
     not_signed_in: "{{name}} is not signed in; run `{{command}}` in a terminal",
     authentication_unverified: "authentication could not be verified",
+    codex_requirements_disallow:
+      "Codex's managed requirements do not allow {{settings}}, which HarmFlow runs it with, so Codex falls back to what they allow: {{allowed}}",
     gh_auth_problem: "gh auth status reported a problem",
   },
   cronFields: {

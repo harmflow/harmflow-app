@@ -200,7 +200,58 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 		info.Readiness = "ready"
 		info.SetDiagnostic(domain.T("authentication_unverified", "authentication could not be verified"))
 	}
+	if info.Ready() {
+		// Requirements that cannot be read leave the harness as it would be with none. An unknown sign-in still shows in
+		// the authentication field, so a disallowed setting takes the diagnostic.
+		if read, err := a.readRequirements(ctx, info); err == nil {
+			if t, found := read.disallowed(); found {
+				info.SetDiagnostic(t)
+			}
+		}
+	}
 	return info
+}
+
+// The settings Prepare runs Codex with: an approval policy under which no command waits for an approval, and the
+// sandbox modes it maps the permission profiles to.
+const (
+	approvalPolicy        = "never"
+	sandboxReadOnly       = "read-only"
+	sandboxWorkspaceWrite = "workspace-write"
+)
+
+var sandboxModes = []string{sandboxReadOnly, sandboxWorkspaceWrite}
+
+// disallowed says which of the settings HarmFlow runs Codex with the requirements do not allow, and what they allow
+// instead; found is false when they allow every one.
+func (r configRequirements) disallowed() (t domain.Text, found bool) {
+	if r.Requirements == nil {
+		return domain.Text{}, false
+	}
+	var settings, allowed []string
+	check := func(name string, list []string, wanted ...string) {
+		if list == nil {
+			return
+		}
+		var missing []string
+		for _, w := range wanted {
+			if !slices.Contains(list, w) {
+				missing = append(missing, w)
+			}
+		}
+		if len(missing) > 0 {
+			settings = append(settings, name+" = "+strings.Join(missing, ", "))
+			allowed = append(allowed, name+" = "+strings.Join(list, ", "))
+		}
+	}
+	check("approval_policy", r.Requirements.AllowedApprovalPolicies, approvalPolicy)
+	check("sandbox_mode", r.Requirements.AllowedSandboxModes, sandboxModes...)
+	if len(settings) == 0 {
+		return domain.Text{}, false
+	}
+	return domain.T("codex_requirements_disallow",
+		"Codex's managed requirements do not allow {{settings}}, which HarmFlow runs it with, so Codex falls back to what they allow: {{allowed}}",
+		"settings", strings.Join(settings, "; "), "allowed", strings.Join(allowed, "; ")), true
 }
 
 // probeTimeout is the limit of a probe whose own limit is def: ProbeTimeout, when it is set.
@@ -386,7 +437,7 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 	if req.Effort != "" && req.Effort != domain.DefaultEffort {
 		args = append(args, "-c", fmt.Sprintf("model_reasoning_effort=%q", req.Effort))
 	}
-	args = append(args, "-c", `approval_policy="never"`)
+	args = append(args, "-c", fmt.Sprintf("approval_policy=%q", approvalPolicy))
 
 	perm := req.Permissions
 	network := perm.Network != domain.NetworkDeny
@@ -394,14 +445,14 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 	dirs := append([]string{}, req.AdditionalDirs...)
 	switch perm.Profile {
 	case domain.ProfileReadOnly:
-		args = append(args, "--sandbox", "read-only")
+		args = append(args, "--sandbox", sandboxReadOnly)
 		restrictions = append(restrictions,
 			ports.Restriction{Name: "read_only", Enforced: true,
 				Text: domain.Text{Message: "Codex's read-only sandbox blocks every write"}},
 			ports.Restriction{Name: "network", Enforced: true,
 				Text: domain.Text{Message: "Codex's read-only sandbox blocks network access"}})
 	default:
-		args = append(args, "--sandbox", "workspace-write",
+		args = append(args, "--sandbox", sandboxWorkspaceWrite,
 			"-c", fmt.Sprintf("sandbox_workspace_write.network_access=%t", network))
 		restrictions = append(restrictions, ports.Restriction{Name: "restrictToWorkspace", Enforced: true,
 			Text: domain.Text{
@@ -664,9 +715,15 @@ func (p *parser) item(kind string, it *item) []ports.HarnessEvent {
 			return []ports.HarnessEvent{{Kind: ports.HarnessToolDone, ToolID: it.ID, Tool: name, IsError: it.Status == "failed"}}
 		}
 	case "error":
-		// Codex reports configuration notices as error items; they do not end the turn.
+		// Codex reports configuration notices as error items; they do not end the turn. One saying its requirements
+		// override the approval policy or the sandbox HarmFlow set is for the user; any other, such as a Windows sandbox
+		// setting on another system, stays a debug line.
 		if done {
-			return []ports.HarnessEvent{{Kind: ports.HarnessWarning, Message: classify.Truncate(it.Message, 2000)}}
+			kind := ports.HarnessWarning
+			if overrideRe.MatchString(it.Message) {
+				kind = ports.HarnessSettingOverridden
+			}
+			return []ports.HarnessEvent{{Kind: kind, Message: classify.Truncate(it.Message, 2000)}}
 		}
 	}
 	return nil
@@ -697,6 +754,12 @@ var patterns = classify.Patterns{
 // prints it: "Reconnecting... waiting for network (Connection failed: error sending request)". Its numbered retries,
 // "Reconnecting... 2/5", are not a wait: Codex exits once they run out.
 var networkWaitRe = regexp.MustCompile(`(?i)^reconnecting\b.*\bwaiting for network\b`)
+
+// overrideRe is Codex's notice that its managed requirements override the approval policy or the sandbox HarmFlow set,
+// as Codex 0.163.0 prints it: "Configured value for `approval_policy` is disallowed by requirements; falling back to
+// required value OnRequest. Details: …". Codex names the sandbox `sandbox_mode`, or `permission_profile` where it
+// derives one from the sandbox.
+var overrideRe = regexp.MustCompile("^Configured value for `(approval_policy|sandbox_mode|permission_profile)` is disallowed by requirements")
 
 // usage is the turns' tokens, priced at the table once the attempt ends.
 func (p *parser) usage(ended bool) *domain.Usage {

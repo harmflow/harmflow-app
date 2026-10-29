@@ -187,8 +187,8 @@ type Invocation struct {
 type HarnessEventKind string
 
 // The kinds of a HarnessEvent: the session started, the agent wrote a message, a tool call started or completed, a file
-// changed, the harness printed a warning or a rate-limit notice, it began to wait for the network, or it reported its
-// token use.
+// changed, the harness printed a warning or a rate-limit notice, it said its own requirements override a setting
+// HarmFlow ran it with, it began to wait for the network, or it reported its token use.
 const (
 	HarnessStarted     HarnessEventKind = "started"
 	HarnessMessage     HarnessEventKind = "message"
@@ -197,6 +197,10 @@ const (
 	HarnessFileChanged HarnessEventKind = "file_changed"
 	HarnessWarning     HarnessEventKind = "warning"
 	HarnessRateLimit   HarnessEventKind = "rate_limit"
+	// HarnessSettingOverridden is the harness's notice that the requirements an administrator manages do not allow a
+	// setting HarmFlow ran it with, such as its approval policy, and that it falls back to one they allow; its Message
+	// is the harness's own notice.
+	HarnessSettingOverridden HarnessEventKind = "setting_overridden"
 	// HarnessNetworkWait is the first notice of a stretch in which the harness cannot reach its provider and waits for
 	// the network; its Message is the harness's own notice.
 	HarnessNetworkWait HarnessEventKind = "network_wait"

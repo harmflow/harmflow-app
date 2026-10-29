@@ -14,10 +14,16 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
-// appServerStandIn writes a stand-in for the codex CLI whose `app-server` answers initialize, and answers skills/list
-// and account/rateLimits/read with the shell commands onList, which read the request's id in $id. Every line the server
-// receives is appended to the file it returns second.
+// appServerStandIn writes a stand-in for the codex CLI whose `app-server` answers initialize, answers skills/list and
+// account/rateLimits/read with the shell commands onList, which read the request's id in $id, and reads no managed
+// requirements. Every line the server receives is appended to the file it returns second.
 func appServerStandIn(t *testing.T, onList string) (string, string) {
+	t.Helper()
+	return appServerStandInWith(t, onList, answer(`{"requirements":null}`))
+}
+
+// appServerStandInWith is appServerStandIn whose configRequirements/read runs the shell commands onRequirements.
+func appServerStandInWith(t *testing.T, onList, onRequirements string) (string, string) {
 	t.Helper()
 	dir := tempDir(t)
 	received := filepath.Join(dir, "received.jsonl")
@@ -34,6 +40,7 @@ case "$1" in
       case "$line" in
         *'"method":"initialize"'*) printf '{"id":%s,"result":{"userAgent":"stand-in"}}\n' "$id" ;;
         *'"method":"skills/list"'*|*'"method":"account/rateLimits/read"'*) ` + onList + ` ;;
+        *'"method":"configRequirements/read"'*) ` + onRequirements + ` ;;
       esac
     done ;;
 esac
@@ -45,8 +52,8 @@ esac
 	return path, received
 }
 
-// answer is the shell commands that answer skills/list with result, after a notification, as Codex can send one
-// between a request and its answer.
+// answer is the shell commands that answer a request with result, after a notification, as Codex can send one between a
+// request and its answer.
 func answer(result string) string {
 	return `printf '{"method":"skills/changed","params":{}}\n'; printf '{"id":%s,"result":%s}\n' "$id" '` + result + `'`
 }

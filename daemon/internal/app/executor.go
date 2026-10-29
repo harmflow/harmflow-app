@@ -1021,6 +1021,11 @@ func (r *run) onHarnessEvent(he ports.HarnessEvent) {
 		}
 	case ports.HarnessWarning:
 		r.event(domain.Event{Type: domain.EventHarnessOutput, Severity: domain.SeverityDebug, Message: trimTo(he.Message, 2000)})
+	case ports.HarnessSettingOverridden:
+		// The attempt goes on: only a command that needs what the setting allowed is affected, and the warning tells the
+		// user where to look. The text is the harness's own, so it carries no key.
+		r.warn(domain.Warning{Code: domain.WarningOther, Text: domain.Text{Message: trimTo(he.Message, 2000)}},
+			domain.EventHarnessOutput, true)
 	case ports.HarnessRateLimit:
 		r.event(domain.Event{Type: domain.EventHarnessOutput, Severity: domain.SeverityWarning, Message: he.Message})
 	case ports.HarnessNetworkWait:

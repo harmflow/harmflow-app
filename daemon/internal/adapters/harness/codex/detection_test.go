@@ -2,10 +2,12 @@ package codex
 
 import (
 	"context"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 )
 
 // tempDir is a temporary directory by its real path: on macOS the temporary directories are under /var, a symlink to
@@ -108,6 +110,48 @@ func TestDetectReadinessAtEachStep(t *testing.T) {
 			}
 			if !c.installed && (info.Path != "" || len(info.Installations) != 0) {
 				t.Errorf("path %q, installations %q, for a harness that is not installed", info.Path, info.Installations)
+			}
+		})
+	}
+}
+
+// harmflow-app#442: managed requirements that do not allow the approval policy or a sandbox mode HarmFlow runs Codex
+// with leave it ready, with a diagnostic naming each setting and what they allow. Requirements that allow both, none at
+// all, or that the app server does not give leave it as it would be with none.
+func TestDetectReportsRequirementsThatOverrideASetting(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	requirements := func(approval, sandbox string) string {
+		return answer(`{"requirements":{"allowedApprovalPolicies":` + approval + `,"allowedSandboxModes":` + sandbox + `}}`)
+	}
+	cases := []struct {
+		name, onRequirements string
+		wantKey              string
+		wantParams           map[string]string
+	}{
+		// As Codex 0.163.0 answered on a machine whose requirements left out `never`.
+		{"approval policy left out", requirements(`["on-request","untrusted"]`, `["read-only","workspace-write"]`),
+			"codex_requirements_disallow",
+			map[string]string{"settings": "approval_policy = never", "allowed": "approval_policy = on-request, untrusted"}},
+		{"sandbox mode left out", requirements(`null`, `["read-only"]`), "codex_requirements_disallow",
+			map[string]string{"settings": "sandbox_mode = workspace-write", "allowed": "sandbox_mode = read-only"}},
+		{"both left out", requirements(`["untrusted"]`, `["danger-full-access"]`), "codex_requirements_disallow",
+			map[string]string{"settings": "approval_policy = never; sandbox_mode = read-only, workspace-write",
+				"allowed": "approval_policy = untrusted; sandbox_mode = danger-full-access"}},
+		{"both allowed", requirements(`["never","on-request"]`, `["read-only","workspace-write","danger-full-access"]`),
+			"", nil},
+		{"no requirements", answer(`{"requirements":null}`), "", nil},
+		{"an error", `printf '{"id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"`, "", nil},
+		{"no answer", `:`, "", nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path, _ := appServerStandInWith(t, answer(`{"data":[]}`), c.onRequirements)
+			a := appServerAdapter(t)
+			a.listTimeout = time.Second
+			info := a.Detect(context.Background(), path)
+			if info.Readiness != "ready" || info.DiagnosticKey != c.wantKey || !maps.Equal(info.DiagnosticParams, c.wantParams) {
+				t.Errorf("Detect(%s) readiness %s, diagnostic %q %v (%s); want ready, diagnostic %q %v", c.name,
+					info.Readiness, info.DiagnosticKey, info.DiagnosticParams, info.Diagnostic, c.wantKey, c.wantParams)
 			}
 		})
 	}

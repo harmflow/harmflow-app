@@ -91,6 +91,24 @@ describe("HarnessRow", () => {
     expect(html).toContain("chip--warning");
     expect(html).toContain('title="authentication could not be verified"');
   });
+
+  it("shows a signed-in Codex whose managed requirements override a setting in a warning tone, naming it (harmflow-app#442)", () => {
+    const overridden: Harness = {
+      ...ready,
+      id: "codex",
+      name: "Codex",
+      diagnostic: "Codex's managed requirements do not allow approval_policy = never",
+      diagnosticKey: "codex_requirements_disallow",
+      diagnosticParams: { settings: "approval_policy = never", allowed: "approval_policy = on-request, untrusted" },
+    };
+    expect(readinessTone(overridden)).toBe("warning");
+    const html = renderToString(<HarnessRow harness={overridden} />);
+    expect(html).toContain("chip--warning");
+    expect(html).toContain(
+      "do not allow approval_policy = never, which HarmFlow runs it with, so Codex falls back to what they allow: " +
+        "approval_policy = on-request, untrusted",
+    );
+  });
 });
 
 // The inventory's rows, label to text, as rendered.
