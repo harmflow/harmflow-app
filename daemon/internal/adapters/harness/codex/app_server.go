@@ -299,6 +299,25 @@ func (r rateLimitsRead) quota() (domain.Quota, error) {
 	return q, nil
 }
 
+// configRequirements is the answer to configRequirements/read, as Codex 0.163.0 writes it: the requirements an
+// administrator manages, of which HarmFlow reads the approval policies and the sandbox modes they allow. Null
+// requirements, or a null list, allow any value; an empty list allows none.
+type configRequirements struct {
+	Requirements *struct {
+		AllowedApprovalPolicies []string `json:"allowedApprovalPolicies"`
+		AllowedSandboxModes     []string `json:"allowedSandboxModes"`
+	} `json:"requirements"`
+}
+
+// readRequirements asks the app server for Codex's managed requirements.
+func (a *Adapter) readRequirements(ctx context.Context, info ports.HarnessInfo) (configRequirements, error) {
+	var read configRequirements
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	err := a.callLocked(ctx, info, "configRequirements/read", nil, &read)
+	return read, err
+}
+
 // skills are the skills Codex lists for workspace and has enabled, each name once: the first in the list's own order,
 // never sorted again. A skill's folder is the one of the SKILL.md Codex reports. Which names a task can cite is the
 // application's to decide, so every name Codex lists is kept.

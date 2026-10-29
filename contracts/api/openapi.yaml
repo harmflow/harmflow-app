@@ -888,6 +888,7 @@ components:
         - quota_report_unrecognized
         - not_signed_in
         - authentication_unverified
+        - codex_requirements_disallow
         - gh_auth_problem
 
     MessageParams:

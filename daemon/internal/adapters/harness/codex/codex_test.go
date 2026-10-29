@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -113,6 +114,42 @@ func TestParseSuccess(t *testing.T) {
 	// A configuration notice reported as an error item does not fail the turn.
 	if end := p.Finish(0, "Reading additional input from stdin...", false, false); end.Class != domain.ClassNone {
 		t.Errorf("end: %+v", end)
+	}
+}
+
+// harmflow-app#442: Codex's notice that its managed requirements override the approval policy HarmFlow set is a
+// setting overridden, quoted as Codex wrote it, as one about the sandbox would be; its other notices of that kind, such
+// as the Windows sandbox on macOS, stay warnings, and none fails the turn.
+func TestParseRequirementsOverride(t *testing.T) {
+	p, events := replay(t, "requirements-override.jsonl")
+	var kinds []ports.HarnessEventKind
+	var overridden string
+	for _, e := range events {
+		kinds = append(kinds, e.Kind)
+		if e.Kind == ports.HarnessSettingOverridden {
+			overridden = e.Message
+		}
+	}
+	wantKinds := []ports.HarnessEventKind{ports.HarnessStarted, ports.HarnessWarning, ports.HarnessSettingOverridden,
+		ports.HarnessWarning, ports.HarnessMessage, ports.HarnessUsage}
+	if !slices.Equal(kinds, wantKinds) {
+		t.Errorf("replay(requirements-override.jsonl) kinds %q, want %q", kinds, wantKinds)
+	}
+	if !strings.HasPrefix(overridden, "Configured value for `approval_policy` is disallowed by requirements; falling back "+
+		"to required value OnRequest.") {
+		t.Errorf("the overridden setting's message %q, want Codex's notice", overridden)
+	}
+	if end := p.Finish(0, "", false, false); end.Class != domain.ClassNone {
+		t.Errorf("Finish(0) = %+v, want no failure", end)
+	}
+
+	for _, field := range []string{"sandbox_mode", "permission_profile"} {
+		notice := "Configured value for `" + field + "` is disallowed by requirements; falling back to required value ReadOnly."
+		line := `{"type":"item.completed","item":{"id":"item_9","type":"error","message":"` + notice + `"}}`
+		got := (&parser{}).Line([]byte(line))
+		if len(got) != 1 || got[0].Kind != ports.HarnessSettingOverridden || got[0].Message != notice {
+			t.Errorf("Line(%s notice) = %+v, want one setting overridden quoting it", field, got)
+		}
 	}
 }
 

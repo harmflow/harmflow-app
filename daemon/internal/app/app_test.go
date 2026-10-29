@@ -204,8 +204,9 @@ func (f *fakeHarness) holding() bool {
 	return f.held > 0
 }
 
-// fakeParser also reads "USAGE <input tokens>", the usage so far, which is final once the attempt ends well, and
-// "CMD <command>", a shell command the session ran to success. "WAIT network" is a wait for the network, as Codex
+// fakeParser also reads "USAGE <input tokens>", the usage so far, which is final once the attempt ends well,
+// "CMD <command>", a shell command the session ran to success, and "OVERRIDE <notice>", the harness's notice that its
+// requirements override a setting HarmFlow ran it with. "WAIT network" is a wait for the network, as Codex
 // prints one again and again without exiting: the first of a stretch is an event, and a timeout that ends a wait is a
 // network failure. Any other line is the agent's message, and the last one is what a quota end reports as its final
 // text, as the real adapters do.
@@ -243,6 +244,9 @@ func (p *fakeParser) Line(b []byte) []ports.HarnessEvent {
 	if n, ok := strings.CutPrefix(s, "USAGE "); ok {
 		p.input, _ = strconv.ParseInt(n, 10, 64)
 		return []ports.HarnessEvent{{Kind: ports.HarnessUsage, Usage: p.usage(domain.UsagePartial)}}
+	}
+	if notice, ok := strings.CutPrefix(s, "OVERRIDE "); ok {
+		return []ports.HarnessEvent{{Kind: ports.HarnessSettingOverridden, Message: notice}}
 	}
 	if cmd, ok := strings.CutPrefix(s, "CMD "); ok {
 		p.tools++
@@ -1026,6 +1030,43 @@ func TestNetworkFailureRecordedWithoutFailover(t *testing.T) {
 	}
 	if err != nil || len(saved.Attempts) != 1 || saved.Attempts[0].Outcome != domain.AttemptNetworkFailed {
 		t.Errorf("the record on disk lacks the network outcome (%v):\n%s", err, data)
+	}
+}
+
+// harmflow-app#442: a harness's notice that its requirements override a setting HarmFlow ran it with does not stop the
+// attempt. The execution completes, carries one warning that quotes the notice with no key of its own, and logs it at
+// warning severity.
+func TestSettingOverriddenIsAWarning(t *testing.T) {
+	e := newEnv(t)
+	e.create("overridden", "")
+	notice := "Configured value for `approval_policy` is disallowed by requirements; falling back to required value " +
+		"OnRequest. Details: invalid value for `approval_policy`: `Never` is not in the allowed set [OnRequest, UnlessTrusted]"
+	// The same notice twice records one warning; the single quotes keep the backquotes literal.
+	e.claude.setScript(func(ports.RunRequest) string {
+		return fmt.Sprintf("echo 'OVERRIDE %[1]s'; echo 'OVERRIDE %[1]s'; echo working; echo 'END ok'", notice)
+	})
+	res, err := e.app.RunTask("overridden")
+	if err != nil {
+		t.Fatalf("RunTask(overridden) = %v, want no error", err)
+	}
+	x := e.wait(res.ExecutionID, domain.StatusCompleted)
+	want := []domain.Warning{{Code: domain.WarningOther, Text: domain.Text{Message: notice}}}
+	if !reflect.DeepEqual(x.Warnings, want) {
+		t.Errorf("warnings %+v, want %+v", x.Warnings, want)
+	}
+	var logged []domain.Event
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline) && len(logged) == 0; {
+		events, _, _ := e.app.ExecutionEvents(res.ExecutionID, 0, 0)
+		for _, ev := range events {
+			if ev.Type == domain.EventHarnessOutput && ev.Message == notice {
+				logged = append(logged, ev)
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(logged) != 1 || logged[0].Severity != domain.SeverityWarning || logged[0].MessageKey != "" {
+		t.Errorf("events quoting the notice %+v, want one %s at warning severity with no key", logged,
+			domain.EventHarnessOutput)
 	}
 }
 

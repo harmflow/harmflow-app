@@ -464,6 +464,8 @@ export const ptBR: Resources = {
     quota_report_unrecognized: "o relatório de uso do {{harness}} não traz nenhuma janela do plano que o HarmFlow consiga ler",
     not_signed_in: "{{name}} não está conectado; execute `{{command}}` em um terminal",
     authentication_unverified: "não foi possível verificar a autenticação",
+    codex_requirements_disallow:
+      "os requisitos gerenciados do Codex não permitem {{settings}}, com que o HarmFlow o executa, então o Codex passa a usar o que eles permitem: {{allowed}}",
     gh_auth_problem: "gh auth status relatou um problema",
   },
   cronFields: {
