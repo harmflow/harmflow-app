@@ -171,8 +171,10 @@ type App struct {
 	tickMu sync.Mutex
 	// retentionMu runs one retention pass at a time, whole.
 	retentionMu sync.Mutex
-	// saveMu orders the saves of execution records, so the last copy taken is the last written.
-	saveMu sync.Mutex
+	// records orders the saves of each execution record, by execution id, so the last copy taken of a record is the last
+	// written; a save waits only for the saves of its own record. Guarded by mu, it holds a record while a save holds or
+	// waits for it.
+	records map[string]*recordLock
 
 	stopOnce sync.Once
 	// stopLoops cancels the context Start runs the loops under, and stopDetection the one of the harness detection it
@@ -229,7 +231,7 @@ func New(d Deps) (*App, error) {
 		inventory: map[string]ports.HarnessInfo{}, manualPaths: map[string]string{}, sched: map[string]*scheduleState{},
 		firings: map[string][]firingRecord{}, ledger: map[string]map[string]*domain.WorkItem{}, accepting: true,
 		adapters: map[string]ports.HarnessAdapter{}, quotas: map[string]quotaReading{}, quotaReads: map[string]*sync.Mutex{},
-		ShutdownRequested: make(chan struct{}),
+		records: map[string]*recordLock{}, ShutdownRequested: make(chan struct{}),
 	}
 	for _, h := range d.Harnesses {
 		a.adapters[h.ID()] = h
@@ -412,13 +414,14 @@ func (a *App) ExecutionEvents(id string, after int64, limit int) ([]domain.Event
 	return a.d.Events.Replay(id, after, limit)
 }
 
-// persistExecution saves a copy of the record taken under a.mu, since the executor may change it at the same time; the
-// caller must not hold a.mu.
-func (a *App) persistExecution(x *domain.Execution) {
-	a.saveMu.Lock()
-	defer a.saveMu.Unlock()
+// persistExecution saves a copy of the record taken under a.mu, since the executor may change it at the same time, and
+// returns the revision of that copy and whether it was written. It waits only for the saves of the same record, so a
+// firing or a cancellation never waits for another execution's save; the caller must not hold a.mu.
+func (a *App) persistExecution(x *domain.Execution) (uint64, bool) {
+	defer a.lockRecord(x.ID)()
 	a.mu.Lock()
 	data, err := json.Marshal(x)
+	revision := x.Revision()
 	a.mu.Unlock()
 	var snapshot domain.Execution
 	if err == nil {
@@ -429,6 +432,37 @@ func (a *App) persistExecution(x *domain.Execution) {
 	}
 	if err != nil {
 		a.log.Printf("saving execution %s: %v", x.ID, err)
+		return 0, false
+	}
+	return revision, true
+}
+
+// recordLock orders the saves of one execution record; users counts the saves that hold or wait for it, guarded by the
+// App's mutex.
+type recordLock struct {
+	mu    sync.Mutex
+	users int
+}
+
+// lockRecord waits for the saves of execution id already under way and returns the function that ends this one. The
+// last save of a record to end removes its lock, so the locks never outnumber the saves under way.
+func (a *App) lockRecord(id string) (unlock func()) {
+	a.mu.Lock()
+	l := a.records[id]
+	if l == nil {
+		l = &recordLock{}
+		a.records[id] = l
+	}
+	l.users++
+	a.mu.Unlock()
+	l.mu.Lock()
+	return func() {
+		l.mu.Unlock()
+		a.mu.Lock()
+		if l.users--; l.users == 0 {
+			delete(a.records, id)
+		}
+		a.mu.Unlock()
 	}
 }
 

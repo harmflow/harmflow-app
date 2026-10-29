@@ -61,6 +61,7 @@ func (a *App) ApplyRetention() {
 		}
 		a.mu.Lock()
 		x.LogExpired = true
+		x.Changed()
 		a.mu.Unlock()
 		a.persistExecution(x)
 	}

@@ -302,6 +302,10 @@ type Execution struct {
 	LogExpired         bool              `json:"logExpired,omitempty"`
 	// Script is the program a script task's execution ran, as it ran; absent for every other type.
 	Script *ScriptRun `json:"script,omitempty"`
+
+	// revision counts the changes made to the record in memory, so a periodic save can skip a record it already wrote.
+	// It is never saved.
+	revision uint64
 }
 
 // ScriptRun is the program of a script execution as it ran, redacted like the raw output, so a later edit of the task
@@ -376,14 +380,23 @@ func NewExecutionID(now time.Time) string {
 	return fmt.Sprintf("exec-%s-%s", now.UTC().Format("20060102-150405"), hex.EncodeToString(b[:]))
 }
 
+// Changed counts a change to the record. Each change counts, whether a method below makes it or the caller sets a
+// field itself, so the next periodic save writes it.
+func (x *Execution) Changed() { x.revision++ }
+
+// Revision is how many changes the record counted in memory: two equal revisions are the same record.
+func (x *Execution) Revision() uint64 { return x.revision }
+
 // SetStep records the current step: the daemon's own, with a key, or the agent's or a tool's words, with none.
 func (x *Execution) SetStep(t Text) {
 	x.CurrentStep, x.CurrentStepKey, x.CurrentStepParams = t.Message, t.Key, t.Params
+	x.Changed()
 }
 
 // SetError records why the execution ended; ErrorMessage is the en-US text.
 func (x *Execution) SetError(t Text) {
 	x.ErrorMessage, x.ErrorKey, x.ErrorParams = t.Message, t.Key, t.Params
+	x.Changed()
 }
 
 // ErrorText is the text SetError recorded.
@@ -399,6 +412,7 @@ func (x *Execution) AddWarning(w Warning) bool {
 		}
 	}
 	x.Warnings = append(x.Warnings, w)
+	x.Changed()
 	return true
 }
 
@@ -410,6 +424,7 @@ func (x *Execution) AddChangedFile(path string) bool {
 		}
 	}
 	x.ChangedFiles = append(x.ChangedFiles, path)
+	x.Changed()
 	return true
 }
 

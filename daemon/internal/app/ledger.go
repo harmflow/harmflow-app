@@ -223,6 +223,7 @@ func (a *App) recover(ctx context.Context) error {
 			}
 			interrupted = append(interrupted, x)
 		} else if changed {
+			x.Changed()
 			redacted = append(redacted, x)
 		}
 	}
