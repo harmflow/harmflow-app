@@ -71,7 +71,8 @@ func (w *fakeWake) woke(at time.Time) {
 // fakeHarness runs /bin/sh with a script the test chooses. The script prints the outcome on its last line:
 // "END ok", "END quota", "END rate", "END network", "END unavailable" (signed out), or "END error"; "STARTED <model>
 // <effort>" reports what the session runs with. Its user configuration holds the skill user-skill and the agent
-// user-agent, each at a path of its own harness, and the skill review-notes for Claude Code only.
+// user-agent, each at a path of its own harness, and the skill review-notes and the agent review-agent for Claude Code
+// only.
 type fakeHarness struct {
 	id          string
 	mu          sync.Mutex
@@ -145,7 +146,8 @@ func (f *fakeHarness) reads() int {
 }
 func (f *fakeHarness) UserItem(_ context.Context, _ ports.HarnessInfo, kind, name, _ string) (ports.ResolvedItem, bool, []ports.DiscoveryError, error) {
 	found := kind == "skill" && name == "user-skill" || kind == "agent" && name == "user-agent" ||
-		kind == "skill" && name == "review-notes" && f.id == domain.HarnessClaudeCode
+		kind == "skill" && name == "review-notes" && f.id == domain.HarnessClaudeCode ||
+		kind == "agent" && name == "review-agent" && f.id == domain.HarnessClaudeCode
 	if !found {
 		return ports.ResolvedItem{}, false, nil, nil
 	}
@@ -1953,6 +1955,83 @@ func TestFallbackMissingASkillIsNotValid(t *testing.T) {
 		return w.Code == domain.WarningInvalidFallback && w.Text.Message == want
 	}) {
 		t.Errorf("the execution's warnings %+v, want %s: %s", x.Warnings, domain.WarningInvalidFallback, want)
+	}
+}
+
+// harmflow-app#347: a fallback that cannot load the task's agent is not valid, as one missing its skill is not. The
+// task saves with a warning that names Codex and the agent, and a run that exhausts Claude Code's quota does not switch
+// to Codex.
+func TestFallbackMissingAnAgentIsNotValid(t *testing.T) {
+	e := newEnv(t)
+	view, err := e.app.CreateTask(t.Context(), TaskInput{YAML: taskYAML("reviewer", codexFallback+"  agents: [review-agent]\n")})
+	if err != nil {
+		t.Fatalf("CreateTask(reviewer): %v", err)
+	}
+	var warned []schema.Issue
+	for _, w := range view.Validation.Warnings {
+		if w.Code == domain.WarningInvalidFallback {
+			warned = append(warned, w)
+		}
+	}
+	want := `codex is not a valid fallback: agent "review-agent" cannot be found for it (the codex configuration)`
+	if len(warned) != 1 || warned[0].Key != "fallback_agent_missing" || warned[0].Message != want ||
+		warned[0].Params["harness"] != domain.HarnessCodex || warned[0].Params["name"] != "review-agent" {
+		t.Fatalf("CreateTask(reviewer) warnings %+v, want one %s: %s", view.Validation.Warnings,
+			domain.WarningInvalidFallback, want)
+	}
+
+	e.claude.setScript(func(ports.RunRequest) string { return "echo 'END quota'" })
+	r, _ := e.app.RunTask("reviewer")
+	x := e.wait(r.ExecutionID, domain.StatusFailed)
+	if len(x.Attempts) != 1 || x.HarnessSwitches != 0 || !strings.Contains(x.ErrorMessage, "no alternative") {
+		t.Errorf("attempts %+v, %d switches, error %q; want one attempt failing with no alternative", x.Attempts,
+			x.HarnessSwitches, x.ErrorMessage)
+	}
+	if n := e.codex.promptCount(); n != 0 {
+		t.Errorf("Codex got %d prompts, want 0", n)
+	}
+	if counts, _ := e.eventCounts(r.ExecutionID); counts[domain.EventHarnessSwitched] != 0 {
+		t.Errorf("%d %s events, want 0", counts[domain.EventHarnessSwitched], domain.EventHarnessSwitched)
+	}
+	if !slices.ContainsFunc(x.Warnings, func(w domain.Warning) bool {
+		return w.Code == domain.WarningInvalidFallback && w.Text.Key == "fallback_agent_missing" && w.Text.Message == want
+	}) {
+		t.Errorf("the execution's warnings %+v, want %s: %s", x.Warnings, domain.WarningInvalidFallback, want)
+	}
+}
+
+// harmflow-app#347: a fallback that cannot load the task's agent nor its skill gets two warnings on save, one naming
+// the agent and one naming the skill.
+func TestFallbackMissingAnAgentAndASkillNamesBoth(t *testing.T) {
+	e := newEnv(t)
+	view, err := e.app.CreateTask(t.Context(), TaskInput{YAML: taskYAML("both",
+		codexFallback+"  agents: [review-agent]\n  skills: [review-notes]\n")})
+	if err != nil {
+		t.Fatalf("CreateTask(both): %v", err)
+	}
+	var warned []schema.Issue
+	for _, w := range view.Validation.Warnings {
+		if w.Code == domain.WarningInvalidFallback {
+			warned = append(warned, w)
+		}
+	}
+	want := []struct{ key, name, message string }{
+		{"fallback_agent_missing", "review-agent",
+			`codex is not a valid fallback: agent "review-agent" cannot be found for it (the codex configuration)`},
+		{"fallback_skill_missing", "review-notes",
+			`codex is not a valid fallback: skill "review-notes" cannot be found for it (the codex configuration)`},
+	}
+	if len(warned) != len(want) {
+		t.Fatalf("CreateTask(both) warnings %+v, want %d %s", view.Validation.Warnings, len(want),
+			domain.WarningInvalidFallback)
+	}
+	for _, w := range want {
+		i := slices.IndexFunc(warned, func(is schema.Issue) bool { return is.Key == w.key })
+		if i < 0 || warned[i].Message != w.message || warned[i].Params["harness"] != domain.HarnessCodex ||
+			warned[i].Params["name"] != w.name {
+			t.Errorf("CreateTask(both) %s warnings %+v, want one %s naming %s: %s", domain.WarningInvalidFallback, warned,
+				w.key, w.name, w.message)
+		}
 	}
 }
 

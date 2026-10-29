@@ -6,8 +6,8 @@
 // The stand-in decides which error the daemon gives: that the daemon gives a document and its YAML the same one is
 // itest › TestOneSchemaForEveryEntryPoint's. ⌘S saves as the Save button does, from any focus in the editor
 // (harmflow-app#230). A save shows the warnings the daemon gives, such as a fallback that cannot load the task's skill
-// (harmflow-app#216). The catalog is asked for with the task's ID, so a task with no workspace path is offered the
-// skills of the folder it runs in, which validation reads (harmflow-app#283).
+// (harmflow-app#216) or its agent (harmflow-app#347). The catalog is asked for with the task's ID, so a task with no
+// workspace path is offered the skills of the folder it runs in, which validation reads (harmflow-app#283).
 import { EditorView } from "@codemirror/view";
 import { isDeepStrictEqual } from "node:util";
 import { act } from "react";
@@ -127,7 +127,27 @@ const fallbackWarningText =
   'Invalid fallback: Codex is not a valid fallback: skill "review-notes" cannot be found for it (the Codex configuration) ' +
   "/spec/harness/fallback/candidates/0";
 
-const warningsFor = (document: Doc) => ((document.metadata as { name: string }).name === REVIEW_NOTES ? [fallbackWarning] : []);
+/** A task named REVIEW_AGENT cites an agent only Claude Code has, which its Codex fallback cannot load. */
+const REVIEW_AGENT = "Review agent";
+
+/** The daemon's warning that Codex is not a valid fallback for that task, as the daemon sends it. */
+const agentFallbackWarning: ValidationIssue = {
+  path: "/spec/harness/fallback/candidates/0",
+  code: "invalid_fallback",
+  message: 'Codex is not a valid fallback: agent "review-agent" cannot be found for it (the Codex configuration)',
+  messageKey: "fallback_agent_missing",
+  params: { name: "review-agent", harness: "Codex", where: "the Codex configuration", source: "harness" },
+};
+const agentFallbackWarningText =
+  'Invalid fallback: Codex is not a valid fallback: agent "review-agent" cannot be found for it (the Codex configuration) ' +
+  "/spec/harness/fallback/candidates/0";
+
+/** The warnings the daemon gives a task, by its name; a task of any other name gets none. */
+const warningsByName = new Map([
+  [REVIEW_NOTES, [fallbackWarning]],
+  [REVIEW_AGENT, [agentFallbackWarning]],
+]);
+const warningsFor = (document: Doc) => warningsByName.get((document.metadata as { name: string }).name) ?? [];
 
 /**
  * The daemon's validation of an input, the same for the editor's live checks, its tab switches, and its saves, so the
@@ -433,14 +453,17 @@ describe("task editor save from the YAML tab", () => {
 });
 
 describe("task editor warnings", () => {
-  it("shows the daemon's warning that a fallback cannot load the task's skill once the task is saved", async () => {
+  it.each([
+    ["skill", REVIEW_NOTES, fallbackWarningText],
+    ["agent", REVIEW_AGENT, agentFallbackWarningText],
+  ])("shows the daemon's warning that a fallback cannot load the task's %s once the task is saved", async (_, name, text) => {
     await open("edit");
     expect(warnings()).toEqual([]);
-    await type(nameField().querySelector("input")!, REVIEW_NOTES);
+    await type(nameField().querySelector("input")!, name);
     await save();
-    expect(sent("PUT", "/tasks/standup")).toEqual([{ document: taskDoc(REVIEW_NOTES), baseRevision: "r1" }]);
+    expect(sent("PUT", "/tasks/standup")).toEqual([{ document: taskDoc(name), baseRevision: "r1" }]);
     expect(toasts("success")).toContain("Saved.");
-    expect(warnings()).toEqual([fallbackWarningText]);
+    expect(warnings()).toEqual([text]);
   });
 });
 
