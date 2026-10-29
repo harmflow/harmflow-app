@@ -50,6 +50,7 @@ func (r *run) keepCheckpoint(c *domain.Checkpoint, prev *previousAttempt) {
 			r.x.Attempts[i].Checkpoint = c
 		}
 	}
+	r.x.Changed()
 	r.a.mu.Unlock()
 	prev.checkpoint = c
 	r.save(true)

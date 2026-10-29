@@ -5074,9 +5074,9 @@ func (e *env) crashAt(task string, crash func(domain.Event) bool) (*env, string)
 			return
 		}
 		once.Do(func() {
-			// A record is saved whole or not at all: a save in progress finishes first, and the next waits for the copy.
-			e.app.saveMu.Lock()
-			defer e.app.saveMu.Unlock()
+			// A record is saved whole or not at all: a save of the execution in progress finishes first, and the next waits
+			// for the copy.
+			defer e.app.lockRecord(ev.ExecutionID)()
 			copied <- os.CopyFS(home, os.DirFS(e.home))
 		})
 	})
@@ -5099,6 +5099,133 @@ func (e *env) crashAt(task string, crash func(domain.Event) bool) (*env, string)
 		e.t.Fatalf("copying the home: %v", copyErr)
 	}
 	return openEnv(e.t, home), r.ExecutionID
+}
+
+// countedExecutions is an execution repository that counts the saves of each record and keeps none. The first save of
+// the record hold names, when it names one, signals held and waits for release.
+type countedExecutions struct {
+	hold    string
+	held    chan struct{}
+	release chan struct{}
+
+	mu    sync.Mutex
+	saves map[string]int
+	holds int
+}
+
+func (c *countedExecutions) Save(x *domain.Execution) error {
+	c.mu.Lock()
+	c.saves[x.ID]++
+	hold := x.ID == c.hold && c.holds == 0
+	if hold {
+		c.holds++
+	}
+	c.mu.Unlock()
+	if hold {
+		c.held <- struct{}{}
+		<-c.release
+	}
+	return nil
+}
+
+func (c *countedExecutions) LoadAll() ([]*domain.Execution, error) { return nil, nil }
+
+func (c *countedExecutions) count(id string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.saves[id]
+}
+
+// newSavingApp builds the use cases over execs and does not start them: nothing saves a record but the test.
+func newSavingApp(t *testing.T, execs *countedExecutions) *App {
+	t.Helper()
+	a, err := New(Deps{Paths: NewPaths(t.TempDir(), t.TempDir(), t.TempDir()), Executions: execs,
+		Logger: log.New(io.Discard, "", 0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a
+}
+
+// The progress ticker's save writes a record only when it changed since the last save wrote it; a forced save, which
+// recovery depends on, always writes.
+func TestPeriodicSaveSkipsAnUnchangedRecord(t *testing.T) {
+	execs := &countedExecutions{saves: map[string]int{}}
+	a := newSavingApp(t, execs)
+	x := &domain.Execution{ID: "exec-unchanged", Attempts: []domain.Attempt{{Number: 1}}}
+	r := &run{a: a, x: x}
+	tick := func() {
+		r.lastSave = time.Time{} // more than a second ago
+		r.save(false)
+	}
+	steps := []struct {
+		name string
+		do   func()
+		want int
+	}{
+		{"a first tick, of a record never written", tick, 1},
+		{"a tick with no change", tick, 1},
+		{"a tick after the harness reported its usage", func() {
+			r.onHarnessEvent(ports.HarnessEvent{Kind: ports.HarnessUsage, Usage: domain.NotReported()})
+			tick()
+		}, 2},
+		{"another tick with no change", tick, 2},
+		{"a tick after a warning", func() {
+			r.warn(domain.Warning{Code: domain.WarningOther, Text: domain.Text{Message: "w"}}, "", false)
+			tick()
+		}, 3},
+		{"a forced save with no change", func() { r.save(true) }, 4},
+		{"a tick after the forced save", tick, 4},
+	}
+	for _, s := range steps {
+		s.do()
+		if got := execs.count(x.ID); got != s.want {
+			t.Fatalf("after %s: %d saves, want %d", s.name, got, s.want)
+		}
+	}
+}
+
+// A save of one execution held up holds up no save of another, and the lock of a record lasts only while a save holds
+// or waits for it.
+func TestSaveOfOneExecutionHoldsUpNoOther(t *testing.T) {
+	execs := &countedExecutions{saves: map[string]int{}, hold: "exec-held", held: make(chan struct{}),
+		release: make(chan struct{})}
+	a := newSavingApp(t, execs)
+	var wg sync.WaitGroup
+	release := sync.OnceFunc(func() { close(execs.release) })
+	defer func() {
+		release()
+		wg.Wait()
+	}()
+	wg.Go(func() { a.persistExecution(&domain.Execution{ID: "exec-held"}) })
+	select {
+	case <-execs.held:
+	case <-time.After(time.Minute):
+		t.Fatal("the save of exec-held never started")
+	}
+
+	other := make(chan struct{})
+	wg.Go(func() {
+		a.persistExecution(&domain.Execution{ID: "exec-other"})
+		close(other)
+	})
+	select {
+	case <-other:
+	case <-time.After(time.Minute):
+		t.Fatal("persistExecution(exec-other) waited for the held save of exec-held")
+	}
+	if got := execs.count("exec-other"); got != 1 {
+		t.Errorf("saves of exec-other = %d, want 1", got)
+	}
+
+	release()
+	wg.Wait()
+	a.mu.Lock()
+	locks := len(a.records)
+	a.mu.Unlock()
+	if locks != 0 {
+		t.Errorf("record locks once every save ended = %d, want 0", locks)
+	}
 }
 
 // Notices follow the task's events and the global level.

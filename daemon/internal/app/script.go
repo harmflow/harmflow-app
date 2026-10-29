@@ -238,6 +238,7 @@ func (r *run) runScript(ctx context.Context, deadline time.Time) (domain.Executi
 	at := domain.Attempt{Number: 1, StartedAt: now, Outcome: domain.AttemptRunning}
 	at.SetReason(domain.T("attempt_first", "first attempt"))
 	r.x.Attempts = append(r.x.Attempts, at)
+	r.x.Changed()
 	a.mu.Unlock()
 	r.event(domain.Event{Type: domain.EventExecutionStarted, Message: r.def.Metadata.Name,
 		Payload: map[string]any{"trigger": string(r.x.Trigger), "timeoutAt": deadline,
@@ -275,6 +276,7 @@ func (r *run) runScript(ctx context.Context, deadline time.Time) (domain.Executi
 	if id, err := procutil.Identify(ctx, proc.Pid()); err == nil {
 		a.mu.Lock()
 		rec.Process = &domain.ProcessIdentity{Group: id.Group, LeaderStart: id.LeaderStart, Boot: id.Boot}
+		r.x.Changed()
 		a.mu.Unlock()
 	}
 	r.save(true)
@@ -349,6 +351,7 @@ func (r *run) endScript(outcome domain.AttemptOutcome, reason domain.Text, exit 
 		s.Signal = signal
 		s.Process = nil
 	}
+	r.x.Changed()
 	a.mu.Unlock()
 	r.save(true)
 }
@@ -366,6 +369,7 @@ func (a *App) endLeftovers(ctx context.Context, x *domain.Execution) {
 	}
 	a.mu.Lock()
 	x.Script.Process = nil
+	x.Changed()
 	if n > 0 {
 		template := "{{count}} processes the interrupted program left running were ended"
 		if n == 1 {

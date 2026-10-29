@@ -38,6 +38,9 @@ type run struct {
 	writable []string // a custom profile's writable paths, resolved
 	saveMu   sync.Mutex
 	lastSave time.Time
+	// saved is the revision of the record the last save wrote, once written is set; both are guarded by saveMu.
+	saved   uint64
+	written bool
 
 	progressOffset int64
 	commandIndex   map[string]int
@@ -132,6 +135,7 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 	x.DefinitionRevision = rev
 	x.TaskName = def.Metadata.Name
 	x.TaskType = def.Spec.Type
+	x.Changed()
 	a.mu.Unlock()
 	if cancelled {
 		r.finish(domain.StatusCancelled, domain.T("cancelled_before_start", "cancelled before it started"))
@@ -155,6 +159,7 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 		a.mu.Lock()
 		x.StartedAt = &started
 		x.TimeoutAt = &deadline
+		x.Changed()
 		a.mu.Unlock()
 		r.setStatus(domain.StatusPreparing, domain.T("step_preparing_workspace", "Preparing the workspace"))
 		// No attempt exists yet to name the harness, so the event names it itself.
@@ -208,17 +213,26 @@ func (r *run) started() *domain.TaskDocument {
 	return &r.def
 }
 
-// save persists the record, at most every second unless forced. What recovery reads from the record, the work item and
-// the last operation, is saved at once, before the event that logs it, so a crash never leaves the record behind the
-// log.
+// save persists the record. Unforced, it saves at most every second, and only a record that changed since the last save
+// wrote it. What recovery reads from the record, the work item and the last operation, is saved at once, before the
+// event that logs it, so a crash never leaves the record behind the log.
 func (r *run) save(force bool) {
 	r.saveMu.Lock()
 	defer r.saveMu.Unlock()
-	if !force && time.Since(r.lastSave) < time.Second {
+	if !force && (time.Since(r.lastSave) < time.Second || r.unchanged()) {
 		return
 	}
 	r.lastSave = time.Now()
-	r.a.persistExecution(r.x)
+	if revision, ok := r.a.persistExecution(r.x); ok {
+		r.saved, r.written = revision, true
+	}
+}
+
+// unchanged reports whether the last save wrote the record as it is now; the caller holds saveMu.
+func (r *run) unchanged() bool {
+	r.a.mu.Lock()
+	defer r.a.mu.Unlock()
+	return r.written && r.x.Revision() == r.saved
 }
 
 // setStatus moves the execution to s and records the step, unless it is empty. It changes nothing and returns false
@@ -238,6 +252,7 @@ func (r *run) setStatus(s domain.ExecutionStatus, step domain.Text) bool {
 		return true
 	}
 	r.x.Status = s
+	r.x.Changed()
 	if step.Message != "" {
 		r.x.SetStep(step)
 	}
@@ -308,6 +323,7 @@ func (r *run) prepare() error {
 	if repos := r.eff.Repositories(); len(repos) == 1 {
 		r.x.Repository = repos[0].Name
 	}
+	r.x.Changed()
 	a.mu.Unlock()
 	// The schema only lets the session check its report before it writes it; the daemon validates the report itself.
 	_ = os.WriteFile(filepath.Join(r.dir, "execution-report.schema.json"), contracts.ExecutionReportSchema, 0o600)
@@ -509,6 +525,7 @@ func (r *run) attempts(ctx context.Context, start func(harness string) error) (d
 			}
 			a.mu.Lock()
 			r.x.HarnessSwitches++
+			r.x.Changed()
 			a.mu.Unlock()
 			r.setStatus(domain.StatusSwitchingHarness, domain.T("step_switching_harness", "Switching to {{harness}}",
 				"harness", nextName))
@@ -622,6 +639,7 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 	at.SetReason(reason)
 	r.x.Attempts = append(r.x.Attempts, at)
 	r.x.Harness, r.x.Model = p.Provider, ""
+	r.x.Changed()
 	a.mu.Unlock()
 	r.setStatus(domain.StatusRunning, domain.T("step_starting_harness", "Starting {{harness}}", "harness", ad.Name()))
 	r.save(true)
@@ -636,6 +654,7 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 	a.mu.Lock()
 	if at := r.x.CurrentAttempt(); at != nil {
 		at.Prompt, at.SessionContext = eventlog.Redact(req.Prompt), eventlog.Redact(req.Context)
+		r.x.Changed()
 	}
 	a.mu.Unlock()
 	inv, parser, err := ad.Prepare(info, req)
@@ -700,6 +719,7 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 		a.mu.Lock()
 		if at := r.x.CurrentAttempt(); at != nil {
 			at.Process = &domain.HarnessProcess{Pid: tree.Pid, Group: tree.Group, StartedAt: tree.Start}
+			r.x.Changed()
 		}
 		a.mu.Unlock()
 		r.save(true)
@@ -792,6 +812,7 @@ func (r *run) endAttemptAs(end domain.AttemptEnd, exit int, outcome domain.Attem
 	}
 	at.SetError(why)
 	at.Outcome = outcome
+	r.x.Changed()
 	harness := at.Harness
 	// Commands still marked running when the process ended did not complete.
 	for i := range r.x.Commands {
@@ -968,6 +989,7 @@ func (r *run) onHarnessEvent(he ports.HarnessEvent) {
 			if he.Effort != "" {
 				at.Effort = he.Effort
 			}
+			r.x.Changed()
 		}
 		a.mu.Unlock()
 		if he.Model != "" || he.Effort != "" {
@@ -993,6 +1015,7 @@ func (r *run) onHarnessEvent(he ports.HarnessEvent) {
 			r.commandIndex[he.ToolID] = len(r.x.Commands)
 			r.x.Commands = append(r.x.Commands, domain.CommandRecord{ID: he.ToolID, Command: trimTo(he.Command, 2000),
 				Status: "running", StartedAt: now, Attempt: r.attempt})
+			r.x.Changed()
 		}
 		a.mu.Unlock()
 		r.event(domain.Event{Type: domain.EventToolStarted, Message: trimTo(title, 2000),
@@ -1017,6 +1040,7 @@ func (r *run) onHarnessEvent(he ports.HarnessEvent) {
 			c.Status = status
 			c.EndedAt = &now
 			c.ExitCode = he.ExitCode
+			r.x.Changed()
 			if status == "succeeded" {
 				r.lastOperation = trimTo(c.Command, 300)
 				r.x.LastOperation = r.lastOperation
@@ -1068,6 +1092,7 @@ func (r *run) onHarnessEvent(he ports.HarnessEvent) {
 		a.mu.Lock()
 		if at := r.x.CurrentAttempt(); at != nil && he.Usage != nil {
 			at.Usage = he.Usage
+			r.x.Changed()
 		}
 		a.mu.Unlock()
 	}
@@ -1129,6 +1154,7 @@ func (r *run) onProgress(p domain.ProgressLine) {
 		if p.Repository != "" {
 			r.x.Repository = p.Repository
 		}
+		r.x.Changed()
 		r.x.SetStep(domain.Text{Message: msg})
 		r.attemptItem(p.WorkItem, p.Repository)
 		a.mu.Unlock()
@@ -1146,6 +1172,7 @@ func (r *run) onProgress(p domain.ProgressLine) {
 	case domain.EventTestCompleted:
 		a.mu.Lock()
 		r.x.TestsStatus = p.Status
+		r.x.Changed()
 		if it := r.attemptItem(firstNonEmpty(p.WorkItem, r.x.WorkItem), p.Repository); it != nil && testStatus(p.Status) {
 			it.Tests = &attemptTests{Status: p.Status, Summary: msg}
 		}
@@ -1158,6 +1185,7 @@ func (r *run) onProgress(p domain.ProgressLine) {
 		}
 		r.lastOperation = p.Type + " " + p.URL
 		r.x.LastOperation = r.lastOperation
+		r.x.Changed()
 		a.mu.Unlock()
 		r.save(true) // setStatus saves only the move to publishing, not a later pull request
 		r.setStatus(domain.StatusPublishing, domain.Text{Message: msg})
@@ -1174,6 +1202,7 @@ func (r *run) onProgress(p domain.ProgressLine) {
 			a.mu.Lock()
 			r.lastOperation = msg
 			r.x.LastOperation = msg
+			r.x.Changed()
 			if it := r.attemptItem(firstNonEmpty(p.WorkItem, r.x.WorkItem), p.Repository); it != nil {
 				it.Branch = p.Branch
 			}
@@ -1196,6 +1225,7 @@ func (r *run) outcomeFromReport() (domain.ExecutionStatus, domain.Text) {
 	if err != nil {
 		r.a.mu.Lock()
 		r.x.Summary = trimTo(r.finalText, 4000)
+		r.x.Changed()
 		r.a.mu.Unlock()
 		return domain.StatusCompleted, domain.Text{}
 	}
@@ -1233,6 +1263,7 @@ func (r *run) applyReport(rep *domain.ExecutionReport) {
 	a := r.a
 	a.mu.Lock()
 	r.x.Summary = trimTo(rep.Summary, 4000)
+	r.x.Changed()
 	if rep.LastOperation != "" {
 		r.x.LastOperation = rep.LastOperation
 	}
@@ -1338,6 +1369,7 @@ func (r *run) finish(status domain.ExecutionStatus, reason domain.Text) {
 	}
 	r.x.Status = status
 	r.x.EndedAt = &now
+	r.x.Changed()
 	if reason.Message != "" && (status == domain.StatusFailed || status == domain.StatusCancelled || status == domain.StatusNeedsAttention) {
 		reason.Message = trimTo(reason.Message, 2000)
 		r.x.SetError(reason)
@@ -1404,6 +1436,7 @@ func (a *App) CancelExecution(id string) error {
 		x.Status = domain.StatusCancelled
 		x.EndedAt = &now
 		x.CancelRequestedAt = &now
+		x.Changed()
 		a.mu.Unlock()
 		a.persistExecution(x)
 		a.emit(domain.Event{Type: domain.EventExecutionCancelled, TaskID: x.TaskID, ExecutionID: x.ID,
@@ -1413,6 +1446,7 @@ func (a *App) CancelExecution(id string) error {
 	}
 	h := a.running[x.TaskID]
 	x.CancelRequestedAt = &now
+	x.Changed()
 	a.mu.Unlock()
 	a.persistExecution(x)
 	a.emit(domain.Event{Type: domain.EventExecutionCancelRequest, TaskID: x.TaskID, ExecutionID: x.ID}.Says(
