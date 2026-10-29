@@ -3292,13 +3292,22 @@ func stopHarness(t *testing.T, script string, exitCode int) {
 
 // A harness that exits on its own keeps the outcome its exit gives, though the daemon begins stopping while the process
 // it left running, which ignores SIGTERM, is ended over the grace period.
+//
+// $! is the subshell the harness forks, which ignores SIGTERM only once it has run its trap, and the daemon sends
+// SIGTERM to what the harness left as soon as the harness exits. Under load the harness could exit before that trap
+// ran: the subshell died of the SIGTERM, nothing was left for the grace period, and the execution ended before the stop
+// came, which met every assertion below without the stop this test exists to prove. So the subshell marks its trap in
+// place before it execs sleep, and the harness polls for the mark, 100 times at most, before it writes the child's pid
+// and exits; a trap never set fails the wait for that pid rather than passing without the stop. The stop then comes
+// while the daemon is still ending the leftover, so the test lasts over the grace period.
 func TestHarnessExitKeepsItsOutcomeThroughAStop(t *testing.T) {
 	e := newEnv(t)
 	e.create("own-exit", "  execution:\n    cancelGraceSeconds: 2\n")
 	dir := t.TempDir()
 	e.claude.setScript(func(ports.RunRequest) string {
-		return fmt.Sprintf("(trap '' TERM; exec sleep 600) >/dev/null 2>&1 & echo $! > %[1]s/child; "+
-			"echo $$ > %[1]s/harness; echo 'END ok'", dir)
+		return fmt.Sprintf("(trap '' TERM; : > %[1]s/trapped; exec sleep 600) >/dev/null 2>&1 & c=$!; i=0; "+
+			"while [ ! -e %[1]s/trapped ] && [ $i -lt 100 ]; do sleep 0.05; i=$((i+1)); done; "+
+			"[ -e %[1]s/trapped ] && echo $c > %[1]s/child; echo $$ > %[1]s/harness; echo 'END ok'", dir)
 	})
 	r, err := e.app.RunTask("own-exit")
 	if err != nil || r.Outcome != "started" {
