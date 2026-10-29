@@ -2660,6 +2660,194 @@ func TestEditWhileRunningKeepsTheStartingDefinition(t *testing.T) {
 	}
 }
 
+// harmflow-app#313: a running execution keeps the timeout it started with. With the timeout counted in seconds, the
+// edit lengthens it from 2 to 6 while the first attempt runs, and that attempt, which would succeed after 4, still times
+// out when its 2 are over. The next execution runs the edit, and the same attempt completes within its 6.
+//
+// The timeout an execution read shows in its outcome and its record, not in when it ended: the timeout's end waits for
+// the attempt's processes to be ended, which a loaded machine delays by seconds. An execution that had read the edit
+// would not time out at all, since its harness succeeds after 4 seconds, and its record would give it 6.
+func TestEditWhileRunningKeepsTheStartingTimeout(t *testing.T) {
+	const timeout, edited = 2 * time.Second, 6 * time.Second
+	e := newEnv(t, func(e *env) { e.timeoutUnit = time.Second })
+	e.claude.setScript(func(ports.RunRequest) string { return "sleep 4; echo 'END ok'" })
+	e.create("timed", "  execution:\n    timeoutMinutes: 2\n")
+	began := time.Now()
+	first, _ := e.app.RunTask("timed")
+	e.wait(first.ExecutionID, domain.StatusRunning)
+	e.prepared(e.claude)
+	before, after := e.editWhileRunning(e.claude, "timed", "timeoutMinutes: 2", "timeoutMinutes: 6")
+
+	x := e.wait(first.ExecutionID, domain.StatusFailed, domain.StatusCompleted)
+	if elapsed := time.Since(began); elapsed < timeout {
+		t.Errorf("the running execution ended after %s, before %s, the timeout it started with", elapsed, timeout)
+	}
+	if x.Status != domain.StatusFailed || x.ErrorKey != "execution_timed_out" || len(x.Attempts) != 1 ||
+		x.Attempts[0].Outcome != domain.AttemptTimedOut {
+		t.Fatalf("the running execution is %s (%s) after attempts %+v, want failed with execution_timed_out after one "+
+			"that timed out: it read the edited timeout", x.Status, x.ErrorKey, x.Attempts)
+	}
+	// The execution's clock is the test's fake one, which stands still, so its start and its timeoutAt are exact.
+	if x.StartedAt == nil || x.TimeoutAt == nil || x.TimeoutAt.Sub(*x.StartedAt) != timeout {
+		t.Errorf("the running execution started at %v with timeoutAt %v, want its start plus %s", x.StartedAt, x.TimeoutAt,
+			timeout)
+	}
+	if x.DefinitionRevision != before {
+		t.Errorf("the running execution's revision is %s, want %s, the one it started with", x.DefinitionRevision, before)
+	}
+
+	e.idle("timed")
+	next, _ := e.app.RunTask("timed")
+	y := e.wait(next.ExecutionID, domain.StatusCompleted, domain.StatusFailed)
+	if y.Status != domain.StatusCompleted || len(y.Attempts) != 1 || y.DefinitionRevision != after {
+		t.Fatalf("the next execution is %s (%s) after %d attempts on revision %s, want completed after 1 on %s, the edit",
+			y.Status, y.ErrorKey, len(y.Attempts), y.DefinitionRevision, after)
+	}
+	if y.StartedAt == nil || y.TimeoutAt == nil || y.TimeoutAt.Sub(*y.StartedAt) != edited {
+		t.Errorf("the next execution started at %v with timeoutAt %v, want its start plus %s", y.StartedAt, y.TimeoutAt,
+			edited)
+	}
+}
+
+// harmflow-app#313: a running execution keeps the rate-limit retries it started with. The edit takes the task's one
+// retry away while the first attempt runs, and the rate limit that ends that attempt still retries on Claude Code, which
+// completes. The next execution runs the edit: the same rate limit fails it after one attempt, with no retry.
+func TestEditWhileRunningKeepsTheStartingRateLimitRetries(t *testing.T) {
+	e := newEnv(t)
+	gates := t.TempDir()
+	var mu sync.Mutex
+	var n int
+	e.claude.setScript(func(req ports.RunRequest) string {
+		if req.PolicyCheck { // validation's, which an edit runs too, and which runs no attempt
+			return ""
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		n++
+		if n == 2 {
+			return "echo 'END ok'"
+		}
+		return fmt.Sprintf("while [ ! -e %s ]; do sleep 0.05; done; echo 'END rate'", filepath.Join(gates, req.TaskID))
+	})
+	e.create("rated", "  execution:\n    rateLimit:\n      maxRetries: 1\n      initialWaitSeconds: 1\n")
+	first, _ := e.app.RunTask("rated")
+	e.wait(first.ExecutionID, domain.StatusRunning)
+	e.prepared(e.claude)
+	before, after := e.editWhileRunning(e.claude, "rated", "maxRetries: 1", "maxRetries: 0")
+	if err := os.WriteFile(filepath.Join(gates, "rated"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	x := e.wait(first.ExecutionID, domain.StatusCompleted, domain.StatusFailed)
+	if x.Status != domain.StatusCompleted || len(x.Attempts) != 2 || x.HarnessSwitches != 0 {
+		t.Fatalf("the running execution is %s (%s) after %d attempts and %d switches, want completed after 2 and none: "+
+			"it read the edited retries", x.Status, x.ErrorMessage, len(x.Attempts), x.HarnessSwitches)
+	}
+	if x.Attempts[0].Outcome != domain.AttemptRateLimited || x.Attempts[0].Harness != domain.HarnessClaudeCode ||
+		x.Attempts[1].Harness != domain.HarnessClaudeCode {
+		t.Errorf("the running execution's attempts %+v, want a rate-limited one on Claude Code, then Claude Code again",
+			x.Attempts)
+	}
+	if counts, _ := e.eventCounts(x.ID); counts[domain.EventHarnessRateLimited] != 1 {
+		t.Errorf("the running execution has %d %s events, want 1", counts[domain.EventHarnessRateLimited],
+			domain.EventHarnessRateLimited)
+	}
+	if x.DefinitionRevision != before {
+		t.Errorf("the running execution's revision is %s, want %s, the one it started with", x.DefinitionRevision, before)
+	}
+
+	e.idle("rated")
+	next, _ := e.app.RunTask("rated")
+	y := e.wait(next.ExecutionID, domain.StatusFailed, domain.StatusCompleted)
+	if y.Status != domain.StatusFailed || len(y.Attempts) != 1 || y.Attempts[0].Outcome != domain.AttemptRateLimited ||
+		y.HarnessSwitches != 0 || y.DefinitionRevision != after {
+		t.Errorf("the next execution is %s (%s) after attempts %+v and %d switches on revision %s, want failed after one "+
+			"rate-limited attempt and none on %s, the edit", y.Status, y.ErrorMessage, y.Attempts, y.HarnessSwitches,
+			y.DefinitionRevision, after)
+	}
+	if counts, _ := e.eventCounts(y.ID); counts[domain.EventHarnessRateLimited] != 0 {
+		t.Errorf("the next execution has %d %s events, want 0: it retried", counts[domain.EventHarnessRateLimited],
+			domain.EventHarnessRateLimited)
+	}
+	if got := e.claude.promptCount(); got != 3 {
+		t.Errorf("Claude Code was prepared %d times, want 3: two attempts, then one", got)
+	}
+}
+
+// harmflow-app#313: a running execution keeps the harness switches it started with. The edit takes the task's one
+// switch away, keeping Codex as its candidate, while Claude Code's first attempt runs, and the quota that ends that
+// attempt still switches to Codex, which completes. The next execution runs the edit: the same quota fails it, with no
+// switch.
+func TestEditWhileRunningKeepsTheStartingHarnessSwitches(t *testing.T) {
+	e := newEnv(t)
+	gates := t.TempDir()
+	e.claude.setScript(func(req ports.RunRequest) string {
+		return fmt.Sprintf("while [ ! -e %s ]; do sleep 0.05; done; echo 'END quota'", filepath.Join(gates, req.TaskID))
+	})
+	e.codex.setScript(func(ports.RunRequest) string { return "echo 'END ok'" })
+	e.create("switching", codexFallback+"      maxSwitches: 1\n")
+	first, _ := e.app.RunTask("switching")
+	e.wait(first.ExecutionID, domain.StatusRunning)
+	e.prepared(e.claude)
+	before, after := e.editWhileRunning(e.claude, "switching", "maxSwitches: 1", "maxSwitches: 0")
+	if err := os.WriteFile(filepath.Join(gates, "switching"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	x := e.wait(first.ExecutionID, domain.StatusCompleted, domain.StatusFailed)
+	if x.Status != domain.StatusCompleted || len(x.Attempts) != 2 || x.HarnessSwitches != 1 {
+		t.Fatalf("the running execution is %s (%s) after %d attempts and %d switches, want completed after 2 and 1: it "+
+			"read the edited switches", x.Status, x.ErrorKey, len(x.Attempts), x.HarnessSwitches)
+	}
+	if x.Attempts[0].Outcome != domain.AttemptQuotaExhausted || x.Attempts[1].Harness != domain.HarnessCodex {
+		t.Errorf("the running execution's attempts %+v, want Claude Code's quota, then Codex", x.Attempts)
+	}
+	if x.DefinitionRevision != before {
+		t.Errorf("the running execution's revision is %s, want %s, the one it started with", x.DefinitionRevision, before)
+	}
+
+	e.idle("switching")
+	next, _ := e.app.RunTask("switching")
+	y := e.wait(next.ExecutionID, domain.StatusFailed, domain.StatusCompleted)
+	if y.Status != domain.StatusFailed || y.ErrorKey != "no_alternative_harness_detail" || len(y.Attempts) != 1 ||
+		y.Attempts[0].Outcome != domain.AttemptQuotaExhausted || y.HarnessSwitches != 0 || y.DefinitionRevision != after {
+		t.Errorf("the next execution is %s (%s) after attempts %+v and %d switches on revision %s, want failed with "+
+			"no_alternative_harness_detail after Claude Code's quota and none on %s, the edit", y.Status, y.ErrorKey,
+			y.Attempts, y.HarnessSwitches, y.DefinitionRevision, after)
+	}
+	if got := e.codex.promptCount(); got != 1 {
+		t.Errorf("Codex was prepared %d times, want 1: the next execution switched", got)
+	}
+}
+
+// editWhileRunning saves an edit of the task that replaces from with to while h's attempt runs. It checks that the
+// edit was saved before that attempt ended, with a new revision and to in the task's file, and returns the revisions
+// before and after it.
+func (e *env) editWhileRunning(h *fakeHarness, task, from, to string) (before, after string) {
+	e.t.Helper()
+	view, _ := e.app.GetTask(task)
+	if !strings.Contains(view.YAML, from) {
+		e.t.Fatalf("task %s's YAML %q does not hold %q", task, view.YAML, from)
+	}
+	saved, err := e.app.UpdateTask(e.t.Context(), task, TaskInput{YAML: strings.Replace(view.YAML, from, to, 1),
+		BaseRevision: view.Revision})
+	if err != nil {
+		e.t.Fatalf("UpdateTask(%s): %v", task, err)
+	}
+	if !h.running() {
+		e.t.Fatalf("%s's attempt ended before the edit of %s was saved", h.id, task)
+	}
+	onDisk, err := os.ReadFile(saved.Path)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	if saved.Revision == view.Revision || !strings.Contains(saved.YAML, to) || string(onDisk) != saved.YAML {
+		e.t.Fatalf("the edit of %s was not saved: revision %s, want other than %s; YAML %q, want %q in it; on disk %q",
+			task, saved.Revision, view.Revision, saved.YAML, to, onDisk)
+	}
+	return view.Revision, saved.Revision
+}
+
 // An edit that fails validation while an execution runs changes nothing. The task keeps its file and revision, the
 // execution ends with the definition it started with, and so does the next one.
 func TestInvalidEditWhileRunning(t *testing.T) {
