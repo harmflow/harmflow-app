@@ -21,6 +21,23 @@ reverse.
 
 Before you write or review Go code, read [`GO-CODE-GUIDE.md`](GO-CODE-GUIDE.md) and apply every rule in it.
 
+## Interface animations
+
+The interface runs in WebKit, where an animation that changes layout or paint redraws its area every frame — and the
+window's gradient backdrop under it — for as long as it runs. An infinite one keeps the GPU busy while the window is
+open. Before you add or change an animation or a timer in `desktop/ui/`:
+
+- A `@keyframes` sets only `transform` and `opacity`, which the compositor runs without repainting. Draw the element at
+  its largest and scale it (`scaleY`, not `height`), move it with `translateX` (not `left`), and give a glow or a
+  shadow a layer of its own (a `::after` with the fixed shadow) whose `opacity` changes. `design.test.ts` fails on a
+  `@keyframes` that sets any other property.
+- A transition on hover or focus follows the same rule where it can; a short one-off transition of a color is fine.
+- An animation runs only while what it shows is happening (`.scanbar--active`, not `.scanbar`), and the
+  `prefers-reduced-motion` rule at the end of `app.css` stops it.
+- A clock that ticks every second (`useNow(1000)`) lives in the smallest component that shows the time, as `Elapsed`
+  in `ui.tsx` does, never in a screen: each tick renders its component again, and everything inside it. A clock with
+  nothing left to count stops (`useNow(null)`).
+
 ## File names
 
 Every file and folder the repository tracks is named by the row of its part. `make check-file-names` checks each
