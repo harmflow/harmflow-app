@@ -376,6 +376,7 @@ export const enUS = {
     repository_unprotected: "{{repository}}: the base branch is not protected against merging without review",
     report_not_json: "report.json is not valid JSON; it was ignored",
     report_schema_invalid: "report.json does not follow its schema ({{path}}: {{detail}}); it was ignored",
+    report_not_decodable: "report.json cannot be decoded ({{detail}}); it was ignored",
     step_checking_harness: "Checking the harness",
     step_preparing_workspace: "Preparing the workspace",
     step_starting_harness: "Starting {{harness}}",
