@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { esES } from "../i18n/es-ES";
@@ -30,11 +30,39 @@ function stack(token: string): string[] {
   return value.split(",").map((name) => name.trim().replace(/^"|"$/g, ""));
 }
 
+/** Every @keyframes of the stylesheets beside this test, with the properties its frames set. */
+function keyframes(): { file: string; name: string; properties: string[] }[] {
+  return readdirSync(__dirname)
+    .filter((file) => file.endsWith(".css"))
+    .flatMap((file) =>
+      [...readFileSync(join(__dirname, file), "utf8").matchAll(/@keyframes\s+([\w-]+)\s*{((?:[^{}]*{[^}]*})*)\s*}/g)].map(
+        ([, name, frames]) => ({
+          file,
+          name,
+          properties: [...frames.matchAll(/([\w-]+)\s*:/g)].map(([, property]) => property),
+        }),
+      ),
+    );
+}
+
 type Tree = { [k: string]: string | Tree };
 
 function strings(tree: Tree): string[] {
   return Object.values(tree).flatMap((v) => (typeof v === "string" ? [v] : strings(v)));
 }
+
+describe("animations", () => {
+  it("animates only transform and opacity, which WebKit runs on the compositor without repainting", () => {
+    const found = keyframes();
+    expect(found.map((k) => k.name)).toContain("scan");
+    for (const { file, name, properties } of found) {
+      expect(
+        properties.filter((p) => p !== "transform" && p !== "opacity"),
+        `@keyframes ${name} in ${file}`,
+      ).toEqual([]);
+    }
+  });
+});
 
 describe("bundled fonts", () => {
   it("declares Inter, Inter Display, and JetBrains Mono", () => {

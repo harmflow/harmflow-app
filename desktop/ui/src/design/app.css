@@ -521,12 +521,14 @@ body:has([aria-modal="true"]) .tooltip {
   height: 14px;
 }
 
+/* A bar is drawn at its tallest and scaled down, so the wave moves on the compositor instead of laying out each frame. */
 .wave span {
   width: 2px;
-  height: 5px;
+  height: 13px;
   border-radius: 2px;
   background: currentColor;
   opacity: 0.6;
+  transform: scaleY(0.38);
 }
 
 .wave--active span {
@@ -536,10 +538,10 @@ body:has([aria-modal="true"]) .tooltip {
 @keyframes wave {
   0%,
   100% {
-    height: 4px;
+    transform: scaleY(0.31);
   }
   50% {
-    height: 13px;
+    transform: scaleY(1);
   }
 }
 
@@ -1112,7 +1114,9 @@ body:has([aria-modal="true"]) .tooltip {
   border-color: rgba(var(--hf-rgb-neutral), 0.35);
 }
 
+/* The glow is a fixed shadow on a layer of its own that fades in and out, so the pulse repaints nothing. */
 .chip__pulse {
+  position: relative;
   width: 7px;
   height: 7px;
   border-radius: 50%;
@@ -1120,15 +1124,25 @@ body:has([aria-modal="true"]) .tooltip {
   animation: pulse 1.8s ease-in-out infinite;
 }
 
+.chip__pulse::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 6px 1px currentColor;
+  opacity: 0;
+  animation: pulse-glow 1.8s ease-in-out infinite;
+}
+
 @keyframes pulse {
-  0%,
-  100% {
-    opacity: 1;
-    box-shadow: 0 0 0 0 currentColor;
-  }
   50% {
     opacity: 0.5;
-    box-shadow: 0 0 6px 1px currentColor;
+  }
+}
+
+@keyframes pulse-glow {
+  50% {
+    opacity: 1;
   }
 }
 
@@ -1353,15 +1367,17 @@ body:has([aria-modal="true"]) .tooltip {
   overflow: hidden;
 }
 
+/* The line travels by transform, which counts in its own width: -105.3% and 268.4% of 38% are -40% and 102% of the bar. */
 .scanbar span {
   position: absolute;
   top: 0;
   bottom: 0;
   width: 38%;
-  left: -40%;
+  left: 0;
   border-radius: inherit;
   background: var(--hf-gradient-scan);
   opacity: 0;
+  transform: translateX(-105.3%);
 }
 
 .scanbar--active span {
@@ -1375,10 +1391,10 @@ body:has([aria-modal="true"]) .tooltip {
 
 @keyframes scan {
   0% {
-    left: -40%;
+    transform: translateX(-105.3%);
   }
   100% {
-    left: 102%;
+    transform: translateX(268.4%);
   }
 }
 
