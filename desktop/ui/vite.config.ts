@@ -128,8 +128,8 @@ export default defineConfig({
       reporter: ["text", "html", "json-summary"],
       include: ["src/**/*.{ts,tsx}"],
       exclude: ["src/**/*.test.{ts,tsx}", "src/api/generated.ts", "src/main.tsx"],
-      // The floors: the reading in COVERAGE.md, truncated to two decimals. Never autoUpdate: a floor moves by hand,
-      // with its row in COVERAGE.md, in one commit.
+      // The floors: the reading in docs/coverage.md, truncated to two decimals. Never autoUpdate: a floor moves by hand,
+      // with its row in docs/coverage.md, in one commit.
       thresholds: {
         statements: 65.33,
         branches: 61.34,

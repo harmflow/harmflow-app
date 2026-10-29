@@ -122,5 +122,5 @@ case "${1:-}" in
     ;;
 esac
 echo
-echo "Headroom is the ratio less its floor: a floor may rise by that much, by hand, with its row in COVERAGE.md. The"
+echo "Headroom is the ratio less its floor: a floor may rise by that much, by hand, with its row in docs/coverage.md. The"
 echo "HTML reports are in the run's \`coverage-$1\` artifact."

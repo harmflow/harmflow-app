@@ -1,7 +1,7 @@
 # A pull request runs only the parts it touches, a change in contracts/ runs every part, and main runs everything.
 # This repository's CI checks Linux only: every job runs on Linux, and every other platform is built and checked
 # outside this repository. Development stays on macOS. A test that needs another platform skips here, naming what it
-# needs (GO-CODE-GUIDE.md, "Tests by platform"). make test-packaging, which tests the Mac's own make update-app, is a
+# needs (docs/go-code-guide.md, "Tests by platform"). make test-packaging, which tests the Mac's own make update-app, is a
 # local check on the Mac.
 #
 # Every action is pinned to a full commit SHA, with the release it corresponds to in a comment, so a moved tag cannot

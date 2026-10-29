@@ -22,7 +22,7 @@ COVERAGE := $(CURDIR)/build/coverage
 # a heavily loaded machine, where a full run reached it less than halfway through; this one is sized from full runs
 # measured under load, with a margin. Each test still fails within its own waits: the limit only bounds the package.
 INTEGRATION_TIMEOUT := 30m
-# The shell's coverage floors, in percent; COVERAGE.md holds the reading they come from.
+# The shell's coverage floors, in percent; docs/coverage.md holds the reading they come from.
 RUST_FLOOR_LINES := 31.19
 RUST_FLOOR_FUNCTIONS := 29.09
 # cargo llvm-cov fails below a floor without saying which, so its summary is read again to name the counter that fell,
@@ -104,7 +104,7 @@ test-integration: daemon ## Tests across the daemon's process boundary, with fak
 	go -C tests test -count=1 -timeout $(INTEGRATION_TIMEOUT) $(TEST_FLAGS) ./...
 
 # Coverage is held by a ratchet, never by a target: each target fails when a part reads below its floor.
-# COVERAGE.md holds the reading the floors come from.
+# docs/coverage.md holds the reading the floors come from.
 .PHONY: coverage
 coverage: coverage-daemon coverage-desktop ## Read the tests' coverage of the daemon, the interface, and the shell
 
