@@ -103,7 +103,7 @@ func needProcessTable(t *testing.T) {
 	}
 }
 
-// startDaemon starts harmflowd on the home, with env added to the test's own environment, a later entry winning.
+// startDaemon starts harmflowd on the home, with env applied to the test's own environment as daemonEnv applies it.
 func startDaemon(t *testing.T, home string, env ...string) *daemon {
 	t.Helper()
 	return startDaemonOn(t, home, "", env...)
@@ -142,7 +142,7 @@ func startDaemonWith(t *testing.T, home string, o daemonOptions, env ...string) 
 	_ = os.Remove(filepath.Join(home, "run", "daemon.json"))
 	cmd := exec.Command(binary, "--home", home, "--builtins", builtins)
 	// Codex's configuration is the test's own, never the user's.
-	cmd.Env = append(append(append(os.Environ(), "CODEX_HOME="+filepath.Join(home, "codex")), store...), env...)
+	cmd.Env = daemonEnv(append(append([]string{"CODEX_HOME=" + filepath.Join(home, "codex")}, store...), env...))
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := cmd.Start(); err != nil {
@@ -165,6 +165,20 @@ func startDaemonWith(t *testing.T, home string, o daemonOptions, env ...string) 
 
 // runtimeWait is how long a test waits for a daemon it started to write its address and token.
 const runtimeWait = 20 * time.Second
+
+// daemonEnv is the test's own environment with env applied in order: an entry NAME=VALUE sets NAME, a later entry
+// winning, and an entry NAME alone removes it.
+func daemonEnv(env []string) []string {
+	out := os.Environ()
+	for _, kv := range env {
+		if strings.Contains(kv, "=") {
+			out = append(out, kv)
+			continue
+		}
+		out = slices.DeleteFunc(out, func(e string) bool { return strings.HasPrefix(e, kv+"=") })
+	}
+	return out
+}
 
 // awaitRuntime waits until the daemon at home has written its address and token, and returns its API's base URL and
 // the token: empty when it has not within the timeout.
