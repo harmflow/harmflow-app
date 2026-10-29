@@ -455,7 +455,7 @@ func (e *Executions) writeIndexLocked() {
 }
 
 func sortedIDs(m map[string]indexEntry) []string {
-	ids := make([]string, 0, len(m))
+	var ids []string
 	for id := range m {
 		ids = append(ids, id)
 	}
