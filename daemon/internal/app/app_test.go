@@ -676,6 +676,44 @@ sleep 1.2; printf '%%s' '%[2]s' > %[1]s/report.json; echo 'END ok'`, req.Executi
 	e.wait(res.ExecutionID, domain.StatusNoWork)
 }
 
+// Each pull request is announced once: one the session announced through progress.jsonl gets no event when its report
+// names it again, and one the session did not announce gets one from the report, however many of its work items name
+// it.
+func TestReportAnnouncesEachPullRequestOnce(t *testing.T) {
+	e := newEnv(t)
+	e.create("announcer", "")
+	const announced, unannounced = "https://github.com/o/r/pull/9", "https://github.com/o/r/pull/10"
+	e.claude.setScript(func(req ports.RunRequest) string {
+		item := func(key, url string) string {
+			return `{"key":"` + key + `","outcome":"completed","pullRequest":{"url":"` + url + `","created":true}}`
+		}
+		report := `{"outcome":"completed","summary":"opened two drafts","workItems":[` + item("o/r#7", announced) + `,` +
+			item("o/r#8", unannounced) + `,` + item("o/r#11", unannounced) + `]}`
+		return fmt.Sprintf(`echo '{"type":"pull_request.created","url":"%[3]s","number":9,"workItem":"o/r#7"}' >> %[1]s/progress.jsonl
+printf '%%s' '%[2]s' > %[1]s/report.json; echo 'END ok'`, req.ExecutionDir, report, announced)
+	})
+	res, err := e.app.RunTask("announcer")
+	if err != nil || res.Outcome != "started" {
+		t.Fatalf("run: %v %+v", err, res)
+	}
+	e.wait(res.ExecutionID, domain.StatusCompleted)
+	e.eventKeys(res.ExecutionID, domain.EventExecutionCompleted)
+	events, _, err := e.app.ExecutionEvents(res.ExecutionID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]int{}
+	for _, ev := range events {
+		if ev.Type == domain.EventPullRequestCreated {
+			url, _ := ev.Payload["url"].(string)
+			got[url]++
+		}
+	}
+	if want := map[string]int{announced: 1, unannounced: 1}; !maps.Equal(got, want) {
+		t.Errorf("pull_request.created events by URL: %v, want %v", got, want)
+	}
+}
+
 // A conflict the agent met keeps its code in the record, and its log holds it as a warning that a replay returns; the
 // execution continues.
 func TestConflictingActivityIsLogged(t *testing.T) {
