@@ -132,6 +132,7 @@ func checkConfigured(t *testing.T, what string, at map[string]any, model, effort
 // and --effort high, and its attempt keeps them. The attempt's model is the one the harness reports, whichever was
 // configured.
 func TestModelAndEffortReachTheHarness(t *testing.T) {
+	t.Parallel()
 	d := startDaemon(t, t.TempDir())
 	d.call("PUT", "/harnesses/claude-code", map[string]any{"path": recordingStandIn(t, "fake-claude", "claude")}, 200)
 	d.call("POST", "/tasks", map[string]any{"yaml": task("defaults", "Say hi.", "")}, 201)
@@ -159,6 +160,7 @@ func TestModelAndEffortReachTheHarness(t *testing.T) {
 // --help. An unsupported value is refused with 422 at the profile's path, and the task file keeps its bytes: nothing is
 // saved in its place. A supported change is saved, and the next execution runs with it.
 func TestChangedProfileIsValidatedAndAppliedNextRun(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	// The daemon's CODEX_HOME is <home>/codex. Its cache offers one model, which accepts the efforts low and high.
 	cache := filepath.Join(home, "codex", "models_cache.json")

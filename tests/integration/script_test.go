@@ -77,6 +77,7 @@ func gone(pid int) bool {
 // A script task is created and imported over the API, runs its program with no shell and no harness, ends by its exit
 // status, and keeps its output marked and redacted.
 func TestScriptTaskOverTheAPI(t *testing.T) {
+	t.Parallel()
 	d := startDaemon(t, t.TempDir())
 	token := "ghp_" + strings.Repeat("b", 36)
 	inline := fmt.Sprintf(`  script:
@@ -141,6 +142,7 @@ func TestScriptTaskOverTheAPI(t *testing.T) {
 
 // Cancelling a script execution ends its program and the child it started in the background.
 func TestScriptCancelEndsItsProcesses(t *testing.T) {
+	t.Parallel()
 	d := startDaemon(t, t.TempDir())
 	dir := t.TempDir()
 	d.call("POST", "/tasks", map[string]any{"yaml": scriptTask("slow", fmt.Sprintf(
@@ -159,6 +161,7 @@ func TestScriptCancelEndsItsProcesses(t *testing.T) {
 // A daemon killed while a script runs leaves the program running in its own group; started again, it marks the
 // execution interrupted and ends what the program left.
 func TestRestartEndsWhatTheScriptLeft(t *testing.T) {
+	t.Parallel()
 	home, dir := t.TempDir(), t.TempDir()
 	d := startDaemon(t, home)
 	d.call("POST", "/tasks", map[string]any{"yaml": scriptTask("left", fmt.Sprintf(

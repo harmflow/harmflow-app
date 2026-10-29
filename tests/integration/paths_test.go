@@ -33,6 +33,7 @@ func (d *daemon) refusal(method, path string, body any) (string, string) {
 // harmflow-app#77: a payload carrying a path or a program the rule refuses gets 422 naming its field, and nothing
 // changes: the harness inventory's state, the task files, and the Settings read as before.
 func TestPathsInRequestsAreChecked(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	d := startDaemon(t, home)
 	root := t.TempDir()
