@@ -295,6 +295,29 @@ func TestOutputOfAProbeThatLeavesAChild(t *testing.T) {
 	}
 }
 
+// harmflow-app#329: a help probe that still runs at its timeout was not read, so a flag missing from what it printed
+// may still be there; one that ended by itself was read in full, even when it failed.
+func TestHelpSaysWhetherTheProbeEndedBeforeItsTimeout(t *testing.T) {
+	cases := []struct {
+		name, script, wantHelp string
+		timeout                time.Duration
+		wantRead               bool
+	}{
+		{"ended", `echo "--print --model"`, "--print --model\n", time.Minute, true},
+		{"failed", `echo "--print"; exit 2`, "--print\n", time.Minute, true},
+		// exec, so the timeout ends the sleep itself and no child keeps the output open.
+		{"still running at its timeout", `exec sleep 30`, "", 500 * time.Millisecond, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			help, read := Help(context.Background(), c.timeout, nil, "/bin/sh", "-c", c.script)
+			if help != c.wantHelp || read != c.wantRead {
+				t.Errorf("Help(%q) = %q, %v; want %q, %v", c.script, help, read, c.wantHelp, c.wantRead)
+			}
+		})
+	}
+}
+
 func TestExitCode(t *testing.T) {
 	p, err := Start(ports.Invocation{Path: "/bin/sh", Args: []string{"-c", "echo out; echo err >&2; exit 3"}}, nil, func([]byte) {})
 	if err != nil {

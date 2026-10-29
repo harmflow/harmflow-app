@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
@@ -81,6 +82,89 @@ func TestDetectReadsOnlyWhatTheProbesEstablish(t *testing.T) {
 					c.wantReadiness)
 			}
 		})
+	}
+}
+
+// helpStandIn writes a stand-in for the codex CLI at a supported version whose `exec --help` and `login status` run the
+// given shell commands.
+func helpStandIn(t *testing.T, help, login string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "codex")
+	script := `#!/bin/bash
+case "$1" in
+  --version) echo "codex-cli 0.163.0" ;;
+  login) ` + login + ` ;;
+  exec) ` + help + ` ;;
+esac
+`
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// harmflow-app#329: an `exec --help` check that times out leaves Codex ready, with its flags unknown and a diagnostic
+// saying the check timed out, which the dashboard shows as a warning; it never names a flag the version lacks. Help
+// read in full that lacks a flag still reads as a version that lacks it.
+func TestDetectReadsAHelpCheckThatTimesOutAsFlagsUnknown(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	signedIn := `echo "Logged in using ChatGPT" >&2`
+	someFlags := `echo "Usage: codex exec  --json  --sandbox <MODE>  --cd <DIR>"`
+	allFlags := `echo "Usage: codex exec  --json  --sandbox <MODE>  --cd <DIR>  --skip-git-repo-check"`
+	cases := []struct {
+		name, help, login          string
+		timeout                    time.Duration // the check's limit; zero is its own
+		wantUnknown                bool
+		wantSupport, wantReadiness string
+		wantKey                    string
+	}{
+		{"read in full", allFlags, signedIn, 0, false, "supported", "ready", ""},
+		// exec, so the check's timeout ends the sleep itself, and no child keeps the help's output open.
+		{"timed out", `exec sleep 30`, signedIn, time.Second, true, "supported", "ready", "harness_help_timed_out"},
+		{"timed out after some flags", someFlags + `; exec sleep 30`, signedIn, time.Second, true, "supported", "ready",
+			"harness_help_timed_out"},
+		// The sign-in shows unknown in its own field, so the timed-out check keeps the diagnostic.
+		{"timed out, sign-in unverified", `exec sleep 30`, `kill -KILL $$`, time.Second, true, "supported", "ready",
+			"harness_help_timed_out"},
+		{"read in full, lacking a flag", someFlags, signedIn, 0, false, "below_minimum", "not_ready",
+			"harness_feature_missing"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			a := &Adapter{Home: t.TempDir(), helpTimeout: c.timeout}
+			info := a.Detect(context.Background(), helpStandIn(t, c.help, c.login))
+			if info.FeaturesUnknown != c.wantUnknown || info.VersionSupport != c.wantSupport ||
+				info.Readiness != c.wantReadiness || info.DiagnosticKey != c.wantKey {
+				t.Errorf("Detect: flags unknown %v, support %s, readiness %s, diagnostic %q (%s); want %v, %s, %s, %q",
+					info.FeaturesUnknown, info.VersionSupport, info.Readiness, info.DiagnosticKey, info.Diagnostic,
+					c.wantUnknown, c.wantSupport, c.wantReadiness, c.wantKey)
+			}
+			if c.wantKey == "harness_help_timed_out" && (info.DiagnosticParams["harness"] != Name ||
+				info.DiagnosticParams["command"] != "exec --help") {
+				t.Errorf("Detect: diagnostic params %v, want the harness %q and the command exec --help",
+					info.DiagnosticParams, Name)
+			}
+		})
+	}
+}
+
+// harmflow-app#329: with its flags unknown, Codex runs as if it had them, and the first attempt proves them: the
+// optional flags are passed, the added directories included.
+func TestUnknownFlagsAreTakenAsThere(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	a := &Adapter{Home: t.TempDir()}
+	info := ports.HarnessInfo{Path: "/bin/codex", Features: map[string]bool{}, FeaturesUnknown: true}
+	perm := *domain.TaskDocument{}.Effective().Spec.Permissions
+	inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, AdditionalDirs: []string{"/repo"},
+		Prompt: "do it"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Join(inv.Args, " ")
+	for _, want := range []string{"--ephemeral", "--color never", "--add-dir /repo"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("Prepare args %s, want %q", args, want)
+		}
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
@@ -860,6 +861,90 @@ func TestDetectReadsOnlyWhatTheProbesEstablish(t *testing.T) {
 					c.wantReadiness)
 			}
 		})
+	}
+}
+
+// helpStandIn writes a stand-in for the claude CLI at a supported version whose --help and `auth status` run the given
+// shell commands.
+func helpStandIn(t *testing.T, help, auth string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "claude")
+	script := `#!/bin/bash
+case "$1" in
+  --version) echo "2.1.239 (Claude Code)" ;;
+  --help) ` + help + ` ;;
+  auth) ` + auth + ` ;;
+esac
+`
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// harmflow-app#329: a --help check that times out leaves Claude Code ready, with its flags unknown and a diagnostic
+// saying the check timed out, which the dashboard shows as a warning; it never names a flag the version lacks. Help
+// read in full that lacks a flag still reads as a version that lacks it.
+func TestDetectReadsAHelpCheckThatTimesOutAsFlagsUnknown(t *testing.T) {
+	signedIn := `echo '{"loggedIn": true}'`
+	someFlags := `echo "-p, --print  --output-format <format>  --permission-mode <mode>  --allowedTools <tools...>"`
+	allFlags := `echo "-p, --print  --output-format <format>  --permission-mode <mode>  --allowedTools <tools...>  ` +
+		`--append-system-prompt <prompt>"`
+	cases := []struct {
+		name, help, auth           string
+		timeout                    time.Duration // the check's limit; zero is its own
+		wantUnknown                bool
+		wantSupport, wantReadiness string
+		wantKey                    string
+	}{
+		{"read in full", allFlags, signedIn, 0, false, "supported", "ready", ""},
+		// exec, so the check's timeout ends the sleep itself, and no child keeps the help's output open.
+		{"timed out", `exec sleep 30`, signedIn, time.Second, true, "supported", "ready", "harness_help_timed_out"},
+		{"timed out after some flags", someFlags + `; exec sleep 30`, signedIn, time.Second, true, "supported", "ready",
+			"harness_help_timed_out"},
+		// The sign-in shows unknown in its own field, so the timed-out check keeps the diagnostic.
+		{"timed out, sign-in unverified", `exec sleep 30`, `kill -KILL $$`, time.Second, true, "supported", "ready",
+			"harness_help_timed_out"},
+		{"read in full, lacking a flag", someFlags, signedIn, 0, false, "below_minimum", "not_ready",
+			"harness_feature_missing"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			a := &Adapter{Home: t.TempDir(), helpTimeout: c.timeout}
+			info := a.Detect(context.Background(), helpStandIn(t, c.help, c.auth))
+			if info.FeaturesUnknown != c.wantUnknown || info.VersionSupport != c.wantSupport ||
+				info.Readiness != c.wantReadiness || info.DiagnosticKey != c.wantKey {
+				t.Errorf("Detect: flags unknown %v, support %s, readiness %s, diagnostic %q (%s); want %v, %s, %s, %q",
+					info.FeaturesUnknown, info.VersionSupport, info.Readiness, info.DiagnosticKey, info.Diagnostic,
+					c.wantUnknown, c.wantSupport, c.wantReadiness, c.wantKey)
+			}
+			if c.wantKey == "harness_help_timed_out" && (info.DiagnosticParams["harness"] != Name ||
+				info.DiagnosticParams["command"] != "--help") {
+				t.Errorf("Detect: diagnostic params %v, want the harness %q and the command --help", info.DiagnosticParams,
+					Name)
+			}
+		})
+	}
+}
+
+// harmflow-app#329: with its flags unknown, Claude Code runs as if it had them, and the first attempt proves them: a
+// profile's effort is not refused for a flag the help did not get to, and the optional flags are passed.
+func TestUnknownFlagsAreTakenAsThere(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "") // the user's settings are read from Home, which has none
+	a := &Adapter{Home: t.TempDir()}
+	info := ports.HarnessInfo{Detected: true, Path: "/bin/claude", Version: "2.1.239",
+		Efforts: []string{domain.DefaultEffort}, Features: map[string]bool{}, FeaturesUnknown: true}
+	if err := a.ValidateProfile(info, "sonnet", "high"); err != nil {
+		t.Errorf("ValidateProfile(sonnet, high) = %v, want nil", err)
+	}
+	perm := domain.TaskDocument{}.Effective().Spec.Permissions
+	inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: *perm, ExecutionDir: t.TempDir(),
+		Prompt: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(inv.Args, "--no-session-persistence") {
+		t.Errorf("Prepare args %q, want --no-session-persistence", inv.Args)
 	}
 }
 

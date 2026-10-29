@@ -55,9 +55,13 @@ type Adapter struct {
 	// KnownLocations are searched after PATH; nil is the usual install locations, an empty list none.
 	KnownLocations []string
 
-	mu      sync.Mutex
-	plugins map[string]pluginListing // by CLI path and workspace, kept until ReloadUserItems
+	mu          sync.Mutex
+	plugins     map[string]pluginListing // by CLI path and workspace, kept until ReloadUserItems
+	helpTimeout time.Duration            // the --help check; zero is defaultHelpTimeout
 }
+
+// defaultHelpTimeout bounds the --help check; help it could not read by then leaves the flags unknown.
+const defaultHelpTimeout = 15 * time.Second
 
 var (
 	_ ports.HarnessAdapter        = (*Adapter)(nil)
@@ -150,15 +154,27 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 		info.Version = m[1]
 		info.Readiness = "version_identified"
 	}
-	// Help that cannot be read lists no flags, so each feature reads as missing.
-	help, _, _ := procutil.Output(ctx, 15*time.Second, a.Env, info.Path, "--help")
+	// Help read in full that does not list a flag reads as a version that lacks it. Help the check could not read within
+	// its limit leaves the flags unknown instead: a slow check does not turn the harness away, and the first attempt
+	// proves them.
+	helpTimeout := a.helpTimeout
+	if helpTimeout == 0 {
+		helpTimeout = defaultHelpTimeout
+	}
+	help, read := procutil.Help(ctx, helpTimeout, a.Env, info.Path, "--help")
 	for _, f := range append(requiredFlags, "--plugin-dir", "--effort", "--agents", "--add-dir", "--tools",
 		"--disallowedTools", "--no-session-persistence", "--model") {
 		info.Features[f] = strings.Contains(help, f)
 	}
+	info.FeaturesUnknown = !read
+	if info.FeaturesUnknown {
+		info.SetDiagnostic(domain.T("harness_help_timed_out",
+			"the {{harness}} {{command}} check timed out, so the flags it has are unknown; the first attempt proves them",
+			"harness", Name, "command", "--help"))
+	}
 	info.VersionSupport = "supported"
 	for _, f := range requiredFlags {
-		if !info.Features[f] {
+		if !info.HasFeature(f) {
 			info.VersionSupport = "below_minimum"
 			info.Readiness = "not_ready"
 			info.SetDiagnostic(domain.T("harness_feature_missing", "this {{harness}} version lacks {{feature}}, which HarmFlow needs",
@@ -213,15 +229,19 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 		info.Readiness = "not_ready"
 		info.SetDiagnostic(domain.T("claude_not_signed_in", "Claude Code is not signed in; run `claude` in a terminal and sign in"))
 	default:
-		// The CLI cannot tell; let the first execution prove it rather than blocking on an unknown.
+		// The CLI cannot tell; let the first execution prove it rather than blocking on an unknown. The unknown sign-in
+		// shows in the authentication field, so a help check that timed out keeps the diagnostic.
 		info.Readiness = "ready"
-		info.SetDiagnostic(domain.T("authentication_unverified", "authentication could not be verified"))
+		if !info.FeaturesUnknown {
+			info.SetDiagnostic(domain.T("authentication_unverified", "authentication could not be verified"))
+		}
 	}
 	return info
 }
 
 // ValidateProfile implements ports.HarnessAdapter: a model is default, an alias Claude Code offers, or a full claude-*
-// name, and an effort other than default is one the detected CLI accepts; with no CLI detected, any effort passes.
+// name, and an effort other than default is one the detected CLI accepts; with no CLI detected, or help that could not
+// be read in time, any effort passes.
 func (a *Adapter) ValidateProfile(info ports.HarnessInfo, model, effort string) error {
 	if model != "" && model != domain.DefaultModel && !strings.HasPrefix(model, "claude-") && !containsStr(declaredModels, model) {
 		return domain.TextErr("claude_model_unknown",
@@ -229,7 +249,7 @@ func (a *Adapter) ValidateProfile(info ports.HarnessInfo, model, effort string) 
 			"model", model, "models", strings.Join(declaredModels, ", "))
 	}
 	if effort != "" && effort != domain.DefaultEffort {
-		if !info.Detected {
+		if !info.Detected || info.FeaturesUnknown {
 			return nil
 		}
 		if !info.Features["--effort"] {
@@ -331,7 +351,7 @@ var writeTools = append([]string{"Bash"}, editTools...)
 // the permission profile translated to Claude Code's controls, with the restrictions it enforces and those it cannot.
 func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.Invocation, ports.OutputParser, error) {
 	args := []string{"-p", "--output-format", "stream-json", "--verbose"}
-	if info.Features["--no-session-persistence"] {
+	if info.HasFeature("--no-session-persistence") {
 		args = append(args, "--no-session-persistence")
 	}
 	if req.Model != "" && req.Model != domain.DefaultModel {
