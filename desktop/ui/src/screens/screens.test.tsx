@@ -484,8 +484,8 @@ describe("the executions screen's cards", () => {
     const script: ExecutionSummary = { ...running, id: "exec-script", taskType: "script", harness: "", model: undefined };
     await render(
       <>
-        <ExecutionCard execution={running} selected={false} onSelect={() => {}} now={Date.now()} onCancel={() => {}} cancelling={false} />
-        <ExecutionCard execution={script} selected={false} onSelect={() => {}} now={Date.now()} onCancel={() => {}} cancelling={false} />
+        <ExecutionCard execution={running} selected={false} onSelect={() => {}} onCancel={() => {}} cancelling={false} />
+        <ExecutionCard execution={script} selected={false} onSelect={() => {}} onCancel={() => {}} cancelling={false} />
       </>,
     );
     const runBy = [...host!.querySelectorAll(".exec-card__fields > div")]
@@ -496,7 +496,7 @@ describe("the executions screen's cards", () => {
 
   it("disables the card's Cancel for a finished execution", async () => {
     const onCancel = vi.fn();
-    await render(<ExecutionCard execution={finished} selected={false} onSelect={() => {}} now={Date.now()} onCancel={onCancel} cancelling={false} />);
+    await render(<ExecutionCard execution={finished} selected={false} onSelect={() => {}} onCancel={onCancel} cancelling={false} />);
     const cancel = host!.querySelector<HTMLButtonElement>(".exec-card__cancel")!;
     expect(cancel.disabled).toBe(true);
     await act(async () => cancel.click());

@@ -1,9 +1,13 @@
 import { useEffect, useState } from "react";
 
-/** The current time, refreshed every interval — for elapsed times and "in 18 min" labels. */
-export function useNow(intervalMs = 1000): number {
+/**
+ * The current time, refreshed every interval — for elapsed times and "in 18 min" labels. A null interval stops the
+ * clock. Each tick renders the calling component again, so a fast clock belongs in the smallest one that shows it.
+ */
+export function useNow(intervalMs: number | null = 1000): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
+    if (intervalMs === null) return;
     const id = setInterval(() => setNow(Date.now()), intervalMs);
     return () => clearInterval(id);
   }, [intervalMs]);

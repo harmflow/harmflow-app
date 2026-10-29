@@ -9,15 +9,14 @@ import type { Attempt, Execution, ExecutionOutput, ExecutionSummary, HarmflowEve
 import { isActive } from "../api/types";
 import type { Tone } from "../design/tokens";
 import { daemonText, eventText, fieldText } from "../lib/daemonText";
-import { formatBytes, formatDateTime, formatDuration, formatElapsed, formatTime, elapsedMs } from "../lib/format";
-import { useNow } from "../lib/hooks";
+import { formatBytes, formatDateTime, formatDuration, formatTime, elapsedMs } from "../lib/format";
 import { buildTimeline, changedFilesFromEvents, toolKey, type TimelineItem } from "../lib/timeline";
 import { actions, useStore } from "../state/store";
 import { CostsTab } from "./CostsTab";
 import { useCancel } from "./ExecutionCard";
 import { HarnessLabel } from "./Shell";
 import { Icon, type IconName } from "./Icon";
-import { Banner, Button, Chip, CopyButton, EmptyState, KeyValue, StatusChip, Tabs, cx, type TabDef } from "./ui";
+import { Banner, Button, Chip, CopyButton, Elapsed, EmptyState, KeyValue, StatusChip, Tabs, cx, type TabDef } from "./ui";
 
 type TabKey = "chat" | "events" | "output" | "program" | "raw" | "files" | "commands" | "results" | "attempts" | "costs";
 
@@ -38,7 +37,6 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
   // The tab the user chose; none, or one this execution lacks, shows the first of its list.
   const [tab, setTab] = useState<TabKey | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<number | null>(null);
-  const now = useNow(1000);
   const { cancel, pending } = useCancel();
 
   useEffect(() => {
@@ -140,7 +138,7 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
               </span>
             ) : null}
             <span className="meta mono">
-              <Icon name="clock" size={14} /> {formatElapsed(exec.startedAt ?? exec.createdAt, exec.endedAt, now)}
+              <Icon name="clock" size={14} /> <Elapsed start={exec.startedAt ?? exec.createdAt} end={exec.endedAt} />
             </span>
           </div>
         </div>
@@ -179,8 +177,8 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
         {shown === "files" ? <FileList files={files} /> : null}
         {shown === "commands" ? <CommandList commands={commands} locale={i18n.language} /> : null}
         {shown === "results" ? <Results detail={detail} summary={exec} /> : null}
-        {shown === "attempts" ? <Attempts detail={detail} locale={i18n.language} now={now} /> : null}
-        {shown === "costs" ? <CostsTab key={executionId} attempts={attempts} active={active} now={now} /> : null}
+        {shown === "attempts" ? <Attempts detail={detail} locale={i18n.language} /> : null}
+        {shown === "costs" ? <CostsTab key={executionId} attempts={attempts} active={active} /> : null}
       </div>
       <p className="detail__footnote">
         <Icon name="shield" size={13} /> {t("executions.detail.noConversation")}
@@ -772,7 +770,7 @@ function Results({ detail, summary }: { detail?: Execution; summary: ExecutionSu
   );
 }
 
-function Attempts({ detail, locale, now }: { detail?: Execution; locale: string; now: number }) {
+function Attempts({ detail, locale }: { detail?: Execution; locale: string }) {
   const { t } = useTranslation();
   const attempts = detail?.attempts ?? [];
   if (!attempts.length) return <EmptyState icon="layers" title={t("executions.detail.noAttempts")} />;
@@ -798,7 +796,7 @@ function Attempts({ detail, locale, now }: { detail?: Execution; locale: string;
               [t("executions.detail.harnessVersion"), a.harnessVersion ? <span className="mono">{a.harnessVersion}</span> : null],
               [t("executions.detail.reason"), fieldText(a.reason, a.reasonKey, a.reasonParams) ?? null],
               [t("executions.detail.started"), formatDateTime(a.startedAt, locale)],
-              [t("executions.detail.duration"), formatElapsed(a.startedAt, a.endedAt, now)],
+              [t("executions.detail.duration"), <Elapsed start={a.startedAt} end={a.endedAt} />],
               [t("executions.detail.exitCode"), a.exitCode !== undefined ? <span className="mono">{a.exitCode}</span> : null],
               [
                 t("executions.detail.error"),

@@ -16,6 +16,7 @@ import {
   type ReceiptLine,
 } from "../lib/costs";
 import { formatDuration, formatNumber } from "../lib/format";
+import { useNow } from "../lib/hooks";
 import { HarnessLabel } from "./Shell";
 import { Icon } from "./Icon";
 import { Button, Chip, CopyButton, EmptyState, cx } from "./ui";
@@ -26,8 +27,10 @@ const CACHE_LIFETIMES: Record<string, { cacheWriteShort: string; cacheWriteLong:
   codex: { cacheWriteShort: "30 min", cacheWriteLong: "12 h" },
 };
 
-export function CostsTab({ attempts, active, now }: { attempts: Attempt[]; active: boolean; now: number }) {
+export function CostsTab({ attempts, active }: { attempts: Attempt[]; active: boolean }) {
   const { t } = useTranslation();
+  // A running attempt's cost grows with its time; a finished execution's does not.
+  const now = useNow(active ? 1000 : null);
   const [view, setView] = useState<"summary" | "receipt">("summary");
   const cost = useMemo(() => executionCost(attempts, now), [attempts, now]);
   if (!attempts.length) return <EmptyState icon="coin" title={t("executions.detail.noAttempts")} />;

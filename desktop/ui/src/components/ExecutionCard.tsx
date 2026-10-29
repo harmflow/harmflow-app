@@ -5,13 +5,13 @@ import { native } from "../api/native";
 import type { ExecutionSummary } from "../api/types";
 import { isActive } from "../api/types";
 import { fieldText } from "../lib/daemonText";
-import { formatElapsed, formatTime } from "../lib/format";
+import { formatTime } from "../lib/format";
 import { buildTimeline } from "../lib/timeline";
 import { useStore } from "../state/store";
 import { HarnessLabel } from "./Shell";
 import { Icon } from "./Icon";
 import { toast } from "./toast";
-import { Button, ScanBar, StatusChip, cx } from "./ui";
+import { Button, Elapsed, ScanBar, StatusChip, cx } from "./ui";
 
 export function useCancel() {
   const { t } = useTranslation();
@@ -54,14 +54,12 @@ export function ExecutionCard({
   execution,
   selected,
   onSelect,
-  now,
   onCancel,
   cancelling,
 }: {
   execution: ExecutionSummary;
   selected: boolean;
   onSelect: () => void;
-  now: number;
   onCancel: () => void;
   cancelling: boolean;
 }) {
@@ -117,7 +115,7 @@ export function ExecutionCard({
           <dd className="mono">
             {formatTime(execution.startedAt ?? execution.createdAt, i18n.language)}
             <span className="exec-card__elapsed">
-              <Icon name="clock" size={13} /> {formatElapsed(execution.startedAt ?? execution.createdAt, execution.endedAt, now)}
+              <Icon name="clock" size={13} /> <Elapsed start={execution.startedAt ?? execution.createdAt} end={execution.endedAt} />
             </span>
           </dd>
         </div>
