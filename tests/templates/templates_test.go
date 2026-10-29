@@ -132,6 +132,37 @@ func TestTemplateTextsStayInTheirFiles(t *testing.T) {
 	}
 }
 
+// No built-in template's identifier is the name of a built-in agent or skill, so that a name says which it is, and the
+// rule above tells a template's identifier from an agent's in the source.
+func TestTemplateIdentifiersAreNoAgentOrSkill(t *testing.T) {
+	root := repoRoot()
+	builtins := map[string]string{}
+	agents, err := os.ReadDir(filepath.Join(root, "agents"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range agents {
+		builtins[strings.TrimSuffix(e.Name(), ".md")] = "agents/" + e.Name()
+	}
+	skills, err := os.ReadDir(filepath.Join(root, "skills"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range skills {
+		if e.IsDir() {
+			builtins[e.Name()] = "skills/" + e.Name()
+		}
+	}
+	if len(builtins) == 0 {
+		t.Fatal("agents/ and skills/ hold no built-in")
+	}
+	for _, x := range texts(t) {
+		if x.what == "identifier" && builtins[x.value] != "" {
+			t.Errorf("%s has the identifier %s, the name of %s", x.template, x.value, builtins[x.value])
+		}
+	}
+}
+
 // The rule finds a template's text written whole in a source file, and leaves out a longer word that starts with it, a
 // longer identifier, a test, and the generated code.
 func TestTheRuleFindsAWholeText(t *testing.T) {
