@@ -10,15 +10,22 @@ import (
 	"testing"
 )
 
-// recordingStandIn writes a wrapper, named for the CLI it stands for, around one of the stand-ins in testdata. Each
-// execution's arguments are recorded NUL-separated in $HARMFLOW_EXECUTION_DIR/args before the stand-in runs; the
-// probes run with no execution directory and record nothing.
+// recordingStandIn writes a wrapper, named for the CLI it stands for, around one of the stand-ins in testdata. Before
+// the stand-in runs, each execution's arguments are recorded NUL-separated in $HARMFLOW_EXECUTION_DIR/args, the
+// CLAUDE_CONFIG_DIR it runs with in claude-config-dir, and its stdin, read to its end, in stdin, which the stand-in
+// then reads in turn. The read builtin stands in for cat, as in the stand-ins. The probes run with no execution
+// directory and record nothing.
 func recordingStandIn(t *testing.T, fake, name string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
+	stand := `"` + filepath.Join(repoRoot(), "tests", "integration", "testdata", fake) + `"`
 	script := "#!/bin/bash\n" +
-		`[ -n "$HARMFLOW_EXECUTION_DIR" ] && printf '%s\0' "$@" > "$HARMFLOW_EXECUTION_DIR/args"` + "\n" +
-		`exec "` + filepath.Join(repoRoot(), "tests", "integration", "testdata", fake) + `" "$@"` + "\n"
+		`[ -z "$HARMFLOW_EXECUTION_DIR" ] && exec ` + stand + ` "$@"` + "\n" +
+		`printf '%s\0' "$@" > "$HARMFLOW_EXECUTION_DIR/args"` + "\n" +
+		`printf '%s' "$CLAUDE_CONFIG_DIR" > "$HARMFLOW_EXECUTION_DIR/claude-config-dir"` + "\n" +
+		`IFS= read -r -d '' input` + "\n" +
+		`printf '%s' "$input" > "$HARMFLOW_EXECUTION_DIR/stdin"` + "\n" +
+		`exec ` + stand + ` "$@" < "$HARMFLOW_EXECUTION_DIR/stdin"` + "\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -28,11 +35,17 @@ func recordingStandIn(t *testing.T, fake, name string) string {
 // recordedArgs are the arguments the recording stand-in received in an execution.
 func recordedArgs(t *testing.T, x map[string]any) []string {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(x["executionDir"].(string), "args"))
+	return strings.Split(strings.TrimSuffix(recorded(t, x, "args"), "\x00"), "\x00")
+}
+
+// recorded is what the recording stand-in recorded in an execution under the name: args, claude-config-dir, or stdin.
+func recorded(t *testing.T, x map[string]any, name string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(x["executionDir"].(string), name))
 	if err != nil {
-		t.Fatalf("the stand-in recorded no arguments: %v", err)
+		t.Fatalf("the stand-in recorded no %s: %v", name, err)
 	}
-	return strings.Split(strings.TrimSuffix(string(data), "\x00"), "\x00")
+	return string(data)
 }
 
 // passedPair reports whether args hold flag immediately followed by value.
