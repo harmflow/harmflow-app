@@ -59,7 +59,13 @@ type run struct {
 	// selected holds every work item the session selected, in order, each with what the ledger held for it before;
 	// guarded by the App's mutex.
 	selected []selection
+	// announced holds the pull requests the execution's events announced, in every attempt, by event type and by their
+	// URL or message, so the report announces none again; guarded by the App's mutex.
+	announced map[announcement]bool
 }
+
+// announcement is a pull request event of an execution: its type, and a URL or message it carries.
+type announcement struct{ eventType, text string }
 
 // selectionOf is what the ledger held for key when the session selected it, nil when the session did not select it.
 func (r *run) selectionOf(key string) *selection {
@@ -202,7 +208,21 @@ func (r *run) event(e domain.Event) domain.Event {
 		e.WorkItemID = r.x.WorkItem
 		r.a.mu.Unlock()
 	}
-	return r.a.emitFor(e, r.started())
+	stored := r.a.emitFor(e, r.started())
+	if stored.Type == domain.EventPullRequestCreated || stored.Type == domain.EventPullRequestUpdated {
+		url, _ := stored.Payload["url"].(string)
+		r.a.mu.Lock()
+		if r.announced == nil {
+			r.announced = map[announcement]bool{}
+		}
+		for _, text := range []string{url, stored.Message} {
+			if text != "" {
+				r.announced[announcement{stored.Type, text}] = true
+			}
+		}
+		r.a.mu.Unlock()
+	}
+	return stored
 }
 
 // started is the definition the execution started with, or nil when it ended before it took one: its task was gone.
@@ -1331,18 +1351,12 @@ func prURL(w domain.WorkItemResult) string {
 	return ""
 }
 
-// sawEvent reports whether the session already announced a pull request through progress.jsonl.
+// sawEvent reports whether the execution already announced a pull request, through progress.jsonl or an earlier work
+// item of its report. It asks what the run kept of its events, not the log, which it would read whole.
 func (r *run) sawEvent(eventType, url string) bool {
-	events, _, err := r.a.d.Events.Replay(r.x.ID, 0, 0)
-	if err != nil {
-		return false
-	}
-	for _, e := range events {
-		if e.Type == eventType && (e.Payload["url"] == url || e.Message == url) {
-			return true
-		}
-	}
-	return false
+	r.a.mu.Lock()
+	defer r.a.mu.Unlock()
+	return r.announced[announcement{eventType, url}]
 }
 
 func (r *run) limits() domain.WorkItemLimits {

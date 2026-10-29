@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -41,7 +42,19 @@ type Log struct {
 	ring    []domain.Event
 	subs    map[int]chan domain.Event
 	nextSub int
-	files   map[string]*os.File
+	files   map[string]*logFile
+}
+
+// logFile is the open log of a running execution, with an index of where the line of each event it wrote starts, so a
+// replay after an id reads only the lines after it. The index lives as long as the file is open: once the execution
+// ended, its log no longer grows, and a replay reads it from the start.
+type logFile struct {
+	f *os.File
+	// size is the file's length, which each line written adds to; -1 once it is unknown, and the file has no index.
+	size int64
+	// ids are the events this log wrote to the file since it opened it, in order, and offsets where each one's line
+	// starts. Lines already in the file when it opened, from before a restart or the execution's end, are not in them.
+	ids, offsets []int64
 }
 
 var _ ports.EventLog = (*Log)(nil)
@@ -53,7 +66,7 @@ func New(dir string, clock func() time.Time) (*Log, error) {
 		return nil, err
 	}
 	return &Log{dir: dir, clock: clock, floor: clock().UnixMicro(), subs: map[int]chan domain.Event{},
-		files: map[string]*os.File{}}, nil
+		files: map[string]*logFile{}}, nil
 }
 
 // Append assigns the next incremental id, writes the event to its execution's log, and publishes it. Ids are
@@ -101,14 +114,17 @@ func (l *Log) Append(e domain.Event) domain.Event {
 }
 
 func (l *Log) write(e domain.Event) {
-	f, ok := l.files[e.ExecutionID]
+	lf, ok := l.files[e.ExecutionID]
 	if !ok {
-		var err error
-		f, err = os.OpenFile(l.path(e.ExecutionID), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		f, err := os.OpenFile(l.path(e.ExecutionID), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if err != nil {
 			return
 		}
-		l.files[e.ExecutionID] = f
+		lf = &logFile{f: f, size: -1}
+		if info, err := f.Stat(); err == nil {
+			lf.size = info.Size()
+		}
+		l.files[e.ExecutionID] = lf
 	}
 	data, err := json.Marshal(e)
 	if err != nil {
@@ -116,9 +132,18 @@ func (l *Log) write(e domain.Event) {
 	}
 	// The event is in the ring and reaches its subscribers whatever the file does, and Append has no caller that could
 	// act on a failed write: the line is lost from the replay only.
-	_, _ = f.Write(append(data, '\n'))
+	n, err := lf.f.Write(append(data, '\n'))
+	switch {
+	case err != nil:
+		// A line cut short runs into the next one, so no offset after it is known to start a line: the file loses its
+		// index, and a replay reads it from the start.
+		lf.size, lf.ids, lf.offsets = -1, nil, nil
+	case lf.size >= 0:
+		lf.ids, lf.offsets = append(lf.ids, e.ID), append(lf.offsets, lf.size)
+		lf.size += int64(n)
+	}
 	if isTerminal(e.Type) {
-		_ = f.Sync()
+		_ = lf.f.Sync()
 	}
 }
 
@@ -126,10 +151,10 @@ func (l *Log) write(e domain.Event) {
 func (l *Log) Close(executionID string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if f, ok := l.files[executionID]; ok {
+	if lf, ok := l.files[executionID]; ok {
 		// As in write: a failure loses lines from the replay only, and the execution has ended.
-		_ = f.Sync()
-		_ = f.Close()
+		_ = lf.f.Sync()
+		_ = lf.f.Close()
 		delete(l.files, executionID)
 	}
 }
@@ -146,12 +171,10 @@ func isTerminal(t string) bool {
 func (l *Log) path(executionID string) string { return filepath.Join(l.dir, executionID+".jsonl") }
 
 // Replay returns the stored events of an execution after an id; expired is true when the log was deleted by retention.
+// It reads the file with no lock held, so it never holds up Append, and with no sync: os.File.Write does not buffer,
+// so every line Append wrote is in the file already. A running execution's log is read from the line after the id.
 func (l *Log) Replay(executionID string, after int64, limit int) ([]domain.Event, bool, error) {
-	l.mu.Lock()
-	if f, ok := l.files[executionID]; ok {
-		_ = f.Sync() // a failed sync only leaves the latest lines out of this replay
-	}
-	l.mu.Unlock()
+	start := l.start(executionID, after)
 	f, err := os.Open(l.path(executionID))
 	if errors.Is(err, os.ErrNotExist) {
 		return []domain.Event{}, true, nil
@@ -160,6 +183,11 @@ func (l *Log) Replay(executionID string, after int64, limit int) ([]domain.Event
 		return nil, false, err
 	}
 	defer f.Close() // read only: closing cannot lose data
+	if start > 0 {
+		if _, err := f.Seek(start, io.SeekStart); err != nil {
+			return nil, false, err
+		}
+	}
 	out := []domain.Event{}
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 64*1024), 8*1024*1024)
@@ -174,6 +202,26 @@ func (l *Log) Replay(executionID string, after int64, limit int) ([]domain.Event
 		}
 	}
 	return out, false, sc.Err()
+}
+
+// start is the offset where a replay of an execution's log after an id begins: the line of the first event after it,
+// or the end of the file when there is none yet. Every line before it holds an earlier event. It is 0, the start of the
+// file, when the log has no index, or when the file may hold an event after the id that the index does not.
+func (l *Log) start(executionID string, after int64) int64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	lf, ok := l.files[executionID]
+	if !ok || len(lf.ids) == 0 || after < lf.ids[0] {
+		return 0
+	}
+	i, found := slices.BinarySearch(lf.ids, after)
+	if found {
+		i++
+	}
+	if i == len(lf.ids) {
+		return lf.size
+	}
+	return lf.offsets[i]
 }
 
 // Subscribe returns the buffered events after the given id followed by live ones. replayGap is true when the
