@@ -43,6 +43,11 @@ type Log struct {
 	subs    map[int]chan domain.Event
 	nextSub int
 	files   map[string]*logFile
+
+	// tails are the attempts' captures as ReadRaw last returned them, under a lock of their own; redact masks the
+	// captures' text, which a test counts.
+	tails  tails
+	redact func(string) string
 }
 
 // logFile is the open log of a running execution, with an index of where the line of each event it wrote starts, so a
@@ -66,7 +71,7 @@ func New(dir string, clock func() time.Time) (*Log, error) {
 		return nil, err
 	}
 	return &Log{dir: dir, clock: clock, floor: clock().UnixMicro(), subs: map[int]chan domain.Event{},
-		files: map[string]*logFile{}}, nil
+		files: map[string]*logFile{}, tails: tails{m: map[tailKey]*tailEntry{}}, redact: Redact}, nil
 }
 
 // Append assigns the next incremental id, writes the event to its execution's log, and publishes it. Ids are
@@ -275,10 +280,13 @@ func (l *Log) RawWriter(executionID string, attempt int) (io.WriteCloser, error)
 }
 
 // ReadRaw reads the last limit bytes of an attempt's capture, from the start of a line. The text is redacted again,
-// whole, so a secret that spans lines is masked too.
+// as a whole, so a secret that spans lines is masked too. The log keeps the tail it returns, and the next read of the
+// same attempt redacts again only the bytes added since and the end of the tail before them (readTail).
 func (l *Log) ReadRaw(executionID string, attempt int, limit int64) (ports.RawCapture, error) {
+	key := tailKey{execution: executionID, attempt: attempt}
 	f, err := os.Open(l.rawPath(executionID, attempt))
 	if errors.Is(err, os.ErrNotExist) {
+		l.tails.drop(key)
 		return ports.RawCapture{}, nil
 	}
 	if err != nil {
@@ -289,27 +297,22 @@ func (l *Log) ReadRaw(executionID string, attempt int, limit int64) (ports.RawCa
 	if err != nil {
 		return ports.RawCapture{}, err
 	}
-	size, offset := info.Size(), int64(0)
+	size, from := info.Size(), int64(0)
 	if limit > 0 && size > limit {
-		offset = size - limit
+		from = size - limit
 	}
-	data := make([]byte, size-offset)
-	n, err := f.ReadAt(data, offset)
-	if err != nil && !errors.Is(err, io.EOF) {
+	t, err := readTail(f, size, from, l.tails.get(key), l.redact)
+	if err != nil {
 		return ports.RawCapture{}, err
 	}
-	data = data[:n]
-	if offset > 0 {
-		if i := bytes.IndexByte(data, '\n'); i >= 0 {
-			data, offset = data[i+1:], offset+int64(i+1)
-		}
-	}
-	return ports.RawCapture{Size: size, Offset: offset, Text: Redact(string(data))}, nil
+	l.tails.put(key, t)
+	return ports.RawCapture{Size: t.size, Offset: t.offset, Text: t.text}, nil
 }
 
 // DeleteLog removes an execution's JSONL and raw output; the execution record is kept.
 func (l *Log) DeleteLog(executionID string) error {
 	l.Close(executionID)
+	l.tails.forget(executionID)
 	err1 := os.Remove(l.path(executionID))
 	err2 := os.RemoveAll(filepath.Join(l.dir, executionID))
 	if err1 != nil && !errors.Is(err1, os.ErrNotExist) {
@@ -369,7 +372,7 @@ var secretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`xox[abprs]-[A-Za-z0-9\-]{10,}`),
 	regexp.MustCompile(`AKIA[0-9A-Z]{16}`),
 	regexp.MustCompile(`(?i)(authorization:\s*bearer\s+)[A-Za-z0-9._\-]{16,}`),
-	regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----`),
+	regexp.MustCompile(privateKeyBegin + `[\s\S]*?` + privateKeyEnd),
 	// A password, cookie, or session value counts only after its key and separator, on the same line: the words alone,
 	// or inside another word, are ordinary text. A value stops before a quote or a backslash, so a masked value never
 	// closes the string that holds it, in a task's YAML or anywhere else.
