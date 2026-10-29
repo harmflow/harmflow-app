@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { Root } from "./App";
 import { rootOptions } from "./components/ErrorBoundary";
 import "./i18n";
+import "./design/fonts.css";
 import "./design/tokens.css";
 import "./design/app.css";
 
