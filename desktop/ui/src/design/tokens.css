@@ -95,9 +95,11 @@
   --hf-gradient-scan: linear-gradient(90deg, transparent 0%, var(--hf-color-cyan) 45%, var(--hf-color-violet) 70%, transparent 100%);
 
   /* Typography */
-  --hf-font-sans: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", "Helvetica Neue", sans-serif;
-  --hf-font-display: "SF Pro Display", -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
-  --hf-font-mono: "SF Mono", ui-monospace, Menlo, "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  /* The bundled fonts of fonts.css first; the system's fonts after them are only fallbacks. */
+  --hf-font-sans: "Inter", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
+  --hf-font-display: "Inter Display", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --hf-font-display-settings: "opsz" 32;
+  --hf-font-mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, "Cascadia Code", Consolas, monospace;
   --hf-font-size-2xs: 10.5px;
   --hf-font-size-xs: 11.5px;
   --hf-font-size-sm: 12.5px;

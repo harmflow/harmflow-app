@@ -183,6 +183,7 @@ ol {
 /* No taller than the logo, so the navigation stays put when the text goes */
 .brand__name {
   font-family: var(--hf-font-display);
+  font-variation-settings: var(--hf-font-display-settings);
   font-size: var(--hf-font-size-xl);
   font-weight: var(--hf-font-weight-bold);
   letter-spacing: 0.01em;
@@ -435,6 +436,7 @@ body:has([aria-modal="true"]) .tooltip {
 .topbar__title {
   margin-top: 4px;
   font-family: var(--hf-font-display);
+  font-variation-settings: var(--hf-font-display-settings);
   font-size: var(--hf-font-size-3xl);
   font-weight: var(--hf-font-weight-bold);
   letter-spacing: 0.005em;
@@ -1021,6 +1023,7 @@ body:has([aria-modal="true"]) .tooltip {
 
 .counter__value {
   font-family: var(--hf-font-display);
+  font-variation-settings: var(--hf-font-display-settings);
   font-size: var(--hf-font-size-2xl);
   font-weight: var(--hf-font-weight-bold);
   line-height: 1.1;
