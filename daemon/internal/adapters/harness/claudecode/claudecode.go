@@ -507,9 +507,15 @@ func (a *Adapter) allowlistRestriction(req ports.RunRequest, covered []string) p
 // editRestriction says whether workspace_write's file edits are limited to the workspace and the added directories.
 // acceptEdits limits them so, but Claude Code adds the allow rules of every settings source it loads, and an editing
 // rule that may reach outside those directories lifts the limit. In doubt, a rule reaches outside: only one whose path
-// lies within the working directory or an added directory stays inside, and a bare rule does not.
+// lies within the working directory or an added directory stays inside, and a bare rule does not. The directories are
+// compared resolved, as the rules' paths are, so a link on either side does not decide.
 func (a *Adapter) editRestriction(req ports.RunRequest) ports.Restriction {
-	roots := append([]string{req.ExecutionDir, req.WorkDir}, req.AdditionalDirs...)
+	var roots []string
+	for _, d := range append([]string{req.ExecutionDir, req.WorkDir}, req.AdditionalDirs...) {
+		if real, err := domain.ResolvePath(d); err == nil {
+			roots = append(roots, real)
+		}
+	}
 	widening := a.wideningSources(req, func(source, r string) bool {
 		return containsStr(editTools, toolName(r)) && !a.editRuleInside(r, source != "user", roots)
 	})
@@ -526,8 +532,10 @@ func (a *Adapter) editRestriction(req ports.RunRequest) ports.Restriction {
 // editRuleInside reports whether an editing rule's path stays within the working directory or one of roots, read in
 // Claude Code's forms: //path from the filesystem root, ~/path from the home folder, and any other path from the
 // working directory. A /path is read from the settings file's folder or the project root, as versions differ, so it
-// stays inside only in the working directory's own settings, as a path from that directory. A bare rule, Tool(*),
-// another user's ~, and a path that climbs out with .. reach outside.
+// stays inside only in the working directory's own settings, as a path from that directory. A //path or ~/path is
+// resolved before it is compared with roots, which are resolved too: through the longest part of it that exists, so a
+// link to a root stays inside, and a path that cannot be resolved reaches outside. A bare rule, Tool(*), another user's
+// ~, and a path that climbs out with .. reach outside.
 func (a *Adapter) editRuleInside(rule string, workspaceSettings bool, roots []string) bool {
 	pattern, ok := strings.CutPrefix(rule, toolName(rule)+"(")
 	if !ok || !strings.HasSuffix(pattern, ")") {
@@ -557,7 +565,8 @@ func (a *Adapter) editRuleInside(rule string, workspaceSettings bool, roots []st
 	if base == "" {
 		return filepath.IsLocal(filepath.Join(".", dir))
 	}
-	return within(filepath.Join(base, dir), roots)
+	real, err := domain.ResolvePath(filepath.Join(base, dir))
+	return err == nil && within(real, roots)
 }
 
 // fixedDir is the part of a path pattern before its first segment with a wildcard, which every path it matches lies
