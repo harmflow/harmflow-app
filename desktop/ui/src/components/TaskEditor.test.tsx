@@ -1,12 +1,13 @@
 // @vitest-environment happy-dom
 // Drives the task editor in a DOM, against a stand-in for the daemon's local API (harmflow-app#183). Its Form and YAML
-// tabs carry the task across through the daemon's validation, both ways. A save from the YAML tab sends the text with
-// the revision of the last successful save; a refused one keeps the text and shows the daemon's error at its line, the
-// same error a save from the form shows on its field. The stand-in decides which error the daemon gives: that the daemon
-// gives a document and its YAML the same one is itest › TestOneSchemaForEveryEntryPoint's. ⌘S saves as the Save button
-// does, from any focus in the editor (harmflow-app#230). A save shows the warnings the daemon gives, such as a fallback
-// that cannot load the task's skill (harmflow-app#216). The catalog is asked for with the task's ID, so a task with no
-// workspace path is offered the skills of the folder it runs in, which validation reads (harmflow-app#283).
+// tabs carry the task across through the daemon's validation, both ways, whether it allows extra usage included
+// (harmflow-app#300). A save from the YAML tab sends the text with the revision of the last successful save; a refused
+// one keeps the text and shows the daemon's error at its line, the same error a save from the form shows on its field.
+// The stand-in decides which error the daemon gives: that the daemon gives a document and its YAML the same one is
+// itest › TestOneSchemaForEveryEntryPoint's. ⌘S saves as the Save button does, from any focus in the editor
+// (harmflow-app#230). A save shows the warnings the daemon gives, such as a fallback that cannot load the task's skill
+// (harmflow-app#216). The catalog is asked for with the task's ID, so a task with no workspace path is offered the
+// skills of the folder it runs in, which validation reads (harmflow-app#283).
 import { EditorView } from "@codemirror/view";
 import { isDeepStrictEqual } from "node:util";
 import { act } from "react";
@@ -46,16 +47,21 @@ const CRON = "0 9 * * 1-5";
 /** A cron the daemon refuses, a rule the form marks on the Cron field: minute 61. */
 const BAD_CRON = "61 9 * * 1-5";
 
-/** The one task the stand-in knows, as a document. */
-const taskDoc = (name: string, cron = CRON): Doc => ({
+/** The one task the stand-in knows, as a document; it sets whether it allows extra usage only when told. */
+const taskDoc = (name: string, cron = CRON, allowExtraUsage?: boolean): Doc => ({
   apiVersion: "harmflow/v1alpha1",
   kind: "Task",
   metadata: { id: "standup", name },
-  spec: { type: "general", schedule: { cron }, prompt: "Write the standup notes." },
+  spec: {
+    type: "general",
+    schedule: { cron },
+    prompt: "Write the standup notes.",
+    ...(allowExtraUsage === undefined ? {} : { execution: { allowExtraUsage } }),
+  },
 });
 
 /** The same task as the daemon writes it in YAML; the cron is on line 9, among the lines CodeMirror draws. */
-const taskYaml = (name: string, cron = CRON) =>
+const taskYaml = (name: string, cron = CRON, allowExtraUsage?: boolean) =>
   [
     "apiVersion: harmflow/v1alpha1",
     "kind: Task",
@@ -67,6 +73,7 @@ const taskYaml = (name: string, cron = CRON) =>
     "  schedule:",
     `    cron: "${cron}"`,
     "  prompt: Write the standup notes.",
+    ...(allowExtraUsage === undefined ? [] : ["  execution:", `    allowExtraUsage: ${allowExtraUsage}`]),
     "",
   ].join("\n");
 
@@ -74,15 +81,18 @@ const taskYaml = (name: string, cron = CRON) =>
 function parse(yaml: string): Doc | undefined {
   const name = /^ {2}name: (.*)$/m.exec(yaml)?.[1];
   const cron = /^ {4}cron: "(.*)"$/m.exec(yaml)?.[1];
-  return name !== undefined && cron !== undefined && yaml === taskYaml(name, cron) ? taskDoc(name, cron) : undefined;
+  const extra = /^ {4}allowExtraUsage: (true|false)$/m.exec(yaml)?.[1];
+  const allowExtraUsage = extra === undefined ? undefined : extra === "true";
+  return name !== undefined && cron !== undefined && yaml === taskYaml(name, cron, allowExtraUsage) ? taskDoc(name, cron, allowExtraUsage) : undefined;
 }
 
 /** The YAML of a document of this task; a document the stand-in cannot write fails the request. */
 function write(doc: Doc): string {
   const name = (doc.metadata as { name: string }).name;
   const cron = (doc.spec as { schedule: { cron: string } }).schedule.cron;
-  if (!isDeepStrictEqual(doc, taskDoc(name, cron))) throw new Error(`The stand-in cannot write ${JSON.stringify(doc)}`);
-  return taskYaml(name, cron);
+  const allowExtraUsage = (doc.spec as { execution?: { allowExtraUsage?: boolean } }).execution?.allowExtraUsage;
+  if (!isDeepStrictEqual(doc, taskDoc(name, cron, allowExtraUsage))) throw new Error(`The stand-in cannot write ${JSON.stringify(doc)}`);
+  return taskYaml(name, cron, allowExtraUsage);
 }
 
 /** The daemon's refusal of BAD_CRON, at the field's path and at its key's line and column in the YAML. */
@@ -218,6 +228,8 @@ const field = (label: string) =>
   [...host!.querySelectorAll<HTMLElement>("label.field")].find((f) => f.querySelector(".field__label")?.textContent === label)!;
 const nameField = () => field("Name");
 const cronField = () => field("Cron expression (5 fields)");
+const extraUsage = () =>
+  [...host!.querySelectorAll("label.toggle")].find((l) => l.querySelector(".toggle__label")?.textContent === "Allow extra usage")!.querySelector("input")!;
 
 /** The validation panel, and the errors it lists. */
 const panel = () => host!.querySelector(".editor__side .validation")!;
@@ -297,6 +309,36 @@ describe("task editor tabs", () => {
     expect(unsaved()).toBe("Unsaved changes");
     expect(toasts("warning")).toContain("The YAML could not be converted to the form; fix the errors first.");
     expect(errors()).toEqual(["YAML syntax error: found unexpected end of stream"]);
+  });
+
+  // Whether the task allows extra usage crosses as every other field does (harmflow-app#300).
+  it("carries extra usage turned on in the form to the YAML tab, and turned off there back to the form", async () => {
+    await open("edit");
+    expect(extraUsage().checked).toBe(false);
+    await click(extraUsage());
+    await click(tab("YAML"));
+    expect(sent("POST", "/tasks/validate")).toContainEqual({ document: taskDoc("Standup notes", CRON, true) });
+    expect(yamlText()).toBe(taskYaml("Standup notes", CRON, true));
+
+    await typeYaml(taskYaml("Standup notes", CRON, false));
+    await click(tab("Form"));
+    expect(sent("POST", "/tasks/validate")).toContainEqual({ yaml: taskYaml("Standup notes", CRON, false) });
+    expect(openTab()).toBe("Form");
+    expect(extraUsage().checked).toBe(false);
+  });
+
+  it("carries extra usage allowed in the YAML to the form, and the form turning it off removes the key from the YAML", async () => {
+    await open("edit");
+    await click(tab("YAML"));
+    await typeYaml(taskYaml("Standup notes", CRON, true));
+    await click(tab("Form"));
+    expect(sent("POST", "/tasks/validate")).toContainEqual({ yaml: taskYaml("Standup notes", CRON, true) });
+    expect(extraUsage().checked).toBe(true);
+
+    await click(extraUsage());
+    await click(tab("YAML"));
+    expect(sent("POST", "/tasks/validate")).toContainEqual({ document: taskDoc("Standup notes") });
+    expect(yamlText()).toBe(taskYaml("Standup notes"));
   });
 });
 

@@ -1018,6 +1018,9 @@ export const enUS = {
       rateLimitMaxRetries: "Rate-limit retries",
       rateLimitInitialWait: "First wait (seconds)",
       rateLimitMaxWait: "Longest wait (seconds)",
+      allowExtraUsage: "Allow extra usage",
+      allowExtraUsageHint:
+        "Usage billed beyond what the harness's plan includes. Off, an attempt does not start on a harness whose plan is used up, and a Claude Code attempt that turns to extra usage is ended. On, neither check holds an attempt back.",
       notificationsEnabled: "Native notifications",
       notificationEvents: "Notify me about",
       programKind: "What it runs",

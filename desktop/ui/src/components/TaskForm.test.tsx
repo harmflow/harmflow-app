@@ -882,3 +882,115 @@ describe("task form checkbox groups", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 });
+
+// A task that runs a harness shows in its Execution section, after the rate-limit fields, whether it allows extra
+// usage: off unless its document allows it. Off removes the key, so the default, which allows none, applies. A script
+// task runs no harness and shows no such control (harmflow-app#300). What the daemon does with the setting is app ›
+// TestExhaustedQuotaHoldsTheAttemptBack's, TestExtraUsageEndsTheAttempt's, and TestExtraUsageAllowed's.
+describe("task form extra usage", () => {
+  let current: Doc = {};
+
+  function Form({ doc }: { doc: Doc }) {
+    const [value, setValue] = useState(doc);
+    current = value;
+    return <TaskForm doc={value} onChange={(d) => setValue((current = d))} mode="edit" harnesses={[]} errorPaths={new Set()} />;
+  }
+
+  async function openForm(doc: Doc) {
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(<Form doc={doc} />));
+    await settle();
+  }
+
+  /** A task of a type that runs a harness, with the execution limits given. */
+  const harnessTask = (type: "general" | "github", execution?: Doc): Doc => {
+    const doc = task({});
+    return { ...doc, spec: { ...(doc.spec as Doc), type, ...(execution ? { execution } : {}) } };
+  };
+  const script = (execution?: Doc): Doc => ({
+    apiVersion: "harmflow/v1alpha1",
+    kind: "Task",
+    metadata: { id: "audit", name: "Audit" },
+    spec: { type: "script", script: { command: ["/bin/date"] }, ...(execution ? { execution } : {}) },
+  });
+
+  const spec = () => current.spec as Doc;
+  const section = () => host!.querySelector("#section-execution")!;
+  const toggle = () => section().querySelector<HTMLInputElement>("label.toggle input");
+  const label = () => section().querySelector("label.toggle")?.textContent;
+  const hint = () => section().querySelector(".field--toggle .field__hint")?.textContent;
+  const input = (text: string) =>
+    [...section().querySelectorAll("label.field")].find((f) => f.querySelector(".field__label")?.textContent === text)!.querySelector("input")!;
+  async function click(el: HTMLElement) {
+    await act(async () => el.click());
+  }
+  async function type(el: HTMLInputElement, value: string) {
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(el, value);
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+
+  it.each(["general", "github"] as const)("shows a %s task's extra usage off when its document sets nothing, after the rate-limit fields", async (kind) => {
+    await openForm(harnessTask(kind));
+    expect(toggle()?.checked).toBe(false);
+    // Named by its label alone: the hint sits beside the toggle's label, not in it.
+    expect(label()).toBe("Allow extra usage");
+    expect(hint()).toBe(
+      "Usage billed beyond what the harness's plan includes. Off, an attempt does not start on a harness whose plan is used up, and a Claude Code attempt that turns to extra usage is ended. On, neither check holds an attempt back.",
+    );
+    expect(input("Longest wait (seconds)").compareDocumentPosition(toggle()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(spec().execution).toBeUndefined();
+  });
+
+  it.each([
+    ["no other limit", undefined],
+    ["another limit", { timeoutMinutes: 45 }],
+  ])("writes true when turned on, and removes the key when turned off, with %s", async (_, execution) => {
+    await openForm(harnessTask("general", execution));
+    await click(toggle()!);
+    expect(toggle()!.checked).toBe(true);
+    expect(spec().execution).toStrictEqual({ ...execution, allowExtraUsage: true });
+
+    await click(toggle()!);
+    expect(toggle()!.checked).toBe(false);
+    // An execution left with no limit goes with its last key.
+    expect(spec().execution).toStrictEqual(execution);
+  });
+
+  it.each([true, false])("opens a task whose file sets allowExtraUsage: %s with the toggle at that value", async (allowed) => {
+    await openForm(harnessTask("github", { allowExtraUsage: allowed }));
+    expect(toggle()!.checked).toBe(allowed);
+  });
+
+  it("turns a task whose file sets allowExtraUsage: false on, then off without the key", async () => {
+    await openForm(harnessTask("general", { allowExtraUsage: false }));
+    await click(toggle()!);
+    expect(spec().execution).toStrictEqual({ allowExtraUsage: true });
+    await click(toggle()!);
+    expect(spec().execution).toBeUndefined();
+  });
+
+  it("shows a script task no extra-usage control, and its document never carries the key", async () => {
+    await openForm(script({ timeoutMinutes: 5 }));
+    expect(section().querySelector(".toggle")).toBeNull();
+    expect(section().textContent).not.toContain("Allow extra usage");
+    await type(input("Timeout (minutes), shared by all attempts"), "10");
+    expect(spec().execution).toStrictEqual({ timeoutMinutes: 10 });
+  });
+
+  it.each([
+    ["pt-BR", "Permitir uso extra", "Uso cobrado além do que o plano do harness inclui."],
+    ["es-ES", "Permitir uso extra", "Uso facturado más allá de lo que incluye el plan del harness."],
+  ])("labels the toggle and its hint in %s", async (language, text, hintStart) => {
+    await i18n.changeLanguage(language);
+    try {
+      await openForm(harnessTask("general"));
+      expect(label()).toBe(text);
+      expect(hint()?.startsWith(hintStart)).toBe(true);
+    } finally {
+      await i18n.changeLanguage("en-US");
+    }
+  });
+});

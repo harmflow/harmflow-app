@@ -1041,6 +1041,9 @@ export const ptBR: Resources = {
       rateLimitMaxRetries: "Novas tentativas por limite de taxa",
       rateLimitInitialWait: "Primeira espera (segundos)",
       rateLimitMaxWait: "Espera mais longa (segundos)",
+      allowExtraUsage: "Permitir uso extra",
+      allowExtraUsageHint:
+        "Uso cobrado além do que o plano do harness inclui. Desligado, uma tentativa não começa num harness cujo plano se esgotou, e uma tentativa do Claude Code que passa a usar uso extra é encerrada. Ligado, nenhuma dessas verificações segura uma tentativa.",
       notificationsEnabled: "Notificações nativas",
       notificationEvents: "Notificar sobre",
       programKind: "O que executa",
