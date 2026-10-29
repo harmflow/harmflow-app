@@ -41,7 +41,7 @@ import {
   type Path,
 } from "../lib/taskForm";
 import { Icon, type IconName } from "./Icon";
-import { Banner, Button, Checkbox, Field, IconButton, Modal, NumberInput, Select, TextArea, TextInput, Toggle, cx } from "./ui";
+import { Banner, Button, Checkbox, Field, FieldGroup, IconButton, Modal, NumberInput, Select, TextArea, TextInput, Toggle, cx } from "./ui";
 
 export interface TaskFormProps {
   doc: Doc;
@@ -223,24 +223,22 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
           harnesses={harnesses}
         />
         <div className="grid-2">
-          <Field label={t("tasks.fields.fallbackOn")}>
-            <div className="check-row">
-              {schemaEnum(["spec", "harness", "fallback", "on"]).map((trigger) => {
-                const current = get<string[]>(["spec", "harness", "fallback", "on"]) ?? (def(["spec", "harness", "fallback", "on"]) as string[]) ?? [];
-                return (
-                  <Checkbox
-                    key={trigger}
-                    checked={current.includes(trigger)}
-                    label={t(`tasks.options.fallbackOn.${trigger}` as never, { defaultValue: trigger }) as string}
-                    onChange={(on) => {
-                      const next = on ? [...current, trigger] : current.filter((x) => x !== trigger);
-                      set(["spec", "harness", "fallback", "on"], next.length ? next : undefined);
-                    }}
-                  />
-                );
-              })}
-            </div>
-          </Field>
+          <FieldGroup label={t("tasks.fields.fallbackOn")} className="check-row">
+            {schemaEnum(["spec", "harness", "fallback", "on"]).map((trigger) => {
+              const current = get<string[]>(["spec", "harness", "fallback", "on"]) ?? (def(["spec", "harness", "fallback", "on"]) as string[]) ?? [];
+              return (
+                <Checkbox
+                  key={trigger}
+                  checked={current.includes(trigger)}
+                  label={t(`tasks.options.fallbackOn.${trigger}` as never, { defaultValue: trigger }) as string}
+                  onChange={(on) => {
+                    const next = on ? [...current, trigger] : current.filter((x) => x !== trigger);
+                    set(["spec", "harness", "fallback", "on"], next.length ? next : undefined);
+                  }}
+                />
+              );
+            })}
+          </FieldGroup>
           <IntField path={["spec", "harness", "fallback", "maxSwitches"]} label={t("tasks.fields.maxSwitches")} doc={doc} set={set} />
         </div>
       </Section>
@@ -298,25 +296,23 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
           onChange={(v) => set(["spec", "notifications", "native", "enabled"], v)}
           label={t("tasks.fields.notificationsEnabled")}
         />
-        <Field label={t("tasks.fields.notificationEvents")}>
-          <div className="check-grid">
-            {NOTIFIABLE_EVENTS.map((ev) => {
-              const current =
-                get<string[]>(["spec", "notifications", "native", "events"]) ?? (def(["spec", "notifications", "native", "events"]) as string[]) ?? [];
-              return (
-                <Checkbox
-                  key={ev}
-                  checked={current.includes(ev)}
-                  label={t(`tasks.options.notifiable.${ev}` as never, { defaultValue: ev }) as string}
-                  onChange={(on) => {
-                    const next = on ? [...current, ev] : current.filter((x) => x !== ev);
-                    set(["spec", "notifications", "native", "events"], next);
-                  }}
-                />
-              );
-            })}
-          </div>
-        </Field>
+        <FieldGroup label={t("tasks.fields.notificationEvents")} className="check-grid">
+          {NOTIFIABLE_EVENTS.map((ev) => {
+            const current =
+              get<string[]>(["spec", "notifications", "native", "events"]) ?? (def(["spec", "notifications", "native", "events"]) as string[]) ?? [];
+            return (
+              <Checkbox
+                key={ev}
+                checked={current.includes(ev)}
+                label={t(`tasks.options.notifiable.${ev}` as never, { defaultValue: ev }) as string}
+                onChange={(on) => {
+                  const next = on ? [...current, ev] : current.filter((x) => x !== ev);
+                  set(["spec", "notifications", "native", "events"], next);
+                }}
+              />
+            );
+          })}
+        </FieldGroup>
       </Section>
     </div>
   );
@@ -497,18 +493,16 @@ function ScriptFields({ doc, onChange, set, err }: { doc: Doc; onChange: (doc: D
             onChange={(e) => set(["spec", "script", "workingDirectory"], e.target.value)}
           />
         </Field>
-        <Field label={t("tasks.fields.systems")} hint={t("tasks.fields.systemsHint")}>
-          <div className="check-row">
-            {schemaEnum(["spec", "script", "systems"]).map((system) => (
-              <Checkbox
-                key={system}
-                checked={systems.includes(system)}
-                label={t(`tasks.options.systems.${system}` as never, { defaultValue: system }) as string}
-                onChange={(on) => set(["spec", "script", "systems"], on ? [...systems, system] : systems.filter((s) => s !== system))}
-              />
-            ))}
-          </div>
-        </Field>
+        <FieldGroup label={t("tasks.fields.systems")} hint={t("tasks.fields.systemsHint")} className="check-row">
+          {schemaEnum(["spec", "script", "systems"]).map((system) => (
+            <Checkbox
+              key={system}
+              checked={systems.includes(system)}
+              label={t(`tasks.options.systems.${system}` as never, { defaultValue: system }) as string}
+              onChange={(on) => set(["spec", "script", "systems"], on ? [...systems, system] : systems.filter((s) => s !== system))}
+            />
+          ))}
+        </FieldGroup>
       </div>
       <Field label={t("tasks.fields.environment")} hint={t("tasks.fields.environmentHint")} error={err(["spec", "script", "environment"])}>
         <EnvArea value={getIn(doc, ["spec", "script", "environment"])} onValue={(v) => set(["spec", "script", "environment"], v)} />
