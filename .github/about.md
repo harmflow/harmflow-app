@@ -2,7 +2,8 @@
 
 > [!NOTE]
 > This page describes the `.github` folder of harmflow-app. The repository's overview — what HarmFlow is, its
-> architecture, the quick start, and the commands — is the [`README.md`](/README.md) at the root.
+> architecture, the quick start, and the commands — is the [`README.md`](/README.md) at the root. This page is not
+> named `README.md`: GitHub would show it on the repository's page in place of the root one.
 
 What GitHub reads from this folder: the workflows that check every change and every night, the scripts they run,
 Dependabot's configuration, and the images the root README shows.
