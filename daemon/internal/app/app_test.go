@@ -937,6 +937,118 @@ func TestFailureLeavesTheOthersRunning(t *testing.T) {
 	}
 }
 
+// Cancelling a's execution ends the helper its harness started, which daemonized and carries a's execution id, as
+// gpg-agent does, and names it in a's log. b's execution, which used that helper, keeps running: its next use fails,
+// as a gpg signature would, and it goes on to complete. The test binary stands in for the helper, as its environment
+// can be read, and a FIFO for the helper's socket: a use opens it without waiting, so once the helper, the FIFO's only
+// reader, is gone, the use fails at once.
+func TestCancelLeavesRunningAnExecutionWhoseHelperItEnded(t *testing.T) {
+	needProcessTable(t)
+	e := newEnv(t)
+	e.create("a", "  execution:\n    cancelGraceSeconds: 1\n")
+	e.create("b", "")
+	dir := t.TempDir()
+	fifo, uses, agentFile, harnessFile, gate := filepath.Join(dir, "agent"), filepath.Join(dir, "uses"),
+		filepath.Join(dir, "agent.pid"), filepath.Join(dir, "harness.pid"), filepath.Join(dir, "go")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatalf("Mkfifo(%s): %v", fifo, err)
+	}
+	e.claude.setScript(func(req ports.RunRequest) string {
+		if req.Prompt == "Do the work of a." {
+			// The harness writes its pid once the helper's first half has exited, so launchd has adopted the helper.
+			return fmt.Sprintf(`%s=daemonize APP_FIFO='%s' APP_USES='%s' APP_PIDFILE='%s' '%s'; echo $$ > '%s'; `+
+				`echo working; sleep 300`, helperVariable, fifo, uses, agentFile, os.Args[0], harnessFile)
+		}
+		// Each use writes one line to the helper; it waits for the gate, a minute at most, between the two.
+		return fmt.Sprintf(`use() { perl -MFcntl -e 'sysopen(F, $ARGV[0], O_WRONLY|O_NONBLOCK) && `+
+			`syswrite(F, "$ARGV[1]\n") or exit 1' '%[1]s' "$1"; }; `+
+			`if use first; then echo 'used the helper'; else echo 'the helper failed'; fi; `+
+			`i=0; while [ ! -e '%[2]s' ] && [ $i -lt 1200 ]; do sleep 0.05; i=$((i+1)); done; `+
+			`if use second; then echo 'used the helper'; else echo 'the helper failed'; fi; echo 'END ok'`, fifo, gate)
+	})
+	a, err := e.app.RunTask("a")
+	if err != nil || a.Outcome != "started" {
+		t.Fatalf("run a: %v %+v", err, a)
+	}
+	helper := waitForPid(t, agentFile)
+	gone := false
+	t.Cleanup(func() {
+		if !gone {
+			_ = syscall.Kill(helper, syscall.SIGKILL)
+		}
+	})
+	waitForPid(t, harnessFile)
+	b, err := e.app.RunTask("b")
+	if err != nil || b.Outcome != "started" {
+		t.Fatalf("run b: %v %+v", err, b)
+	}
+	e.wait(a.ExecutionID, domain.StatusRunning)
+	e.wait(b.ExecutionID, domain.StatusRunning)
+	if !e.poll(10*time.Second, func() bool {
+		data, _ := os.ReadFile(uses)
+		return string(data) == "first\n"
+	}) {
+		data, _ := os.ReadFile(uses)
+		t.Fatalf("the helper recorded %q, want b's first use", data)
+	}
+
+	if err := e.app.CancelExecution(a.ExecutionID); err != nil {
+		t.Fatal(err)
+	}
+	e.wait(a.ExecutionID, domain.StatusCancelled)
+	if alive(helper) {
+		t.Fatalf("the helper %d, which a's harness started and which carries a's id, survived a's cancel", helper)
+	}
+	gone = true
+	events, _, err := e.app.ExecutionEvents(a.ExecutionID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := filepath.Base(os.Args[0])
+	if len(name) > 16 {
+		name = name[:16]
+	}
+	named := false
+	for _, ev := range events {
+		named = named || ev.Type == domain.EventProcessEnded && ev.MessageKey == "process_ended" &&
+			fmt.Sprint(ev.Payload["pid"]) == strconv.Itoa(helper) && ev.Payload["executable"] == name
+	}
+	if !named {
+		t.Errorf("a's log does not name the helper %d, %s, among the processes it ended: %+v", helper, name, events)
+	}
+	if x, _ := e.app.GetExecution(b.ExecutionID); x.Status != domain.StatusRunning {
+		t.Fatalf("b is %s once the helper it used is gone, want running", x.Status)
+	}
+
+	if err := os.WriteFile(gate, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	x := e.wait(b.ExecutionID, domain.StatusCompleted)
+	if x.ErrorMessage != "" || x.CancelRequestedAt != nil || x.HarnessSwitches != 0 || len(x.Attempts) != 1 ||
+		x.Attempts[0].Outcome != domain.AttemptSucceeded || x.Attempts[0].ErrorMessage != "" {
+		t.Errorf("b after the helper it used was ended: error %q, attempts %+v", x.ErrorMessage, x.Attempts)
+	}
+	events, _, err = e.app.ExecutionEvents(b.ExecutionID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var said []string
+	for _, ev := range events {
+		if ev.Type == domain.EventExecutionFailed || ev.Severity == domain.SeverityError {
+			t.Errorf("b's log holds %s: %s", ev.Type, ev.Message)
+		}
+		if ev.Type == domain.EventHarnessMessage && strings.Contains(ev.Message, "helper") {
+			said = append(said, ev.Message)
+		}
+	}
+	if want := []string{"used the helper", "the helper failed"}; !slices.Equal(said, want) {
+		t.Errorf("b's harness said %q, want %q: its second use did not fail once the helper was gone", said, want)
+	}
+	if data, _ := os.ReadFile(uses); string(data) != "first\n" {
+		t.Errorf("the helper recorded %q, want b's first use alone", data)
+	}
+}
+
 // A harness that exits on its own keeps the outcome its exit gives, though a cancel comes while the process it left
 // running, which ignores SIGTERM, is ended over the grace period; that process is gone once the execution ends.
 //
