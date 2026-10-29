@@ -375,6 +375,9 @@ func TestAPIGuardOnEveryRoute(t *testing.T) {
 	control := []guardedRoute{
 		{"POST /harnesses/refresh", "/harnesses/refresh", nil},
 		{"PUT /harnesses/{harnessId}", "/harnesses/claude-code", map[string]any{"path": nil}},
+		{"PUT /templates/{templateId}", "/templates/hf-general", map[string]any{"yaml": "kind: TaskTemplate\n"}},
+		{"DELETE /templates/{templateId}", "/templates/hf-general", nil},
+		{"POST /templates/{templateId}/draft", "/templates/hf-general/draft", map[string]any{"language": "en-US"}},
 		{"POST /tasks", "/tasks", map[string]any{"yaml": task("intruder", "p", "")}},
 		{"POST /tasks/validate", "/tasks/validate", map[string]any{"yaml": task("intruder", "p", "")}},
 		{"POST /tasks/import", "/tasks/import", map[string]any{"yaml": task("imported", "p", "")}},
@@ -401,6 +404,7 @@ func TestAPIGuardOnEveryRoute(t *testing.T) {
 		{"GET /harnesses", "/harnesses", nil},
 		{"GET /tools", "/tools", nil},
 		{"GET /catalog", "/catalog", nil},
+		{"GET /templates", "/templates", nil},
 		{"GET /tasks", "/tasks", nil},
 		{"GET /tasks/{taskId}", "/tasks/finished", nil},
 		{"GET /tasks/{taskId}/export", "/tasks/finished/export", nil},
@@ -1409,23 +1413,25 @@ func formDocument(t *testing.T, id string) map[string]any {
 	return doc
 }
 
-// A new GitHub task selects the built-in issue implementer of this checkout, an agent and not a skill: it is copied
-// whole, with no field left out, it brings the built-in skills it uses, and a task made of its copy, with the agent as
-// its origin, is valid.
+// A new GitHub task, from the built-in template of the GitHub type, selects the built-in issue implementer of this
+// checkout, an agent and not a skill: it is copied whole, with no field left out, it brings the built-in skills it
+// uses, and the task the template builds, with the implementer's copy as its prompt and the agent as its origin, is
+// valid once its repository is set.
 func TestGitHubTypeSelectsTheBuiltinImplementer(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	d := startDaemon(t, home)
-	catalog := d.call("GET", "/catalog", nil, 200)
-	var selected string
-	for _, x := range catalog["taskTypes"].([]any) {
-		if tt := x.(map[string]any); tt["id"] == "github" {
-			selected, _ = tt["selectedAgent"].(string)
+	var selected, template string
+	for _, tp := range d.list("/templates") {
+		if tp["type"] == "github" {
+			selected, _ = tp["selectedAgent"].(string)
+			template, _ = tp["id"].(string)
 		}
 	}
 	if selected != "hf-github-issue-implementer" {
-		t.Fatalf("GET /catalog: the GitHub type selects %q, want hf-github-issue-implementer", selected)
+		t.Fatalf("GET /templates: the GitHub type's template selects %q, want hf-github-issue-implementer", selected)
 	}
+	catalog := d.call("GET", "/catalog", nil, 200)
 	copied := d.builtinAgentCopy(selected)
 	builtinSkills := map[string]bool{}
 	for _, x := range catalog["skills"].([]any) {
@@ -1455,18 +1461,14 @@ func TestGitHubTypeSelectsTheBuiltinImplementer(t *testing.T) {
 
 	repo := t.TempDir()
 	d.call("PATCH", "/settings", map[string]any{"allowedFolders": []any{repo}}, 200)
-	doc := map[string]any{"apiVersion": "harmflow/v1alpha1", "kind": "Task",
-		"metadata": map[string]any{"id": "implement", "name": "Implement GitHub issues", "description": copied["description"]},
-		"spec": map[string]any{
-			"type":    "github",
-			"prompt":  prompt,
-			"origin":  map[string]any{"agent": selected, "hash": copied["hash"]},
-			"skills":  skills,
-			"harness": map[string]any{"preferred": map[string]any{"provider": "claude-code"}},
-			"github": map[string]any{
-				"repositories": []any{map[string]any{"name": "harmflow/example", "localPath": repo}},
-			},
-		}}
+	doc := d.call("POST", "/templates/"+template+"/draft", map[string]any{"language": "en-US"}, 200)["document"].(map[string]any)
+	spec := doc["spec"].(map[string]any)
+	if spec["prompt"] != prompt || !reflect.DeepEqual(spec["origin"], map[string]any{"agent": selected, "hash": copied["hash"]}) ||
+		!reflect.DeepEqual(spec["skills"], skills) || doc["metadata"].(map[string]any)["description"] != copied["description"] {
+		t.Errorf("POST /templates/%s/draft = %v, want the copy of %s, with the agent as its origin", template, doc, selected)
+	}
+	spec["github"].(map[string]any)["repositories"].([]any)[0].(map[string]any)["name"] = "harmflow/example"
+	spec["github"].(map[string]any)["repositories"].([]any)[0].(map[string]any)["localPath"] = repo
 	if v := d.call("POST", "/tasks/validate", map[string]any{"document": doc}, 200); v["valid"] != true {
 		t.Errorf("a task made of the copy of %s fails validation: %v", selected, v["errors"])
 	}

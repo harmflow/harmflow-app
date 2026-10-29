@@ -7,6 +7,9 @@ import _ "embed"
 //go:embed task.schema.json
 var TaskSchema []byte
 
+//go:embed template.schema.json
+var TemplateSchema []byte
+
 //go:embed event.schema.json
 var EventSchema []byte
 
@@ -17,8 +20,9 @@ var ExecutionReportSchema []byte
 var ContextSchema []byte
 
 const (
-	TaskSchemaURL    = "https://harmflow.com/schemas/v1alpha1/task.schema.json"
-	EventSchemaURL   = "https://harmflow.com/schemas/v1alpha1/event.schema.json"
-	ReportSchemaURL  = "https://harmflow.com/schemas/v1alpha1/execution-report.schema.json"
-	ContextSchemaURL = "https://harmflow.com/schemas/v1alpha1/context.schema.json"
+	TaskSchemaURL     = "https://harmflow.com/schemas/v1alpha1/task.schema.json"
+	TemplateSchemaURL = "https://harmflow.com/schemas/v1alpha1/template.schema.json"
+	EventSchemaURL    = "https://harmflow.com/schemas/v1alpha1/event.schema.json"
+	ReportSchemaURL   = "https://harmflow.com/schemas/v1alpha1/execution-report.schema.json"
+	ContextSchemaURL  = "https://harmflow.com/schemas/v1alpha1/context.schema.json"
 )

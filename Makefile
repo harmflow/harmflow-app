@@ -48,7 +48,7 @@ help: ## List the targets
 
 .PHONY: generate
 generate: ## Refresh the code generated from contracts/
-	cp contracts/schemas/task.schema.json contracts/schemas/event.schema.json \
+	cp contracts/schemas/task.schema.json contracts/schemas/template.schema.json contracts/schemas/event.schema.json \
 		contracts/schemas/execution-report.schema.json contracts/schemas/context.schema.json daemon/internal/contracts/
 	pnpm -C desktop generate
 

@@ -1,5 +1,5 @@
-// Package schema validates task documents, execution reports, and events against the embedded copies of
-// contracts/schemas, and locates each problem in the YAML by line and column.
+// Package schema validates task documents, task templates, execution reports, and events against the embedded copies
+// of contracts/schemas, and locates each problem in the YAML by line and column.
 package schema
 
 import (
@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,10 +32,11 @@ type Issue struct {
 	Code   string `json:"code,omitempty"`
 }
 
-// Validator holds the task, execution report, event, and session context schemas, compiled, and the task schema's
-// identifier and skill name.
+// Validator holds the task, template, execution report, event, and session context schemas, compiled, and the task
+// schema's identifier and skill name.
 type Validator struct {
 	task       *jsonschema.Schema
+	template   *jsonschema.Schema
 	identifier *jsonschema.Schema
 	skillName  *jsonschema.Schema
 	report     *jsonschema.Schema
@@ -48,10 +50,11 @@ func New() (*Validator, error) {
 	// An event's timestamp is checked as a date-time; the task and report schemas name no format.
 	c.AssertFormat()
 	for url, raw := range map[string][]byte{
-		contracts.TaskSchemaURL:    contracts.TaskSchema,
-		contracts.ReportSchemaURL:  contracts.ExecutionReportSchema,
-		contracts.EventSchemaURL:   contracts.EventSchema,
-		contracts.ContextSchemaURL: contracts.ContextSchema,
+		contracts.TaskSchemaURL:     contracts.TaskSchema,
+		contracts.TemplateSchemaURL: contracts.TemplateSchema,
+		contracts.ReportSchemaURL:   contracts.ExecutionReportSchema,
+		contracts.EventSchemaURL:    contracts.EventSchema,
+		contracts.ContextSchemaURL:  contracts.ContextSchema,
 	} {
 		doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
 		if err != nil {
@@ -62,6 +65,10 @@ func New() (*Validator, error) {
 		}
 	}
 	task, err := c.Compile(contracts.TaskSchemaURL)
+	if err != nil {
+		return nil, err
+	}
+	template, err := c.Compile(contracts.TemplateSchemaURL)
 	if err != nil {
 		return nil, err
 	}
@@ -85,8 +92,8 @@ func New() (*Validator, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Validator{task: task, identifier: identifier, skillName: skillName, report: report, event: event,
-		context: sessionContext}, nil
+	return &Validator{task: task, template: template, identifier: identifier, skillName: skillName, report: report,
+		event: event, context: sessionContext}, nil
 }
 
 var yamlLine = regexp.MustCompile(`line (\d+)(?::|,)?\s*(?:column (\d+))?`)
@@ -254,6 +261,11 @@ func (v *Validator) ValidateTask(doc any, node *yaml.Node) []Issue {
 	return collect(v.task.Validate(doc), node)
 }
 
+// ValidateTemplate checks a decoded document against template.schema.json; node, when given, locates each issue.
+func (v *Validator) ValidateTemplate(doc any, node *yaml.Node) []Issue {
+	return collect(v.template.Validate(doc), node)
+}
+
 // ValidIdentifier says whether name is an identifier of task.schema.json, the name a task cites an agent by.
 func (v *Validator) ValidIdentifier(name string) bool {
 	return v.identifier.Validate(name) == nil
@@ -304,22 +316,32 @@ func collect(err error, node *yaml.Node) []Issue {
 	walk(ve)
 	seen := map[string]bool{}
 	var out []Issue
-	for _, l := range leaves {
-		path := "/" + strings.Join(l.InstanceLocation, "/")
-		if len(l.InstanceLocation) == 0 {
+	add := func(location []string, text domain.Text) {
+		path := "/" + strings.Join(location, "/")
+		if len(location) == 0 {
 			path = ""
 		}
-		text := kindText(l.ErrorKind)
 		key := path + "|" + text.Message
 		if seen[key] {
-			continue
+			return
 		}
 		seen[key] = true
 		is := Issue{Path: path, Text: text, Code: "schema"}
 		if node != nil {
-			is.Line, is.Column = Locate(node, l.InstanceLocation)
+			is.Line, is.Column = Locate(node, location)
 		}
 		out = append(out, is)
+	}
+	for _, l := range leaves {
+		// A missing property is reported at its own path, where a form shows it, and located at the object that lacks
+		// it, the deepest node the text has.
+		if r, ok := l.ErrorKind.(*kind.Required); ok {
+			for _, name := range r.Missing {
+				add(append(slices.Clip(l.InstanceLocation), name), kindText(&kind.Required{Missing: []string{name}}))
+			}
+			continue
+		}
+		add(l.InstanceLocation, kindText(l.ErrorKind))
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Line != out[j].Line {

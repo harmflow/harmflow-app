@@ -106,8 +106,8 @@ func TestSchemaVersionIsRequired(t *testing.T) {
 	doc, node, _ = ParseYAML([]byte(strings.Replace(versionSecond, "apiVersion: harmflow/v1alpha1\n", "", 1)))
 	issues := v.ValidateTask(doc, node)
 	if len(issues) != 1 || issues[0].Key != "schema_required" || issues[0].Params["properties"] != `"apiVersion"` ||
-		issues[0].Path != "" {
-		t.Errorf("a task with no apiVersion: got %+v, want apiVersion required at the root", issues)
+		issues[0].Path != "/apiVersion" {
+		t.Errorf("a task with no apiVersion: got %+v, want apiVersion required at /apiVersion", issues)
 	}
 	doc, node, _ = ParseYAML([]byte(strings.Replace(versionSecond, "harmflow/v1alpha1", "harmflow/v1", 1)))
 	issues = v.ValidateTask(doc, node)
@@ -288,7 +288,7 @@ func TestTypeRulesNeedTheType(t *testing.T) {
 	}
 }
 
-// Every task has a type. A task with none is told so at its spec, on that line, and an empty
+// Every task has a type. A task with none is told so at its type, on the line of its spec, and an empty
 // type is not one of the types.
 func TestTaskNeedsAType(t *testing.T) {
 	v, _ := New()
@@ -297,8 +297,8 @@ func TestTaskNeedsAType(t *testing.T) {
 	i := slices.IndexFunc(issues, func(is Issue) bool {
 		return is.Key == "schema_required" && is.Params["properties"] == `"type"`
 	})
-	if i < 0 || issues[i].Path != "/spec" || issues[i].Line != 6 {
-		t.Errorf("a task with no type: got %+v, want schema_required naming \"type\" at /spec, on line 6", issues)
+	if i < 0 || issues[i].Path != "/spec/type" || issues[i].Line != 6 {
+		t.Errorf("a task with no type: got %+v, want schema_required naming \"type\" at /spec/type, on line 6", issues)
 	}
 	doc, node, _ = ParseYAML([]byte(strings.Replace(valid, "type: general", `type: ""`, 1)))
 	issues = v.ValidateTask(doc, node)

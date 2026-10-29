@@ -128,6 +128,25 @@ func (a *App) validate(ctx context.Context, in TaskInput, mode catalogMode) *Val
 	return r
 }
 
+// validateTemplate checks a template file against template.schema.json, and gives the document it decodes to; readErr
+// is the error that kept the file from being read.
+func (a *App) validateTemplate(content []byte, readErr error) (*ValidationResult, map[string]any) {
+	r := &ValidationResult{Errors: []schema.Issue{}, Warnings: []schema.Issue{}}
+	if readErr != nil {
+		r.Errors = append(r.Errors, schema.Issue{Text: domain.TextOf(readErr)})
+		return r, nil
+	}
+	value, node, issues := schema.ParseYAML(content)
+	if len(issues) > 0 {
+		r.Errors = issues
+		return r, nil
+	}
+	r.node = node
+	r.Errors = append(r.Errors, a.d.Validator.ValidateTemplate(value, node)...)
+	doc, _ := value.(map[string]any)
+	return r, doc
+}
+
 func (r *ValidationResult) addError(path string, text domain.Text) {
 	is := schema.Issue{Path: path, Text: text, Code: "semantic"}
 	is.Line, is.Column = schema.LocatePointer(r.node, path)

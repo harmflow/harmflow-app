@@ -147,6 +147,15 @@ type ResolvedItem struct {
 	Description string
 }
 
+// TemplateFile is a task template's file: its name without the extension, its path, and its content, or the error that
+// kept it from being read.
+type TemplateFile struct {
+	Name    string
+	Path    string
+	Content []byte
+	Err     error
+}
+
 // RunRequest is everything an adapter needs to start one attempt.
 type RunRequest struct {
 	ExecutionID    string

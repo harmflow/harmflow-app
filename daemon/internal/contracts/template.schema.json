@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harmflow.com/schemas/v1alpha1/template.schema.json",
+  "title": "HarmFlow task template",
+  "description": "A named starting point for new tasks, stored as one YAML file per template: one task type, and the values a new task of that type starts with. A template never runs. Every field of a task's spec it sets holds a value valid for that field, as task.schema.json checks it, while a value a task requires may be left unset, at any level, for the task editor to ask for: the definitions below that a task requires a value in are restated without those requirements, and every other definition is the task schema's. A template never sets a task's identifier, name, or enabled state, nor the origin of a copied agent.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": { "const": "harmflow/v1alpha1" },
+    "kind": { "const": "TaskTemplate" },
+    "metadata": { "$ref": "#/$defs/metadata" },
+    "spec": { "$ref": "#/$defs/spec" }
+  },
+  "$defs": {
+    "localizedName": {
+      "description": "A name in each language of the interface; a task created from the template takes the one of the language it is created in.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pt-BR", "en-US", "es-ES"],
+      "properties": {
+        "pt-BR": { "$ref": "task.schema.json#/$defs/metadata/properties/name" },
+        "en-US": { "$ref": "task.schema.json#/$defs/metadata/properties/name" },
+        "es-ES": { "$ref": "task.schema.json#/$defs/metadata/properties/name" }
+      }
+    },
+    "localizedDescription": {
+      "description": "What the template is for, in each language of the interface.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pt-BR", "en-US", "es-ES"],
+      "properties": {
+        "pt-BR": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "en-US": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "es-ES": { "type": "string", "minLength": 1, "maxLength": 2000 }
+      }
+    },
+    "metadata": {
+      "description": "The template's own identifier, name, and description, none of which a task created from it keeps but its name. A built-in template's identifier carries the hf- prefix and is its file's name.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "description"],
+      "properties": {
+        "id": { "$ref": "task.schema.json#/$defs/identifier" },
+        "name": { "$ref": "#/$defs/localizedName" },
+        "description": { "$ref": "#/$defs/localizedDescription" }
+      }
+    },
+    "spec": {
+      "description": "The task type, and the fields of a task's spec a new task of it starts with. Instead of a prompt, a template may name the agent its tasks select: a task created from it starts as that agent's copy, with the agent as its origin, as selecting the agent in the task editor makes it, and then takes the fields the template sets itself, which keep the template's values.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "$ref": "task.schema.json#/$defs/taskType" },
+        "selectedAgent": {
+          "description": "The agent a task created from the template selects, by name: built-in ones carry the hf- prefix, the user's live in the harness configuration. When this machine lacks it, the task starts with no prompt.",
+          "$ref": "task.schema.json#/$defs/identifier"
+        },
+        "prompt": { "$ref": "task.schema.json#/$defs/spec/properties/prompt" },
+        "agents": { "$ref": "task.schema.json#/$defs/spec/properties/agents" },
+        "skills": { "$ref": "task.schema.json#/$defs/spec/properties/skills" },
+        "workspace": { "$ref": "task.schema.json#/$defs/workspace" },
+        "schedule": { "$ref": "task.schema.json#/$defs/schedule" },
+        "concurrency": { "$ref": "task.schema.json#/$defs/concurrency" },
+        "harness": { "$ref": "#/$defs/harness" },
+        "permissions": { "$ref": "task.schema.json#/$defs/permissions" },
+        "execution": { "$ref": "task.schema.json#/$defs/execution" },
+        "notifications": { "$ref": "task.schema.json#/$defs/notifications" },
+        "github": { "$ref": "#/$defs/github" },
+        "script": { "$ref": "#/$defs/script" }
+      },
+      "not": { "required": ["prompt", "selectedAgent"] },
+      "allOf": [
+        {
+          "if": { "required": ["type"], "properties": { "type": { "const": "script" } } },
+          "then": {
+            "properties": {
+              "prompt": false,
+              "selectedAgent": false,
+              "agents": false,
+              "skills": false,
+              "workspace": false,
+              "harness": false,
+              "github": false,
+              "execution": { "properties": { "allowExtraUsage": false } }
+            }
+          },
+          "else": { "properties": { "script": false } }
+        },
+        {
+          "if": { "required": ["type"], "properties": { "type": { "const": "general" } } },
+          "then": { "not": { "required": ["github"] } }
+        }
+      ]
+    },
+    "harnessProfile": {
+      "description": "A task's harness profile, whose provider a template may leave unset.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "$ref": "task.schema.json#/$defs/harnessProfile/properties/provider" },
+        "model": { "$ref": "task.schema.json#/$defs/harnessProfile/properties/model" },
+        "effort": { "$ref": "task.schema.json#/$defs/harnessProfile/properties/effort" }
+      }
+    },
+    "harness": {
+      "description": "A task's harness selection, whose preferred profile a template may leave unset.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preferred": { "$ref": "#/$defs/harnessProfile" },
+        "fallback": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "on": { "$ref": "task.schema.json#/$defs/harness/properties/fallback/properties/on" },
+            "candidates": { "type": "array", "items": { "$ref": "#/$defs/harnessProfile" } },
+            "maxSwitches": { "$ref": "task.schema.json#/$defs/harness/properties/fallback/properties/maxSwitches" }
+          }
+        }
+      }
+    },
+    "repositoryTarget": {
+      "description": "A repository a GitHub task works, whose name and local path a template may leave unset.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "task.schema.json#/$defs/repositoryTarget/properties/name" },
+        "localPath": { "$ref": "task.schema.json#/$defs/repositoryTarget/properties/localPath" },
+        "baseBranch": { "$ref": "task.schema.json#/$defs/repositoryTarget/properties/baseBranch" }
+      }
+    },
+    "github": {
+      "description": "The parameters of the github type, whose repositories a template may leave unset.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repositories": { "type": "array", "items": { "$ref": "#/$defs/repositoryTarget" }, "minItems": 1 },
+        "queue": { "$ref": "task.schema.json#/$defs/github/properties/queue" },
+        "delivery": { "$ref": "task.schema.json#/$defs/github/properties/delivery" }
+      }
+    },
+    "script": {
+      "description": "The parameters of the script type, whose program a template may leave unset; it never sets both command and inline.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "command": { "$ref": "task.schema.json#/$defs/script/properties/command" },
+        "inline": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "interpreter": { "$ref": "task.schema.json#/$defs/script/properties/inline/properties/interpreter" },
+            "source": { "$ref": "task.schema.json#/$defs/script/properties/inline/properties/source" }
+          }
+        },
+        "workingDirectory": { "$ref": "task.schema.json#/$defs/script/properties/workingDirectory" },
+        "environment": { "$ref": "task.schema.json#/$defs/script/properties/environment" },
+        "systems": { "$ref": "task.schema.json#/$defs/script/properties/systems" }
+      },
+      "not": { "required": ["command", "inline"] }
+    }
+  }
+}

@@ -84,3 +84,33 @@ func TestReadAgentCopyForms(t *testing.T) {
 		t.Error("ReadAgentCopy of a missing file = nil error, want one")
 	}
 }
+
+// The templates under a root are its templates/*.yaml files, sorted by name, each with its content; a folder, a file
+// of another extension, and a missing directory give none.
+func TestTemplates(t *testing.T) {
+	root := t.TempDir()
+	if got := (Dir{Root: root}).Templates(); len(got) != 0 {
+		t.Errorf("Templates() with no templates/ directory = %v, want none", got)
+	}
+	dir := filepath.Join(root, "templates")
+	for _, p := range []string{filepath.Join(dir, "hf-script.yaml"), filepath.Join(dir, "hf-general.yaml"), filepath.Join(dir, "notes.md"),
+		filepath.Join(dir, "nested.yaml", "inner.yaml")} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("kind: "+filepath.Base(p)+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := (Dir{Root: root, Builtin: true}).Templates()
+	var names []string
+	for _, f := range got {
+		names = append(names, f.Name)
+		if f.Err != nil || string(f.Content) != "kind: "+f.Name+".yaml\n" || f.Path != filepath.Join(dir, f.Name+".yaml") {
+			t.Errorf("Templates() gave %+v, want %s.yaml's path and content", f, f.Name)
+		}
+	}
+	if want := []string{"hf-general", "hf-script"}; !slices.Equal(names, want) {
+		t.Errorf("Templates() names = %v, want %v", names, want)
+	}
+}

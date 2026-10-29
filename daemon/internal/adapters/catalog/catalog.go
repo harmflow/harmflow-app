@@ -130,7 +130,8 @@ func listOf(v any) []string {
 	return nil
 }
 
-// Dir lists agents (<dir>/agents/*.md) and skills (<dir>/skills/*/SKILL.md) of one root.
+// Dir lists agents (<dir>/agents/*.md), skills (<dir>/skills/*/SKILL.md), and task templates
+// (<dir>/templates/*.yaml) of one root.
 type Dir struct {
 	Root    string
 	Builtin bool
@@ -183,6 +184,23 @@ func (d Dir) Items(kind string) []ports.ResolvedItem {
 		if it, ok := d.Item(kind, n); ok {
 			out = append(out, it)
 		}
+	}
+	return out
+}
+
+// Templates lists the task template files under the root, sorted by name: each with its content, or with the error
+// that kept it from being read. A missing or unreadable directory has none.
+func (d Dir) Templates() []ports.TemplateFile {
+	dir := filepath.Join(d.Root, "templates")
+	entries, _ := os.ReadDir(dir) // sorted by name; a missing or unreadable directory has no templates
+	var out []ports.TemplateFile
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
+			continue
+		}
+		f := ports.TemplateFile{Name: strings.TrimSuffix(e.Name(), ".yaml"), Path: filepath.Join(dir, e.Name())}
+		f.Content, f.Err = os.ReadFile(f.Path)
+		out = append(out, f)
 	}
 	return out
 }
