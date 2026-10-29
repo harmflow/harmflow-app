@@ -382,6 +382,7 @@ export const ptBR: Resources = {
     repository_unprotected: "{{repository}}: a branch base não está protegida contra merge sem revisão",
     report_not_json: "report.json não é um JSON válido; foi ignorado",
     report_schema_invalid: "report.json não segue o seu schema ({{path}}: {{detail}}); foi ignorado",
+    report_not_decodable: "report.json não pode ser decodificado ({{detail}}); foi ignorado",
     step_checking_harness: "Verificando o harness",
     step_preparing_workspace: "Preparando o workspace",
     step_starting_harness: "Iniciando {{harness}}",

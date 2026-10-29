@@ -383,6 +383,7 @@ export const esES: Resources = {
     repository_unprotected: "{{repository}}: la rama base no está protegida contra merges sin revisión",
     report_not_json: "report.json no es un JSON válido; se ignoró",
     report_schema_invalid: "report.json no sigue su schema ({{path}}: {{detail}}); se ignoró",
+    report_not_decodable: "report.json no se puede decodificar ({{detail}}); se ignoró",
     step_checking_harness: "Comprobando el harness",
     step_preparing_workspace: "Preparando el espacio de trabajo",
     step_starting_harness: "Iniciando {{harness}}",

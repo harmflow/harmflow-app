@@ -1214,7 +1214,10 @@ func (r *run) outcomeFromReport() (domain.ExecutionStatus, domain.Text) {
 	}
 	var rep domain.ExecutionReport
 	if err := json.Unmarshal(data, &rep); err != nil {
-		return domain.StatusCompleted, domain.Text{}
+		text := domain.T("report_not_decodable", "report.json cannot be decoded ({{detail}}); it was ignored",
+			"detail", err.Error())
+		r.warn(domain.Warning{Code: domain.WarningOther, Text: text}, "", false)
+		return domain.StatusNeedsAttention, text
 	}
 	eventlog.RedactFields(&rep) // the agent's words, before the record, the ledger, or the reason take any of them
 	r.applyReport(&rep)

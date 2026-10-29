@@ -137,8 +137,8 @@ func TestCancelledSelectionCountsNoFailure(t *testing.T) {
 	}
 }
 
-// harmflow-app#312: an ignored report loses its work items' results, so the execution needs attention, with the reason
-// it was ignored, and every item its session selected counts a failure.
+// harmflow-app#312 and #440: an ignored report loses its work items' results, so the execution needs attention, with
+// the reason it was ignored, and every item its session selected counts a failure.
 func TestIgnoredReportNeedsAttention(t *testing.T) {
 	for _, tc := range []struct {
 		name, report, key string
@@ -146,6 +146,9 @@ func TestIgnoredReportNeedsAttention(t *testing.T) {
 		{"not following its schema", `{"outcome":"completed","workItems":[{"key":"o/r#1","outcome":"completed",` +
 			`"pullRequest":"https://github.com/o/r/pull/9"}]}`, "report_schema_invalid"},
 		{"not JSON", `{"outcome":`, "report_not_json"},
+		// The schema bounds an issue number only from below, and no int holds this one.
+		{"not fitting its fields", `{"outcome":"completed","workItems":[{"key":"o/r#1","outcome":"completed",` +
+			`"issueNumber":100000000000000000000}]}`, "report_not_decodable"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newEnv(t)

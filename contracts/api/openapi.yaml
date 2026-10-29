@@ -894,6 +894,7 @@ components:
         - repository_unprotected
         - report_not_json
         - report_schema_invalid
+        - report_not_decodable
         # Execution steps and why an attempt started
         - step_checking_harness
         - step_preparing_workspace
