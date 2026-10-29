@@ -499,3 +499,13 @@ func OutputIn(ctx context.Context, timeout time.Duration, env []string, dir, nam
 	}
 	return out.String(), errb.String(), err
 }
+
+// Help runs a CLI's help probe as Output does and returns what it printed. read is false when the probe still ran at
+// its timeout, so the help may be cut short and says nothing for sure about the flags it would list; a probe that ended
+// by itself, even with an error, was read in full.
+func Help(ctx context.Context, timeout time.Duration, env []string, name string, args ...string) (help string, read bool) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	help, _, err := Output(ctx, timeout, env, name, args...)
+	return help, err == nil || !errors.Is(ctx.Err(), context.DeadlineExceeded)
+}

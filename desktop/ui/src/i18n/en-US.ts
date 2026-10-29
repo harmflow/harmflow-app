@@ -451,6 +451,7 @@ export const enUS = {
     gh_not_found: "the GitHub CLI (gh) was not found; the GitHub task type needs it",
     command_failed: "{{command}} failed: {{detail}}",
     harness_feature_missing: "this {{harness}} version lacks {{feature}}, which HarmFlow needs",
+    harness_help_timed_out: "the {{harness}} {{command}} check timed out, so the flags it has are unknown; the first attempt proves them",
     harness_version_below_minimum: "{{harness}} {{version}} is older than {{minimum}}, the oldest version line HarmFlow supports",
     claude_not_signed_in: "Claude Code is not signed in; run `claude` in a terminal and sign in",
     quota_report_unrecognized: "{{harness}}'s usage report names no plan window HarmFlow can read",

@@ -56,6 +56,7 @@ type Adapter struct {
 	server      *appServer
 	reload      bool          // the next skills/list carries forceReload
 	listTimeout time.Duration // a call to the app server; zero is defaultListTimeout
+	helpTimeout time.Duration // the `exec --help` check; zero is the probe's own limit
 }
 
 var (
@@ -146,10 +147,22 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 		info.Version = m[1]
 		info.Readiness = "version_identified"
 	}
-	// Help that cannot be read lists no flags, so each feature reads as missing.
-	help, _, _ := procutil.Output(ctx, a.probeTimeout(15*time.Second), a.Env, info.Path, "exec", "--help")
+	// Help read in full that does not list a flag reads as a version that lacks it. Help the check could not read within
+	// its limit leaves the flags unknown instead: a slow check does not turn the harness away, and the first attempt
+	// proves them.
+	helpTimeout := a.helpTimeout
+	if helpTimeout == 0 {
+		helpTimeout = a.probeTimeout(15 * time.Second)
+	}
+	help, read := procutil.Help(ctx, helpTimeout, a.Env, info.Path, "exec", "--help")
 	for _, f := range append(requiredFlags, "--add-dir", "--ephemeral", "--model", "--color") {
 		info.Features[f] = strings.Contains(help, f)
+	}
+	info.FeaturesUnknown = !read
+	if info.FeaturesUnknown {
+		info.SetDiagnostic(domain.T("harness_help_timed_out",
+			"the {{harness}} {{command}} check timed out, so the flags it has are unknown; the first attempt proves them",
+			"harness", Name, "command", "exec --help"))
 	}
 	// The app server lists the user's skills. Codex 0.163.0 marks the command experimental, though skills/list is in its
 	// stable schema; the help lists it either way.
@@ -157,7 +170,7 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 	info.Features["app-server"] = strings.Contains(top, "app-server")
 	info.VersionSupport = "supported"
 	for _, f := range requiredFlags {
-		if !info.Features[f] {
+		if !info.HasFeature(f) {
 			info.VersionSupport = "below_minimum"
 			info.Readiness = "not_ready"
 			info.SetDiagnostic(domain.T("harness_feature_missing", "this {{harness}} version lacks {{feature}}, which HarmFlow needs",
@@ -196,13 +209,17 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 		info.SetDiagnostic(domain.T("not_signed_in", "{{name}} is not signed in; run `{{command}}` in a terminal",
 			"name", Name, "command", "codex login"))
 	default:
-		// The CLI cannot tell; let the first execution prove it rather than blocking on an unknown.
+		// The CLI cannot tell; let the first execution prove it rather than blocking on an unknown. The unknown sign-in
+		// shows in the authentication field, so a help check that timed out keeps the diagnostic.
 		info.Readiness = "ready"
-		info.SetDiagnostic(domain.T("authentication_unverified", "authentication could not be verified"))
+		if !info.FeaturesUnknown {
+			info.SetDiagnostic(domain.T("authentication_unverified", "authentication could not be verified"))
+		}
 	}
 	if info.Ready() {
 		// Requirements that cannot be read leave the harness as it would be with none. An unknown sign-in still shows in
-		// the authentication field, so a disallowed setting takes the diagnostic.
+		// the authentication field, so a disallowed setting takes the diagnostic, and it does over a help check that
+		// timed out too: a setting Codex will not run with outlasts a slow check, which the next one may read.
 		if read, err := a.readRequirements(ctx, info); err == nil {
 			if t, found := read.disallowed(); found {
 				info.SetDiagnostic(t)
@@ -425,10 +442,10 @@ func (a *Adapter) UserItems(ctx context.Context, info ports.HarnessInfo, kind, w
 // instructions, which name the built-ins as copied into the execution's directory.
 func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.Invocation, ports.OutputParser, error) {
 	args := []string{"exec", "--json", "--skip-git-repo-check", "--cd", req.WorkDir}
-	if info.Features["--ephemeral"] {
+	if info.HasFeature("--ephemeral") {
 		args = append(args, "--ephemeral")
 	}
-	if info.Features["--color"] {
+	if info.HasFeature("--color") {
 		args = append(args, "--color", "never")
 	}
 	if req.Model != "" && req.Model != domain.DefaultModel {
@@ -475,7 +492,7 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 	}
 	seen := map[string]bool{req.WorkDir: true}
 	for _, d := range dirs {
-		if d != "" && !seen[d] && info.Features["--add-dir"] {
+		if d != "" && !seen[d] && info.HasFeature("--add-dir") {
 			seen[d] = true
 			args = append(args, "--add-dir", d)
 		}

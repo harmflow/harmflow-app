@@ -109,6 +109,21 @@ describe("HarnessRow", () => {
         "approval_policy = on-request, untrusted",
     );
   });
+
+  it("shows a ready harness whose help check timed out in a warning tone, saying so (harmflow-app#329)", () => {
+    const helpTimedOut: Harness = {
+      ...ready,
+      diagnostic: "the Claude Code --help check timed out",
+      diagnosticKey: "harness_help_timed_out",
+      diagnosticParams: { harness: "Claude Code", command: "--help" },
+    };
+    expect(readinessTone(helpTimedOut)).toBe("warning");
+    const html = renderToString(<HarnessRow harness={helpTimedOut} />);
+    expect(html).toContain("chip--warning");
+    expect(html).toContain(
+      "the Claude Code --help check timed out, so the flags it has are unknown; the first attempt proves them",
+    );
+  });
 });
 
 // The inventory's rows, label to text, as rendered.

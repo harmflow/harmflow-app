@@ -110,12 +110,19 @@ type HarnessInfo struct {
 	DiagnosticKey       string            `json:"diagnosticKey,omitempty"`
 	DiagnosticParams    map[string]string `json:"diagnosticParams,omitempty"`
 	Features            map[string]bool   `json:"-"`
+	// FeaturesUnknown is true when the help that lists the CLI's flags could not be read within its check's limit, so
+	// Features cannot tell a flag the CLI lacks from one the help did not get to.
+	FeaturesUnknown bool `json:"-"`
 }
 
 // SetDiagnostic records what is wrong with the harness; Diagnostic is the en-US text.
 func (h *HarnessInfo) SetDiagnostic(t domain.Text) {
 	h.Diagnostic, h.DiagnosticKey, h.DiagnosticParams = t.Message, t.Key, t.Params
 }
+
+// HasFeature reports whether the CLI has feature, as its help listed it. With FeaturesUnknown, every feature counts as
+// there: the first attempt proves the ones it uses, and one that fails on a missing flag fails over as any attempt does.
+func (h HarnessInfo) HasFeature(feature string) bool { return h.FeaturesUnknown || h.Features[feature] }
 
 // DiagnosticText is the text SetDiagnostic recorded.
 func (h HarnessInfo) DiagnosticText() domain.Text {

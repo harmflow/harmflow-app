@@ -462,6 +462,8 @@ export const esES: Resources = {
     gh_not_found: "no se encontró la CLI de GitHub (gh); el tipo de tarea GitHub la necesita",
     command_failed: "{{command}} falló: {{detail}}",
     harness_feature_missing: "esta versión de {{harness}} no tiene {{feature}}, que HarmFlow necesita",
+    harness_help_timed_out:
+      "la comprobación de {{command}} de {{harness}} agotó el tiempo, así que las flags que tiene son desconocidas; el primer intento las comprueba",
     harness_version_below_minimum: "{{harness}} {{version}} es anterior a la {{minimum}}, la línea de versiones más antigua que admite HarmFlow",
     claude_not_signed_in: "Claude Code no tiene la sesión iniciada; ejecuta `claude` en una terminal e inicia sesión",
     quota_report_unrecognized: "el informe de uso de {{harness}} no nombra ninguna ventana del plan que HarmFlow pueda leer",
