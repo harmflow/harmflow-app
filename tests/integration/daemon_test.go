@@ -131,7 +131,7 @@ func startDaemonOn(t *testing.T, home, keychain string, env ...string) *daemon {
 	}
 	watchDaemon(t, cmd.Process.Pid, false)
 	d := &daemon{t: t, home: home, cmd: cmd}
-	if d.base, d.token = awaitRuntime(home, 20*time.Second); d.base != "" && keychain != "" {
+	if d.base, d.token = awaitRuntime(home, runtimeWait); d.base != "" && keychain != "" {
 		d.token = strings.TrimSpace(string(keychainToken(t, keychain))) // read as a client reads it
 	}
 	if d.base == "" {
@@ -143,6 +143,9 @@ func startDaemonOn(t *testing.T, home, keychain string, env ...string) *daemon {
 	d.useFakeHarnesses()
 	return d
 }
+
+// runtimeWait is how long a test waits for a daemon it started to write its address and token.
+const runtimeWait = 20 * time.Second
 
 // awaitRuntime waits until the daemon at home has written its address and token, and returns its API's base URL and
 // the token: empty when it has not within the timeout.
@@ -3722,7 +3725,7 @@ func startDetachedDaemon(t *testing.T, home string) (*daemon, int, func()) {
 		stopDetachedDaemon(pid)
 	})
 	d := &daemon{t: t, home: home}
-	if d.base, d.token = awaitRuntime(home, 20*time.Second); d.base == "" {
+	if d.base, d.token = awaitRuntime(home, runtimeWait); d.base == "" {
 		t.Fatalf("the daemon %d wrote no runtime file:\n%s", pid, out.String())
 	}
 	d.useFakeHarnesses()

@@ -27,6 +27,12 @@ const binaryEnv = "HARMFLOW_TEST_BINARY"
 // holdEnv+"_DETACHED" is set when the daemon is started through runStarter.
 const holdEnv = "HARMFLOW_TEST_HOLD"
 
+// holdLimit is the time limit of the run TestNoDaemonOutlivesAnInterruptedRun lets time out. Go counts it from before
+// TestHoldADaemon starts its daemon, so it covers what startDaemon allows the daemon to write its address and token,
+// and a margin to point the daemon at the stand-ins and write the PID: on a loaded machine, a shorter fixed limit ends
+// the run before it holds a daemon, which leaves nothing to test.
+const holdLimit = runtimeWait + 10*time.Second
+
 // watchDaemon ties the daemon with the PID to the test process. A watchdog, the test binary run as one, holds the read
 // end of a pipe whose write end only the test process holds; the kernel closes it when the test process exits, however
 // it ends, and the watchdog then ends the daemon if it still runs. The test's cleanup closes the pipe itself, so a
@@ -160,7 +166,7 @@ func TestNoDaemonOutlivesAnInterruptedRun(t *testing.T) {
 		{"killed", false, nil, signalling(syscall.SIGKILL)},
 		{"killed with a detached daemon", true, nil, signalling(syscall.SIGKILL)},
 		{"interrupted", false, nil, signalling(syscall.SIGINT)},
-		{"timed out", false, []string{"-test.timeout=10s"}, nil},
+		{"timed out", false, []string{"-test.timeout=" + holdLimit.String()}, nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -182,7 +188,7 @@ func TestNoDaemonOutlivesAnInterruptedRun(t *testing.T) {
 				<-exited
 			})
 			var pid int
-			for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline) && pid == 0; time.Sleep(50 * time.Millisecond) {
+			for deadline := time.Now().Add(holdLimit); time.Now().Before(deadline) && pid == 0; time.Sleep(50 * time.Millisecond) {
 				data, _ := os.ReadFile(pidFile)
 				pid, _ = strconv.Atoi(string(data))
 			}
@@ -199,9 +205,10 @@ func TestNoDaemonOutlivesAnInterruptedRun(t *testing.T) {
 			if c.end != nil {
 				c.end(run.Process)
 			}
+			// A run that times out ends only once its limit has passed, which began before it wrote the PID.
 			select {
 			case <-exited:
-			case <-time.After(30 * time.Second):
+			case <-time.After(holdLimit + 30*time.Second):
 				t.Fatalf("the run did not end:\n%s", out.String())
 			}
 			for deadline := time.Now().Add(15 * time.Second); processIdentity(pid) == id; time.Sleep(100 * time.Millisecond) {
