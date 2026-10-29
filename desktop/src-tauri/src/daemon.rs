@@ -431,12 +431,18 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn daemon_starts_in_its_own_process_group() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("harmflow-spawn-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let bin = dir.join("harmflowd");
-        std::fs::write(&bin, "#!/bin/sh\nexec sleep 60\n").unwrap();
-        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // A shell of its own writes the stand-in and exits before the spawn, so this process never holds it open for
+        // writing. Were it to, a fork another test makes beside this one would keep that descriptor until its exec, and
+        // on Linux executing a file that any process holds open for writing fails with "Text file busy".
+        let wrote = Command::new("/bin/sh")
+            .args(["-c", r#"printf '#!/bin/sh\nexec sleep 60\n' > "$1" && chmod 755 "$1""#, "sh"])
+            .arg(&bin)
+            .status()
+            .unwrap();
+        assert!(wrote.success(), "the stand-in for harmflowd was not written");
         let pgid = |pid: u32| -> Option<u32> {
             let out = Command::new("/bin/ps").args(["-o", "pgid=", "-p", &pid.to_string()]).output().ok()?;
             String::from_utf8_lossy(&out.stdout).trim().parse().ok()
