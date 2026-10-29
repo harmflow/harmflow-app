@@ -2242,12 +2242,14 @@ func TestRetentionExpiresTheLogAtStart(t *testing.T) {
 	}
 }
 
-// Claude Code exhausts its quota; Codex finishes the same execution.
+// Claude Code selects a work item and exhausts its quota; Codex finishes the same execution, in the same workspace and
+// on the same work item.
 func TestFailoverAcrossHarnesses(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	_ = os.MkdirAll(filepath.Join(d.home, "codex"), 0o700)
 	_ = os.WriteFile(filepath.Join(d.home, "codex", "config.toml"), []byte("model = \"gpt-from-config\"\n"), 0o600)
-	d.call("POST", "/tasks", map[string]any{"yaml": task("failover", "SCENARIO=quota",
+	const prompt = "SCENARIO=quota ITEM=o/r#11"
+	d.call("POST", "/tasks", map[string]any{"yaml": task("failover", prompt,
 		"    fallback:\n      candidates:\n        - provider: codex\n")}, 201)
 	run := d.call("POST", "/tasks/failover/run", nil, 202)
 	x := d.waitStatus(run["executionId"].(string), "completed", "failed")
@@ -2300,12 +2302,50 @@ func TestFailoverAcrossHarnesses(t *testing.T) {
 	// Each attempt keeps the prompt it sent and its own session context, under the contract's names.
 	c1, _ := a1["sessionContext"].(string)
 	c2, _ := a2["sessionContext"].(string)
-	if a1["prompt"] != "SCENARIO=quota" || a2["prompt"] != "SCENARIO=quota" {
+	if a1["prompt"] != prompt || a2["prompt"] != prompt {
 		t.Errorf("prompts %q and %q", a1["prompt"], a2["prompt"])
 	}
 	if !strings.HasPrefix(c1, "This session is run by HarmFlow") || strings.Contains(c1, "continuing the same execution") ||
 		!strings.Contains(c2, "continuing the same execution") {
 		t.Errorf("session contexts:\n%s\n---\n%s", c1, c2)
+	}
+	// harmflow-app#308: the second attempt works in the first one's workspace, and on its work item, which the
+	// context.json it got names as the first attempt's.
+	workspace := func(context string) string {
+		_, rest, _ := strings.Cut(context, "\nWorkspace: ")
+		path, _, _ := strings.Cut(rest, "\n")
+		return path
+	}
+	if w1, w2 := workspace(c1), workspace(c2); w1 == "" || w2 != w1 || x["workspacePath"] != w1 {
+		t.Errorf("workspaces %q and %q, the execution's %v; want one", w1, w2, x["workspacePath"])
+	}
+	dir, _ := x["executionDir"].(string)
+	data, err := os.ReadFile(filepath.Join(dir, "context.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ctx struct {
+		Execution struct {
+			Attempt int `json:"attempt"`
+		} `json:"execution"`
+		Paths struct {
+			Workspace string `json:"workspace"`
+		} `json:"paths"`
+		PreviousAttempts []struct {
+			Number    int `json:"number"`
+			WorkItems []struct {
+				Key string `json:"key"`
+			} `json:"workItems"`
+		} `json:"previousAttempts"`
+	}
+	if err := json.Unmarshal(data, &ctx); err != nil {
+		t.Fatal(err)
+	}
+	prev := ctx.PreviousAttempts
+	if ctx.Execution.Attempt != 2 || ctx.Paths.Workspace != workspace(c1) || len(prev) != 1 || prev[0].Number != 1 ||
+		len(prev[0].WorkItems) != 1 || prev[0].WorkItems[0].Key != "o/r#11" || x["workItem"] != "o/r#11" {
+		t.Errorf("the second attempt's context.json does not give it the first one's workspace %q and work item o/r#11 "+
+			"(the execution's is %v):\n%s", workspace(c1), x["workItem"], data)
 	}
 }
 

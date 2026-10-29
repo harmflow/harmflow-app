@@ -13,8 +13,12 @@ var EventSchema []byte
 //go:embed execution-report.schema.json
 var ExecutionReportSchema []byte
 
+//go:embed context.schema.json
+var ContextSchema []byte
+
 const (
-	TaskSchemaURL   = "https://harmflow.com/schemas/v1alpha1/task.schema.json"
-	EventSchemaURL  = "https://harmflow.com/schemas/v1alpha1/event.schema.json"
-	ReportSchemaURL = "https://harmflow.com/schemas/v1alpha1/execution-report.schema.json"
+	TaskSchemaURL    = "https://harmflow.com/schemas/v1alpha1/task.schema.json"
+	EventSchemaURL   = "https://harmflow.com/schemas/v1alpha1/event.schema.json"
+	ReportSchemaURL  = "https://harmflow.com/schemas/v1alpha1/execution-report.schema.json"
+	ContextSchemaURL = "https://harmflow.com/schemas/v1alpha1/context.schema.json"
 )

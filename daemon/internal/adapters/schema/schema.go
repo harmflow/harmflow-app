@@ -31,14 +31,15 @@ type Issue struct {
 	Code   string `json:"code,omitempty"`
 }
 
-// Validator holds the task, execution report, and event schemas, compiled, and the task schema's identifier and skill
-// name.
+// Validator holds the task, execution report, event, and session context schemas, compiled, and the task schema's
+// identifier and skill name.
 type Validator struct {
 	task       *jsonschema.Schema
 	identifier *jsonschema.Schema
 	skillName  *jsonschema.Schema
 	report     *jsonschema.Schema
 	event      *jsonschema.Schema
+	context    *jsonschema.Schema
 }
 
 // New compiles the embedded schemas; an error means an embedded schema does not compile.
@@ -47,9 +48,10 @@ func New() (*Validator, error) {
 	// An event's timestamp is checked as a date-time; the task and report schemas name no format.
 	c.AssertFormat()
 	for url, raw := range map[string][]byte{
-		contracts.TaskSchemaURL:   contracts.TaskSchema,
-		contracts.ReportSchemaURL: contracts.ExecutionReportSchema,
-		contracts.EventSchemaURL:  contracts.EventSchema,
+		contracts.TaskSchemaURL:    contracts.TaskSchema,
+		contracts.ReportSchemaURL:  contracts.ExecutionReportSchema,
+		contracts.EventSchemaURL:   contracts.EventSchema,
+		contracts.ContextSchemaURL: contracts.ContextSchema,
 	} {
 		doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
 		if err != nil {
@@ -79,7 +81,12 @@ func New() (*Validator, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Validator{task: task, identifier: identifier, skillName: skillName, report: report, event: event}, nil
+	sessionContext, err := c.Compile(contracts.ContextSchemaURL)
+	if err != nil {
+		return nil, err
+	}
+	return &Validator{task: task, identifier: identifier, skillName: skillName, report: report, event: event,
+		context: sessionContext}, nil
 }
 
 var yamlLine = regexp.MustCompile(`line (\d+)(?::|,)?\s*(?:column (\d+))?`)
@@ -266,6 +273,11 @@ func (v *Validator) ValidateReport(doc any) []Issue {
 // ValidateEvent checks an event, decoded from the JSON its log line or SSE frame carries, against event.schema.json.
 func (v *Validator) ValidateEvent(doc any) []Issue {
 	return collect(v.event.Validate(doc), nil)
+}
+
+// ValidateContext checks a context.json the daemon wrote against context.schema.json.
+func (v *Validator) ValidateContext(doc any) []Issue {
+	return collect(v.context.Validate(doc), nil)
 }
 
 var printer = message.NewPrinter(language.English)

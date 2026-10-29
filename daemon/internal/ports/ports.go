@@ -332,6 +332,16 @@ type WorkspaceReader interface {
 	Mark(ctx context.Context, workspace string) WorkspaceMark
 	// Changes lists the files changed in the workspace since mark.
 	Changes(ctx context.Context, workspace string, mark WorkspaceMark) *domain.Checkpoint
+	// Heads names what each Git repository at the workspace's root or directly under it has checked out now.
+	Heads(ctx context.Context, workspace string) []RepositoryHead
+}
+
+// RepositoryHead is a Git repository of a workspace as it stands: its path relative to the workspace, "." for the
+// workspace's root, the branch it has checked out, empty when its HEAD is detached, and its HEAD commit.
+type RepositoryHead struct {
+	Path   string
+	Branch string
+	Commit string
 }
 
 // WorkspaceMark is what a WorkspaceReader measures the changes of an attempt from: when the attempt started, by the

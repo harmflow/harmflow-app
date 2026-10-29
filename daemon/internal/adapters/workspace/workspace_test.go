@@ -5,10 +5,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
+	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
 // hermetic is the environment the tests run git with: no user or system configuration.
@@ -115,5 +117,47 @@ func TestChangesOfAWorkspaceThatIsARepository(t *testing.T) {
 	}
 	if !slices.Equal(c.Files, want) || c.Scanned {
 		t.Errorf("Changes = %+v, want the files %+v read with Git alone", c, want)
+	}
+}
+
+// commitAt is the commit HEAD names in the repository at dir.
+func commitAt(t *testing.T, dir string) string {
+	t.Helper()
+	cmd := exec.Command("git", "-C", dir, "rev-parse", "HEAD")
+	cmd.Env = hermetic
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD in %s: %v", dir, err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// harmflow-app#308: each repository at the workspace's root or directly under it is named with the branch it has
+// checked out and its HEAD commit: a worktree on its work branch, one with a detached HEAD, which names no branch, and
+// the root. A repository with no commit yet, and a plain folder, are left out.
+func TestHeadsOfTheWorkspaceRepositories(t *testing.T) {
+	ws := t.TempDir()
+	repo(t, ws, "root.txt")
+	origin := t.TempDir()
+	repo(t, filepath.Join(origin, "origin"), "base.txt")
+	git(t, filepath.Join(origin, "origin"), "worktree", "add", "-q", "-b", "fix/5-parser", filepath.Join(ws, "r-5"), "main")
+	write(t, filepath.Join(ws, "r-5", "fix.txt"), "fix\n")
+	git(t, filepath.Join(ws, "r-5"), "add", "fix.txt")
+	git(t, filepath.Join(ws, "r-5"), "commit", "-q", "-m", "fix")
+	git(t, filepath.Join(origin, "origin"), "worktree", "add", "-q", "--detach", filepath.Join(ws, "detached"), "main")
+	git(t, ws, "init", "-q", "-b", "main", filepath.Join(ws, "empty"))
+	write(t, filepath.Join(ws, "notes", "plain.txt"), "plain\n")
+
+	got := (&Reader{Env: hermetic}).Heads(t.Context(), ws)
+	want := []ports.RepositoryHead{
+		{Path: ".", Branch: "main", Commit: commitAt(t, ws)},
+		{Path: "detached", Commit: commitAt(t, filepath.Join(ws, "detached"))},
+		{Path: "r-5", Branch: "fix/5-parser", Commit: commitAt(t, filepath.Join(ws, "r-5"))},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("Heads = %+v, want %+v", got, want)
+	}
+	if got[2].Commit == got[1].Commit {
+		t.Errorf("Heads gives r-5 the commit %s it started at, not its own", got[2].Commit)
 	}
 }

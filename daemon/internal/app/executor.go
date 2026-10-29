@@ -43,8 +43,9 @@ type run struct {
 	commandIndex   map[string]int
 	lastOperation  string
 	attempt        int
-	finalText      string // the agent's last message, the summary when the session leaves no report
-	hasContext     bool   // context.json holds parameters or history the session can use, not only the task's identity
+	items          []attemptWorkItem // the work items the current attempt works, guarded by a.mu
+	finalText      string            // the agent's last message, the summary when the session leaves no report
+	hasContext     bool              // context.json holds parameters or history the session can use, not only the task's identity
 	// ownEnd is set while the outcome is the end of an attempt whose harness exited on its own: a daemon that began
 	// stopping while what it left running was ended does not make that outcome interrupted.
 	ownEnd bool
@@ -310,6 +311,8 @@ func (r *run) prepare() error {
 	a.mu.Unlock()
 	// The schema only lets the session check its report before it writes it; the daemon validates the report itself.
 	_ = os.WriteFile(filepath.Join(r.dir, "execution-report.schema.json"), contracts.ExecutionReportSchema, 0o600)
+	// What each field of context.json holds, for the session to read beside it.
+	_ = os.WriteFile(filepath.Join(r.dir, "context.schema.json"), contracts.ContextSchema, 0o600)
 	return r.writeContext(nil)
 }
 
@@ -321,8 +324,10 @@ type previousAttempt struct {
 	Error         string `json:"error,omitempty"`
 	LastOperation string `json:"lastOperation,omitempty"`
 	LastMessage   string `json:"lastMessage,omitempty"`
+	// WorkItems are the work items the attempt worked, with what it reported of each and what its checkpoint found.
+	WorkItems []attemptWorkItem `json:"workItems,omitempty"`
 	// checkpoint is the files the attempt left changed, which the next attempt's session context names; context.json
-	// does not carry it.
+	// carries them only by work item.
 	checkpoint *domain.Checkpoint
 }
 
@@ -459,7 +464,7 @@ func (r *run) attempts(ctx context.Context, start func(harness string) error) (d
 			at := r.x.CurrentAttempt()
 			prev = append(prev, previousAttempt{Number: at.Number, Harness: at.Harness, Model: at.Model,
 				Outcome: string(at.Outcome), Error: end.Error.Message, LastOperation: r.lastOperation,
-				LastMessage: trimTo(end.FinalText, 1500)})
+				LastMessage: trimTo(end.FinalText, 1500), WorkItems: slices.Clone(r.items)})
 			a.mu.Unlock()
 		}
 		a.mu.Lock()
@@ -500,6 +505,7 @@ func (r *run) attempts(ctx context.Context, start func(harness string) error) (d
 					eventlog.RedactFields(c) // its paths, kept and sent on like the harness's own text
 					r.keepCheckpoint(c, &prev[len(prev)-1])
 				}
+				r.placeWorkItems(ctx, &prev[len(prev)-1])
 			}
 			a.mu.Lock()
 			r.x.HarnessSwitches++
@@ -609,6 +615,7 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 	a.mu.Lock()
 	n := len(r.x.Attempts) + 1
 	r.attempt = n
+	r.items = r.continuedItems(prev)
 	// The model and effort used stay unreported until the harness reports them.
 	at := domain.Attempt{Number: n, Harness: p.Provider, HarnessVersion: info.Version, ConfiguredModel: p.Model,
 		ConfiguredEffort: p.Effort, StartedAt: now, Outcome: domain.AttemptRunning}
@@ -878,7 +885,7 @@ Workspace: %s
 Execution directory: %s
 `, r.x.ID, attempt, r.x.Trigger, r.work, r.dir)
 	if r.hasContext {
-		b.WriteString("- context.json: the task's parameters and history — its work items with their status, resumes, and failures, interrupted executions with their last operation, and previous attempts of this execution. Read it when the task works on items such as issues.\n")
+		b.WriteString("- context.json: the task's parameters and history — its work items with their status, resumes, and failures, interrupted executions with their last operation, and previous attempts of this execution, each with its work items' branch and head commit, last test result, and changed files. Read it when the task works on items such as issues; context.schema.json in the same directory describes each field.\n")
 	}
 	b.WriteString(`- progress.jsonl: append one JSON object per line as you reach each step, so the user can follow the execution. Types: step.started {"phase":"preparing|running|testing|publishing","message"}, work_item.selected {"workItem":"owner/repo#123","message":"<title>","repository"}, workspace.changed {"message","branch"}, test.started {"message":"<command>"}, test.completed {"status":"passed|failed|not_run","message"}, pull_request.created and pull_request.updated {"url","number","workItem","branch"}, repository.unprotected {"repository","message"}.
 - report.json: write it once, at the end, following execution-report.schema.json in the same directory: {"outcome":"completed|no_work|needs_attention|failed","summary","lastOperation","workItems":[...],"warnings":[...]}. The summary is your answer to the task in a few sentences. Use no_work when nothing was eligible; it is not a failure.
@@ -906,6 +913,9 @@ This is a new session continuing the same execution. The previous attempt ran on
 		}
 		if last.checkpoint != nil {
 			b.WriteString("\n" + checkpointText(last.checkpoint))
+		}
+		if len(last.WorkItems) > 0 {
+			b.WriteString("\nFor each work item it worked, previousAttempts in context.json gives what it reported and left: the branch with its head commit, the last test result, and the files changed in the branch's worktree.")
 		}
 		b.WriteString(`
 Continue from the current state of the workspace. Reconcile before repeating any external operation — a commit, a push, a pull request — so nothing is duplicated.
@@ -1120,6 +1130,7 @@ func (r *run) onProgress(p domain.ProgressLine) {
 			r.x.Repository = p.Repository
 		}
 		r.x.SetStep(domain.Text{Message: msg})
+		r.attemptItem(p.WorkItem, p.Repository)
 		a.mu.Unlock()
 		// The record names the item before the ledger does: recovery counts the interruption from the record.
 		r.save(true)
@@ -1135,6 +1146,9 @@ func (r *run) onProgress(p domain.ProgressLine) {
 	case domain.EventTestCompleted:
 		a.mu.Lock()
 		r.x.TestsStatus = p.Status
+		if it := r.attemptItem(firstNonEmpty(p.WorkItem, r.x.WorkItem), p.Repository); it != nil && testStatus(p.Status) {
+			it.Tests = &attemptTests{Status: p.Status, Summary: msg}
+		}
 		a.mu.Unlock()
 		r.setStatus(domain.StatusRunning, domain.Text{Message: msg})
 	case domain.EventPullRequestCreated, domain.EventPullRequestUpdated:
@@ -1160,6 +1174,9 @@ func (r *run) onProgress(p domain.ProgressLine) {
 			a.mu.Lock()
 			r.lastOperation = msg
 			r.x.LastOperation = msg
+			if it := r.attemptItem(firstNonEmpty(p.WorkItem, r.x.WorkItem), p.Repository); it != nil {
+				it.Branch = p.Branch
+			}
 			a.mu.Unlock()
 			r.save(true)
 		}
