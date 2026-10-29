@@ -3,6 +3,7 @@
 package sysinfo
 
 import (
+	"context"
 	"io/fs"
 	"os/exec"
 	"path/filepath"
@@ -10,34 +11,116 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
-// Reader is the SystemInfo. It keeps the CPU reading for 3 seconds and the directory's size for a minute, so frequent
-// snapshots stay cheap.
+// Reader is the SystemInfo. Between Start and Stop it samples CPU and memory every 3 seconds and the size of its
+// directory every minute, each in a goroutine of its own, and Snapshot returns the last samples: a request never starts
+// a process or walks the directory, and a slow sample holds up neither a request nor another gauge.
 type Reader struct {
-	mu       sync.Mutex
-	dirBytes int64
-	dirAt    time.Time
-	cpu      float64
-	cpuAt    time.Time
+	dir string
+
+	// The sources and intervals of the samples; New sets the real ones, and tests replace them.
+	cpuSource  func(ctx context.Context) (float64, bool)
+	memSource  func(ctx context.Context) (memSample, bool)
+	sizeSource func(ctx context.Context, dir string) (int64, bool)
+	fastEvery  time.Duration
+	sizeEvery  time.Duration
+
+	cpu  atomic.Pointer[float64]
+	mem  atomic.Pointer[memSample]
+	size atomic.Pointer[int64]
+
+	mu      sync.Mutex
+	stop    context.CancelFunc
+	running sync.WaitGroup
+}
+
+// memSample is the memory's size and the part in use, which is 0 when vm_stat cannot be read.
+type memSample struct {
+	total, used int64
 }
 
 var _ ports.SystemInfo = (*Reader)(nil)
 
-// Snapshot implements ports.SystemInfo: CPU use, memory, the disk that holds dir, and the size of dir, each under its
-// key, leaving out a gauge it cannot read.
+// New returns a Reader that samples the size of dir, HarmFlow's data directory. It samples nothing until Start.
+func New(dir string) *Reader {
+	return &Reader{
+		dir:        dir,
+		cpuSource:  cpuPercent,
+		memSource:  memory,
+		sizeSource: dirSize,
+		fastEvery:  3 * time.Second,
+		sizeEvery:  time.Minute,
+	}
+}
+
+// Start begins sampling, at once and then at each gauge's interval, until ctx ends or Stop is called. A second Start
+// before Stop does nothing.
+func (r *Reader) Start(ctx context.Context) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.stop != nil {
+		return
+	}
+	ctx, r.stop = context.WithCancel(ctx)
+	r.running.Add(3)
+	go r.sample(ctx, r.fastEvery, func(ctx context.Context) {
+		if v, ok := r.cpuSource(ctx); ok {
+			r.cpu.Store(&v)
+		}
+	})
+	go r.sample(ctx, r.fastEvery, func(ctx context.Context) {
+		if v, ok := r.memSource(ctx); ok {
+			r.mem.Store(&v)
+		}
+	})
+	go r.sample(ctx, r.sizeEvery, func(ctx context.Context) {
+		if v, ok := r.sizeSource(ctx, r.dir); ok {
+			r.size.Store(&v)
+		}
+	})
+}
+
+// Stop ends the sampling and waits for its goroutines, a sample under way included, which its context cancels.
+func (r *Reader) Stop() {
+	r.mu.Lock()
+	stop := r.stop
+	r.mu.Unlock()
+	if stop != nil {
+		stop()
+	}
+	r.running.Wait()
+}
+
+func (r *Reader) sample(ctx context.Context, every time.Duration, take func(context.Context)) {
+	defer r.running.Done()
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		take(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// Snapshot implements ports.SystemInfo: CPU use, memory, the disk that holds dir, and the size of the Reader's
+// directory, each under its key. A gauge it cannot read, or has not sampled yet, is left out.
 func (r *Reader) Snapshot(dir string) map[string]any {
 	out := map[string]any{}
-	if cpu, ok := r.cpuPercent(); ok {
-		out["cpuPercent"] = cpu
+	if cpu := r.cpu.Load(); cpu != nil {
+		out["cpuPercent"] = *cpu
 	}
-	if total, used, ok := memory(); ok {
-		out["memoryTotalBytes"] = total
-		out["memoryUsedBytes"] = used
+	if mem := r.mem.Load(); mem != nil {
+		out["memoryTotalBytes"] = mem.total
+		out["memoryUsedBytes"] = mem.used
 	}
 	var st syscall.Statfs_t
 	if syscall.Statfs(dir, &st) == nil {
@@ -46,17 +129,14 @@ func (r *Reader) Snapshot(dir string) map[string]any {
 		out["diskTotalBytes"] = total
 		out["diskUsedBytes"] = total - free
 	}
-	out["harmflowDirBytes"] = r.dirSize(dir)
+	if size := r.size.Load(); size != nil {
+		out["harmflowDirBytes"] = *size
+	}
 	return out
 }
 
-func (r *Reader) cpuPercent() (float64, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if time.Since(r.cpuAt) < 3*time.Second {
-		return r.cpu, true
-	}
-	out, err := exec.Command("/bin/ps", "-A", "-o", "%cpu=").Output()
+func cpuPercent(ctx context.Context) (float64, bool) {
+	out, err := exec.CommandContext(ctx, "/bin/ps", "-A", "-o", "%cpu=").Output()
 	if err != nil {
 		return 0, false
 	}
@@ -67,30 +147,30 @@ func (r *Reader) cpuPercent() (float64, bool) {
 			sum += v
 		}
 	}
-	pct := sum / float64(runtime.NumCPU())
-	if pct > 100 {
-		pct = 100
-	}
-	r.cpu, r.cpuAt = pct, time.Now()
-	return pct, true
+	return min(sum/float64(runtime.NumCPU()), 100), true
 }
 
-func memory() (int64, int64, bool) {
-	out, err := exec.Command("/usr/sbin/sysctl", "-n", "hw.memsize").Output()
+func memory(ctx context.Context) (memSample, bool) {
+	out, err := exec.CommandContext(ctx, "/usr/sbin/sysctl", "-n", "hw.memsize").Output()
 	if err != nil {
-		return 0, 0, false
+		return memSample{}, false
 	}
 	total, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
 	if err != nil {
-		return 0, 0, false
+		return memSample{}, false
 	}
-	vm, err := exec.Command("/usr/bin/vm_stat").Output()
+	vm, err := exec.CommandContext(ctx, "/usr/bin/vm_stat").Output()
 	if err != nil {
-		return total, 0, true
+		return memSample{total: total}, true
 	}
+	return memSample{total: total, used: usedMemory(string(vm))}, true
+}
+
+// usedMemory is the memory in use that vm_stat's output reports: the active, wired, and compressed pages.
+func usedMemory(vmStat string) int64 {
 	page := int64(4096)
 	pages := map[string]int64{}
-	for _, line := range strings.Split(string(vm), "\n") {
+	for _, line := range strings.Split(vmStat, "\n") {
 		if strings.Contains(line, "page size of") {
 			for _, f := range strings.Fields(line) {
 				if n, err := strconv.ParseInt(f, 10, 64); err == nil {
@@ -108,19 +188,16 @@ func memory() (int64, int64, bool) {
 			pages[strings.TrimSpace(k)] = n
 		}
 	}
-	used := (pages["Pages active"] + pages["Pages wired down"] + pages["Pages occupied by compressor"]) * page
-	return total, used, true
+	return (pages["Pages active"] + pages["Pages wired down"] + pages["Pages occupied by compressor"]) * page
 }
 
-func (r *Reader) dirSize(dir string) int64 {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if time.Since(r.dirAt) < time.Minute {
-		return r.dirBytes
-	}
+// dirSize is the size of the files under dir, skipping what it cannot read. A walk that ctx ends gives no sample.
+func dirSize(ctx context.Context, dir string) (int64, bool) {
 	var total int64
-	// The walk skips what it cannot read and its callback returns no error, so it returns none.
-	_ = filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		if err != nil {
 			return nil
 		}
@@ -131,6 +208,5 @@ func (r *Reader) dirSize(dir string) int64 {
 		}
 		return nil
 	})
-	r.dirBytes, r.dirAt = total, time.Now()
-	return total
+	return total, err == nil
 }
