@@ -2,12 +2,14 @@ package integration
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -133,6 +135,148 @@ func TestCitedUserItemsReachARealClaudeCode(t *testing.T) {
 	}
 	agentMarker.check(t)
 	skillMarker.check(t)
+}
+
+// A Claude Code task cites a built-in skill, and its prompt asks the session to use it by name and says nothing else of
+// it. The real Claude Code loads the skill from the plugin HarmFlow hands it in the execution's directory and follows
+// it, and the user's Claude Code configuration keeps its files: the settings, the instructions, the agents, the skills,
+// and the plugins. The signed-in Claude Code reads the user's own configuration directory, so the test compares that
+// one, and writes nothing into it.
+func TestBuiltinSkillLoadsInARealClaudeCode(t *testing.T) {
+	claude := realClaude(t)
+	builtinSkillLoads(t, realHarness{
+		id:        "claude-code",
+		path:      claude,
+		preferred: map[string]any{"provider": "claude-code", "model": "haiku", "effort": "low"},
+		config:    claudeConfigDir(t),
+		files:     []string{"settings.json", "CLAUDE.md", "agents", "skills", "plugins"},
+		// The plugins an organization manages for the account, which the signed-in Claude Code fetches again when a
+		// session starts: the list it received, with its etag, and the round of the fetch.
+		state: []string{filepath.Join("plugins", "synced")},
+	})
+}
+
+// realHarness is a real CLI that a test runs a task on, and the user's configuration that the daemon runs it with.
+type realHarness struct {
+	id        string         // the harness's identifier in the API
+	path      string         // the installed CLI
+	preferred map[string]any // the task's preferred harness
+	config    string         // the folder of the user's configuration
+	files     []string       // the entries of config that hold the user's configuration files
+	// state are folders under files that the CLI itself rewrites when a session starts, whoever starts it. What they
+	// hold is the CLI's own session state, no configuration file and nothing HarmFlow writes, so the comparison leaves
+	// them out.
+	state []string
+	env   []string // added to the daemon's environment
+}
+
+// builtinSkillLoads runs a task citing a built-in skill on the real harness h, through a daemon whose built-ins are the
+// test's own. The skill's instructions tell the session to write a marker in the workspace, with a content only they
+// hold, and the task's prompt only names the skill. The session must follow the skill, and the files of the user's
+// configuration must be as they were before the daemon started: none added, none removed, each with its bytes. A
+// session writes its own state on every run, such as its transcripts, history, and caches, outside those files.
+func builtinSkillLoads(t *testing.T, h realHarness) {
+	t.Helper()
+	const skill = "hf-test-marker"
+	work, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newMarker(work, skill)
+	builtins := t.TempDir()
+	writeTemp(t, filepath.Join(builtins, "skills", skill, "SKILL.md"), itemFile(skill, "Writes a marker file.", m.instruction()))
+	// Before the daemon starts, so that what its detection of the harness writes is caught too.
+	before := snapshotConfig(t, h)
+
+	d := startDaemonWith(t, t.TempDir(), daemonOptions{builtins: builtins}, h.env...)
+	d.call("PUT", "/harnesses/"+h.id, map[string]any{"path": h.path}, 200)
+	d.call("PATCH", "/settings", map[string]any{"allowedFolders": []any{work}}, 200)
+	id := "builtin-" + h.id
+	doc := map[string]any{"apiVersion": "harmflow/v1alpha1", "kind": "Task",
+		"metadata": map[string]any{"id": id, "name": "Built-in skill on " + h.id},
+		"spec": map[string]any{
+			"type":      "general",
+			"prompt":    fmt.Sprintf("Use the %s skill, by name. Do what it says, and nothing else.", skill),
+			"skills":    []any{skill},
+			"harness":   map[string]any{"preferred": h.preferred},
+			"workspace": map[string]any{"path": work},
+			"execution": map[string]any{"timeoutMinutes": 5},
+		}}
+	d.call("POST", "/tasks", map[string]any{"document": doc}, 201)
+	run := d.call("POST", "/tasks/"+id+"/run", nil, 202)["executionId"].(string)
+	// Longer than the task's timeout, so that the execution's own end says why a session ran too long.
+	x := d.waitEnd(run, 6*time.Minute)
+
+	if x["status"] != "completed" {
+		t.Errorf("execution %s = %v (%v), want completed", run, x["status"], x["errorMessage"])
+	}
+	m.check(t)
+	// A write when the daemon stops is caught too.
+	d.stop()
+	after := snapshotConfig(t, h)
+	for entry, was := range before {
+		switch now, ok := after[entry]; {
+		case !ok:
+			t.Errorf("after the execution, the user's %s configuration in %s lost %s", h.id, h.config, entry)
+		case now != was:
+			t.Errorf("after the execution, the user's %s configuration in %s has %s = %s, want it unchanged, %s",
+				h.id, h.config, entry, now, was)
+		}
+	}
+	for entry, now := range after {
+		if _, ok := before[entry]; !ok {
+			t.Errorf("after the execution, the user's %s configuration in %s gained %s (%s)", h.id, h.config, entry, now)
+		}
+	}
+}
+
+// snapshotConfig is every entry of the user's configuration of h that its files name, and every entry under those that
+// are folders, but for its state, by its path relative to the configuration's folder: a folder as such, a symbolic link
+// by its target, which is not followed, a regular file by the SHA-256 of its bytes, and any other file by its type. A
+// name the folder does not hold has no entry, so that it counts as gained if it appears.
+func snapshotConfig(t *testing.T, h realHarness) map[string]string {
+	t.Helper()
+	entries := map[string]string{}
+	for _, name := range h.files {
+		root := filepath.Join(h.config, name)
+		if _, err := os.Lstat(root); errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		err := filepath.WalkDir(root, func(path string, e fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			rel, err := filepath.Rel(h.config, path)
+			if err != nil {
+				return err
+			}
+			switch {
+			case e.IsDir() && slices.Contains(h.state, rel):
+				return fs.SkipDir
+			case e.Type()&fs.ModeSymlink != 0:
+				target, err := os.Readlink(path)
+				if err != nil {
+					return err
+				}
+				entries[rel] = "a link to " + target
+			case e.IsDir():
+				entries[rel] = "a folder"
+			case !e.Type().IsRegular():
+				entries[rel] = "a file of type " + e.Type().String()
+			default:
+				data, err := os.ReadFile(path)
+				if err != nil {
+					return err
+				}
+				entries[rel] = fmt.Sprintf("a file of SHA-256 %x", sha256.Sum256(data))
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("reading the user's configuration in %s: %v", root, err)
+		}
+	}
+	return entries
 }
 
 // claudeConfigDir is the configuration directory of the signed-in Claude Code, which the daemon reads too:

@@ -113,6 +113,21 @@ func startDaemon(t *testing.T, home string, env ...string) *daemon {
 // file store, run/token, when keychain is empty. No test reaches the user's login keychain.
 func startDaemonOn(t *testing.T, home, keychain string, env ...string) *daemon {
 	t.Helper()
+	return startDaemonWith(t, home, daemonOptions{keychain: keychain}, env...)
+}
+
+// daemonOptions are what a test changes in the daemon startDaemonWith starts; the zero value is startDaemon's.
+type daemonOptions struct {
+	// keychain is the throwaway keychain file the default token store points at; empty for the file store, run/token.
+	keychain string
+	// builtins is the folder --builtins names; empty for the repository's root.
+	builtins string
+}
+
+// startDaemonWith is startDaemon with the options o.
+func startDaemonWith(t *testing.T, home string, o daemonOptions, env ...string) *daemon {
+	t.Helper()
+	keychain := o.keychain
 	store := []string{"HARMFLOW_TOKEN_STORE=file"}
 	if keychain != "" {
 		if _, err := os.Stat(keychain); err != nil || !strings.HasPrefix(keychain, os.TempDir()) {
@@ -120,8 +135,12 @@ func startDaemonOn(t *testing.T, home, keychain string, env ...string) *daemon {
 		}
 		store = []string{"HARMFLOW_TOKEN_STORE=", "HARMFLOW_KEYCHAIN=" + keychain}
 	}
+	builtins := o.builtins
+	if builtins == "" {
+		builtins = repoRoot()
+	}
 	_ = os.Remove(filepath.Join(home, "run", "daemon.json"))
-	cmd := exec.Command(binary, "--home", home, "--builtins", repoRoot())
+	cmd := exec.Command(binary, "--home", home, "--builtins", builtins)
 	// Codex's configuration is the test's own, never the user's.
 	cmd.Env = append(append(append(os.Environ(), "CODEX_HOME="+filepath.Join(home, "codex")), store...), env...)
 	var out bytes.Buffer
