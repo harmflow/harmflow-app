@@ -3,7 +3,9 @@ package integration
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -76,8 +78,8 @@ func TestDraftAtItsResumeLimitIsNotResumed(t *testing.T) {
 		// Its status is left out: the ledger may mark the item at its limit, or only once it is past it.
 		want := map[string]any{"testsStatus": "failed", "resumes": float64(resumes), "branch": draft.Head,
 			"pullRequestUrl": draft.URL}
-		if item := resumeLimitQueued(d, key); !resumeLimitHolds(item, want) {
-			t.Fatalf("after the stand-in's execution %s, reporting the item %s, GET /queue gives %s as %v, want %v", id,
+		if item := resumeLimitHeld(t, home, key); !resumeLimitHolds(item, want) {
+			t.Fatalf("after the stand-in's execution %s, reporting the item %s, the ledger holds %s as %v, want %v", id,
 				kind, key, item, want)
 		}
 	}
@@ -117,8 +119,8 @@ func TestDraftAtItsResumeLimitIsNotResumed(t *testing.T) {
 		t.Errorf("report.json gives %s the outcome %q and the kind %q, want needs_attention, or no entry\n%s", key,
 			outcome, reportedKind(t, dir, issue), runFiles(dir))
 	}
-	if item := resumeLimitQueued(d, key); item == nil || item["status"] != "needs_attention" {
-		t.Errorf("after execution %s, GET /queue gives %s as %v, want it needs_attention", id, key, item)
+	if item := resumeLimitHeld(t, home, key); item == nil || item["status"] != "needs_attention" {
+		t.Errorf("after execution %s, the ledger holds %s as %v, want it needs_attention", id, key, item)
 	}
 	checkResumeLimitDraft(t, issue, draft, pushed)
 }
@@ -243,16 +245,34 @@ func checkResumeLimitDraft(t *testing.T, issue int, draft restartPR, pushed stri
 	}
 }
 
-// resumeLimitQueued is the daemon's work item under key, as GET /queue lists it: nil when it lists none.
-func resumeLimitQueued(d *daemon, key string) map[string]any {
-	d.t.Helper()
-	items, _ := d.call("GET", "/queue", nil, 200)["workItems"].([]any)
-	for _, x := range items {
-		if item, _ := x.(map[string]any); item != nil && strings.EqualFold(fmt.Sprint(item["key"]), key) {
-			return item
+// resumeLimitHeld is the queue task's work item under key as the daemon's ledger in home holds it, nil when it holds
+// none. The ledger is read from its files, the archive of closed items first, then the items still in play, which hold
+// an item's later copy: GET /queue lists only the items in play (harmflow-app#341), and an item at its resume limit
+// needs attention.
+func resumeLimitHeld(t *testing.T, home, key string) map[string]any {
+	t.Helper()
+	var held map[string]any
+	for _, name := range []string{"workitems-archive.json", "workitems.json"} {
+		data, err := os.ReadFile(filepath.Join(home, "state", name))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		var f struct {
+			Tasks map[string]map[string]map[string]any `json:"tasks"`
+		}
+		if err := json.Unmarshal(data, &f); err != nil {
+			t.Fatal(err)
+		}
+		for k, item := range f.Tasks["queue"] {
+			if strings.EqualFold(k, key) {
+				held = item
+			}
 		}
 	}
-	return nil
+	return held
 }
 
 // resumeLimitHolds reports whether item holds each field of want with its value.
