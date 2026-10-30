@@ -16,7 +16,7 @@ internal/adapters/launchd 93.33
 internal/adapters/schema 88.38
 internal/adapters/secret 47.27
 internal/adapters/sysinfo 0.00
-internal/adapters/tools 0.00
+internal/adapters/tools 100.00
 internal/adapters/wake 100.00
 internal/adapters/workspace 84.92
 internal/app 87.30

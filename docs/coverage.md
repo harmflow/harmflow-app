@@ -82,12 +82,19 @@ each daemon writes its counters when it exits. Both sides count in `atomic` mode
 | `internal/adapters/schema` | 175 | 198 | 88.38% | 88.38% |
 | `internal/adapters/secret` | 26 | 55 | 47.27% | 47.27% |
 | `internal/adapters/sysinfo` | 0 | 70 | 0.00% | 0.00% |
-| `internal/adapters/tools` | 0 | 39 | 0.00% | 0.00% |
+| `internal/adapters/tools` | 44 | 44 | 100.00% | 100.00% |
 | `internal/adapters/wake` | 14 | 14 | 100.00% | 100.00% |
 | `internal/adapters/workspace` | 107 | 126 | 84.92% | 84.92% |
 | `internal/app` | 2489 | 2851 | 87.30% | 87.30% |
 | `internal/domain` | 587 | 627 | 93.62% | 93.62% |
 | `internal/ports` | 3 | 4 | 75.00% | 75.00% |
+
+`internal/adapters/tools` was read again on 2026-10-30, when its first tests came (harmflow-app#363), as the rest of
+the table was: `make coverage-daemon` on CI's `ubuntu-latest` runner, the unit and integration data merged, at
+`50b9960`, the merge of `6e4730d` onto `main` at `d1c8047` that the pull request's checks run. Two runs of that tree,
+[CI](https://github.com/harmflow/harmflow-app/actions/runs/41116302061/job/124271575579) and its
+[re-run](https://github.com/harmflow/harmflow-app/actions/runs/41116302061/job/124336997722), each read 44 of 44. The
+change that set the floor touches none of the measured code.
 
 ### Shell — `desktop/src-tauri`
 
