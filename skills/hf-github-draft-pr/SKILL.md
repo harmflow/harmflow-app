@@ -5,10 +5,16 @@ description: Tests a HarmFlow work item, repairs failing tests within the task's
 
 # Test, publish, and document
 
+Run each command on its own, one per call, as this skill writes it: reach the worktree with `git -C <worktree>` and
+full paths, never with a `cd` chained before other commands, and keep paths out of shell variables. Claude Code asks
+for approval before it runs a `cd` chained with a redirection such as `2>&1`, or a command whose variable it cannot
+check, whatever the task's permissions allow. An unattended session has nobody to give it, so the command is refused:
+a push refused that way leaves the work with no pull request.
+
 ## 1. Test
 
 Find how the repository runs its tests — its README, CONTRIBUTING, CI workflow, `Makefile`, `package.json`,
-`pyproject.toml`, `go.mod`, `build.gradle` — and run them in the worktree. Before and after, append to
+`pyproject.toml`, `go.mod`, `build.gradle` — and run them in the worktree. Before and after each run, append to
 `progress.jsonl`:
 
 ```json
@@ -18,7 +24,8 @@ Find how the repository runs its tests — its README, CONTRIBUTING, CI workflow
 
 If tests fail, try to fix them up to `task.parameters.delivery.testRepairAttempts` times (default 2), running them
 again after each fix. Fix the code, never the tests' intent: do not delete, skip, or weaken a test to make it pass.
-When no test suite exists, the status is `not_run`.
+The run after a fix is a run of its own, with its own `test.started` and `test.completed` lines, so the log shows each
+run: at most `testRepairAttempts` + 1 before you publish. When no test suite exists, the status is `not_run`.
 
 ## 2. Commit the work
 
