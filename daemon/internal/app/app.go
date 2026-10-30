@@ -160,6 +160,7 @@ type App struct {
 	ledger        map[string]map[string]*domain.WorkItem
 	applied       map[string][]string // by execution id, the items whose result the ledger took, as ledgerFile.Applied
 	ledgerRepair  bool                // the ledger was saved before ledgerVersion, and repairLedger has not mended it yet
+	archive       ledgerArchive
 	notifications []Notification
 	accepting     bool
 	stopping      bool

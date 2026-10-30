@@ -1,9 +1,12 @@
 package app
 
 import (
+	"encoding/json"
 	"io"
 	"log"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
@@ -29,14 +32,143 @@ func withReport(report string) string {
 	return `printf '%s' '` + report + `' > "$HARMFLOW_EXECUTION_DIR/report.json"` + "\necho 'END ok'"
 }
 
-// ledgerItem is the task's work item key as the queue shows it, nil when the ledger holds none.
+// ledgerItem is the task's work item key as the ledger holds it, nil when it holds none.
 func ledgerItem(e *env, task, key string) *domain.WorkItem {
+	return heldItem(e.app, task, key)
+}
+
+// heldItem is a copy of the task's work item key as a's ledger holds it, closed or not, nil when it holds none. The
+// queue shows only the items still in play.
+func heldItem(a *App, task, key string) *domain.WorkItem {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	w := a.ledger[task][key]
+	if w == nil {
+		return nil
+	}
+	c := *w
+	return &c
+}
+
+// queued reports whether the queue lists the task's work item key.
+func queued(e *env, task, key string) bool {
 	for _, w := range e.app.Queue().WorkItems {
 		if w.TaskID == task && w.Key == key {
-			return &w
+			return true
 		}
 	}
-	return nil
+	return false
+}
+
+// savedItems are the work items of the ledger's file name in the state folder, by task and key.
+func savedItems(t *testing.T, e *env, name string) map[string]map[string]*domain.WorkItem {
+	t.Helper()
+	var f ledgerFile
+	if _, err := e.app.d.State.Load(name, &f); err != nil {
+		t.Fatalf("Load(%q) = %v", name, err)
+	}
+	return f.Tasks
+}
+
+// harmflow-app#341: the queue leaves out an item as soon as it closes, completed, needing attention, or closed, and
+// lists the items still in play. The ledger keeps every item, and context.json still lists the closed ones.
+func TestQueueLeavesOutClosedItems(t *testing.T) {
+	e := newEnv(t)
+	e.create("closer", "")
+	x := runTask(e, "closer", domain.StatusCompleted, selectTwo(e.app.d.Paths.Logs)+withReport(`{"outcome":"completed",`+
+		`"workItems":[{"key":"o/r#1","outcome":"completed"},{"key":"o/r#3","outcome":"needs_attention"},`+
+		`{"key":"o/r#4","outcome":"closed"},{"key":"o/r#5","outcome":"completed","tests":{"status":"failed","summary":"1 failed"}},`+
+		`{"key":"o/r#6","outcome":"failed"}]}`))
+
+	for key, want := range map[string]bool{"o/r#1": false, "o/r#2": true, "o/r#3": false, "o/r#4": false,
+		"o/r#5": true, "o/r#6": true} {
+		if got := queued(e, "closer", key); got != want {
+			t.Errorf("Queue() lists %s (%+v): %v, want %v", key, ledgerItem(e, "closer", key), got, want)
+		}
+		if ledgerItem(e, "closer", key) == nil {
+			t.Errorf("the ledger holds no %s; want every item kept", key)
+		}
+	}
+
+	e.claude.setScript(func(ports.RunRequest) string { return "echo 'END ok'" })
+	r, err := e.app.RunTask("closer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := e.wait(r.ExecutionID, domain.StatusCompleted, domain.StatusNoWork, domain.StatusNeedsAttention)
+	e.idle("closer")
+	data, err := os.ReadFile(filepath.Join(next.ExecutionDir, "context.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c struct {
+		WorkItems []domain.WorkItem `json:"workItems"`
+	}
+	if err := json.Unmarshal(data, &c); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.WorkItems) != 6 {
+		t.Errorf("context.json after %s lists %d work items, want all 6, the closed ones included: %+v", x.ID,
+			len(c.WorkItems), c.WorkItems)
+	}
+}
+
+// harmflow-app#341: a closed item moves from the file of the items in play to the archive beside it, and a change to an
+// item in play rewrites only the first file. An archived item stays there, and one selected again comes back to the
+// first file; after a restart the ledger holds every item, each as it was last saved.
+func TestClosedItemsMoveToTheArchive(t *testing.T) {
+	e := newEnv(t)
+	e.create("archiver", "")
+	runTask(e, "archiver", domain.StatusCompleted, selectTwo(e.app.d.Paths.Logs)+withReport(`{"outcome":"completed",`+
+		`"workItems":[{"key":"o/r#1","outcome":"completed"},{"key":"o/r#2","outcome":"failed"}]}`))
+
+	open, archive := savedItems(t, e, ledgerName), savedItems(t, e, archiveName)
+	if w := archive["archiver"]["o/r#1"]; w == nil || w.Status != domain.WorkItemCompleted {
+		t.Errorf("the archive's o/r#1 = %+v, want it completed", w)
+	}
+	if w := open["archiver"]["o/r#1"]; w != nil {
+		t.Errorf("the ledger's file of items in play keeps o/r#1, completed: %+v", w)
+	}
+	if w := open["archiver"]["o/r#2"]; w == nil || w.Status != domain.WorkItemFailed {
+		t.Errorf("the file of items in play: o/r#2 = %+v, want it failed", w)
+	}
+	if w := archive["archiver"]["o/r#2"]; w != nil {
+		t.Errorf("the archive keeps o/r#2, still in play: %+v", w)
+	}
+
+	// A change to an item in play leaves the archive as it is on disk.
+	archivePath := filepath.Join(e.paths.State, archiveName+".json")
+	before, err := os.Stat(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(archivePath, before.ModTime(), before.ModTime().Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	e.app.failWorkItem("archiver", "o/r#2", "x", "", e.app.taskLimits("archiver"))
+	if after, err := os.Stat(archivePath); err != nil || !after.ModTime().Equal(before.ModTime().Add(-time.Hour)) {
+		t.Errorf("a change to o/r#2, in play, wrote the archive again (%v)", err)
+	}
+
+	// Selected again, o/r#1 is back in play, and its archived copy stays until it closes again.
+	e.app.trackWorkItem("archiver", "o/r#1", "", "", "y")
+	open, archive = savedItems(t, e, ledgerName), savedItems(t, e, archiveName)
+	if w := open["archiver"]["o/r#1"]; w == nil || w.Status != domain.WorkItemInProgress {
+		t.Errorf("o/r#1 selected again: the file of items in play holds %+v, want it in progress", w)
+	}
+	if archive["archiver"]["o/r#1"] == nil {
+		t.Error("o/r#1 selected again: its archived copy was deleted")
+	}
+
+	e.app.Stop(domain.Text{Message: "restart"})
+	e = e.restart(t)
+	if w := ledgerItem(e, "archiver", "o/r#1"); w == nil || w.Status != domain.WorkItemInProgress ||
+		w.LastExecutionID != "y" {
+		t.Errorf("after a restart, o/r#1 = %+v; want in progress, selected by y, the later of its two copies", w)
+	}
+	if w := ledgerItem(e, "archiver", "o/r#2"); w == nil || w.Status != domain.WorkItemFailed || w.Failures != 2 {
+		t.Errorf("after a restart, o/r#2 = %+v; want failed, with two failures", w)
+	}
 }
 
 // runTask runs task once with script and waits until its execution has ended as want and freed the task, so that what
