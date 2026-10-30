@@ -1433,6 +1433,8 @@ func (r *run) finish(status domain.ExecutionStatus, reason domain.Text) {
 		a.failWorkItem(r.x.TaskID, key, r.x.ID, r.lastOperation, r.limitsOrDefault())
 	}
 	r.save(true)
+	// Only now: the ledger must keep the marks of its results until the record says the execution ended.
+	a.forgetApplied(r.x.ID)
 	sev := domain.SeverityInfo
 	switch status {
 	case domain.StatusFailed, domain.StatusInterrupted:

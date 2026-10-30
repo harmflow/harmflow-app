@@ -5331,6 +5331,71 @@ func TestRecoveryAfterACrashMatchesTheLog(t *testing.T) {
 	}
 }
 
+// harmflow-app#577: a crash after the ledger took the report's result for an item, before the record saved the
+// execution as ended, counts no failure against that item, as the execution's own end would not, whether the record
+// names it or only the log's selections do; an item the execution selected and left without a result still counts
+// one. The home is copied as the report's pull request is logged, which follows the ledger's save of that item's
+// result, and the ledger the recovery saves keeps no mark of the execution.
+func TestRecoveryCountsNoFailureForAnAppliedResult(t *testing.T) {
+	type want struct {
+		status   domain.WorkItemStatus
+		failures int
+	}
+	result := func(key string, pr int) string {
+		return fmt.Sprintf(`{"key":"%s","outcome":"completed","pullRequest":{"url":"https://github.com/o/r/pull/%d",`+
+			`"number":%d,"created":true},"tests":{"status":"passed"}}`, key, pr, pr)
+	}
+	for _, tc := range []struct {
+		name   string
+		result string // the report's only result; the session selected o/r#1, then o/r#2, which the record names
+		want   map[string]want
+	}{
+		{"the record's item's result", result("o/r#2", 9),
+			map[string]want{"o/r#1": {domain.WorkItemFailed, 1}, "o/r#2": {domain.WorkItemCompleted, 0}}},
+		{"an earlier selection's result", result("o/r#1", 10),
+			map[string]want{"o/r#1": {domain.WorkItemCompleted, 0}, "o/r#2": {domain.WorkItemFailed, 1}}},
+		{"another item's result", result("o/r#8", 11), map[string]want{"o/r#1": {domain.WorkItemFailed, 1},
+			"o/r#2": {domain.WorkItemFailed, 1}, "o/r#8": {domain.WorkItemCompleted, 0}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.create("crashed", "")
+			report := `{"outcome":"completed","summary":"opened a draft","workItems":[` + tc.result + `]}`
+			e.claude.setScript(func(ports.RunRequest) string { return selectTwo(e.app.d.Paths.Logs) + withReport(report) })
+			rec, id := e.crashAt("crashed", func(ev domain.Event) bool { return ev.Type == domain.EventPullRequestCreated })
+
+			if x, err := rec.app.GetExecution(id); err != nil || x.Status != domain.StatusInterrupted {
+				t.Fatalf("GetExecution(%q) = %+v, %v; want interrupted", id, x.ExecutionSummary, err)
+			}
+			for key, w := range tc.want {
+				got := ledgerItem(rec, "crashed", key)
+				if got == nil || got.Status != w.status || got.Failures != w.failures || got.LastExecutionID != id {
+					t.Errorf("ledgerItem(rec, %q, %q) = %+v; want %s with %d failures, the last by %s", "crashed", key, got,
+						w.status, w.failures, id)
+				}
+			}
+			state, err := fsstore.NewState(rec.paths.State)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var saved struct {
+				Applied map[string][]string `json:"applied"`
+			}
+			if ok, err := state.Load("workitems", &saved); err != nil || !ok || len(saved.Applied) != 0 {
+				t.Errorf("state.Load(\"workitems\") = %v, %v, marks %v; want true, nil, no mark", ok, err, saved.Applied)
+			}
+
+			// The first daemon goes on, and the execution's end, once its record is saved, forgets the marks it left.
+			e.eventKeys(id, domain.EventExecutionCompleted)
+			for key := range tc.want {
+				if e.app.resultApplied(id, key) {
+					t.Errorf("after the execution ended, resultApplied(%s, %s) = true, want false", id, key)
+				}
+			}
+		})
+	}
+}
+
 // A harness still running when the daemon crashed is ended once a daemon starts again, before the execution reads
 // interrupted: the harness the attempt's record names, its child in its group, and a command in a session of its own,
 // as Claude Code runs a tool command. The record names the harness from the moment it started, and the log names each

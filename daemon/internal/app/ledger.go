@@ -13,6 +13,10 @@ import (
 type ledgerFile struct {
 	SchemaVersion string                                 `json:"schemaVersion"`
 	Tasks         map[string]map[string]*domain.WorkItem `json:"tasks"`
+	// Applied names, by execution id, the work items whose result the ledger took from an execution not yet saved as
+	// ended. A result and its mark are saved together, so recovery tells an item the execution gave a result from one it
+	// left without, whatever the record had saved when the daemon died.
+	Applied map[string][]string `json:"applied,omitempty"`
 }
 
 // ledgerVersion is the schemaVersion the ledger is saved at. A ledger saved at "1" comes from a daemon under which a
@@ -29,6 +33,9 @@ func (a *App) loadLedger() {
 		redacted := eventlog.RedactFields(&f)
 		a.mu.Lock()
 		a.ledger = f.Tasks
+		if f.Applied != nil {
+			a.applied = f.Applied
+		}
 		a.ledgerRepair = f.SchemaVersion == "1"
 		a.mu.Unlock()
 		if redacted {
@@ -39,7 +46,8 @@ func (a *App) loadLedger() {
 
 func (a *App) saveLedger() {
 	a.mu.Lock()
-	f := ledgerFile{SchemaVersion: ledgerVersion, Tasks: map[string]map[string]*domain.WorkItem{}}
+	f := ledgerFile{SchemaVersion: ledgerVersion, Tasks: map[string]map[string]*domain.WorkItem{},
+		Applied: map[string][]string{}}
 	for task, items := range a.ledger {
 		m := map[string]*domain.WorkItem{}
 		for k, w := range items {
@@ -47,6 +55,9 @@ func (a *App) saveLedger() {
 			m[k] = &c
 		}
 		f.Tasks[task] = m
+	}
+	for id, keys := range a.applied {
+		f.Applied[id] = slices.Clone(keys)
 	}
 	a.mu.Unlock()
 	if err := a.d.State.Save("workitems", f); err != nil {
@@ -104,7 +115,8 @@ func (a *App) trackWorkItem(taskID, key, title, repo, executionID string) select
 
 // applyWorkItem folds a report's result for the item into the ledger. before is what the ledger held for the item when
 // the session selected it, nil when the session did not select it. A skipped result changes no status: an item the
-// session selected goes back to the status it had before, and an item the ledger did not hold gets no entry.
+// session selected goes back to the status it had before, and an item the ledger did not hold gets no entry. The save
+// that holds the result marks it applied for the execution, which resultApplied reads.
 func (a *App) applyWorkItem(taskID string, r domain.WorkItemResult, executionID string, limits domain.WorkItemLimits,
 	before *selection) {
 	if r.Key == "" {
@@ -124,8 +136,26 @@ func (a *App) applyWorkItem(taskID string, r domain.WorkItemResult, executionID 
 			w.Status = before.status
 		}
 	}
+	a.applied[executionID] = append(a.applied[executionID], r.Key)
 	a.mu.Unlock()
 	a.saveLedger()
+}
+
+// resultApplied reports whether the ledger holds a result for the item from the execution. It is read from the ledger,
+// not the execution's record: the selection also names the execution in the item's entry, and a completed item whose
+// tests failed reads in progress, so neither the entry nor the record, saved apart from the ledger, tells it.
+func (a *App) resultApplied(executionID, key string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return slices.Contains(a.applied[executionID], key)
+}
+
+// forgetApplied drops the marks of the execution once its record is saved as ended, after which recovery never reads
+// them; the ledger's next save leaves them out.
+func (a *App) forgetApplied(executionID string) {
+	a.mu.Lock()
+	delete(a.applied, executionID)
+	a.mu.Unlock()
 }
 
 // failWorkItem returns an item that failed operationally to the queue, until its retry limit.
@@ -178,9 +208,10 @@ func (a *App) repairLedger() {
 
 // recover marks every execution a crash or restart left active as interrupted: it is never continued, and each work
 // item its session selected counts an operational failure, so a later cycle resumes or retries it — the item its record
-// names, and every other one its log's selections name (otherSelections). First it ends the harness that each one's
-// running attempt left, and what that harness started, which the daemon's end does not reach. Waiting firings stay
-// queued; startQueued then drops each one whose task was disabled or deleted while the daemon was down.
+// names, and every other one its log's selections name (otherSelections) — unless the ledger already took the
+// execution's result for it. First it ends the harness that each one's running attempt left, and what that harness
+// started, which the daemon's end does not reach. Waiting firings stay queued; startQueued then drops each one whose
+// task was disabled or deleted while the daemon was down.
 //
 // It reads the summary of each execution from the index of the records, and the whole record only of an execution
 // that has not ended, or of one saved at an older schema: such a record was saved before the agent's text was redacted
@@ -254,7 +285,7 @@ func (a *App) recover(ctx context.Context) error {
 		a.endLeftovers(ctx, x)
 		a.persistExecution(x)
 		limits := a.taskLimits(x.TaskID)
-		if x.WorkItem != "" {
+		if x.WorkItem != "" && !a.resultApplied(x.ID, x.WorkItem) {
 			a.failWorkItem(x.TaskID, x.WorkItem, x.ID, x.LastOperation, limits)
 		}
 		for _, key := range a.otherSelections(x) {
@@ -265,13 +296,29 @@ func (a *App) recover(ctx context.Context) error {
 			Payload: map[string]any{"status": string(domain.StatusInterrupted), "lastOperation": x.LastOperation}}.Says(
 			x.ErrorText()))
 	}
+	// Every execution recovery found active has ended, and a daemon that died before it forgot an ended one's marks left
+	// them saved: none of them is read again.
+	a.mu.Lock()
+	forgotten := 0
+	for id := range a.applied {
+		if x := a.executions[id]; x == nil || !x.Status.IsActive() {
+			delete(a.applied, id)
+			forgotten++
+		}
+	}
+	a.mu.Unlock()
+	if forgotten > 0 {
+		a.saveLedger()
+	}
 	return nil
 }
 
 // otherSelections is every work item the session of an interrupted execution selected besides the one its record
 // names, and left without a result, in the order its log first names each one. The record names only the last item a
 // session selected, and the memory of the others was lost with the daemon, so they are read from the log's
-// work_item.selected events. A log that cannot be read gives none.
+// work_item.selected events. An item has a result when the record holds one or the ledger took one from the execution
+// (resultApplied): the record is saved apart from the ledger and may not hold it yet. A log that cannot be read gives
+// none.
 func (a *App) otherSelections(x *domain.Execution) []string {
 	events, _, err := a.d.Events.Replay(x.ID, 0, 0)
 	if err != nil {
@@ -282,7 +329,8 @@ func (a *App) otherSelections(x *domain.Execution) []string {
 	for _, e := range events {
 		key := e.WorkItemID
 		if e.Type != domain.EventWorkItemSelected || key == "" || key == x.WorkItem || slices.Contains(keys, key) ||
-			slices.ContainsFunc(x.WorkItems, func(r domain.WorkItemResult) bool { return r.Key == key }) {
+			slices.ContainsFunc(x.WorkItems, func(r domain.WorkItemResult) bool { return r.Key == key }) ||
+			a.resultApplied(x.ID, key) {
 			continue
 		}
 		keys = append(keys, key)
