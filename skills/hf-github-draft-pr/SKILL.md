@@ -86,7 +86,7 @@ warnings (`conflicting_activity`).
 
 - **§3 found one from the work branch:** update it — `gh pr edit <number> --repo OWNER/REPO --body-file <file>`.
 - **§3 found none:** `gh pr create --repo OWNER/REPO --draft --base BASE --head <branch> --title "<title>" --body-file <file>`,
-  adding the task's marking (by default `--label harmflow`; create the label first with
+  adding the label of the task's marking (by default `--label harmflow`; create the label first with
   `gh label create harmflow --repo OWNER/REPO --color 7C3AED` if it does not exist).
 
 Always draft, also when tests fail. **Never run `gh pr merge`, `gh pr ready`, or enable auto-merge.**
@@ -105,10 +105,13 @@ The commands run and their result — what passed and what failed.
 ## Pending
 What is still missing or needs a reviewer's decision.
 
-Managed by HarmFlow task <task-id> (execution <execution-id>).
+<marking line>
 ```
 
-`<task-id>` and `<execution-id>` are `task.id` and `execution.id` in `context.json`. Then append:
+`<marking line>` is the line the task's prompt marks its pull requests with, as the prompt states it: by default
+`Managed by HarmFlow task <task-id>.`, where `<task-id>` is `task.id` in `context.json`. When the prompt's marking
+names no line, leave it out. The body carries no other line that marks it, and names no execution: the execution's
+report and events already link the execution to its pull request. Then append:
 
 ```json
 {"type":"pull_request.created","workItem":"OWNER/REPO#123","url":"<url>","number":<n>,"branch":"<branch>"}
