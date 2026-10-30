@@ -153,26 +153,42 @@ func useClaude(d *daemon, claude, clone string) {
 // customized to the fixtures.
 func queueTask(d *daemon, clone string) string {
 	d.t.Helper()
+	return issueQueueTask(d, clone,
+		fmt.Sprintf("open issues of %s labelled %s; every other issue is excluded.", queueRepo, queueLabel), "oldest_first")
+}
+
+// issueQueueTask is a task made of the built-in issue implementer as selecting it copies it, on queueRepo, with the
+// copy's eligible-issues line giving eligible instead, or removed when eligible is empty, which leaves the prompt with
+// no selection. ordering is the queue's order; when it is empty, the task sets none and the default applies.
+func issueQueueTask(d *daemon, clone, eligible, ordering string) string {
+	d.t.Helper()
 	copied := d.builtinAgentCopy("hf-github-issue-implementer")
-	const eligible = "- **Eligible issues:** open issues labeled `agent-ready` that are not labeled `blocked`.\n"
+	const line = "- **Eligible issues:** open issues labeled `agent-ready` that are not labeled `blocked`.\n"
 	prompt, _ := copied["prompt"].(string)
-	if !strings.Contains(prompt, eligible) {
-		d.t.Fatalf("the copy of hf-github-issue-implementer has no line %q to customize:\n%s", eligible, prompt)
+	if !strings.Contains(prompt, line) {
+		d.t.Fatalf("the copy of hf-github-issue-implementer has no line %q to customize:\n%s", line, prompt)
 	}
-	prompt = strings.Replace(prompt, eligible, fmt.Sprintf(
-		"- **Eligible issues:** open issues of %s labelled %s; every other issue is excluded.\n", queueRepo, queueLabel), 1)
+	replacement := ""
+	if eligible != "" {
+		replacement = "- **Eligible issues:** " + eligible + "\n"
+	}
+	prompt = strings.Replace(prompt, line, replacement, 1)
+	order := ""
+	if ordering != "" {
+		order = "\n      ordering: " + ordering
+	}
 	return fmt.Sprintf(`apiVersion: harmflow/v1alpha1
 kind: Task
 metadata:
   id: queue
-  name: Queue retry
+  name: Issue queue
 spec:
   type: github
   prompt: |
-    %[4]s
+    %[3]s
   origin:
     agent: hf-github-issue-implementer
-    hash: %[5]s
+    hash: %[4]s
   skills: [hf-github-issue-queue, hf-github-worktree, hf-github-draft-pr]
   harness:
     preferred:
@@ -193,13 +209,12 @@ spec:
   github:
     repositories:
       - name: %[1]s
-        localPath: %[3]s
-    queue:
-      ordering: oldest_first
+        localPath: %[2]s
+    queue:%[5]s
       maxItemsPerCycle: 1
       resumeStrategy: resume_first
       maxFailedRetries: 1
-`, queueRepo, queueLabel, clone, strings.ReplaceAll(prompt, "\n", "\n    "), copied["hash"])
+`, queueRepo, clone, strings.ReplaceAll(prompt, "\n", "\n    "), copied["hash"], order)
 }
 
 func executionDir(d *daemon, id string) string {
