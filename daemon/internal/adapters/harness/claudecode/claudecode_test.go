@@ -263,7 +263,8 @@ func TestPrepareTranslatesPermissions(t *testing.T) {
 // harmflow-app#211: Claude Code merges the allow rules of every settings source into a custom profile's tool list. A
 // rule the task's allowed and denied lists do not carry, in a settings file HarmFlow can read, leaves the list not
 // enforced, and the warning names the source; validation reads only the user's settings. A rule counts as carried only
-// when it is identical to an entry, and a file that cannot be read or parsed widens the list.
+// when it is identical to an entry, and a file that cannot be read or parsed widens the list. Additional directories
+// widen no tool list, not even a value that is not a list (harmflow-app#426).
 func TestPrepareReportsAllowRulesThatWidenTheToolList(t *testing.T) {
 	const bashAll = `{"permissions":{"allow":["Bash(*)"]}}`
 	const python = `{"permissions":{"allow":["Bash(python3:*)"]}}`
@@ -304,6 +305,8 @@ func TestPrepareReportsAllowRulesThatWidenTheToolList(t *testing.T) {
 		{name: "allow rules that are not a list", user: `{"permissions":{"allow":"Bash(*)"}}`, allowed: allowed,
 			want: "user"},
 		{name: "project settings that cannot be read", project: dir, allowed: allowed, want: "project"},
+		{name: "additional directories", user: `{"permissions":{"allow":["Read"],"additionalDirectories":["/etc"]}}`,
+			local: `{"permissions":{"additionalDirectories":"/etc"}}`, allowed: allowed},
 	}
 	where := map[string]string{"user": "user settings", "project": "project settings", "local": "local settings",
 		"user_local": "user and local settings", "user_project_local": "user, project, and local settings"}
@@ -381,13 +384,17 @@ func TestPrepareReadsTheUserSettingsOfTheConfigurationDirectory(t *testing.T) {
 // lies within those directories stays inside: a bare rule, one Claude Code could read another way, and a file that
 // cannot be read or parsed do not. The workspace is given resolved, as the daemon gives it, and a rule's path is
 // resolved before the two are compared, so a rule naming the workspace through a link stays inside and one naming a
-// folder outside through a link does not (harmflow-app#449).
+// folder outside through a link does not (harmflow-app#449). An additional directory in the same sources is a folder
+// where acceptEdits approves edits, so it lifts the limit as such a rule does, read the same way: only an absolute path
+// within those directories stays inside, and a relative or ~ path, and a value that is not a list of strings, null
+// included, do not (harmflow-app#426).
 func TestPrepareReportsEditRulesThatReachOutside(t *testing.T) {
 	const bareWrite = `{"permissions":{"allow":["Write"]}}`
+	const etc = `{"permissions":{"additionalDirectories":["/etc"]}}`
 	const dir = "<dir>" // a folder where the file would be: it exists, but cannot be read
 	cases := []struct {
 		name                 string
-		user, project, local string // settings content; <work>, <added>, <exec>, <link> name the folders; "" for no file
+		user, project, local string // settings with <work>, <added>, <exec>, <link>, <out> for the folders; "" for no file
 		policyCheck          bool
 		want                 string // the sources param of edits not limited; "" for limited edits
 	}{
@@ -432,9 +439,40 @@ func TestPrepareReportsEditRulesThatReachOutside(t *testing.T) {
 			user: `{"permissions":{"allow":["Write(/<link>/**)","Edit(~/link/src/**)"]}}`, policyCheck: true},
 		{name: "a rule naming a folder outside through a link at validation",
 			user: `{"permissions":{"allow":["Edit(~/out/**)"]}}`, policyCheck: true, want: "user"},
+		{name: "an additional directory outside the workspace", user: etc, want: "user"},
+		{name: "additional directories within the workspace and the added directories",
+			project: `{"permissions":{"additionalDirectories":["<work>","<work>/src","<added>/docs"]}}`},
+		{name: "the execution folder as an additional directory", local: `{"permissions":{"additionalDirectories":["<exec>"]}}`},
+		{name: "an additional directory beside the workspace",
+			local: `{"permissions":{"additionalDirectories":["<work>-other"]}}`, want: "local"},
+		{name: "the workspace's parent as an additional directory",
+			user: `{"permissions":{"additionalDirectories":["<work>/.."]}}`, want: "user"},
+		{name: "a relative additional directory", project: `{"permissions":{"additionalDirectories":["src"]}}`,
+			want: "project"},
+		{name: "an additional directory from the home folder", user: `{"permissions":{"additionalDirectories":["~/repo"]}}`,
+			want: "user"},
+		{name: "an empty additional directory", local: `{"permissions":{"additionalDirectories":[""]}}`, want: "local"},
+		{name: "additional directories that are not a list", user: `{"permissions":{"additionalDirectories":"/etc"}}`,
+			want: "user"},
+		{name: "an additional directory that is not a string", project: `{"permissions":{"additionalDirectories":[1]}}`,
+			want: "project"},
+		{name: "null additional directories", user: `{"permissions":{"additionalDirectories":null}}`, want: "user"},
+		{name: "an empty list of additional directories", user: `{"permissions":{"additionalDirectories":[]}}`},
+		{name: "an additional directory outside beside an editing rule inside",
+			user: `{"permissions":{"allow":["Edit(/<work>/src/**)"],"additionalDirectories":["/etc"]}}`, want: "user"},
+		{name: "additional directories outside in two sources", user: etc, local: etc, want: "user_local"},
+		{name: "an additional directory naming the workspace through a link",
+			user: `{"permissions":{"additionalDirectories":["<link>/src"]}}`},
+		{name: "an additional directory naming a folder outside through a link",
+			user: `{"permissions":{"additionalDirectories":["<out>"]}}`, want: "user"},
+		{name: "an additional directory outside at validation", user: etc, policyCheck: true, want: "user"},
+		{name: "an additional directory within the workspace at validation",
+			user: `{"permissions":{"additionalDirectories":["<work>/src"]}}`, policyCheck: true},
+		{name: "project and local additional directories at validation", project: etc,
+			local: `{"permissions":{"additionalDirectories":"/etc"}}`, policyCheck: true},
 	}
 	where := map[string]string{"user": "user settings", "project": "project settings", "local": "local settings",
-		"user_project_local": "user, project, and local settings"}
+		"user_local": "user and local settings", "user_project_local": "user, project, and local settings"}
 	info := ports.HarnessInfo{Path: "/bin/claude", Features: map[string]bool{}}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -451,7 +489,8 @@ func TestPrepareReportsEditRulesThatReachOutside(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Setenv("CLAUDE_CONFIG_DIR", config)
-			folders := strings.NewReplacer("<work>", work, "<added>", added, "<exec>", exec, "<link>", link)
+			folders := strings.NewReplacer("<work>", work, "<added>", added, "<exec>", exec, "<link>", link,
+				"<out>", filepath.Join(home, "out"))
 			writeSettings(t, filepath.Join(config, "settings.json"), folders.Replace(c.user))
 			writeSettings(t, filepath.Join(work, ".claude", "settings.json"), folders.Replace(c.project))
 			writeSettings(t, filepath.Join(work, ".claude", "settings.local.json"), folders.Replace(c.local))

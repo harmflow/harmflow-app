@@ -479,9 +479,9 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 	return inv, &parser{tools: map[string]toolUse{}}, nil
 }
 
-// settingsSources are the Claude Code settings files HarmFlow reads for allow rules, in the order a warning names them:
-// the user's, in the configuration directory, then the working directory's project and local ones. Managed settings
-// are not read.
+// settingsSources are the Claude Code settings files HarmFlow reads for allow rules and additional directories, in the
+// order a warning names them: the user's, in the configuration directory, then the working directory's project and
+// local ones. Managed settings are not read.
 var settingsSources = []struct{ name, file string }{
 	{"user", "settings.json"},
 	{"project", filepath.Join(".claude", "settings.json")},
@@ -489,9 +489,9 @@ var settingsSources = []struct{ name, file string }{
 }
 
 // wideningSources names, in the order of settingsSources, the settings sources that widen what the task allows: those
-// with an allow rule widens reports, and those whose file exists but cannot be read or parsed, since it cannot be
-// checked. Validation reads only the user's settings; the workspace's own are read when each execution starts.
-func (a *Adapter) wideningSources(req ports.RunRequest, widens func(source, rule string) bool) []string {
+// whose settings widens reports, and those whose file exists but cannot be read or parsed, since it cannot be checked.
+// Validation reads only the user's settings; the workspace's own are read when each execution starts.
+func (a *Adapter) wideningSources(req ports.RunRequest, widens func(source string, settings claudeSettings) bool) []string {
 	var out []string
 	for _, s := range settingsSources {
 		path := filepath.Join(req.WorkDir, s.file)
@@ -501,8 +501,8 @@ func (a *Adapter) wideningSources(req ports.RunRequest, widens func(source, rule
 		case req.PolicyCheck || req.WorkDir == "":
 			continue
 		}
-		rules, err := allowRules(path)
-		if err != nil || slices.ContainsFunc(rules, func(r string) bool { return widens(s.name, r) }) {
+		settings, err := readSettings(path)
+		if err != nil || widens(s.name, settings) {
 			out = append(out, s.name)
 		}
 	}
@@ -513,7 +513,9 @@ func (a *Adapter) wideningSources(req ports.RunRequest, widens func(source, rule
 // every settings source it loads into the list it is given, so an allow rule that covered, the task's allowed and
 // denied tools, does not hold widens the list. A rule is covered only when it is identical to an entry.
 func (a *Adapter) allowlistRestriction(req ports.RunRequest, covered []string) ports.Restriction {
-	widening := a.wideningSources(req, func(_, r string) bool { return !slices.Contains(covered, r) })
+	widening := a.wideningSources(req, func(_ string, s claudeSettings) bool {
+		return slices.ContainsFunc(s.Permissions.Allow, func(r string) bool { return !slices.Contains(covered, r) })
+	})
 	if len(widening) == 0 {
 		return ports.Restriction{Name: "tool_allowlist", Enforced: true,
 			Text: domain.Text{Message: "Claude Code allows the listed tools, and the commands it judges read-only"}}
@@ -525,10 +527,12 @@ func (a *Adapter) allowlistRestriction(req ports.RunRequest, covered []string) p
 }
 
 // editRestriction says whether workspace_write's file edits are limited to the workspace and the added directories.
-// acceptEdits limits them so, but Claude Code adds the allow rules of every settings source it loads, and an editing
-// rule that may reach outside those directories lifts the limit. In doubt, a rule reaches outside: only one whose path
-// lies within the working directory or an added directory stays inside, and a bare rule does not. The directories are
-// compared resolved, as the rules' paths are, so a link on either side does not decide.
+// acceptEdits limits them so, but Claude Code adds the allow rules of every settings source it loads, and the
+// additional directories, where acceptEdits approves edits as in the working directory; an editing rule or an
+// additional directory that may reach outside those directories lifts the limit. In doubt, either reaches outside:
+// only one whose path lies within the working directory or an added directory stays inside, and a bare rule, or a list
+// of additional directories that cannot be read, does not. The directories are compared resolved, as the rules' and
+// the additional directories' paths are, so a link on either side does not decide.
 func (a *Adapter) editRestriction(req ports.RunRequest) ports.Restriction {
 	var roots []string
 	for _, d := range append([]string{req.ExecutionDir, req.WorkDir}, req.AdditionalDirs...) {
@@ -536,8 +540,12 @@ func (a *Adapter) editRestriction(req ports.RunRequest) ports.Restriction {
 			roots = append(roots, real)
 		}
 	}
-	widening := a.wideningSources(req, func(source, r string) bool {
-		return containsStr(editTools, toolName(r)) && !a.editRuleInside(r, source != "user", roots)
+	widening := a.wideningSources(req, func(source string, s claudeSettings) bool {
+		dirs, ok := s.additionalDirs()
+		return !ok || slices.ContainsFunc(dirs, func(d string) bool { return !dirInside(d, roots) }) ||
+			slices.ContainsFunc(s.Permissions.Allow, func(r string) bool {
+				return containsStr(editTools, toolName(r)) && !a.editRuleInside(r, source != "user", roots)
+			})
 	})
 	if len(widening) == 0 {
 		return ports.Restriction{Name: "edit_directories", Enforced: true,
@@ -545,8 +553,16 @@ func (a *Adapter) editRestriction(req ports.RunRequest) ports.Restriction {
 	}
 	return ports.Restriction{Name: "edit_directories", Enforced: false,
 		Text: domain.T("restriction_claude_edit_rules",
-			"Claude Code adds the allow rules of its {{where}} to the task's permissions, and they allow file edits outside the workspace and the added directories or could not be read; managed settings are not checked",
+			"Claude Code adds the allow rules and additional directories of its {{where}} to the task's permissions, and they allow file edits outside the workspace and the added directories or could not be read; managed settings are not checked",
 			"where", settingsPhrase(widening), "sources", strings.Join(widening, "_"))}
+}
+
+// dirInside reports whether an additional directory of a settings file lies within one of roots, resolved as they
+// are. Only an absolute path can: a relative one, which Claude Code could read from more than one folder, and a ~ one
+// are in doubt, so they reach outside.
+func dirInside(dir string, roots []string) bool {
+	real, err := domain.ResolvePath(dir)
+	return err == nil && within(real, roots)
 }
 
 // editRuleInside reports whether an editing rule's path stays within the working directory or one of roots, read in
@@ -611,24 +627,42 @@ func within(path string, dirs []string) bool {
 	return false
 }
 
-// allowRules are the permissions.allow rules of a Claude Code settings file; a missing file has none.
-func allowRules(path string) ([]string, error) {
+// claudeSettings are what HarmFlow checks in a Claude Code settings file: its permissions.allow rules, and its
+// permissions.additionalDirectories, which Claude Code counts as working directories. The directories are decoded
+// apart, by additionalDirs, so that a value that is not a list leaves the allow rules readable.
+type claudeSettings struct {
+	Permissions struct {
+		Allow                 []string        `json:"allow"`
+		AdditionalDirectories json.RawMessage `json:"additionalDirectories"`
+	} `json:"permissions"`
+}
+
+// additionalDirs are the settings' additional directories, none when the key is absent. ok is false when the value is
+// not a list of strings, null included, since it cannot be checked.
+func (s claudeSettings) additionalDirs() (dirs []string, ok bool) {
+	raw := s.Permissions.AdditionalDirectories
+	if raw == nil {
+		return nil, true
+	}
+	// A list decodes to a slice, an empty one included; null decodes to none.
+	if err := json.Unmarshal(raw, &dirs); err != nil || dirs == nil {
+		return nil, false
+	}
+	return dirs, true
+}
+
+// readSettings reads what HarmFlow checks in a Claude Code settings file; a missing file holds nothing.
+func readSettings(path string) (claudeSettings, error) {
+	var settings claudeSettings
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
+		return settings, nil
 	}
 	if err != nil {
-		return nil, err
+		return settings, err
 	}
-	var settings struct {
-		Permissions struct {
-			Allow []string `json:"allow"`
-		} `json:"permissions"`
-	}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return nil, err
-	}
-	return settings.Permissions.Allow, nil
+	err = json.Unmarshal(data, &settings)
+	return settings, err
 }
 
 // settingsPhrase names settings sources in en-US: "user settings", "user and local settings", "user, project, and

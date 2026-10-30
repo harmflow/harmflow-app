@@ -55,7 +55,7 @@ describe("daemonText", () => {
         "e elas permitem mais que a lista ou não puderam ser lidas; as configurações gerenciadas não são verificadas",
     );
     expect(daemonText({ message: "", messageKey: "restriction_claude_edit_rules", params: { where: "project settings", sources: "project" } })).toBe(
-      "o Claude Code soma as regras de permissão das suas configurações de projeto às permissões da tarefa, e elas permitem " +
+      "o Claude Code soma as regras de permissão e as pastas adicionais das suas configurações de projeto às permissões da tarefa, e elas permitem " +
         "editar arquivos fora do workspace e das pastas adicionadas ou não puderam ser lidas; as configurações gerenciadas não são verificadas",
     );
   });
