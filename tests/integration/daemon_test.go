@@ -274,27 +274,88 @@ func (d *daemon) list(path string) []map[string]any {
 	return out
 }
 
-func (d *daemon) waitStatus(id string, want ...string) map[string]any {
-	d.t.Helper()
-	return d.waitStatusWithin(20*time.Second, id, want...)
+// A wait for an execution fails once executionSilence passes with no progress of the execution — a new line in its
+// JSONL log under logs/, or a change of its status — and once executionCeiling passes from the call in all. A loaded
+// host slows every process an execution starts, the stand-in harness, its sleeps, and the daemon's checks, so a fixed
+// deadline ran out while the execution still progressed. A hung daemon still fails within the silence, and a slow host
+// only stretches the wait up to the ceiling.
+const (
+	executionSilence = 20 * time.Second
+	executionCeiling = 3 * time.Minute
+)
+
+// executionProgress follows an execution's progress through a wait, from the call: the first read is where the wait
+// starts, and each later change is progress.
+type executionProgress struct {
+	start, at time.Time // the call, and the last progress
+	read      bool
+	lines     int
+	status    any
+	last      string // the last progress, for the failure message
 }
 
-// waitStatusWithin is waitStatus with a deadline of its own, for an execution that starts more processes than most.
-func (d *daemon) waitStatusWithin(within time.Duration, id string, want ...string) map[string]any {
+func newExecutionProgress() *executionProgress {
+	now := time.Now()
+	return &executionProgress{start: now, at: now}
+}
+
+// see records a read of the execution's log lines and of its status, nil when the wait does not read it.
+func (p *executionProgress) see(lines []logLine, status any) {
+	now := time.Now()
+	if p.read && len(lines) > p.lines {
+		p.at, p.last = now, fmt.Sprintf("line %d of its log, %s", len(lines), lines[len(lines)-1].Type)
+	}
+	if p.read && status != p.status {
+		p.at, p.last = now, fmt.Sprintf("its status %v", status)
+	}
+	p.read, p.lines, p.status = true, len(lines), status
+}
+
+// notYet records a read that found no execution yet, such as a scheduled one before its firing: with nothing to be
+// silent, only the ceiling bounds the wait.
+func (p *executionProgress) notYet() {
+	p.at = time.Now()
+}
+
+// over names the limit the wait reached, or is empty while the wait goes on.
+func (p *executionProgress) over() string {
+	now := time.Now()
+	switch {
+	case now.Sub(p.start) >= executionCeiling:
+		return fmt.Sprintf("%v in all", executionCeiling)
+	case now.Sub(p.at) >= executionSilence:
+		return fmt.Sprintf("%v with no progress", executionSilence)
+	}
+	return ""
+}
+
+// String names the execution's last progress and when it came, for a failure message.
+func (p *executionProgress) String() string {
+	const clock = "15:04:05.000"
+	if p.last == "" {
+		return "no progress since the wait began at " + p.start.Format(clock)
+	}
+	return "last progress " + p.last + " at " + p.at.Format(clock)
+}
+
+// waitStatus returns the execution once it has one of the statuses, waiting while it progresses (executionSilence).
+func (d *daemon) waitStatus(id string, want ...string) map[string]any {
 	d.t.Helper()
-	deadline := time.Now().Add(within)
-	var x map[string]any
-	for time.Now().Before(deadline) {
-		x = d.call("GET", "/executions/"+id, nil, 200)
+	logPath := filepath.Join(d.home, "logs", id+".jsonl")
+	p := newExecutionProgress()
+	for ; ; time.Sleep(100 * time.Millisecond) {
+		x := d.call("GET", "/executions/"+id, nil, 200)
 		for _, w := range want {
 			if x["status"] == w {
 				return x
 			}
 		}
-		time.Sleep(100 * time.Millisecond)
+		p.see(readLog(d.t, logPath), x["status"])
+		if limit := p.over(); limit != "" {
+			d.t.Fatalf("execution %s is %v, want %v, after %s; %v", id, x["status"], want, limit, p)
+			return nil
+		}
 	}
-	d.t.Fatalf("execution %s is %v, want %v", id, x["status"], want)
-	return nil
 }
 
 func task(id, prompt, extra string) string {
@@ -2491,10 +2552,7 @@ func TestFailoverEndsWhatTheFirstAttemptLeft(t *testing.T) {
 		"    fallback:\n      candidates:\n        - provider: codex\n  execution:\n    cancelGraceSeconds: 1\n")}, 201)
 	run := d.call("POST", "/tasks/leftover/run", nil, 202)
 	id := run["executionId"].(string)
-	// The execution starts eleven processes one after another: eight checks of the two harnesses before their attempts,
-	// the two stand-ins, and the mv that writes the leftover's pid. On a loaded host each start can take seconds: 20
-	// seconds did not always cover them, and a heavier load took them up to 75.
-	x := d.waitStatusWithin(120*time.Second, id, "completed", "failed")
+	x := d.waitStatus(id, "completed", "failed")
 	left := readPid(t, filepath.Join(x["executionDir"].(string), "leftover.pid"))
 	t.Cleanup(func() {
 		if !gone(left) {
@@ -3486,7 +3544,7 @@ func TestScheduledRunWithDashboardClosed(t *testing.T) {
 
 	// From here until the execution ends, the test calls nothing and opens no stream: it reads logs/ only. Schedules
 	// have no seconds field, so the firing comes at the next minute boundary, then within a scheduler tick.
-	id, logged := waitLogEnd(t, d.home, "", 90*time.Second, nil)
+	id, logged := waitLogEnd(t, d.home, "", nil)
 	d.call("POST", "/tasks/every-minute/disable", nil, 200)
 	if first, last := logged[0], logged[len(logged)-1]; first.Type != "execution.created" ||
 		last.Type != "execution.completed" {
@@ -3610,7 +3668,7 @@ func TestClosingTheStreamStopsNothing(t *testing.T) {
 		}
 	}
 
-	_, logged := waitLogEnd(t, d.home, id, 30*time.Second, func() {
+	_, logged := waitLogEnd(t, d.home, id, func() {
 		if h := d.call("GET", "/health", nil, 200); h["pid"] != health["pid"] || h["startedAt"] != health["startedAt"] {
 			t.Fatalf("GET /health answered for another daemon: %v, then %v", health, h)
 		}
@@ -3657,14 +3715,7 @@ func TestDaemonOutlivesItsStarter(t *testing.T) {
 	if h := d.call("GET", "/health", nil, 200); h["pid"] != health["pid"] || h["startedAt"] != health["startedAt"] {
 		t.Fatalf("GET /health answered for another daemon: %v, then %v", health, h)
 	}
-	// From running, the execution has the stand-in's ticks scenario left: ten ticks half a second apart, each pause a
-	// sleep the stand-in starts, so eleven process starts with its own, then the end of the attempt. The harness checks
-	// run before running, outside this wait. On a loaded host each start can take seconds: with a full run and other
-	// process starts beside it, the ticks came up to 4.4 seconds apart, and 20 seconds from running did not cover them.
-	// The wait gives the pauses their five seconds and each start 10 seconds, as
-	// TestFailoverEndsWhatTheFirstAttemptLeft gives its eleven starts.
-	const pauses, starts, perStart = 10 * 500 * time.Millisecond, 11, 10 * time.Second
-	x := d.waitStatusWithin(pauses+starts*perStart, id, "completed", "failed", "cancelled", "interrupted")
+	x := d.waitStatus(id, "completed", "failed", "cancelled", "interrupted")
 	if x["status"] != "completed" {
 		t.Errorf("the execution is %v, want completed", x["status"])
 	}
@@ -3810,31 +3861,43 @@ func readLog(t *testing.T, path string) []logLine {
 }
 
 // waitLogEnd reads logs/ under home, and calls nothing on the daemon, until an execution's JSONL log holds a terminal
-// event; it returns the execution's id and the log's lines. An empty id waits for the only execution's log. each, when
-// set, runs between two reads.
-func waitLogEnd(t *testing.T, home, id string, timeout time.Duration, each func()) (string, []logLine) {
+// event; it returns the execution's id and the log's lines. It waits while the log grows (executionSilence). An empty
+// id waits for the only execution's log, which only the ceiling bounds until it appears. each, when set, runs between
+// two reads.
+func waitLogEnd(t *testing.T, home, id string, each func()) (string, []logLine) {
 	t.Helper()
 	dir := filepath.Join(home, "logs")
 	pattern := "*.jsonl"
 	if id != "" {
 		pattern = id + ".jsonl"
 	}
-	for deadline := time.Now().Add(timeout); time.Now().Before(deadline); time.Sleep(250 * time.Millisecond) {
+	p := newExecutionProgress()
+	var limit string
+	for {
 		files, _ := filepath.Glob(filepath.Join(dir, pattern))
 		if len(files) > 1 {
 			t.Fatalf("logs/ holds %d execution logs, want one: %v", len(files), files)
 		}
+		if len(files) == 0 && id == "" {
+			p.notYet()
+		}
+		var lines []logLine
 		for _, f := range files {
-			lines := readLog(t, f)
+			lines = readLog(t, f)
 			for _, l := range lines {
 				if terminalTypes[l.Type] {
 					return strings.TrimSuffix(filepath.Base(f), ".jsonl"), lines
 				}
 			}
 		}
+		p.see(lines, nil)
+		if limit = p.over(); limit != "" {
+			break
+		}
 		if each != nil {
 			each()
 		}
+		time.Sleep(250 * time.Millisecond)
 	}
 	var names []string
 	entries, _ := os.ReadDir(dir)
@@ -3845,7 +3908,8 @@ func waitLogEnd(t *testing.T, home, id string, timeout time.Duration, each func(
 	if len(daemonLog) > 4000 {
 		daemonLog = daemonLog[len(daemonLog)-4000:]
 	}
-	t.Fatalf("no execution log in logs/ ended within %v; logs/ holds %v; daemon.log ends:\n%s", timeout, names, daemonLog)
+	t.Fatalf("no execution log in logs/ ended after %s; %v; logs/ holds %v; daemon.log ends:\n%s", limit, p, names,
+		daemonLog)
 	return "", nil
 }
 
