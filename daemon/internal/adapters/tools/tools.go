@@ -13,15 +13,19 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
-// Prober is the ToolProber: it looks for git and gh on PathEnv, then in the usual Homebrew and system locations, and
-// runs them with Env.
+// Prober is the ToolProber: it looks for git and gh on PathEnv, then in Dirs, and runs them with Env.
 type Prober struct {
 	Home    string
 	PathEnv string
 	Env     []string
+	// Dirs are the folders searched after PathEnv; nil for the usual Homebrew and system locations, usualDirs.
+	Dirs []string
 }
 
 var _ ports.ToolProber = (*Prober)(nil)
+
+// usualDirs are the folders searched after PathEnv when Prober.Dirs is nil.
+var usualDirs = []string{"/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"}
 
 var versionRe = regexp.MustCompile(`(\d+\.\d+(\.\d+)?)`)
 
@@ -31,7 +35,15 @@ func (p *Prober) Probe(ctx context.Context) []ports.ToolInfo {
 }
 
 func (p *Prober) find(name string) string {
-	found := procutil.LookPath(name, p.PathEnv, []string{"/opt/homebrew/bin/" + name, "/usr/local/bin/" + name, "/usr/bin/" + name})
+	dirs := p.Dirs
+	if dirs == nil {
+		dirs = usualDirs
+	}
+	var known []string
+	for _, d := range dirs {
+		known = append(known, d+"/"+name)
+	}
+	found := procutil.LookPath(name, p.PathEnv, known)
 	if len(found) == 0 {
 		return ""
 	}
@@ -73,6 +85,8 @@ func (p *Prober) gh(ctx context.Context) ports.ToolInfo {
 	if m := versionRe.FindStringSubmatch(out); m != nil {
 		t.Version = m[1]
 	}
+	// Only a gh that says it is signed out reads invalid. Any other failure, a probe killed at its timeout included,
+	// leaves the sign-in unknown, as the harnesses' sign-in reads (harmflow-app#71).
 	stdout, stderr, err := procutil.Output(ctx, 15*time.Second, p.Env, t.Path, "auth", "status")
 	switch {
 	case err == nil:
@@ -82,8 +96,7 @@ func (p *Prober) gh(ctx context.Context) ports.ToolInfo {
 		t.SetDiagnostic(domain.T("not_signed_in", "{{name}} is not signed in; run `{{command}}` in a terminal",
 			"name", "gh", "command", "gh auth login"))
 	default:
-		t.Authentication = "invalid"
-		t.SetDiagnostic(domain.T("gh_auth_problem", "gh auth status reported a problem"))
+		t.SetDiagnostic(domain.T("authentication_unverified", "authentication could not be verified"))
 	}
 	return t
 }

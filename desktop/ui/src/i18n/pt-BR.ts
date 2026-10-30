@@ -476,7 +476,6 @@ export const ptBR: Resources = {
     authentication_unverified: "não foi possível verificar a autenticação",
     codex_requirements_disallow:
       "os requisitos gerenciados do Codex não permitem {{settings}}, com que o HarmFlow o executa, então o Codex passa a usar o que eles permitem: {{allowed}}",
-    gh_auth_problem: "gh auth status relatou um problema",
   },
   cronFields: {
     minute: "minuto",
