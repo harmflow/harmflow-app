@@ -147,6 +147,13 @@ For each selected item, append one line to `progress.jsonl`:
 {"type":"work_item.selected","workItem":"OWNER/REPO#123","repository":"OWNER/REPO","message":"<issue title>"}
 ```
 
+Then read its issue's assignees, the logins it prints, and keep them: hf-github-draft-pr §3 reads them again before it
+publishes, and an assignee the issue did not have here is activity that conflicts with the work.
+
+```bash
+gh api repos/OWNER/REPO/issues/<issue> --jq '[.assignees[].login]'
+```
+
 If nothing is eligible, the execution's outcome is `no_work`: write `report.json` with
 `{"outcome":"no_work","summary":"<what was checked>"}`, its `workItems` holding the items whose worktree
 hf-github-worktree §3 found ended, and stop. That is a normal outcome, not a failure.

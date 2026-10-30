@@ -74,6 +74,18 @@ name, followed by a hyphen or by nothing, which hf-github-worktree §2 puts in e
 A call that fails decides nothing: push nothing and open no pull request, and the item's outcome is `failed`, as when
 the pull request could not be opened.
 
+Before you open or update the pull request, read the issue's assignees and state again:
+
+```bash
+gh api repos/OWNER/REPO/issues/<issue> --jq '{state, assignees: [.assignees[].login]}'
+```
+
+An assignee the issue did not have when hf-github-issue-queue §3 read its assignees at selection is someone taking the
+issue while you worked — your own login too, since the built-in skills never assign an issue. Record it in the report's
+warnings (`conflicting_activity`, §5), naming the assignee, and go on: push, and open or update the pull request as the
+lookups above decided. An issue that reads `closed` is recorded the same way, and the work goes on too. This read
+decides nothing else: when it fails, record nothing and go on.
+
 ## 4. Push, and open or update exactly one draft pull request
 
 ```bash
