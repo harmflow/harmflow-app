@@ -10,7 +10,7 @@ executions. Read `task.parameters.queue` from `context.json`:
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `maxDiscoveredPerCycle` | 10 | How many eligible new issues to collect, per repository; excluded and already-processed issues do not count |
+| `maxDiscoveredPerCycle` | 10 | How many eligible new issues a cycle discovers, across all the task's repositories together (§2); excluded and already-processed issues do not count |
 | `maxItemsPerCycle` | 1 | How many work items this execution processes |
 | `ordering` | `oldest_first` | `oldest_first` or `newest_first`, by issue creation — the order discovery reads issues in (§2) |
 | `resumeStrategy` | `resume_first` | `resume_first`, `new_first`, or `alternate` between the two lists |
@@ -69,13 +69,16 @@ Report it with `kind` `new` — no pull request is resumed, so it counts toward 
 
 ## 2. New issues
 
-New work is, for each repository, the first `maxDiscoveredPerCycle` **eligible** issues in the task's `ordering`: the
-oldest ones for `oldest_first`, the newest ones for `newest_first`. Eligibility is decided before the list is cut — an
-issue the prompt's criteria exclude, or one already processed, does not count against the limit, so read past it.
+New work is the cycle's first `maxDiscoveredPerCycle` **eligible** issues across all the task's repositories together,
+in the task's `ordering`: the oldest ones for `oldest_first`, the newest ones for `newest_first`. The limit is the
+cycle's, not each repository's: the eligible issues of every repository form one list, by creation date, never one
+repository's issues after another's. Eligibility is decided before the list is cut — an issue the prompt's criteria
+exclude, or one already processed, does not count against the limit, so read past it.
 
 When the prompt names one specific issue, read it with
 `gh issue view <n> --repo OWNER/REPO --json number,title,url,labels,state,createdAt` instead of listing. Otherwise,
-read the repository's open issues one page at a time, from page 1, in the task's order:
+read each repository in `task.parameters.repositories` the same way: its open issues one page at a time, from page 1,
+in the task's order:
 
 ```bash
 gh api "repos/OWNER/REPO/issues?state=open&sort=created&direction=<asc|desc>&per_page=100&page=<n>" \
@@ -100,10 +103,15 @@ gh api "repos/OWNER/REPO/issues?state=open&sort=created&direction=<asc|desc>&per
 
   Read its result in order as below. An empty result does not prove that no issue matches.
 
-Go through the issues in the order they came, page after page, and keep each one that meets the prompt's criteria and
-is not already processed (below). Stop when you have `maxDiscoveredPerCycle` of them, when a page's `fetched` is below
-100 (it was the last page), or after 10 pages — 1,000 open issues and pull requests. If you stop at that cap, go on
-with what you kept and say so in the report's `summary`.
+Go through each repository's issues in the order they came, page after page, and keep each one that meets the prompt's
+criteria and is not already processed (below). Stop reading a repository when you have kept `maxDiscoveredPerCycle`
+of its issues, the most the cycle's list can take from one repository; when a page's `fetched` is below 100 (it was
+the last page); or after 10 pages — 1,000 open issues and pull requests. If you stop at that cap, go on with what you
+kept and say so in the report's `summary`.
+
+Then put the issues kept from every repository in one list by their `createdAt`, oldest first for `oldest_first`,
+newest first for `newest_first`, and keep its first `maxDiscoveredPerCycle`: those are the cycle's new work, in that
+order. Issues of two repositories created at the same time keep the order of `task.parameters.repositories`.
 
 An issue is **already processed**, and is not new work, when any of these holds:
 
@@ -129,8 +137,9 @@ is resumed under §1, and a `failed` item no pull request links is retried under
 
 ## 3. Order and select
 
-The work of §1 is one list: the managed draft pull requests to resume, then the work to retry. New issues keep the
-order of §2. Merge the two lists by `resumeStrategy`, then take the first `maxItemsPerCycle` items.
+The work of §1 is one list: the managed draft pull requests to resume, then the work to retry. New issues are the one
+list of §2, across all the task's repositories, in the task's `ordering` — never one repository's issues after
+another's. Merge the two lists by `resumeStrategy`, then take the first `maxItemsPerCycle` items.
 
 For each selected item, append one line to `progress.jsonl`:
 
