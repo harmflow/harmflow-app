@@ -188,7 +188,7 @@ func (a *App) copyAgent(ctx context.Context, metadata, spec map[string]any, t *T
 		harness = domain.HarnessClaudeCode
 	}
 	workspace, _ := lookup(t.spec, "workspace", "path").(string)
-	l := a.resolveItem(ctx, "agent", t.SelectedAgent, harness, a.taskFolder(workspace, taskID))
+	l := a.resolveItem(ctx, "agent", t.SelectedAgent, harness, a.taskFolder(workspace, taskID), nil)
 	if !l.found {
 		return
 	}

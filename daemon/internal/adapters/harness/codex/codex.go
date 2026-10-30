@@ -421,8 +421,9 @@ func (a *Adapter) ProfileWarning(info ports.HarnessInfo, model, effort string) (
 func (a *Adapter) userDir() catalog.Dir { return catalog.Dir{Root: a.codexHome()} }
 
 // UserItem implements ports.HarnessAdapter: a skill is the first of that name in Codex's skill list for workspace, an
-// agent is looked up in the Codex home.
-func (a *Adapter) UserItem(ctx context.Context, info ports.HarnessInfo, kind, name, workspace string) (ports.ResolvedItem, bool, []ports.DiscoveryError, error) {
+// agent is looked up in the Codex home. Codex's list is asked for the workspace alone, so the added folders change
+// nothing.
+func (a *Adapter) UserItem(ctx context.Context, info ports.HarnessInfo, kind, name, workspace string, _ []string) (ports.ResolvedItem, bool, []ports.DiscoveryError, error) {
 	if kind != "skill" {
 		it, ok := a.userDir().Item(kind, name)
 		return it, ok, nil, nil
@@ -440,8 +441,8 @@ func (a *Adapter) UserItem(ctx context.Context, info ports.HarnessInfo, kind, na
 }
 
 // UserItems implements ports.HarnessAdapter: the skills of Codex's skill list for workspace, or the agents of the Codex
-// home.
-func (a *Adapter) UserItems(ctx context.Context, info ports.HarnessInfo, kind, workspace string) ([]ports.ResolvedItem, []ports.DiscoveryError, error) {
+// home; the added folders change nothing.
+func (a *Adapter) UserItems(ctx context.Context, info ports.HarnessInfo, kind, workspace string, _ []string) ([]ports.ResolvedItem, []ports.DiscoveryError, error) {
 	if kind != "skill" {
 		return a.userDir().Items(kind), nil, nil
 	}

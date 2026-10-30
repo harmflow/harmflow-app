@@ -108,7 +108,7 @@ func TestSkillsFromTheAppServer(t *testing.T) {
 	info := appServerInfo(path)
 	workspace := tempDir(t)
 
-	items, problems, err := a.UserItems(context.Background(), info, "skill", workspace)
+	items, problems, err := a.UserItems(context.Background(), info, "skill", workspace, nil)
 	if err != nil {
 		t.Fatalf("UserItems(skill) = %v, want no error", err)
 	}
@@ -124,18 +124,18 @@ func TestSkillsFromTheAppServer(t *testing.T) {
 		t.Errorf("UserItems(skill) discovery errors %v, want %v", problems, wantProblems)
 	}
 
-	it, found, problems, err := a.UserItem(context.Background(), info, "skill", "my-skill", workspace)
+	it, found, problems, err := a.UserItem(context.Background(), info, "skill", "my-skill", workspace, nil)
 	if err != nil || !found || it.Path != filepath.Dir(mine) || it.Description != "Mine." || len(problems) != 1 {
 		t.Errorf("UserItem(my-skill) = %+v, %v, %v, %v; want %s, described Mine., one discovery error", it, found,
 			problems, err, filepath.Dir(mine))
 	}
 	for _, name := range []string{"pdf:pdf", "hf-github-worktree"} {
-		if _, found, _, err := a.UserItem(context.Background(), info, "skill", name, workspace); !found || err != nil {
+		if _, found, _, err := a.UserItem(context.Background(), info, "skill", name, workspace, nil); !found || err != nil {
 			t.Errorf("UserItem(%s) found %v, err %v; want found", name, found, err)
 		}
 	}
 	for _, name := range []string{"off", "missing"} {
-		if _, found, _, err := a.UserItem(context.Background(), info, "skill", name, workspace); found || err != nil {
+		if _, found, _, err := a.UserItem(context.Background(), info, "skill", name, workspace, nil); found || err != nil {
 			t.Errorf("UserItem(%s) found %v, err %v; want not found", name, found, err)
 		}
 	}
@@ -177,7 +177,7 @@ func TestReloadSendsForceReloadOnce(t *testing.T) {
 		if reload {
 			a.ReloadUserItems()
 		}
-		if _, _, err := a.UserItems(context.Background(), info, "skill", "/w"); err != nil {
+		if _, _, err := a.UserItems(context.Background(), info, "skill", "/w", nil); err != nil {
 			t.Fatalf("UserItems(skill) = %v, want no error", err)
 		}
 	}
@@ -221,12 +221,12 @@ func TestUnreadableSkillList(t *testing.T) {
 				// Long enough for initialize, short of the stand-in's sleep.
 				a.listTimeout = 2 * time.Second
 			}
-			_, found, _, err := a.UserItem(context.Background(), c.info(path), "skill", "my-skill", "/w")
+			_, found, _, err := a.UserItem(context.Background(), c.info(path), "skill", "my-skill", "/w", nil)
 			if err == nil || found || domain.TextOf(err).Key != c.wantKey {
 				t.Errorf("UserItem(my-skill) found %v, error %v (%s); want the error %s", found, err, domain.TextOf(err).Key,
 					c.wantKey)
 			}
-			if _, _, err := a.UserItems(context.Background(), c.info(path), "skill", "/w"); domain.TextOf(err).Key != c.wantKey {
+			if _, _, err := a.UserItems(context.Background(), c.info(path), "skill", "/w", nil); domain.TextOf(err).Key != c.wantKey {
 				t.Errorf("UserItems(skill) error %v (%s), want %s", err, domain.TextOf(err).Key, c.wantKey)
 			}
 		})
@@ -254,7 +254,7 @@ func TestAppServerThatCannotBeUsed(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			a := appServerAdapter(t)
-			_, _, err := a.UserItems(context.Background(), appServerInfo(c.path), "skill", "/w")
+			_, _, err := a.UserItems(context.Background(), appServerInfo(c.path), "skill", "/w", nil)
 			if domain.TextOf(err).Key != c.wantKey {
 				t.Errorf("UserItems(skill) error %v (%s), want %s", err, domain.TextOf(err).Key, c.wantKey)
 			}
@@ -269,7 +269,7 @@ func TestAppServerFollowsTheDetectedCodex(t *testing.T) {
 	a := appServerAdapter(t)
 	a.ClientVersion = "1.2.3"
 	for _, path := range []string{first, second} {
-		if _, _, err := a.UserItems(context.Background(), appServerInfo(path), "skill", "/w"); err != nil {
+		if _, _, err := a.UserItems(context.Background(), appServerInfo(path), "skill", "/w", nil); err != nil {
 			t.Fatalf("UserItems(skill) with Codex at %s = %v, want no error", path, err)
 		}
 	}
@@ -293,10 +293,10 @@ func TestAppServerRestartsAfterItExits(t *testing.T) {
 	path, received := appServerStandIn(t, `if [ ! -e '`+flag+`' ]; then touch '`+flag+`'; exit 3; fi; `+answer(`{"data":[]}`))
 	a := appServerAdapter(t)
 	info := appServerInfo(path)
-	if _, _, err := a.UserItems(context.Background(), info, "skill", "/w"); domain.TextOf(err).Key != "codex_app_server_exited" {
+	if _, _, err := a.UserItems(context.Background(), info, "skill", "/w", nil); domain.TextOf(err).Key != "codex_app_server_exited" {
 		t.Fatalf("first UserItems(skill) error %v (%s), want codex_app_server_exited", err, domain.TextOf(err).Key)
 	}
-	if _, _, err := a.UserItems(context.Background(), info, "skill", "/w"); err != nil {
+	if _, _, err := a.UserItems(context.Background(), info, "skill", "/w", nil); err != nil {
 		t.Fatalf("second UserItems(skill) = %v, want no error", err)
 	}
 	if n := len(requests(t, received)["initialize"]); n != 2 {
@@ -312,11 +312,11 @@ func TestAgentsStayInTheCodexHome(t *testing.T) {
 	_ = os.MkdirAll(filepath.Dir(agent), 0o700)
 	_ = os.WriteFile(agent, []byte("---\nname: reviewer\ndescription: Reviews.\n---\nYou review."), 0o600)
 	a := appServerAdapter(t)
-	it, found, _, err := a.UserItem(context.Background(), ports.HarnessInfo{}, "agent", "reviewer", "/w")
+	it, found, _, err := a.UserItem(context.Background(), ports.HarnessInfo{}, "agent", "reviewer", "/w", nil)
 	if err != nil || !found || it.Path != agent {
 		t.Errorf("UserItem(agent reviewer) = %+v, %v, %v; want %s", it, found, err, agent)
 	}
-	items, _, err := a.UserItems(context.Background(), ports.HarnessInfo{}, "agent", "/w")
+	items, _, err := a.UserItems(context.Background(), ports.HarnessInfo{}, "agent", "/w", nil)
 	if err != nil || len(items) != 1 || items[0].Name != "reviewer" {
 		t.Errorf("UserItems(agent) = %+v, %v; want reviewer", items, err)
 	}
@@ -389,7 +389,7 @@ func TestDetectReadsATopLevelHelpCheckThatTimesOutAsAppServerUnknown(t *testing.
 				t.Errorf("Detect: diagnostic params %v, want the harness %q and the command --help", info.DiagnosticParams,
 					Name)
 			}
-			_, _, err := a.UserItems(context.Background(), info, "skill", "/w")
+			_, _, err := a.UserItems(context.Background(), info, "skill", "/w", nil)
 			var got string
 			if err != nil {
 				got = domain.TextOf(err).Key

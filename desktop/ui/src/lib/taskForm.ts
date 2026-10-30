@@ -134,3 +134,31 @@ export function setScheduleKind(doc: Doc, kind: "none" | "cron" | "interval"): D
   if (kind === "interval") next = setIn(next, ["spec", "schedule", "interval"], "1h");
   return next;
 }
+
+/** The folders a session of the task adds beside its workspace, as the daemon reads them: its repositories' local paths,
+
+ * and the writable paths of a custom profile. Claude Code finds skills in them too. */
+
+export function addedFolders(doc: Doc): string[] {
+
+  const spec = doc.spec as
+
+    | { github?: { repositories?: unknown }; permissions?: { profile?: unknown; custom?: { writablePaths?: unknown } } }
+
+    | undefined;
+
+  const paths = (list: unknown[]) => list.filter((p): p is string => typeof p === "string" && p !== "");
+
+  const repositories = Array.isArray(spec?.github?.repositories) ? spec.github.repositories : [];
+
+  const writable = spec?.permissions?.custom?.writablePaths;
+
+  return [
+
+    ...paths(repositories.map((r) => (r as { localPath?: unknown } | null)?.localPath)),
+
+    ...(spec?.permissions?.profile === "custom" && Array.isArray(writable) ? paths(writable) : []),
+
+  ];
+
+}
