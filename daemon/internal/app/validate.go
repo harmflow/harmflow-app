@@ -207,7 +207,7 @@ func (a *App) semanticChecks(ctx context.Context, r *ValidationResult, doc domai
 				"{{harness}} is not ready: {{detail}}", "harness", ad.Name()).Nest("detail", info.DiagnosticText()))
 		}
 		// Agents and skills must be available to every harness of the chain.
-		missing := a.missingItems(ctx, doc, p.Provider, a.itemWorkspace(doc))
+		missing := a.missingItems(ctx, doc, p.Provider, a.itemWorkspace(doc), a.addedFolders(doc))
 		for _, m := range missing {
 			code := domain.WarningMissingSkill
 			kindPath := "/spec/skills"
@@ -215,6 +215,8 @@ func (a *App) semanticChecks(ctx context.Context, r *ValidationResult, doc domai
 				code, kindPath = domain.WarningMissingAgent, "/spec/agents"
 			}
 			switch {
+			case i == 0 && m.unreadable != nil && m.unverifiable:
+				r.addWarning(kindPath, code, m.unverified(ad.Name()))
 			case i == 0 && mode == catalogStrict:
 				r.addError(kindPath, m.notFound(ad.Name()))
 			case i == 0:
@@ -273,6 +275,17 @@ type missingItem struct {
 	workspace         string // the folder a harness's list was read for
 	errors            string // the discovery errors, as one line
 	unreadable        error
+	// unverifiable says the harness loads the task's items of this kind itself, so a list it could not give leaves them
+	// unverified: validation warns instead of refusing.
+	unverifiable bool
+}
+
+// unverified says a harness could not give its list of the user's skills for workspace, so the task's skills are not
+// verified, and why.
+func (m missingItem) unverified(harness string) domain.Text {
+	return domain.T("skill_list_unverified",
+		"{{harness}} could not say which skills it loads for {{workspace}}, so the task's skills are not verified: {{detail}}",
+		"harness", harness, "workspace", m.workspace).Nest("detail", domain.TextOf(m.unreadable))
 }
 
 // listUnreadable says a harness's list of the user's skills for workspace could not be read, and why. Only skills are
@@ -336,9 +349,9 @@ func (m missingItem) params(harness string) []string {
 	return params
 }
 
-// missingItems are the task's agents and skills a harness cannot load for workspace. A list that cannot be read is
-// one entry, and the items of its kind are not looked up again.
-func (a *App) missingItems(ctx context.Context, doc domain.TaskDocument, harness, workspace string) []missingItem {
+// missingItems are the task's agents and skills a harness cannot load for workspace and the added folders. A list that
+// cannot be read is one entry, and the items of its kind are not looked up again.
+func (a *App) missingItems(ctx context.Context, doc domain.TaskDocument, harness, workspace string, added []string) []missingItem {
 	var out []missingItem
 	for _, kind := range []string{"agent", "skill"} {
 		names := doc.Spec.Agents
@@ -346,7 +359,7 @@ func (a *App) missingItems(ctx context.Context, doc domain.TaskDocument, harness
 			names = doc.Spec.Skills
 		}
 		for _, name := range names {
-			l := a.resolveItem(ctx, kind, name, harness, workspace)
+			l := a.resolveItem(ctx, kind, name, harness, workspace, added)
 			if l.unreadable != nil {
 				l.missing.unreadable = l.unreadable
 				out = append(out, l.missing)

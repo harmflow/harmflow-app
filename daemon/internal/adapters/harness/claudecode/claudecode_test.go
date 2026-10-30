@@ -505,69 +505,6 @@ func TestPrepareChecksAllowRulesOnlyForTheCustomProfile(t *testing.T) {
 	}
 }
 
-// A user's skill is found in Claude Code's configuration directory for every workspace, as before, and in the
-// workspace's .claude/skills for that workspace only. A name in both is the configuration directory's, listed once, as
-// Claude Code runs a personal skill over a project's. Agents are read from the configuration directory alone.
-func TestUserSkillsComeFromTheConfigurationAndTheWorkspace(t *testing.T) {
-	config := t.TempDir()
-	t.Setenv("CLAUDE_CONFIG_DIR", config)
-	ws, other := t.TempDir(), t.TempDir()
-	writeSettings(t, filepath.Join(config, "skills", "review-notes", "SKILL.md"), "---\nname: review-notes\ndescription: Mine.\n---\n")
-	writeSettings(t, filepath.Join(config, "skills", "shared", "SKILL.md"), "---\nname: shared\ndescription: The user's.\n---\n")
-	project := filepath.Join(ws, ".claude", "skills")
-	writeSettings(t, filepath.Join(project, "release-notes", "SKILL.md"), "---\nname: release-notes\ndescription: The project's.\n---\n")
-	writeSettings(t, filepath.Join(project, "shared", "SKILL.md"), "---\nname: shared\ndescription: The project's.\n---\n")
-	writeSettings(t, filepath.Join(ws, ".claude", "agents", "project-agent.md"), "---\nname: project-agent\n---\n")
-	a := &Adapter{Home: t.TempDir()}
-	ctx := t.Context()
-
-	for _, c := range []struct {
-		name, workspace string
-		want            []string
-	}{
-		{"the workspace with project skills", ws, []string{"release-notes", "review-notes", "shared"}},
-		{"another workspace", other, []string{"review-notes", "shared"}},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			items, problems, err := a.UserItems(ctx, ports.HarnessInfo{}, "skill", c.workspace)
-			var names []string
-			for _, it := range items {
-				names = append(names, it.Name)
-				if it.Name == "shared" && (it.Path != filepath.Join(config, "skills", "shared") || it.Description != "The user's.") {
-					t.Errorf("UserItems(skill, %s) shared = %+v, want the configuration directory's", c.workspace, it)
-				}
-			}
-			if !slices.Equal(names, c.want) || problems != nil || err != nil {
-				t.Errorf("UserItems(skill, %s) = %q, %v, %v; want %q", c.workspace, names, problems, err, c.want)
-			}
-		})
-	}
-
-	for _, c := range []struct {
-		name, kind, item, workspace, wantPath string
-	}{
-		{"a project skill in its workspace", "skill", "release-notes", ws, filepath.Join(project, "release-notes")},
-		{"a project skill in another workspace", "skill", "release-notes", other, ""},
-		{"a configuration skill in any workspace", "skill", "review-notes", other, filepath.Join(config, "skills", "review-notes")},
-		{"a shared name", "skill", "shared", ws, filepath.Join(config, "skills", "shared")},
-		{"a project agent", "agent", "project-agent", ws, ""},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			it, found, problems, err := a.UserItem(ctx, ports.HarnessInfo{}, c.kind, c.item, c.workspace)
-			if found != (c.wantPath != "") || it.Path != c.wantPath || problems != nil || err != nil {
-				t.Errorf("UserItem(%s %s, %s) = %+v, %v, %v, %v; want found at %q", c.kind, c.item, c.workspace, it, found,
-					problems, err, c.wantPath)
-			}
-		})
-	}
-	if agents, _, _ := a.UserItems(ctx, ports.HarnessInfo{}, "agent", ws); len(agents) != 0 {
-		t.Errorf("UserItems(agent, %s) = %+v, want none: the workspace's agents are not read", ws, agents)
-	}
-	if skill, agent := a.ReadsWorkspace("skill"), a.ReadsWorkspace("agent"); !skill || agent {
-		t.Errorf("ReadsWorkspace(skill), ReadsWorkspace(agent) = %v, %v; want true, false", skill, agent)
-	}
-}
-
 func restriction(rs []ports.Restriction, name string) (ports.Restriction, bool) {
 	for _, r := range rs {
 		if r.Name == name {

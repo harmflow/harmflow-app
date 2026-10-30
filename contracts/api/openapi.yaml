@@ -182,6 +182,16 @@ paths:
             The ID of the task the catalog is for. With no `workspace`, its harnesses list the user's items for the
             folder HarmFlow runs this task in, the folder validation reads for a task with no workspace path.
           schema: { type: string }
+        - name: addDir
+          in: query
+          required: false
+          description: >-
+            A folder a session of the task adds beside its workspace — a repository's local path or a writable path —
+            expanded as the task's paths are, once per folder. A harness that finds skills in the folders a session
+            adds, as Claude Code does, lists them for these folders too, as validation and an execution read them.
+          style: form
+          explode: true
+          schema: { type: array, items: { type: string } }
       responses:
         "200":
           description: The catalog.
@@ -858,13 +868,15 @@ components:
         - fallback_agent_missing
         - fallback_skill_missing
         - skill_list_unreadable
+        - skill_list_unverified
         - fallback_skill_list_unreadable
         - codex_app_server_missing
         - codex_app_server_start_failed
         - codex_app_server_exited
         - codex_app_server_timed_out
         - codex_app_server_error
-        - claude_plugin_output_unrecognized
+        - claude_skill_list_unrecognized
+        - claude_skill_list_timed_out
         - fallback_repeats_preferred
         - extra_usage_unenforced
         - path_variable_unterminated

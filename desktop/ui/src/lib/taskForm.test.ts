@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { schemaDefault, schemaEnum } from "./schema";
 import {
+  addedFolders,
   envToLines,
   getIn,
   linesToArgs,
@@ -13,6 +14,21 @@ import {
   slugify,
   type Doc,
 } from "./taskForm";
+
+describe("added folders", () => {
+  it("are the repositories' local paths and a custom profile's writable paths, which the catalog is asked for", () => {
+    const spec = (permissions: Doc) => ({
+      spec: {
+        github: { repositories: [{ name: "o/a", localPath: "~/a" }, { name: "o/b" }, { name: "o/c", localPath: "~/c" }] },
+        permissions,
+      },
+    });
+    expect(addedFolders(spec({ profile: "custom", custom: { writablePaths: ["~/out", 3] } }))).toEqual(["~/a", "~/c", "~/out"]);
+    expect(addedFolders(spec({ profile: "workspace_write", custom: { writablePaths: ["~/out"] } }))).toEqual(["~/a", "~/c"]);
+    expect(addedFolders({ spec: { type: "general" } })).toEqual([]);
+    expect(addedFolders({})).toEqual([]);
+  });
+});
 
 describe("form ↔ document", () => {
   it("writes a field at its path without touching the rest", () => {

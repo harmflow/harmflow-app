@@ -7,7 +7,7 @@ import { native } from "../api/native";
 import type { Catalog, Task, TaskInput, ValidationResult } from "../api/types";
 import { daemonText } from "../lib/daemonText";
 import { useDebounced } from "../lib/hooks";
-import type { Doc } from "../lib/taskForm";
+import { addedFolders, type Doc } from "../lib/taskForm";
 import { actions, getState, useStore } from "../state/store";
 import { Icon } from "./Icon";
 import { tipBelow, useTooltip } from "./Shell";
@@ -64,22 +64,24 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
 
   // A harness that finds the user's skills per workspace, as Codex and Claude Code do, offers the ones it has in the
   // task's workspace: the catalog is asked for it, and the one already loaded stands in until it answers. The task's ID
-  // goes with its workspace path, so that with none the daemon reads the folder it runs the task in, as validation does.
+  // goes with its workspace path, so that with none the daemon reads the folder it runs the task in, as validation does,
+  // and so do the folders the task adds, where Claude Code finds skills too.
   const spec = doc.spec as { workspace?: { path?: unknown } } | undefined;
   const metadata = doc.metadata as { id?: unknown } | undefined;
   const workspace = useDebounced(typeof spec?.workspace?.path === "string" ? spec.workspace.path : "", 500);
   const taskId = useDebounced(typeof metadata?.id === "string" ? metadata.id : "", 500);
+  const added = useDebounced(addedFolders(doc).join("\n"), 500);
   const [workspaceCatalog, setWorkspaceCatalog] = useState<Catalog>();
   useEffect(() => {
     let cancelled = false;
-    api.catalog(workspace || undefined, taskId || undefined).then(
+    api.catalog(workspace || undefined, taskId || undefined, added ? added.split("\n") : undefined).then(
       (c) => !cancelled && setWorkspaceCatalog(c),
       () => {}, // the catalog already loaded stays
     );
     return () => {
       cancelled = true;
     };
-  }, [workspace, taskId]);
+  }, [workspace, taskId, added]);
 
   const input = (): TaskInput => (tab === "form" ? { document: doc, baseRevision } : { yaml, baseRevision });
 

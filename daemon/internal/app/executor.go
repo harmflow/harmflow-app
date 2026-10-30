@@ -618,7 +618,7 @@ func (r *run) chain(ctx context.Context) ([]domain.HarnessProfile, []domain.Text
 		if !ok {
 			continue
 		}
-		if missing := r.a.missingItems(ctx, r.def, p.Provider, r.itemWorkspace()); len(missing) > 0 {
+		if missing := r.a.missingItems(ctx, r.def, p.Provider, r.itemWorkspace(), r.addedFolders()); len(missing) > 0 {
 			invalid = append(invalid, missing[0].invalidFallback(ad.Name()))
 			continue
 		}
@@ -903,7 +903,7 @@ func (r *run) resolve(ctx context.Context, ad ports.HarnessAdapter) ([]ports.Res
 			names = r.eff.Spec.Skills
 		}
 		for _, name := range names {
-			l := r.a.resolveItem(ctx, kind, name, ad.ID(), r.itemWorkspace())
+			l := r.a.resolveItem(ctx, kind, name, ad.ID(), r.itemWorkspace(), r.addedFolders())
 			if l.unreadable != nil {
 				l.missing.unreadable = l.unreadable
 			}
@@ -927,6 +927,19 @@ func (r *run) itemWorkspace() string {
 		return r.work
 	}
 	return r.a.itemWorkspace(r.def)
+}
+
+// addedFolders are the folders the execution's session adds beside its workspace, as validation reads them: its
+// repositories and its writable paths once the workspace is prepared, or, before, the ones they will be.
+func (r *run) addedFolders() []string {
+	if r.work != "" {
+		out := append([]string{}, r.extra...)
+		if customWritablePaths(r.eff) != nil {
+			out = append(out, r.writable...)
+		}
+		return out
+	}
+	return r.a.addedFolders(r.def)
 }
 
 // harmflowContext is HarmFlow's orchestration context for the session: where to find the task's parameters and

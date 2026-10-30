@@ -145,7 +145,7 @@ func (f *fakeHarness) reads() int {
 	defer f.mu.Unlock()
 	return f.quotaReads
 }
-func (f *fakeHarness) UserItem(_ context.Context, _ ports.HarnessInfo, kind, name, _ string) (ports.ResolvedItem, bool, []ports.DiscoveryError, error) {
+func (f *fakeHarness) UserItem(_ context.Context, _ ports.HarnessInfo, kind, name, _ string, _ []string) (ports.ResolvedItem, bool, []ports.DiscoveryError, error) {
 	found := kind == "skill" && name == "user-skill" || kind == "agent" && name == "user-agent" ||
 		kind == "skill" && name == "review-notes" && f.id == domain.HarnessClaudeCode ||
 		kind == "agent" && name == "review-agent" && f.id == domain.HarnessClaudeCode
@@ -154,7 +154,7 @@ func (f *fakeHarness) UserItem(_ context.Context, _ ports.HarnessInfo, kind, nam
 	}
 	return ports.ResolvedItem{Name: name, Kind: kind, Path: filepath.Join("/", f.id, kind+"s", name)}, true, nil, nil
 }
-func (f *fakeHarness) UserItems(context.Context, ports.HarnessInfo, string, string) ([]ports.ResolvedItem, []ports.DiscoveryError, error) {
+func (f *fakeHarness) UserItems(context.Context, ports.HarnessInfo, string, string, []string) ([]ports.ResolvedItem, []ports.DiscoveryError, error) {
 	return nil, nil, nil
 }
 func (f *fakeHarness) Prepare(_ ports.HarnessInfo, req ports.RunRequest) (ports.Invocation, ports.OutputParser, error) {

@@ -333,9 +333,12 @@ export const enUS = {
     fallback_skill_missing:
       '{{harness}} is not a valid fallback: skill "{{name}}" cannot be found for it ($t(itemSource.{{source}}))',
     skill_list_unreadable: "{{harness}}'s skill list for {{workspace}} could not be read: {{detail}}",
+    skill_list_unverified:
+      "{{harness}} could not say which skills it loads for {{workspace}}, so the task's skills are not verified: {{detail}}",
     fallback_skill_list_unreadable:
       "{{harness}} is not a valid fallback: its skill list for {{workspace}} could not be read: {{detail}}",
-    claude_plugin_output_unrecognized: "{{command}} printed nothing HarmFlow can read",
+    claude_skill_list_unrecognized: "{{command}} printed no skill list HarmFlow can read",
+    claude_skill_list_timed_out: "{{command}} printed no init line within {{timeout}}, so the skills Claude Code loads are unknown",
     codex_app_server_missing: "Codex {{version}} has no app server",
     codex_app_server_start_failed: "Codex's app server could not start: {{detail}}",
     codex_app_server_exited: "Codex's app server exited",
