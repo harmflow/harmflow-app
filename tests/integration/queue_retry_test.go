@@ -301,9 +301,19 @@ func activeStatus(s string) bool {
 	return false
 }
 
-// restartMidRun kills the daemon while a session runs, as a crash would, then ends the session's process group, which
-// a daemon killed this way leaves running, and starts the daemon again on the same home.
+// restartMidRun stops the daemon while a session runs, as crashMidRun does, and starts the daemon again on the same
+// home.
 func restartMidRun(t *testing.T, d *daemon, home, claude, clone string) *daemon {
+	t.Helper()
+	crashMidRun(t, d)
+	d2 := startDaemon(t, home)
+	useClaude(d2, claude, clone)
+	return d2
+}
+
+// crashMidRun kills the daemon while a session runs, as a crash would, then ends the session's process group, which a
+// daemon killed this way leaves running.
+func crashMidRun(t *testing.T, d *daemon) {
 	t.Helper()
 	out, _ := exec.Command("pgrep", "-P", strconv.Itoa(d.cmd.Process.Pid)).Output()
 	var groups []int
@@ -320,9 +330,6 @@ func restartMidRun(t *testing.T, d *daemon, home, claude, clone string) *daemon 
 	for _, g := range groups {
 		_ = syscall.Kill(-g, syscall.SIGKILL)
 	}
-	d2 := startDaemon(t, home)
-	useClaude(d2, claude, clone)
-	return d2
 }
 
 // runFiles is what a session left in its execution directory, for a failure message.
