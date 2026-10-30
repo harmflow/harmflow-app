@@ -174,6 +174,46 @@ func TestIgnoredReportNeedsAttention(t *testing.T) {
 	}
 }
 
+// harmflow-app#413: a crash counts one failure against every item the session selected and left without a result,
+// not only the last one, which the record names. Recovery reads the others from the execution's log; the record names
+// the last item before the log does, so a crash between the two still counts it. The record still names the last item
+// alone, and an item selected twice counts once.
+func TestRecoveryCountsEverySelectedItem(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		crash string // the message of the event the daemon dies before appending
+	}{
+		{"every selection logged", "Work on the second"},
+		{"the last selection not yet logged", "Select the second"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.create("crashed", "")
+			e.claude.setScript(func(ports.RunRequest) string {
+				return selectTwo(e.app.d.Paths.Logs) + `printf '%s\n' ` +
+					`'{"type":"work_item.selected","workItem":"o/r#1","message":"Select the first again"}' ` +
+					`'{"type":"work_item.selected","workItem":"o/r#2","message":"Select the second again"}' ` +
+					`'{"type":"step.started","message":"Work on the second"}' >> "$P"` + "\nexec sleep 30"
+			})
+			rec, id := e.crashAt("crashed", func(ev domain.Event) bool { return ev.Message == tc.crash })
+
+			x, err := rec.app.GetExecution(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if x.Status != domain.StatusInterrupted || x.WorkItem != "o/r#2" {
+				t.Errorf("GetExecution(%s): %s, work item %q; want interrupted, o/r#2", id, x.Status, x.WorkItem)
+			}
+			for _, key := range []string{"o/r#1", "o/r#2"} {
+				if w := ledgerItem(rec, "crashed", key); w == nil || w.Status != domain.WorkItemFailed || w.Failures != 1 ||
+					w.LastExecutionID != id {
+					t.Errorf("%s, selected by the crashed session: %+v; want failed, with one failure, by %s", key, w, id)
+				}
+			}
+		})
+	}
+}
+
 // harmflow-app#312: a ledger saved before the daemon kept skipped and unreported items out of progress is repaired on
 // the first start that loads it, and only on that one. An item in progress whose last execution reported it skipped,
 // with nothing counted, leaves the ledger; one that execution gave no result counts a failure. An item whose execution

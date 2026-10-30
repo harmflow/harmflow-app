@@ -1178,7 +1178,8 @@ func (r *run) onProgress(p domain.ProgressLine) {
 		r.x.SetStep(domain.Text{Message: msg})
 		r.attemptItem(p.WorkItem, p.Repository)
 		a.mu.Unlock()
-		// The record names the item before the ledger does: recovery counts the interruption from the record.
+		// The record names the item before the ledger and the log do: recovery counts the interruption against the item
+		// the record names, and against every other one the log's events of this type name.
 		r.save(true)
 		before := a.trackWorkItem(r.x.TaskID, p.WorkItem, msg, p.Repository, r.x.ID)
 		if p.WorkItem != "" && r.selectionOf(p.WorkItem) == nil {
