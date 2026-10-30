@@ -37,14 +37,16 @@ func TestFailingTestsStillOpenADraftPullRequest(t *testing.T) {
 		sandboxLabel(t, label)
 	}
 	base := sandboxBase(t)
-	sweepRetryLimitFixtures(t, base)
+	sweepSuiteFixtures(t, retryLimitLabel, base)
 	before := branchHead(t, base)
-	clone := cloneWithSuite(t, base)
-	issue := retryLimitFixture(t, base)
+	clone := cloneWithSuite(t, base, sandboxSuite)
+	issue := suiteFixture(t, retryLimitLabel, base, "Raise the retry limit to 5",
+		"Jobs give up too early when the network is slow.\n\n"+
+			"In `settings.json`, raise `retries` from 3 to 5, and change nothing else.\n")
 	home := t.TempDir()
 	d := startDaemon(t, home)
 	useClaude(d, claude, clone)
-	d.call("POST", "/tasks", map[string]any{"yaml": failingTestsTask(d, clone, base)}, 201)
+	d.call("POST", "/tasks", map[string]any{"yaml": failingTestsTask(d, clone, base, retryLimitLabel, 0)}, 201)
 
 	id := d.call("POST", "/tasks/failing-tests/run", nil, 202)["executionId"].(string)
 	dir := executionDir(d, id)
@@ -116,10 +118,10 @@ func TestFailingTestsStillOpenADraftPullRequest(t *testing.T) {
 }
 
 // failingTestsTask is a task made of the built-in issue implementer as selecting it copies it, with the open issues of
-// queueRepo labelled retryLimitLabel as its only eligible ones, and with no test repair. Its permissions allow what the
-// built-in skills run to select, implement, test with npm, push, and open the draft pull request, and deny gh pr merge:
-// a denied tool wins over every allow rule, the signed-in Claude Code's own included.
-func failingTestsTask(d *daemon, clone, base string) string {
+// queueRepo labelled label as its only eligible ones, and with repairs as its limit of test repairs. Its permissions
+// allow what the built-in skills run to select, implement, test with npm, push, and open the draft pull request, and
+// deny gh pr merge: a denied tool wins over every allow rule, the signed-in Claude Code's own included.
+func failingTestsTask(d *daemon, clone, base, label string, repairs int) string {
 	d.t.Helper()
 	copied := d.builtinAgentCopy("hf-github-issue-implementer")
 	const eligible = "- **Eligible issues:** open issues labeled `agent-ready` that are not labeled `blocked`.\n"
@@ -128,7 +130,7 @@ func failingTestsTask(d *daemon, clone, base string) string {
 		d.t.Fatalf("the copy of hf-github-issue-implementer has no line %q to customize:\n%s", eligible, prompt)
 	}
 	prompt = strings.Replace(prompt, eligible, fmt.Sprintf(
-		"- **Eligible issues:** open issues of %s labelled %s; every other issue is excluded.\n", queueRepo, retryLimitLabel), 1)
+		"- **Eligible issues:** open issues of %s labelled %s; every other issue is excluded.\n", queueRepo, label), 1)
 	return fmt.Sprintf(`apiVersion: harmflow/v1alpha1
 kind: Task
 metadata:
@@ -170,18 +172,18 @@ spec:
       maxItemsPerCycle: 1
       resumeStrategy: resume_first
     delivery:
-      testRepairAttempts: 0
-`, queueRepo, clone, base, strings.ReplaceAll(prompt, "\n", "\n    "), copied["hash"])
+      testRepairAttempts: %[6]d
+`, queueRepo, clone, base, strings.ReplaceAll(prompt, "\n", "\n    "), copied["hash"], repairs)
 }
 
 // cloneWithSuite is the repository the task targets: a clone of queueRepo that fetches from a local mirror, whose base
-// branch holds one more commit than GitHub's, adding the files of testdata/sandboxSuite, and that pushes to GitHub. The
+// branch holds one more commit than GitHub's, adding the files of testdata/<suite>, and that pushes to GitHub. The
 // sandbox's default branch holds no test suite, and a test pushes nothing to it, so the suite reaches the session's
 // worktree through the clone alone: the session branches from the mirror's base branch, and pushes its work branch,
 // with the suite's commit under its own, to GitHub. A pull request into a branch other than the default one would
 // close no issue on GitHub, so the base branch stays the default one. The mirror sits beside the clone, inside the
 // folder the daemon allows.
-func cloneWithSuite(t *testing.T, base string) string {
+func cloneWithSuite(t *testing.T, base, suite string) string {
 	t.Helper()
 	parent, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -194,7 +196,7 @@ func cloneWithSuite(t *testing.T, base string) string {
 	}
 	clone := filepath.Join(parent, filepath.Base(queueRepo))
 	git(t, parent, "clone", "--quiet", "--branch", base, mirror, clone)
-	suite := filepath.Join("testdata", sandboxSuite)
+	suite = filepath.Join("testdata", suite)
 	err = filepath.WalkDir(suite, func(path string, e fs.DirEntry, err error) error {
 		if err != nil || e.IsDir() {
 			return err
@@ -224,14 +226,12 @@ func cloneWithSuite(t *testing.T, base string) string {
 	return clone
 }
 
-// retryLimitFixture opens the fixture issue, labelled retryLimitLabel, and returns its number. Its change raises a
-// setting past what a test of the suite allows. When the test ends, failed or not, the fixtures are swept.
-func retryLimitFixture(t *testing.T, base string) int {
+// suiteFixture opens the fixture issue, labelled label, with the title and the body of a change to the suite's
+// repository, and returns its number. When the test ends, failed or not, the fixtures under the label are swept.
+func suiteFixture(t *testing.T, label, base, title, body string) int {
 	t.Helper()
-	body := "Jobs give up too early when the network is slow.\n\n" +
-		"In `settings.json`, raise `retries` from 3 to 5, and change nothing else.\n"
-	out, err := exec.Command("gh", "issue", "create", "--repo", queueRepo, "--label", retryLimitLabel,
-		"--title", "Raise the retry limit to 5", "--body", body).Output()
+	out, err := exec.Command("gh", "issue", "create", "--repo", queueRepo, "--label", label,
+		"--title", title, "--body", body).Output()
 	if err != nil {
 		t.Fatalf("gh issue create: %v", err)
 	}
@@ -240,29 +240,28 @@ func retryLimitFixture(t *testing.T, base string) int {
 	if err != nil {
 		t.Fatalf("gh issue create printed %q, not an issue's URL", url)
 	}
-	t.Cleanup(func() { sweepRetryLimitFixtures(t, base, issue) })
+	t.Cleanup(func() { sweepSuiteFixtures(t, label, base, issue) })
 	// GitHub lists a new issue under its label some seconds after it opens it, and the session may list it that way.
 	var open []int
 	for deadline := time.Now().Add(time.Minute); time.Now().Before(deadline); time.Sleep(time.Second) {
-		if open, err = labelledIssues(retryLimitLabel); err == nil && slices.Contains(open, issue) {
+		if open, err = labelledIssues(label); err == nil && slices.Contains(open, issue) {
 			break
 		}
 	}
 	if err != nil || !slices.Equal(open, []int{issue}) {
 		t.Fatalf("the open issues of %s labelled %s are %v (%v), want #%d alone: the task's prompt makes each of them "+
-			"eligible", queueRepo, retryLimitLabel, open, err, issue)
+			"eligible", queueRepo, label, open, err, issue)
 	}
 	return issue
 }
 
-// sweepRetryLimitFixtures removes from queueRepo what the runs of the test left, found by the fixture issues and their
-// label, never by the branch names the sessions chose: it closes the open pull requests that link one of the issues,
-// deletes their branches, and closes the issues. The issues are the given ones and the open ones labelled
-// retryLimitLabel, which a run stopped before its cleanup leaves, and which the task's prompt would make eligible. The
-// base branch is never deleted.
-func sweepRetryLimitFixtures(t *testing.T, base string, own ...int) {
+// sweepSuiteFixtures removes from queueRepo what the runs of a test left, found by the fixture issues and their label,
+// never by the branch names the sessions chose: it closes the open pull requests that link one of the issues, deletes
+// their branches, and closes the issues. The issues are the given ones and the open ones labelled label, which a run
+// stopped before its cleanup leaves, and which the task's prompt would make eligible. The base branch is never deleted.
+func sweepSuiteFixtures(t *testing.T, label, base string, own ...int) {
 	t.Helper()
-	issues, err := labelledIssues(retryLimitLabel)
+	issues, err := labelledIssues(label)
 	if err != nil {
 		t.Errorf("cleanup: %v", err)
 	}
