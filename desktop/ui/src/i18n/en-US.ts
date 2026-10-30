@@ -368,7 +368,7 @@ export const enUS = {
     restriction_claude_allow_rules:
       "Claude Code adds the allow rules of its $t(claudeSettings.{{sources}}) to the task's tool list, and they allow more than the list or could not be read; managed settings are not checked",
     restriction_claude_edit_rules:
-      "Claude Code adds the allow rules of its $t(claudeSettings.{{sources}}) to the task's permissions, and they allow file edits outside the workspace and the added directories or could not be read; managed settings are not checked",
+      "Claude Code adds the allow rules and additional directories of its $t(claudeSettings.{{sources}}) to the task's permissions, and they allow file edits outside the workspace and the added directories or could not be read; managed settings are not checked",
     restriction_codex_tool_lists: "Codex has no per-tool allow or deny list; the custom tool lists are not enforced",
     harness_version_untested: "{{harness}} {{version}} is newer than the versions HarmFlow was tested with",
     harness_version_unknown: "{{harness}} reported no version number, so HarmFlow cannot tell whether it was tested with it",
