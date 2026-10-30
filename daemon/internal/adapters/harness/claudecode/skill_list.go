@@ -44,7 +44,8 @@ type initSkills struct {
 // sessionSkills are the skills Claude Code loads for a session in workspace with the added folders, as it reports them,
 // sorted by name and each once. HarmFlow does not search Claude Code's folders: it starts `claude -p` there, as an
 // execution starts it, reads the skills of the stream's init line, and stops the session before the model answers. A
-// workspace not made yet has no skills of its own, so its list is asked for in the user's home folder. The list of each
+// workspace not made yet has no skills of its own, so its list is asked for in the user's home folder, and an added
+// folder not made yet, such as a repository not cloned, is left out, as it holds none. The list of each
 // CLI, folder, and set of added folders is kept until ReloadUserItems, since reading it starts a session that takes
 // seconds; one that failed is not kept. A CLI that was not detected cannot answer, which is an error, never an empty
 // list.
@@ -56,7 +57,10 @@ func (a *Adapter) sessionSkills(ctx context.Context, info ports.HarnessInfo, wor
 	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
 		dir = a.Home
 	}
-	added = uniq(slices.Sorted(slices.Values(added)))
+	added = slices.DeleteFunc(uniq(slices.Sorted(slices.Values(added))), func(d string) bool {
+		st, err := os.Stat(d)
+		return err != nil || !st.IsDir()
+	})
 	key := strings.Join(append([]string{info.Path, dir}, added...), "\x00")
 	a.mu.Lock()
 	defer a.mu.Unlock()
