@@ -1,0 +1,7 @@
+{
+  "name": "sandbox-jobs",
+  "private": true,
+  "scripts": {
+    "test": "node --test"
+  }
+}
