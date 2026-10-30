@@ -796,6 +796,120 @@ func TestConflictingActivityIsLogged(t *testing.T) {
 	}
 }
 
+// An unprotected base branch's warning, as the worktree skill writes it — a progress line, the report's warning, or
+// both — reaches the record once with the skill's message, and the log once as a warning that a replay returns; the
+// execution continues.
+func TestUnprotectedBaseBranchIsWarnedOnce(t *testing.T) {
+	const (
+		noProtection = "main has no branch protection; merges without review are possible"
+		noReview     = "main requires a pull request but no approving review; merges without review are possible"
+	)
+	for _, tc := range []struct {
+		name             string
+		message          string
+		progress, report bool
+	}{
+		{"no protection, both forms", noProtection, true, true},
+		{"no approving review, both forms", noReview, true, true},
+		{"no protection, progress line only", noProtection, true, false},
+		{"no protection, report only", noProtection, false, true},
+		{"no approving review, progress line only", noReview, true, false},
+		{"no approving review, report only", noReview, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			x, data, logged := e.unprotectedRun(tc.message, tc.progress, tc.report)
+			if len(x.Warnings) != 1 || x.Warnings[0].Code != domain.WarningRepositoryUnprotected ||
+				x.Warnings[0].Subject != "o/r" || x.Warnings[0].Message != tc.message {
+				t.Errorf("GetExecution(%s).Warnings = %+v, want one %s for o/r saying %q", x.ID, x.Warnings,
+					domain.WarningRepositoryUnprotected, tc.message)
+			}
+			if len(logged) != 1 {
+				t.Fatalf("%d %s events in the log, want 1:\n%s", len(logged), domain.EventRepositoryUnprotected, data)
+			}
+			if logged[0].Severity != domain.SeverityWarning || logged[0].Message != tc.message {
+				t.Errorf("logged %+v, want a warning saying %q", logged[0], tc.message)
+			}
+			// A log opened afresh, as after the daemon restarts, replays it from the file.
+			fresh, err := eventlog.New(filepath.Join(e.home, "logs"), time.Now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			replayed, _, err := fresh.Replay(x.ID, 0, 0)
+			if err != nil || !slices.ContainsFunc(replayed, func(ev domain.Event) bool {
+				return ev.ID == logged[0].ID && ev.Type == domain.EventRepositoryUnprotected &&
+					ev.Severity == domain.SeverityWarning && ev.Message == tc.message
+			}) {
+				t.Errorf("Replay(%s, 0, 0) = %+v, %v, want the warning among them", x.ID, replayed, err)
+			}
+		})
+	}
+	var contract struct {
+		Defs struct {
+			EventType struct{ Enum []string } `json:"eventType"`
+		} `json:"$defs"`
+	}
+	if err := json.Unmarshal(contracts.EventSchema, &contract); err != nil ||
+		!slices.Contains(contract.Defs.EventType.Enum, domain.EventRepositoryUnprotected) {
+		t.Errorf("%s is not an event type of the contract (%v)", domain.EventRepositoryUnprotected, err)
+	}
+}
+
+// A session whose base branch is protected writes neither form of the warning, and its execution gets no such warning
+// in its record or its log.
+func TestProtectedBaseBranchIsNotWarned(t *testing.T) {
+	e := newEnv(t)
+	x, data, logged := e.unprotectedRun("", false, false)
+	if slices.ContainsFunc(x.Warnings, func(w domain.Warning) bool { return w.Code == domain.WarningRepositoryUnprotected }) {
+		t.Errorf("GetExecution(%s).Warnings = %+v, want none with code %s", x.ID, x.Warnings,
+			domain.WarningRepositoryUnprotected)
+	}
+	if len(logged) != 0 {
+		t.Errorf("%d %s events in the log, want none:\n%s", len(logged), domain.EventRepositoryUnprotected, data)
+	}
+}
+
+// unprotectedRun runs a session that writes a progress line, then the unprotected base branch's warning saying message
+// as a progress line, as the report's warning, both, or neither. It returns the completed execution, its JSONL log,
+// and the repository.unprotected events that log holds.
+func (e *env) unprotectedRun(message string, progress, report bool) (ExecutionView, []byte, []domain.Event) {
+	e.t.Helper()
+	e.create("unprotected", "")
+	e.claude.setScript(func(req ports.RunRequest) string {
+		script := fmt.Sprintf(`echo '{"type":"step.started","phase":"preparing","message":"Reading the task context"}' >> %s/progress.jsonl
+`, req.ExecutionDir)
+		if progress {
+			script += fmt.Sprintf(`echo '{"type":"repository.unprotected","repository":"o/r","message":"%s"}' >> %s/progress.jsonl
+`, message, req.ExecutionDir)
+		}
+		warnings := ""
+		if report {
+			warnings = `,"warnings":[{"code":"repository_unprotected","message":"` + message + `","repository":"o/r"}]`
+		}
+		summary := `{"outcome":"completed","summary":"opened a draft","workItems":[{"key":"o/r#7","outcome":"completed"}]` +
+			warnings + `}`
+		return script + fmt.Sprintf(`printf '%%s' '%s' > %s/report.json; echo 'END ok'`, summary, req.ExecutionDir)
+	})
+	r, err := e.app.RunTask("unprotected")
+	if err != nil {
+		e.t.Fatalf("RunTask(unprotected): %v", err)
+	}
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	e.eventKeys(r.ExecutionID, domain.EventExecutionCompleted)
+	data, err := os.ReadFile(filepath.Join(e.home, "logs", r.ExecutionID+".jsonl"))
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	var logged []domain.Event
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		var ev domain.Event
+		if json.Unmarshal([]byte(line), &ev) == nil && ev.Type == domain.EventRepositoryUnprotected {
+			logged = append(logged, ev)
+		}
+	}
+	return x, data, logged
+}
+
 // Every event the use cases append follows event.schema.json. hookedEvents checks each one in every test; this one
 // runs a success, a failover, a cancellation, and a no_work outcome, and makes sure each was checked.
 func TestEventsFitTheirSchema(t *testing.T) {

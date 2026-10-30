@@ -349,6 +349,25 @@ describe("execution detail", () => {
     expect(await choose("Results")).toContain(`Conflicting activity — ${said}`);
   });
 
+  it("shows an unprotected base branch as a warning above the timeline, in it, and in the results", async () => {
+    const said = "main requires a pull request but no approving review; merges without review are possible";
+    await open(
+      { ...completed, id: "exec-unprotected", warnings: [{ code: "repository_unprotected", message: said, subject: "org/core-banking" }] },
+      [
+        event(1, "execution.started"),
+        event(2, "repository.unprotected", { severity: "warning", message: said, payload: { repository: "org/core-banking" } }),
+        event(3, "execution.completed"),
+      ],
+      capture(""),
+    );
+
+    expect(host!.querySelector(".detail__alerts")!.textContent).toBe(`Base branch not protected — ${said}`);
+    const timeline = await choose("Events");
+    expect(timeline).toContain("Base branch not protected");
+    expect(timeline).toContain(said);
+    expect(await choose("Results")).toContain(`Base branch not protected — ${said}`);
+  });
+
   // harmflow-app#39: a failover's attempts and their sum, each figure with its source, the estimate said as such, and
   // the itemized receipt inside the tab.
   it("shows each attempt's token use and estimated cost, their sum, and the receipt", async () => {
