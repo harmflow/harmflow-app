@@ -331,6 +331,7 @@ type linkedPR struct {
 	Merged bool   `json:"merged"`
 	Base   string `json:"baseRefName"`
 	Head   string `json:"headRefName"`
+	Body   string `json:"body"`
 }
 
 // linkingPullRequests lists the pull requests of queueRepo, in any state, that GitHub links to the issue as closing
@@ -338,7 +339,7 @@ type linkedPR struct {
 func linkingPullRequests(issue int) ([]linkedPR, error) {
 	const query = `query($owner: String!, $repo: String!, $n: Int!) { repository(owner: $owner, name: $repo) {
   issue(number: $n) { closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {
-    nodes { number url state isDraft merged baseRefName headRefName } } } } }`
+    nodes { number url state isDraft merged baseRefName headRefName body } } } } }`
 	owner, name, _ := strings.Cut(queueRepo, "/")
 	out, err := exec.Command("gh", "api", "graphql", "-F", "owner="+owner, "-F", "repo="+name, "-F", "n="+strconv.Itoa(issue),
 		"-f", "query="+query, "--jq", ".data.repository.issue.closedByPullRequestsReferences.nodes").Output()

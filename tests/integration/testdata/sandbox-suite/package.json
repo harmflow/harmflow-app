@@ -1,0 +1,7 @@
+{
+  "name": "sandbox-settings",
+  "private": true,
+  "scripts": {
+    "test": "node --test"
+  }
+}
