@@ -427,7 +427,8 @@ describe("screens", () => {
   });
 });
 
-// The card's Cancel sends the same single cancel as the detail's, and a finished execution's card cannot cancel it.
+// Every active execution has its own card, with its own fields and Cancel. The card's Cancel sends the same single
+// cancel as the detail's, and a finished execution's card cannot cancel it.
 describe("the executions screen's cards", () => {
   let root: Root | undefined;
   let host: HTMLElement | undefined;
@@ -455,6 +456,53 @@ describe("the executions screen's cards", () => {
     await act(async () => root!.render(node));
     await settle();
   }
+
+  it("lists three running executions, each card with its own task, AI tool, repository, issue, elapsed time, state, and Cancel", async () => {
+    // Three GitHub tasks running at once, as the local API lists them, each with its own task, AI tool, repository,
+    // work item, start, and active state; then what each one's card must show, its elapsed time to the fixed clock.
+    const three: ExecutionSummary[] = [
+      { ...running, id: "exec-core", taskId: "core-issues", taskName: "Core issues", harness: "claude-code", status: "running", repository: "org/core-banking", workItem: "org/core-banking#123", createdAt: "2026-10-20T19:21:20-03:00", startedAt: "2026-10-20T19:21:28-03:00" },
+      { ...running, id: "exec-payments", taskId: "payments-fixes", taskName: "Payments fixes", harness: "codex", status: "preparing", repository: "org/payments", workItem: "org/payments#45", createdAt: "2026-10-20T19:29:50-03:00", startedAt: "2026-10-20T19:29:55-03:00" },
+      { ...running, id: "exec-handbook", taskId: "handbook-docs", taskName: "Handbook docs", harness: "codex", status: "switching_harness", repository: "org/handbook", workItem: "org/handbook#7", createdAt: "2026-10-20T18:14:58-03:00", startedAt: "2026-10-20T18:15:00-03:00" },
+    ];
+    const shown = [
+      { title: "Core issues · core-banking#123", task: "core-issues", runBy: "Claude Code", repository: "org/core-banking", elapsed: "8m 32s", state: "Executando" },
+      { title: "Payments fixes · payments#45", task: "payments-fixes", runBy: "Codex", repository: "org/payments", elapsed: "5s", state: "Preparando" },
+      { title: "Handbook docs · handbook#7", task: "handbook-docs", runBy: "Codex", repository: "org/handbook", elapsed: "1h 15m", state: "Trocando de harness" },
+    ];
+    for (const e of three) daemon.answers.set(`/executions/${e.id}/events`, { events: [], logExpired: false });
+    daemon.answers.set(`/executions/${three[0].id}`, { ...detail, ...three[0] });
+    const { active, details, events, stats } = getState();
+    // Only the clock is fixed: the stand-in daemon's answers still arrive through real timers.
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date("2026-10-20T19:30:00-03:00"));
+    try {
+      patchStateForTests({ active: three, stats: stats && { ...stats, running: 3 } });
+      await render(<ExecutionsScreen selectedId={null} onSelect={() => {}} onGoToTasks={() => {}} onSeeHistory={() => {}} />);
+      expect(host!.querySelector(".screen__main .section-title h2")!.textContent).toContain("Execuções ativas (3)");
+      const cards = [...host!.querySelectorAll<HTMLElement>(".exec-card")];
+      expect(cards).toHaveLength(3);
+
+      cards.forEach((card, i) => {
+        // Every query starts from this card's element, so another card's text cannot satisfy it.
+        const field = (label: string) =>
+          [...card.querySelectorAll(".exec-card__fields > div")].find((f) => f.querySelector("dt")!.textContent === label)!.querySelector("dd")!.textContent!.trim();
+        expect(card.querySelector(".exec-card__title")!.textContent).toBe(shown[i].title);
+        expect(field("Tarefa")).toBe(shown[i].task);
+        expect(field("Executada por")).toBe(shown[i].runBy);
+        expect(field("Repositório")).toBe(shown[i].repository);
+        expect(card.querySelector(".exec-card__elapsed")!.textContent!.trim()).toBe(shown[i].elapsed);
+        expect(card.querySelector(".exec-card__header .chip")!.textContent).toBe(shown[i].state);
+        const cancel = card.querySelector<HTMLButtonElement>(".exec-card__cancel")!;
+        expect(cancel.textContent).toBe("Cancelar");
+        expect(cancel.disabled).toBe(false);
+        for (const other of shown.filter((_, j) => j !== i)) expect(card.textContent).not.toContain(other.task);
+      });
+    } finally {
+      vi.useRealTimers();
+      patchStateForTests({ active, details, events, stats });
+    }
+  });
 
   it("sends one cancel from a running execution's card once confirmed, and drops the card once it ends", async () => {
     daemon.answers.set(`/executions/${running.id}`, detail);
