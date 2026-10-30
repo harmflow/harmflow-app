@@ -158,7 +158,8 @@ type App struct {
 	sched         map[string]*scheduleState
 	firings       map[string][]firingRecord // by task id
 	ledger        map[string]map[string]*domain.WorkItem
-	ledgerRepair  bool // the ledger was saved before ledgerVersion, and repairLedger has not mended it yet
+	applied       map[string][]string // by execution id, the items whose result the ledger took, as ledgerFile.Applied
+	ledgerRepair  bool                // the ledger was saved before ledgerVersion, and repairLedger has not mended it yet
 	notifications []Notification
 	accepting     bool
 	stopping      bool
@@ -234,7 +235,8 @@ func New(d Deps) (*App, error) {
 		tasks: map[string]*taskEntry{}, executions: map[string]*domain.Execution{}, running: map[string]*runHandle{},
 		ended: map[string]*domain.ExecutionSummary{}, latest: map[string]placed{},
 		inventory: map[string]ports.HarnessInfo{}, manualPaths: map[string]string{}, sched: map[string]*scheduleState{},
-		firings: map[string][]firingRecord{}, ledger: map[string]map[string]*domain.WorkItem{}, accepting: true,
+		firings: map[string][]firingRecord{}, ledger: map[string]map[string]*domain.WorkItem{},
+		applied: map[string][]string{}, accepting: true,
 		adapters: map[string]ports.HarnessAdapter{}, quotas: map[string]quotaReading{}, quotaReads: map[string]*sync.Mutex{},
 		records: map[string]*recordLock{}, ShutdownRequested: make(chan struct{}),
 	}
