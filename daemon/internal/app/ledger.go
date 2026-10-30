@@ -44,7 +44,11 @@ func (a *App) loadLedger() {
 	}
 }
 
+// saveLedger writes the ledger as it is now. Saves run one at a time, each from its snapshot to the end of its write
+// (ledgerMu), so a save that took an older snapshot never writes after one that took a newer.
 func (a *App) saveLedger() {
+	a.ledgerMu.Lock()
+	defer a.ledgerMu.Unlock()
 	a.mu.Lock()
 	f := ledgerFile{SchemaVersion: ledgerVersion, Tasks: map[string]map[string]*domain.WorkItem{},
 		Applied: map[string][]string{}}
