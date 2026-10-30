@@ -1,6 +1,11 @@
 package app
 
 import (
+	"io"
+	"log"
+	"maps"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -211,6 +216,81 @@ func TestRecoveryCountsEverySelectedItem(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// heldState is a StateStore whose first Save, once it has begun, waits for release before it writes; it records what
+// each Save is given, in the order the saves write, and closes second once the second one has written.
+type heldState struct {
+	entered chan struct{} // closed when the first Save begins
+	second  chan struct{}
+	release chan struct{}
+
+	mu     sync.Mutex
+	calls  int
+	writes []ledgerFile
+}
+
+func (s *heldState) Load(string, any) (bool, error) { return false, nil }
+
+func (s *heldState) Save(_ string, v any) error {
+	s.mu.Lock()
+	s.calls++
+	n := s.calls
+	s.mu.Unlock()
+	if n == 1 {
+		close(s.entered)
+		<-s.release
+	}
+	s.mu.Lock()
+	s.writes = append(s.writes, v.(ledgerFile))
+	s.mu.Unlock()
+	if n == 2 {
+		close(s.second)
+	}
+	return nil
+}
+
+// harmflow-app#585: two saves of the ledger at once write it in the order their snapshots were taken, so the last one
+// written holds every change a save took, and a crash after it loses none. The first save is held in its write until
+// the second one has written, or for a second while the second waits for it.
+func TestLedgerSavesKeepTheirOrder(t *testing.T) {
+	state := &heldState{entered: make(chan struct{}), second: make(chan struct{}), release: make(chan struct{})}
+	a, err := New(Deps{Paths: NewPaths(t.TempDir(), t.TempDir(), t.TempDir()), State: state,
+		Logger: log.New(io.Discard, "", 0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.mu.Lock()
+	a.itemLocked("t", "o/r#1")
+	a.mu.Unlock()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		a.saveLedger()
+	}()
+	<-state.entered
+	go func() {
+		defer wg.Done()
+		a.trackWorkItem("t", "o/r#2", "", "", "x2")
+	}()
+	select {
+	case <-state.second:
+	case <-time.After(time.Second):
+	}
+	close(state.release)
+	wg.Wait()
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if len(state.writes) != 2 {
+		t.Fatalf("Save called %d times; want 2", len(state.writes))
+	}
+	last := state.writes[1].Tasks["t"]
+	if last["o/r#1"] == nil || last["o/r#2"] == nil {
+		t.Errorf("last ledger written holds %v; want o/r#1 and o/r#2, the newest snapshot", slices.Sorted(maps.Keys(last)))
 	}
 }
 
