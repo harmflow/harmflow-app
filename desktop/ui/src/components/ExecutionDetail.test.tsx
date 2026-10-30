@@ -4,14 +4,19 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import type { StreamHandlers } from "../api/transport";
 import type { Execution, ExecutionOutput, HarmflowEvent } from "../api/types";
 import i18n from "../i18n";
 import { formatTime } from "../lib/format";
-import { getState, patchStateForTests } from "../state/store";
+import { getState, patchStateForTests, startSync } from "../state/store";
 import { ExecutionDetail } from "./ExecutionDetail";
 
-// The daemon as the client sees it: an answer per route, and every request it received.
-const daemon = vi.hoisted(() => ({ answers: new Map<string, unknown>(), requests: [] as string[] }));
+// The daemon as the client sees it: an answer per route, every request it received, and the stream it feeds.
+const daemon = vi.hoisted(() => ({
+  answers: new Map<string, unknown>(),
+  requests: [] as string[],
+  stream: undefined as StreamHandlers | undefined,
+}));
 vi.mock("../api/transport", () => ({
   isTauri: () => false,
   EVENT_TYPES: [],
@@ -23,7 +28,10 @@ vi.mock("../api/transport", () => ({
       return daemon.answers.has(route) ? { status: 200, body: daemon.answers.get(route) } : { status: 404, body: null };
     },
     requestText: async () => ({ status: 404, text: "" }),
-    stream: () => () => {},
+    stream: (handlers: StreamHandlers) => {
+      daemon.stream = handlers;
+      return () => {};
+    },
   },
 }));
 
@@ -261,6 +269,88 @@ describe("execution detail", () => {
       { title: "Switching harness", detail: "switching from Claude Code to Codex", tone: "magenta" },
       { title: "Harness started#2", detail: "Codex 0.163.0 started", tone: "violet" },
     ]);
+  });
+
+  // The store's sync starts once per module, as the app starts it once: this is the one test of this file that starts it.
+  it("shows a switch the stream delivers in the alerts and the timeline as it arrives, with no new read of the events", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    const attempt = { ...base.attempts[0], endedAt: undefined, outcome: "running" as const };
+    const running: Execution = { ...base, id: "exec-switch-live", harness: "claude-code", attempts: [attempt] };
+    const on = { executionId: running.id };
+    startSync();
+    await settle();
+    await open(
+      running,
+      [
+        event(1, "harness.started", {
+          ...on,
+          harness: "claude-code",
+          attempt: 1,
+          message: "Claude Code 2.1.239 started",
+          messageKey: "harness_started",
+          params: { harness: "Claude Code", version: "2.1.239" },
+        }),
+      ],
+      capture(),
+    );
+    await choose("Events");
+
+    const eventReads = () => daemon.requests.filter((r) => r.startsWith(`GET /executions/${running.id}/events`)).length;
+    const recordReads = () => daemon.requests.filter((r) => r === `GET /executions/${running.id}`).length;
+    const opened = eventReads();
+    expect(opened).toBe(1);
+    const alerts = () => [...host!.querySelectorAll(".detail__alerts > *")].map((b) => b.textContent ?? "");
+    // The events' items; a running execution's timeline ends on a pending item, which is none.
+    const titles = () => [...host!.querySelectorAll(".tl-item:not(.tl-item--pending) .tl-item__title")].map((t) => t.textContent);
+    expect(alerts()).toEqual([]);
+
+    // Each event reaches the store as a streamed one does, through the handlers startSync gave the transport.
+    const deliver = (e: HarmflowEvent) => act(async () => daemon.stream!.onEvent(e));
+    await deliver(
+      event(2, "harness.quota_exhausted", {
+        ...on,
+        harness: "claude-code",
+        attempt: 1,
+        severity: "warning",
+        message: "Claude Code exhausted its quota",
+        messageKey: "harness_quota_exhausted",
+        params: { harness: "Claude Code" },
+      }),
+    );
+    await deliver(
+      event(3, "harness.switched", {
+        ...on,
+        attempt: 1,
+        severity: "warning",
+        message: "switching from Claude Code to Codex",
+        messageKey: "harness_switched",
+        params: { from: "Claude Code", to: "Codex" },
+      }),
+    );
+
+    // Before Codex starts: the switch's banner, and its item in the timeline.
+    expect(alerts()).toEqual([expect.stringContaining("switching from Claude Code to Codex")]);
+    expect(titles()).toEqual(["Harness started", "Harness quota exhausted", "Switching harness"]);
+
+    await deliver(
+      event(4, "harness.started", {
+        ...on,
+        harness: "codex",
+        attempt: 2,
+        message: "Codex 0.163.0 started",
+        messageKey: "harness_started",
+        params: { harness: "Codex", version: "0.163.0" },
+      }),
+    );
+    expect(titles()).toEqual(["Harness started", "Harness quota exhausted", "Switching harness", "Harness started#2"]);
+    expect(alerts()).toEqual([expect.stringContaining("switching from Claude Code to Codex")]);
+
+    // The reads the store schedules on these events run once their debounce ends: the record, never the events.
+    const records = recordReads();
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    await settle();
+    expect(recordReads()).toBeGreaterThan(records);
+    expect(eventReads()).toBe(opened);
   });
 
   it("shows the daemon's texts in the interface's language, and the agent's and harness's as they are", async () => {
