@@ -108,9 +108,9 @@ func newWorkFixtures(t *testing.T) (excluded, managed, eligible int) {
 			newWorkAPI(t, "repos/"+queueRepo+"/labels", "-f", "name="+label)
 		}
 	}
-	closeNewWorkFixtures(t)
+	closeLabelledFixtures(t, newWorkLabel)
 	var own []int
-	t.Cleanup(func() { closeNewWorkFixtures(t, own...) })
+	t.Cleanup(func() { closeLabelledFixtures(t, newWorkLabel, own...) })
 	run := runSuffix()
 	for i, labels := range [][]string{{newWorkLabel, newWorkExcluded}, {newWorkLabel}, {newWorkLabel}} {
 		if i > 0 {
@@ -212,13 +212,14 @@ func newWorkLinking(issue int) ([]int, error) {
 	return prs, err
 }
 
-// closeNewWorkFixtures closes what the test's runs opened in queueRepo: the open issues and pull requests labelled
-// newWorkLabel, and the own ones, which GitHub may list under the label only some seconds after it opens them. A pull
-// request's branch is deleted with it, read from the pull request: nothing is found by a branch's name.
-func closeNewWorkFixtures(t *testing.T, own ...int) {
+// closeLabelledFixtures closes what a test's runs opened in queueRepo under the label the test owns alone: the open
+// issues and pull requests labelled label, and the own ones, which GitHub may list under the label only some seconds
+// after it opens them. A pull request's branch is deleted with it, read from the pull request: nothing is found by a
+// branch's name.
+func closeLabelledFixtures(t *testing.T, label string, own ...int) {
 	t.Helper()
 	var open []int
-	if err := newWorkJSON(&open, "repos/"+queueRepo+"/issues?state=open&per_page=100&labels="+newWorkLabel,
+	if err := newWorkJSON(&open, "repos/"+queueRepo+"/issues?state=open&per_page=100&labels="+label,
 		"--jq", "[.[].number]"); err != nil {
 		t.Errorf("cleanup: %v", err)
 	}
