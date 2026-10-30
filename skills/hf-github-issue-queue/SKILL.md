@@ -22,11 +22,20 @@ executions. Read `task.parameters.queue` from `context.json`:
 For each repository in `task.parameters.repositories`:
 
 ```bash
-gh pr list --repo OWNER/REPO --state open --draft --json number,url,title,headRefName,labels,body,closingIssuesReferences --limit 100
+gh api repos/OWNER/REPO --jq .default_branch
+gh pr list --repo OWNER/REPO --state open --draft --json number,url,title,headRefName,baseRefName,labels,body,closingIssuesReferences --limit 100
 ```
 
 A pull request is **managed** — and may be resumed — only when it carries the marking the task's prompt defines
 (by default the label `harmflow`). Never resume a pull request without that marking: it is someone else's work.
+
+A draft's issue is the one its `closingIssuesReferences` holds. GitHub links a pull request's `Closes #<n>` to its
+issue only when the pull request goes into the repository's default branch, which the first command prints, so a draft
+whose `baseRefName` is another branch — the draft of a task whose base branch is not the default one — holds none
+there. Its issue is then the number its `headRefName` carries: the number that starts the last segment of the name,
+followed by a hyphen or by nothing, which hf-github-worktree §2 puts in every work branch. `harmflow/42-retry-limit`
+carries 42; `harmflow/142-retry-limit` does not. hf-github-draft-pr §3 matches a pull request to its issue the same
+way.
 
 Resume a managed draft pull request when its work item (`OWNER/REPO#<issue>`) in `context.json` `workItems` has
 status `in_progress` or `failed` — tests failed, or the work was left incomplete or interrupted. Skip it when the item
