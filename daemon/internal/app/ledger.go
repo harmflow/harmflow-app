@@ -24,49 +24,143 @@ type ledgerFile struct {
 // repairLedger mends such a ledger once.
 const ledgerVersion = "2"
 
+// The ledger is saved in two files of the state folder (harmflow-app#341). ledgerName holds the items still in play,
+// and a change to one of them writes it again. archiveName holds the closed items, which leave the first file as they
+// close; it is written only when an item closes, or a closed one changes. Nothing deletes an archived item: one that is
+// selected again comes back to the first file, and its archived copy stays until it closes again and replaces it.
+const (
+	ledgerName  = "workitems"
+	archiveName = "workitems-archive"
+)
+
+// ledgerArchive is the archive of closed work items as the daemon last read or saved it.
+type ledgerArchive struct {
+	items map[string]map[string]domain.WorkItem // by task, then key
+	// unread is set when the archive could not be read: closed items then stay in the file of the items in play, and
+	// the archive on disk is never written over.
+	unread bool
+	// stale is set when items holds what the archive on disk does not, which the next save writes.
+	stale bool
+}
+
 func (a *App) loadLedger() {
-	var f ledgerFile
-	if ok, err := a.d.State.Load("workitems", &f); err != nil {
+	var open, archived ledgerFile
+	if _, err := a.d.State.Load(ledgerName, &open); err != nil {
 		a.log.Printf("work items: %v", err)
-	} else if ok && f.Tasks != nil {
-		// A ledger saved before the agent's text was redacted on arrival may keep a credential in a title.
-		redacted := eventlog.RedactFields(&f)
-		a.mu.Lock()
-		a.ledger = f.Tasks
-		if f.Applied != nil {
-			a.applied = f.Applied
+	}
+	_, archiveErr := a.d.State.Load(archiveName, &archived)
+	if archiveErr != nil {
+		a.log.Printf("archived work items, left as they are on disk: %v", archiveErr)
+	}
+	// A ledger saved before the agent's text was redacted on arrival may keep a credential in a title.
+	redacted := eventlog.RedactFields(&open)
+	archiveRedacted := eventlog.RedactFields(&archived)
+	ledger := map[string]map[string]*domain.WorkItem{}
+	kept := map[string]map[string]domain.WorkItem{}
+	for task, items := range archived.Tasks {
+		for key, w := range items {
+			if w != nil {
+				put(ledger, task, key, w)
+				put(kept, task, key, *w)
+			}
 		}
-		a.ledgerRepair = f.SchemaVersion == "1"
-		a.mu.Unlock()
-		if redacted {
-			a.saveLedger()
+	}
+	for task, items := range open.Tasks {
+		for key, w := range items {
+			// An item in both files is one a stop between the two writes of a save left in each; the later one wins.
+			if old := ledger[task][key]; w == nil || old != nil && old.UpdatedAt.After(w.UpdatedAt) {
+				continue
+			}
+			put(ledger, task, key, w)
 		}
+	}
+	a.mu.Lock()
+	a.ledger = ledger
+	if open.Applied != nil {
+		a.applied = open.Applied
+	}
+	a.ledgerRepair = open.SchemaVersion == "1"
+	a.archive = ledgerArchive{items: kept, unread: archiveErr != nil, stale: archiveRedacted}
+	a.mu.Unlock()
+	if redacted || archiveRedacted {
+		a.saveLedger()
 	}
 }
 
-// saveLedger writes the ledger as it is now. Saves run one at a time, each from its snapshot to the end of its write
-// (ledgerMu), so a save that took an older snapshot never writes after one that took a newer.
+// saveLedger writes the items still in play, and the archive first when an item closed or a closed one changed, so
+// that an item that closed is on disk in one file at least should the daemon stop between the two writes. When the
+// archive cannot be written, the closed items stay in the other file until a later save archives them. Saves run one
+// at a time, each from its snapshot to the end of its last write (ledgerMu), so a save that took an older snapshot
+// never writes after one that took a newer. The applied marks are saved with the items in play.
 func (a *App) saveLedger() {
 	a.ledgerMu.Lock()
 	defer a.ledgerMu.Unlock()
 	a.mu.Lock()
-	f := ledgerFile{SchemaVersion: ledgerVersion, Tasks: map[string]map[string]*domain.WorkItem{},
+	open := ledgerFile{SchemaVersion: ledgerVersion, Tasks: map[string]map[string]*domain.WorkItem{},
 		Applied: map[string][]string{}}
+	closed := map[string]map[string]*domain.WorkItem{}
+	if a.archive.items == nil {
+		a.archive.items = map[string]map[string]domain.WorkItem{}
+	}
 	for task, items := range a.ledger {
-		m := map[string]*domain.WorkItem{}
-		for k, w := range items {
+		for key, w := range items {
 			c := *w
-			m[k] = &c
+			if !c.Status.Closed() || a.archive.unread {
+				put(open.Tasks, task, key, &c)
+				continue
+			}
+			put(closed, task, key, &c)
+			if old, ok := a.archive.items[task][key]; !ok || !sameWorkItem(old, c) {
+				put(a.archive.items, task, key, c)
+				a.archive.stale = true
+			}
 		}
-		f.Tasks[task] = m
+	}
+	var archived *ledgerFile
+	if a.archive.stale {
+		archived = &ledgerFile{SchemaVersion: ledgerVersion, Tasks: map[string]map[string]*domain.WorkItem{}}
+		for task, items := range a.archive.items {
+			for key, w := range items {
+				put(archived.Tasks, task, key, &w)
+			}
+		}
+		a.archive.stale = false
 	}
 	for id, keys := range a.applied {
-		f.Applied[id] = slices.Clone(keys)
+		open.Applied[id] = slices.Clone(keys)
 	}
 	a.mu.Unlock()
-	if err := a.d.State.Save("workitems", f); err != nil {
+	if archived != nil {
+		if err := a.d.State.Save(archiveName, *archived); err != nil {
+			a.log.Printf("saving archived work items: %v", err)
+			a.mu.Lock()
+			a.archive.stale = true
+			a.mu.Unlock()
+			for task, items := range closed {
+				for key, w := range items {
+					put(open.Tasks, task, key, w)
+				}
+			}
+		}
+	}
+	if err := a.d.State.Save(ledgerName, open); err != nil {
 		a.log.Printf("saving work items: %v", err)
 	}
+}
+
+// sameWorkItem reports whether x and y hold the same values, their times compared as instants.
+func sameWorkItem(x, y domain.WorkItem) bool {
+	same := x.UpdatedAt.Equal(y.UpdatedAt)
+	x.UpdatedAt, y.UpdatedAt = time.Time{}, time.Time{}
+	return same && x == y
+}
+
+// put sets m[task][key] to v, making the task's map when it has none.
+func put[T any](m map[string]map[string]T, task, key string, v T) {
+	if m[task] == nil {
+		m[task] = map[string]T{}
+	}
+	m[task][key] = v
 }
 
 func (a *App) itemLocked(taskID, key string) *domain.WorkItem {

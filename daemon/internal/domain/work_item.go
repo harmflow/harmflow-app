@@ -16,6 +16,12 @@ const (
 	WorkItemClosed         WorkItemStatus = "closed"
 )
 
+// Closed reports whether an item with the status is out of play: completed, needing attention, or closed. The queue
+// leaves such an item out, and the ledger keeps it in its archive.
+func (s WorkItemStatus) Closed() bool {
+	return s == WorkItemCompleted || s == WorkItemNeedsAttention || s == WorkItemClosed
+}
+
 // WorkItem is one entry of the daemon's ledger of a task's work items: the item's latest state, as its last execution
 // reported it, and the resumptions and failures counted toward the limits of WorkItemLimits.
 type WorkItem struct {

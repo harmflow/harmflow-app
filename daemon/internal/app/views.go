@@ -275,7 +275,7 @@ type Upcoming struct {
 }
 
 // QueueView is the queue as the API returns it: the firings waiting for their task, oldest first, the next scheduled
-// firings, soonest first, and the work items, last updated first.
+// firings, soonest first, and the work items still in play, last updated first.
 type QueueView struct {
 	Waiting   []ExecutionSummary `json:"waiting"`
 	Upcoming  []Upcoming         `json:"upcoming"`
@@ -283,7 +283,8 @@ type QueueView struct {
 }
 
 // Queue is what waits: firings waiting for their task, the next scheduled firings, and the work items the task's
-// sessions reported.
+// sessions reported that are still in play. A closed item is left out as soon as it closes (harmflow-app#341): the
+// ledger keeps it, and the execution that closed it is in the history.
 func (a *App) Queue() QueueView {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -309,7 +310,9 @@ func (a *App) Queue() QueueView {
 	sort.Slice(q.Upcoming, func(i, j int) bool { return q.Upcoming[i].NextFireAt.Before(q.Upcoming[j].NextFireAt) })
 	for _, task := range sortedKeys(a.ledger) {
 		for _, key := range sortedKeys(a.ledger[task]) {
-			q.WorkItems = append(q.WorkItems, *a.ledger[task][key])
+			if w := a.ledger[task][key]; !w.Status.Closed() {
+				q.WorkItems = append(q.WorkItems, *w)
+			}
 		}
 	}
 	sort.SliceStable(q.WorkItems, func(i, j int) bool { return q.WorkItems[i].UpdatedAt.After(q.WorkItems[j].UpdatedAt) })
