@@ -109,7 +109,7 @@ touch "$MARKER"
 
 // A list is kept per workspace and set of added folders, in any order, so a second lookup starts no session; another
 // set of folders, another workspace, and a lookup after ReloadUserItems ask again. A workspace not made yet is listed
-// in the user's home folder.
+// in the user's home folder, and an added folder not made yet is left out.
 func TestSkillListIsCachedPerWorkspaceAndAddedFolders(t *testing.T) {
 	path, log := listingClaude(t, `echo '{"type":"system","subtype":"init","skills":["simplify"]}'`)
 	home, ws, other, x, y := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
@@ -124,6 +124,7 @@ func TestSkillListIsCachedPerWorkspaceAndAddedFolders(t *testing.T) {
 		{ws, []string{x, y}, 1},
 		{ws, []string{y, x}, 1},
 		{ws, []string{x}, 2},
+		{ws, []string{x, filepath.Join(x, "not-made")}, 2},
 		{other, []string{x}, 3},
 		{filepath.Join(ws, "not-made"), nil, 4},
 	}
