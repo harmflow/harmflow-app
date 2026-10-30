@@ -3,7 +3,10 @@ package integration
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -362,17 +365,26 @@ type ledgerItem struct {
 	Failures int    `json:"failures"`
 }
 
+// readLedger reads the queue task's work items from the ledger's two files: the archive of the closed items, when
+// there is one, then the items still in play, which hold an item's later copy (harmflow-app#341).
 func readLedger(t *testing.T, home string) map[string]ledgerItem {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(home, "state", "workitems.json"))
-	if err != nil {
-		t.Fatal(err)
+	items := map[string]ledgerItem{}
+	for _, name := range []string{"workitems-archive.json", "workitems.json"} {
+		data, err := os.ReadFile(filepath.Join(home, "state", name))
+		if errors.Is(err, fs.ErrNotExist) && name == "workitems-archive.json" {
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		var f struct {
+			Tasks map[string]map[string]ledgerItem `json:"tasks"`
+		}
+		if err := json.Unmarshal(data, &f); err != nil {
+			t.Fatal(err)
+		}
+		maps.Copy(items, f.Tasks["queue"])
 	}
-	var f struct {
-		Tasks map[string]map[string]ledgerItem `json:"tasks"`
-	}
-	if err := json.Unmarshal(data, &f); err != nil {
-		t.Fatal(err)
-	}
-	return f.Tasks["queue"]
+	return items
 }

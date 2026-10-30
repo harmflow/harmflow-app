@@ -272,9 +272,13 @@ func TestCleanAgreesWithANoWorkExecutionThatClosedAnItem(t *testing.T) {
 	})
 
 	got := map[string]domain.WorkItemStatus{}
-	for _, item := range w.app.Queue().WorkItems {
-		got[item.Key] = item.Status
+	w.app.mu.Lock()
+	for _, items := range w.app.ledger {
+		for _, item := range items {
+			got[item.Key] = item.Status
+		}
 	}
+	w.app.mu.Unlock()
 	want := map[string]domain.WorkItemStatus{"o/r#1": domain.WorkItemClosed, "o/r#2": domain.WorkItemCompleted,
 		"o/r#3": domain.WorkItemFailed}
 	if !maps.Equal(got, want) {

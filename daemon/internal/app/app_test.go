@@ -5232,12 +5232,7 @@ func TestRecoveryMarksInterrupted(t *testing.T) {
 		if err := e.app.recover(t.Context()); err != nil {
 			t.Fatal(err)
 		}
-		var item *domain.WorkItem
-		for _, w := range e.app.Queue().WorkItems {
-			if w.TaskID == "issues" && w.Key == "o/r#2" {
-				item = &w
-			}
-		}
+		item := heldItem(e.app, "issues", "o/r#2")
 		if item == nil || item.Status != want || item.Failures != i+1 || item.LastExecutionID != x.ID {
 			t.Errorf("after recovery %d, work item %+v; want %s with %d failures, the last by %s", i+1, item, want, i+1,
 				x.ID)
