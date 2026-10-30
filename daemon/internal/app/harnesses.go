@@ -200,9 +200,8 @@ type itemLookup struct {
 }
 
 // resolveItem finds an agent or skill by name for a harness: built-ins by the hf- prefix, the user's as the harness
-// finds them for workspace, a plugin's `<plugin>:<skill>` among the plugins it has enabled there when it lists them
-// apart from its folders.
-func (a *App) resolveItem(ctx context.Context, kind, name, harness, workspace string) itemLookup {
+// finds them for workspace and the folders a session of the task adds.
+func (a *App) resolveItem(ctx context.Context, kind, name, harness, workspace string, added []string) itemLookup {
 	m := missingItem{kind: kind, name: name, source: "harness"}
 	if strings.HasPrefix(name, BuiltinPrefix) {
 		it, ok := a.builtinDir().Item(kind, name)
@@ -217,12 +216,11 @@ func (a *App) resolveItem(ctx context.Context, kind, name, harness, workspace st
 	m.where = "the " + ad.Name() + " configuration"
 	if l, ok := ad.(ports.WorkspaceLister); ok && l.ListsPerWorkspace(kind) {
 		m.where, m.source, m.workspace = ad.Name()+"'s "+kind+" list for "+workspace, kind+"_list", workspace
-	} else if p, ok := ad.(ports.PluginLister); ok && p.ListsPlugins(kind) && strings.Contains(name, ":") {
-		m.where, m.source, m.workspace = ad.Name()+"'s plugins for "+workspace, "plugin_list", workspace
-	} else if r, ok := ad.(ports.WorkspaceFolderReader); ok && r.ReadsWorkspace(kind) {
-		m.where, m.source, m.workspace = m.where+" and the workspace "+workspace, "harness_workspace", workspace
 	}
-	it, found, problems, err := ad.UserItem(ctx, a.harnessInfo(ctx, harness), kind, name, workspace)
+	if u, ok := ad.(ports.UnverifiedItemsAllower); ok && u.AllowsUnverified(kind) {
+		m.unverifiable = true
+	}
+	it, found, problems, err := ad.UserItem(ctx, a.harnessInfo(ctx, harness), kind, name, workspace, added)
 	if len(problems) > 0 {
 		m.errors = discoveryErrors(problems)
 		m.where += ", which could not load " + m.errors
@@ -248,6 +246,43 @@ func (a *App) itemWorkspace(doc domain.TaskDocument) string {
 		path = w.Path
 	}
 	return a.taskFolder(path, doc.Metadata.ID)
+}
+
+// addedFolders are the folders a session of the task adds beside its workspace, which its harness may find items in
+// too: each repository's local path and each writable path of a custom profile, resolved as an execution resolves
+// them. A folder that does not resolve is left out, as validation leaves it out of the harness's restrictions.
+func (a *App) addedFolders(doc domain.TaskDocument) []string {
+	eff := doc.Effective()
+	e := a.currentPathEnv()
+	_, repos := a.taskFolders(eff, doc.Metadata.ID, e)
+	var out []string
+	for _, f := range repos {
+		if f.err == nil {
+			out = append(out, f.path)
+		}
+	}
+	return append(out, a.resolvedFolders(e, customWritablePaths(eff))...)
+}
+
+// customWritablePaths are the writable paths a session of the task adds, those of a custom profile; none for another
+// profile.
+func customWritablePaths(eff domain.TaskDocument) []string {
+	if p := eff.Spec.Permissions; p != nil && p.Profile == domain.ProfileCustom && p.Custom != nil {
+		return p.Custom.WritablePaths
+	}
+	return nil
+}
+
+// resolvedFolders are paths resolved as an execution resolves a task's writable paths, without those that do not
+// resolve.
+func (a *App) resolvedFolders(e pathEnv, paths []string) []string {
+	var out []string
+	for _, p := range paths {
+		if r, err := e.writablePath(a, p); err == nil {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // taskFolder is the folder of a task with this workspace path and ID: the path, expanded, when it is set and expands,
@@ -277,9 +312,12 @@ type CatalogProblem struct {
 // its name has the hf- prefix, or is not a name the task schema gives its kind. A skill's is an identifier or a
 // plugin's `<plugin>:<skill>`, listed as the harness reports it; an agent's is an identifier. A user's agent that
 // more than one harness holds is copied from the first of them by name. What a harness could not list is in Problems.
-func (a *App) Catalog(ctx context.Context, workspace, task string) Catalog {
+// The added paths are the task's repositories' local paths and writable paths, which a harness may find items in as
+// well: resolved as validation resolves them, without those that do not resolve.
+func (a *App) Catalog(ctx context.Context, workspace, task string, added ...string) Catalog {
 	c := Catalog{Agents: []CatalogEntry{}, Skills: []CatalogEntry{}, Problems: []CatalogProblem{}}
 	workspace = a.taskFolder(workspace, task)
+	folders := a.resolvedFolders(a.currentPathEnv(), added)
 	all := sortedKeys(a.adapters)
 	for _, kind := range []string{"agent", "skill"} {
 		entries := map[string]*CatalogEntry{}
@@ -289,7 +327,7 @@ func (a *App) Catalog(ctx context.Context, workspace, task string) Catalog {
 		}
 		for _, id := range all {
 			ad := a.adapters[id]
-			items, problems, err := ad.UserItems(ctx, a.harnessInfo(ctx, id), kind, workspace)
+			items, problems, err := ad.UserItems(ctx, a.harnessInfo(ctx, id), kind, workspace, folders)
 			if err != nil {
 				c.Problems = append(c.Problems, CatalogProblem{Harness: id, Kind: kind,
 					Text: listUnreadable(ad.Name(), workspace, err)})

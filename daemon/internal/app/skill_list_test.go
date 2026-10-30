@@ -331,81 +331,142 @@ func newClaudeAppOn(t *testing.T, script string) *App {
 	return a
 }
 
-// pluginClaude is a stand-in Claude Code that is signed in and has the plugin pdf@market enabled, installed at root,
-// whose skills are pdf and Forms.
-func pluginClaude(root string) string {
+// initClaude is a stand-in Claude Code that is signed in and, started with -p, appends its folder and arguments to log
+// and prints an init line, as Claude Code 2.1.309 does, then exits. Its list holds a bundled skill, simplify, and a
+// plugin's, pdf:pdf, in any folder; repo-skill in a folder named sub, as the skill of the repository above it; and
+// <name>-skill for each folder <name> it adds with --add-dir. No SKILL.md is read: the list is the stand-in's answer.
+func initClaude(log string) string {
 	return `#!/bin/bash
 case "$1" in
   --version) echo "2.1.309 (Claude Code)" ;;
-  --help) echo "-p, --print  --output-format <format>  --permission-mode <mode>  --allowedTools <tools...>  --append-system-prompt <prompt>" ;;
+  --help) echo "-p, --print  --output-format <format>  --permission-mode <mode>  --allowedTools <tools...>  --append-system-prompt <prompt>  --add-dir <dirs...>  --no-session-persistence" ;;
   auth) echo '{"loggedIn": true}' ;;
-  plugin)
-    case "$2" in
-      list) echo '[{"id":"pdf@market","enabled":true,"projectEnabled":false,"installPath":"` + root + `"}]' ;;
-      details) printf 'pdf 1.0.0\n\nComponent inventory\n  Skills (2)  pdf, Forms\n' ;;
-    esac ;;
+  -p)
+    printf '%s|%s\n' "$(pwd -P)" "$*" >> "` + log + `"
+    skills='"simplify","pdf:pdf"'
+    [ "$(basename "$PWD")" = sub ] && skills="$skills"',"repo-skill"'
+    while [ $# -gt 0 ]; do
+      [ "$1" = --add-dir ] && skills="$skills"',"'"$(basename "$2")"'-skill"'
+      shift
+    done
+    echo '{"type":"system","subtype":"init","skills":['"$skills"']}' ;;
 esac
 `
 }
 
-// A Claude Code task cites a plugin's skill by the name Claude Code gives it, `<plugin>:<skill>`. It saves when a
-// plugin Claude Code has enabled has that skill, and fails naming the skill and the plugins looked in when none has it;
-// the task editor's catalog offers it; an import whose skill no enabled plugin has warns, naming it; and an execution
-// resolves it in the plugin's folder.
-func TestClaudeCodePluginSkills(t *testing.T) {
-	root := t.TempDir()
-	writeSkill(t, filepath.Join(root, "skills", "pdf"))
-	a := newClaudeAppOn(t, pluginClaude(root))
-	ctx := t.Context()
-	ws := filepath.Join(a.d.Paths.UserHome, "ws")
-	if err := os.MkdirAll(ws, 0o700); err != nil {
+// listings are the -p sessions the stand-in of initClaude recorded, each its folder and arguments.
+func listings(t *testing.T, log string) []string {
+	t.Helper()
+	data, err := os.ReadFile(log)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
 		t.Fatal(err)
 	}
-	placed := func(id, skills string) string {
-		return taskYAML(id, "  skills: ["+skills+"]\n  workspace:\n    path: ~/ws\n")
-	}
+	return strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+}
 
-	if _, err := a.CreateTask(ctx, TaskInput{YAML: placed("plugins", "pdf:pdf, pdf:Forms")}); err != nil {
-		t.Fatalf("CreateTask(plugins), citing two skills of an enabled plugin = %v, want no error", err)
-	}
-	_, err := a.CreateTask(ctx, TaskInput{YAML: placed("absent", "pdf:missing")})
-	ae, ok := err.(*Error)
-	if !ok || ae.Key != "skill_not_found" || ae.Params["name"] != "pdf:missing" || ae.Params["source"] != "plugin_list" ||
-		ae.Params["workspace"] != ws || !strings.Contains(ae.Message, "Claude Code's plugins for "+ws) {
-		t.Errorf("CreateTask(absent) = %v (%+v), want skill_not_found naming pdf:missing and Claude Code's plugins for %s",
-			err, ae, ws)
-	}
-
-	if got, want := claudeCodeOffers(ctx, a, "~/ws", "plugins"), []string{"pdf:Forms", "pdf:pdf"}; !slices.Equal(got, want) {
-		t.Errorf(`Catalog(ctx, "~/ws", plugins) offers %q on Claude Code, want %q`, got, want)
-	}
-
-	imported, err := a.ImportTask(ctx, placed("imported", "pdf:pdf, other:skill"), false)
-	if err != nil {
-		t.Fatalf("ImportTask(imported) = %v, want no error", err)
-	}
-	var missing []string
-	for _, w := range imported.Warnings {
-		if w.Key == "skill_missing" {
-			missing = append(missing, w.Params["name"])
+// A Claude Code task's skills are the ones Claude Code lists for its workspace and added folders, and only those. A
+// task whose workspace is a folder of a repository cites the repository's skill, a bundled one, and a plugin's, and
+// saves; one placed elsewhere is refused, naming Claude Code's skill list for its workspace; a skill on disk that Claude
+// Code does not list is not found. The folder a task adds with a writable path counts, in the task editor's catalog,
+// on save, and in an execution. A failover to Claude Code reads the same list. Each list is asked for once per
+// workspace and added folders, and again after a refresh.
+func TestClaudeCodeSkillsComeFromItsSkillList(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "listings.log")
+	a := newClaudeAppOn(t, initClaude(log))
+	ctx := t.Context()
+	home := a.d.Paths.UserHome
+	sub, other, extra := filepath.Join(home, "repo", "sub"), filepath.Join(home, "other"), filepath.Join(home, "extra")
+	for _, d := range []string{sub, other, extra} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
 		}
 	}
-	if !slices.Equal(missing, []string{"other:skill"}) {
-		t.Errorf("ImportTask(imported) warns skill_missing for %q, want only other:skill", missing)
+	writeSkill(t, filepath.Join(home, "repo", ".claude", "skills", "on-disk"))
+	placed := func(id, skills, workspace string) string {
+		return taskYAML(id, "  skills: ["+skills+"]\n  workspace:\n    path: "+workspace+"\n")
+	}
+	adding := func(id, skills string) string {
+		return taskYAML(id, "  skills: ["+skills+"]\n  workspace:\n    path: ~/other\n"+
+			"  permissions:\n    profile: custom\n    custom:\n      writablePaths: [~/extra]\n")
 	}
 
-	res := a.Validate(ctx, TaskInput{YAML: placed("plugins", "pdf:pdf, pdf:Forms")})
+	if _, err := a.CreateTask(ctx, TaskInput{YAML: placed("sub", "repo-skill, simplify, pdf:pdf", "~/repo/sub")}); err != nil {
+		t.Fatalf("CreateTask(sub), citing the repository's skill, a bundled one, and a plugin's = %v, want no error", err)
+	}
+	for _, c := range []struct{ id, skill, workspace string }{
+		{"elsewhere", "repo-skill", "~/other"},
+		{"on-disk", "on-disk", "~/repo/sub"},
+	} {
+		_, err := a.CreateTask(ctx, TaskInput{YAML: placed(c.id, c.skill, c.workspace)})
+		ae, ok := err.(*Error)
+		if !ok || ae.Key != "skill_not_found" || ae.Params["name"] != c.skill || ae.Params["source"] != "skill_list" ||
+			!strings.Contains(ae.Message, "Claude Code's skill list for ") {
+			t.Errorf("CreateTask(%s) = %v (%+v), want skill_not_found naming %s and Claude Code's skill list", c.id, err, ae,
+				c.skill)
+		}
+	}
+	if _, err := a.CreateTask(ctx, TaskInput{YAML: adding("adding", "extra-skill")}); err != nil {
+		t.Fatalf("CreateTask(adding), citing the skill of a folder it adds = %v, want no error", err)
+	}
+
+	if got, want := claudeCodeOffers(ctx, a, "~/repo/sub", "sub"), []string{"pdf:pdf", "repo-skill", "simplify"}; !slices.Equal(got, want) {
+		t.Errorf(`Catalog(ctx, "~/repo/sub", sub) offers %q on Claude Code, want %q`, got, want)
+	}
+	var offered []string
+	for _, e := range a.Catalog(ctx, "~/other", "adding", "~/extra").Skills {
+		if e.Source == "user" && slices.Contains(e.Harnesses, domain.HarnessClaudeCode) {
+			offered = append(offered, e.Name)
+		}
+	}
+	if want := []string{"extra-skill", "pdf:pdf", "simplify"}; !slices.Equal(offered, want) {
+		t.Errorf(`Catalog(ctx, "~/other", adding, "~/extra") offers %q on Claude Code, want %q`, offered, want)
+	}
+
+	res := a.Validate(ctx, TaskInput{YAML: adding("adding", "extra-skill")})
 	if res.doc == nil {
-		t.Fatalf("Validate(plugins) errors = %+v, want none", res.Errors)
+		t.Fatalf("Validate(adding) errors = %+v, want none", res.Errors)
 	}
-	r := &run{a: a, def: *res.doc, eff: res.doc.Effective(), work: ws}
-	_, skills, err := r.resolve(ctx, a.adapters[domain.HarnessClaudeCode])
-	var paths []string
-	for _, s := range skills {
-		paths = append(paths, s.Name+" "+s.Path)
+	resolvedExtra, _ := domain.ResolvePath(extra)
+	r := &run{a: a, def: *res.doc, eff: res.doc.Effective(), work: other, writable: []string{resolvedExtra}}
+	if _, skills, err := r.resolve(ctx, a.adapters[domain.HarnessClaudeCode]); err != nil || len(skills) != 1 ||
+		skills[0].Name != "extra-skill" {
+		t.Errorf("resolve(claude-code) adding %s = %+v, %v; want extra-skill", extra, skills, err)
 	}
-	if want := []string{"pdf:pdf " + filepath.Join(root, "skills", "pdf"), "pdf:Forms " + root}; err != nil || !slices.Equal(paths, want) {
-		t.Errorf("resolve(claude-code) = %q, %v; want %q", paths, err, want)
+
+	// The fake Codex finds every skill named user-skill, so a Codex task cites it with repo-skill.
+	fallback := func(id, workspace string) string {
+		return codexTaskYAML(id, "    fallback:\n      candidates:\n        - provider: claude-code\n"+
+			"  skills: [repo-skill]\n  workspace:\n    path: "+workspace+"\n")
+	}
+	for _, c := range []struct {
+		workspace string
+		invalid   bool
+	}{{"~/repo/sub", false}, {"~/other", true}} {
+		res := a.Validate(ctx, TaskInput{YAML: fallback("fb", c.workspace)})
+		invalid := slices.ContainsFunc(res.Warnings, func(w schemaIssue) bool { return w.Code == domain.WarningInvalidFallback })
+		if invalid != c.invalid {
+			t.Errorf("Validate(fallback in %s) invalid-fallback warning = %v (%+v), want %v", c.workspace, invalid,
+				res.Warnings, c.invalid)
+		}
+	}
+
+	before := len(listings(t, log))
+	claudeCodeOffers(ctx, a, "~/repo/sub", "sub")
+	if got := len(listings(t, log)); got != before {
+		t.Errorf("a second catalog for ~/repo/sub ran %d more listings, want none: the list is kept", got-before)
+	}
+	a.RefreshHarnesses(ctx)
+	claudeCodeOffers(ctx, a, "~/repo/sub", "sub")
+	if got := len(listings(t, log)); got != before+1 {
+		t.Errorf("the catalog after a refresh ran %d more listings, want 1", got-before)
+	}
+	for _, l := range listings(t, log) {
+		if !strings.Contains(l, "|-p --output-format stream-json --verbose --no-session-persistence") {
+			t.Errorf("a listing ran as %q, want claude -p with stream-json output and no session kept", l)
+		}
 	}
 }
 
@@ -421,79 +482,43 @@ func writeSkill(t *testing.T, dir string) {
 	}
 }
 
-// A Claude Code user's skill in the workspace's .claude/skills is found for that workspace only. A task placed there
-// cites it and saves, the task editor's catalog offers it there, and an execution there, the attempt a failover hands
-// to Claude Code included, resolves it in that folder. A task placed elsewhere is refused, naming the configuration
-// and the workspace looked in, and a Codex task placed elsewhere is warned that its Claude Code fallback is invalid.
-// A skill of Claude Code's configuration directory is found for every workspace, as before.
-func TestClaudeCodeSkillsComeFromTheWorkspace(t *testing.T) {
-	a, config := newClaudeApp(t)
-	ctx := t.Context()
-	ws, other := filepath.Join(a.d.Paths.UserHome, "ws"), filepath.Join(a.d.Paths.UserHome, "other")
-	writeSkill(t, filepath.Join(ws, ".claude", "skills", "user-skill"))
-	writeSkill(t, filepath.Join(config, "skills", "review-notes"))
-	if err := os.MkdirAll(other, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	placed := func(id, skills, workspace string) string {
-		return taskYAML(id, "  skills: ["+skills+"]\n  workspace:\n    path: "+workspace+"\n")
-	}
-
-	if _, err := a.CreateTask(ctx, TaskInput{YAML: placed("here", "user-skill, review-notes", "~/ws")}); err != nil {
-		t.Fatalf("CreateTask(here), citing a skill of its workspace and one of the configuration = %v, want no error", err)
-	}
-	if _, err := a.CreateTask(ctx, TaskInput{YAML: placed("configured", "review-notes", "~/other")}); err != nil {
-		t.Fatalf("CreateTask(configured), citing a skill of the configuration = %v, want no error", err)
-	}
-	_, err := a.CreateTask(ctx, TaskInput{YAML: placed("elsewhere", "user-skill", "~/other")})
-	ae, ok := err.(*Error)
-	if !ok || ae.Key != "skill_not_found" || ae.Params["source"] != "harness_workspace" || ae.Params["workspace"] != other ||
-		!strings.Contains(ae.Message, "the Claude Code configuration and the workspace "+other) {
-		t.Errorf("CreateTask(elsewhere) = %v (%+v), want skill_not_found naming the configuration and %s", err, ae, other)
-	}
-
-	if got, want := claudeCodeOffers(ctx, a, "~/ws", "here"), []string{"review-notes", "user-skill"}; !slices.Equal(got, want) {
-		t.Errorf(`Catalog(ctx, "~/ws", here) offers %q on Claude Code, want %q`, got, want)
-	}
-	if got, want := claudeCodeOffers(ctx, a, "~/other", "elsewhere"), []string{"review-notes"}; !slices.Equal(got, want) {
-		t.Errorf(`Catalog(ctx, "~/other", elsewhere) offers %q on Claude Code, want %q`, got, want)
-	}
-
-	// The fake Codex finds user-skill for every workspace, so only Claude Code's lookup tells the two tasks apart.
-	fallback := func(id, workspace string) string {
-		return codexTaskYAML(id, "    fallback:\n      candidates:\n        - provider: claude-code\n"+
-			"  skills: [user-skill]\n  workspace:\n    path: "+workspace+"\n")
-	}
-	imported, err := a.ImportTask(ctx, fallback("fallback-elsewhere", "~/other"), false)
-	if err != nil {
-		t.Fatalf("ImportTask(fallback-elsewhere) = %v, want no error", err)
-	}
-	var invalid []string
-	for _, w := range imported.Warnings {
-		if w.Code == domain.WarningInvalidFallback {
-			invalid = append(invalid, w.Key)
-		}
-	}
-	if !slices.Equal(invalid, []string{"fallback_skill_missing"}) {
-		t.Errorf("ImportTask(fallback-elsewhere) invalid-fallback warnings %q, want fallback_skill_missing", invalid)
-	}
-	res := a.Validate(ctx, TaskInput{YAML: fallback("fallback-here", "~/ws")})
-	if res.doc == nil {
-		t.Fatalf("Validate(fallback-here) errors = %+v, want none", res.Errors)
-	}
-	for _, w := range res.Warnings {
-		if w.Code == domain.WarningInvalidFallback {
-			t.Errorf("Validate(fallback-here) warns %+v, want no invalid-fallback warning for Claude Code", w)
-		}
-	}
-	r := &run{a: a, def: *res.doc, eff: res.doc.Effective(), work: ws}
-	_, skills, err := r.resolve(ctx, a.adapters[domain.HarnessClaudeCode])
-	if want := filepath.Join(ws, ".claude", "skills", "user-skill"); err != nil || len(skills) != 1 || skills[0].Path != want {
-		t.Errorf("resolve(claude-code) in %s = %+v, %v; want user-skill at %s", ws, skills, err, want)
-	}
-	r.work = other
-	if _, _, err := r.resolve(ctx, a.adapters[domain.HarnessClaudeCode]); domain.TextOf(err).Key != "skill_not_found" {
-		t.Errorf("resolve(claude-code) in %s error %v, want skill_not_found", other, err)
+// When Claude Code cannot say which skills it loads — absent, or failing — a Claude Code task that cites a user's
+// skill is not refused: it saves, and validation warns that it could not verify the task's skills, naming why. The
+// catalog says the list could not be read.
+func TestClaudeCodeSkillListUnavailableWarns(t *testing.T) {
+	failing := "#!/bin/bash\ncase \"$1\" in\n  --version) echo \"2.1.309 (Claude Code)\" ;;\n" +
+		"  --help) echo \"-p, --print  --output-format <format>  --permission-mode <mode>  --allowedTools <tools...>  --append-system-prompt <prompt>\" ;;\n" +
+		"  auth) echo '{\"loggedIn\": true}' ;;\n  -p) echo 'Not logged in' >&2; exit 1 ;;\nesac\n"
+	for _, c := range []struct {
+		name, script, wantDetail string
+	}{
+		{"absent", "", "harness_not_detected"},
+		{"failing", failing, "command_failed"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			a, _ := newClaudeApp(t)
+			if c.script != "" {
+				a = newClaudeAppOn(t, c.script)
+			}
+			ctx := t.Context()
+			doc := taskYAML("unverified", "  skills: [review-notes]\n")
+			res := a.Validate(ctx, TaskInput{YAML: doc})
+			unverified := slices.ContainsFunc(res.Warnings, func(w schemaIssue) bool {
+				return w.Key == "skill_list_unverified" && w.Code == domain.WarningMissingSkill &&
+					w.Params["detailKey"] == c.wantDetail
+			})
+			if !res.Valid || !unverified {
+				t.Errorf("Validate(unverified) valid = %v, errors %+v, warnings %+v; want valid with skill_list_unverified "+
+					"naming %s", res.Valid, res.Errors, res.Warnings, c.wantDetail)
+			}
+			if _, err := a.CreateTask(ctx, TaskInput{YAML: doc}); err != nil {
+				t.Errorf("CreateTask(unverified) = %v, want no error", err)
+			}
+			problems := a.Catalog(ctx, "", "unverified").Problems
+			if !slices.ContainsFunc(problems, func(p CatalogProblem) bool { return p.Key == "skill_list_unreadable" }) {
+				t.Errorf(`Catalog(ctx, "", unverified) problems = %+v, want skill_list_unreadable`, problems)
+			}
+		})
 	}
 }
 
@@ -507,36 +532,6 @@ func claudeCodeOffers(ctx context.Context, a *App, workspace, task string) []str
 		}
 	}
 	return names
-}
-
-// A task with no workspace path finds the same Claude Code skills in the task editor's catalog as on save: those of the
-// folder HarmFlow runs it in. A skill of that folder's .claude/skills is offered for the task and passes validation; a
-// skill of HarmFlow's workspace root, or of another task's folder, is neither offered nor accepted.
-func TestClaudeCodeSkillsOfATaskWithNoWorkspacePath(t *testing.T) {
-	a, _ := newClaudeApp(t)
-	writeSkill(t, filepath.Join(a.d.Paths.Workspace, "unplaced", ".claude", "skills", "run-skill"))
-	writeSkill(t, filepath.Join(a.d.Paths.Workspace, ".claude", "skills", "root-skill"))
-
-	for _, c := range []struct {
-		task string
-		want []string
-	}{
-		{"unplaced", []string{"run-skill"}},
-		{"another", nil},
-	} {
-		t.Run(c.task, func(t *testing.T) {
-			if got := claudeCodeOffers(t.Context(), a, "", c.task); !slices.Equal(got, c.want) {
-				t.Errorf(`Catalog(ctx, "", %s) offers %q on Claude Code, want %q`, c.task, got, c.want)
-			}
-			for _, skill := range []string{"run-skill", "root-skill"} {
-				res := a.Validate(t.Context(), TaskInput{YAML: taskYAML(c.task, "  skills: ["+skill+"]\n")})
-				if got, want := res.Valid, slices.Contains(c.want, skill); got != want {
-					t.Errorf("Validate(%s citing %s) valid = %v (errors %+v), want %v, as the catalog offers it", c.task,
-						skill, got, res.Errors, want)
-				}
-			}
-		})
-	}
 }
 
 // After an explicit refresh, the next list asks Codex to read its skills again, and the one after it does not; both run

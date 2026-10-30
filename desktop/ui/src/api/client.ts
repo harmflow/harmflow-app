@@ -57,8 +57,10 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 
 const enc = encodeURIComponent;
 
-function query(params: Record<string, string | number | boolean | undefined>): string {
+// query writes the parameters that have a value; a list is one parameter per entry.
+function query(params: Record<string, string | number | boolean | string[] | undefined>): string {
   const parts = Object.entries(params)
+    .flatMap(([k, v]) => (Array.isArray(v) ? v.map((x) => [k, x] as const) : [[k, v] as const]))
     .filter(([, v]) => v !== undefined && v !== "")
     .map(([k, v]) => `${k}=${enc(String(v))}`);
   return parts.length ? `?${parts.join("&")}` : "";
@@ -86,7 +88,8 @@ export const api = {
    * What a task can cite; a harness that finds the user's items per workspace, as Codex and Claude Code their skills,
    * lists the ones of the task's workspace path, or of the folder HarmFlow runs the task in when it sets none.
    */
-  catalog: (workspace?: string, task?: string) => call<Catalog>("GET", `/catalog${query({ workspace, task })}`),
+  catalog: (workspace?: string, task?: string, addDir?: string[]) =>
+    call<Catalog>("GET", `/catalog${query({ workspace, task, addDir })}`),
   templates: () => call<Template[]>("GET", "/templates"),
   /** The document of a new task from a template, named in language; the daemon writes nothing. */
   draftTask: (template: string, language: TemplateLanguage) =>
