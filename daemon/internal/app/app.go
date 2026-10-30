@@ -159,6 +159,7 @@ type App struct {
 	firings       map[string][]firingRecord // by task id
 	ledger        map[string]map[string]*domain.WorkItem
 	ledgerRepair  bool // the ledger was saved before ledgerVersion, and repairLedger has not mended it yet
+	archive       ledgerArchive
 	notifications []Notification
 	accepting     bool
 	stopping      bool
