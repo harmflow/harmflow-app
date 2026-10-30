@@ -30,7 +30,8 @@
         "properties": {
           "code": { "type": "string", "enum": ["repository_unprotected", "conflicting_activity", "other"] },
           "message": { "type": "string" },
-          "repository": { "type": "string" }
+          "repository": { "type": "string" },
+          "workItem": { "description": "The key of the work item the warning is about, as a work item's key: owner/repo#123.", "type": "string", "minLength": 1 }
         }
       }
     }

@@ -225,12 +225,13 @@ type WorkItemResult struct {
 	ChangedFiles []string        `json:"changedFiles,omitempty"`
 }
 
-// Warning is a warning on an execution or a task: a code, its text, and its subject, such as a repository or the path
-// of the task field it is about.
+// Warning is a warning on an execution or a task: a code, its text, its subject, such as a repository or the path of
+// the task field it is about, and the key of the work item it is about, when it is about one.
 type Warning struct {
 	Code string `json:"code"`
 	Text
-	Subject string `json:"subject,omitempty"`
+	Subject  string `json:"subject,omitempty"`
+	WorkItem string `json:"workItem,omitempty"`
 }
 
 // The codes of a Warning, as Warning in contracts/api/openapi.yaml names them; WarningOther is any warning no other
@@ -407,10 +408,10 @@ func (x *Execution) ErrorText() Text {
 	return Text{Key: x.ErrorKey, Params: x.ErrorParams, Message: x.ErrorMessage}
 }
 
-// AddWarning records a warning once per code and subject.
+// AddWarning records a warning once per code, subject, message, and work item.
 func (x *Execution) AddWarning(w Warning) bool {
 	for _, have := range x.Warnings {
-		if have.Code == w.Code && have.Subject == w.Subject && have.Message == w.Message {
+		if have.Code == w.Code && have.Subject == w.Subject && have.Message == w.Message && have.WorkItem == w.WorkItem {
 			return false
 		}
 	}
