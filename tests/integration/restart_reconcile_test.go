@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -21,7 +22,8 @@ const restartLabel = "restart-test"
 // and the built-in skills of this checkout against queueRepo, on a fixture issue the test opens, from a clone that may
 // push. The daemon is killed at the two points the specification names, once the work branch is pushed and before its
 // pull request is opened, and once the draft pull request is opened; then the task's next firing runs to its end. Each
-// time, the fixture issue ends with exactly one branch and one draft pull request.
+// time, the fixture issue ends with exactly one branch and one draft pull request. After the kill once the draft pull
+// request is opened, the next execution also found that pull request and updated it, as checkUpdatedPullRequest reads.
 func TestRestartDuplicatesNoBranchOrPullRequest(t *testing.T) {
 	claude := realClaude(t)
 	for _, label := range []string{restartLabel, "harmflow"} {
@@ -100,8 +102,120 @@ func TestRestartDuplicatesNoBranchOrPullRequest(t *testing.T) {
 			if !point.afterPush && pr.URL != opened {
 				t.Errorf("the pull request for #%d is %s, want %s, the one the first execution opened", issue, pr.URL, opened)
 			}
+			if !point.afterPush {
+				checkUpdatedPullRequest(t, d, next, nextDir, issue, pr)
+			}
 		})
 	}
+}
+
+// checkUpdatedPullRequest checks that the execution found the fixture issue's existing pull request and updated it,
+// rather than leaving it as an earlier session left it. Its events hold a pull_request.updated for the issue with the
+// pull request's URL, and no pull_request.created. Its report.json gives the issue the kind resume and that pull
+// request, a draft it did not create. On GitHub, the record of the body's edits puts the last one after the
+// execution's execution.started event and before the event that ended it.
+func checkUpdatedPullRequest(t *testing.T, d *daemon, id, dir string, issue int, pr restartPR) {
+	t.Helper()
+	key := issueKey(issue)
+	var updated []string
+	var created []map[string]any
+	var started, ended time.Time
+	for _, e := range d.events(id) {
+		at, _ := time.Parse(time.RFC3339Nano, fmt.Sprint(e["timestamp"]))
+		switch e["type"] {
+		case "pull_request.updated":
+			if item, _ := e["workItemId"].(string); strings.EqualFold(item, key) {
+				payload, _ := e["payload"].(map[string]any)
+				url, _ := payload["url"].(string)
+				updated = append(updated, url)
+			}
+		case "pull_request.created":
+			created = append(created, e)
+		case "execution.started":
+			if started.IsZero() {
+				started = at
+			}
+		case "execution.completed", "execution.no_work", "execution.failed", "execution.cancelled",
+			"execution.interrupted", "execution.needs_attention":
+			if ended.IsZero() {
+				ended = at
+			}
+		}
+	}
+	if !slices.Contains(updated, pr.URL) || len(created) != 0 {
+		t.Errorf("execution %s logged pull_request.updated for %s with %q and pull_request.created %v, want an update "+
+			"of %s and no creation\n%s", id, key, updated, created, pr.URL, runFiles(dir))
+	}
+
+	kind := reportedKind(t, dir, issue)
+	if reported := reportedPullRequest(t, dir, issue); kind != "resume" || reported == nil || reported.URL != pr.URL ||
+		!reported.Draft || reported.Created {
+		t.Errorf("report.json gives %s the kind %q and the pull request %+v, want resume and %s, a draft it did not "+
+			"create\n%s", key, kind, reported, pr.URL, runFiles(dir))
+	}
+
+	if started.IsZero() || ended.IsZero() {
+		t.Fatalf("execution %s logged no start or no end: started %v, ended %v", id, started, ended)
+	}
+	edited := lastBodyEdit(t, pr.Number)
+	// GitHub records an edit to the second, so the start is compared to the second too.
+	if edited.Before(started.Truncate(time.Second)) || edited.After(ended) {
+		t.Errorf("GitHub records the last edit of the body of %s at %v, want it within execution %s, from %v to %v",
+			pr.URL, edited, id, started, ended)
+	}
+}
+
+// reportedKind is the kind the execution's report.json gives the issue's work item, new or resume: "" when the report
+// lists no such item, or gives it no kind.
+func reportedKind(t *testing.T, dir string, issue int) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, "report.json"))
+	if err != nil {
+		t.Errorf("report.json: %v", err)
+		return ""
+	}
+	var report struct {
+		WorkItems []struct {
+			Key  string `json:"key"`
+			Kind string `json:"kind"`
+		} `json:"workItems"`
+	}
+	if err := json.Unmarshal(data, &report); err != nil {
+		t.Errorf("report.json: %v", err)
+		return ""
+	}
+	for _, w := range report.WorkItems {
+		if strings.EqualFold(w.Key, issueKey(issue)) {
+			return w.Kind
+		}
+	}
+	return ""
+}
+
+// lastBodyEdit is when the body of the pull request of queueRepo was last edited, by GitHub's record of the body's
+// edits: the latest editedAt of its userContentEdits, never what a session reports. It is the zero time when the body
+// was never edited.
+func lastBodyEdit(t *testing.T, number int) time.Time {
+	t.Helper()
+	const query = `query($owner: String!, $repo: String!, $n: Int!) { repository(owner: $owner, name: $repo) {
+  pullRequest(number: $n) { userContentEdits(first: 100) { nodes { editedAt } } } } }`
+	owner, name, _ := strings.Cut(queueRepo, "/")
+	out, err := exec.Command("gh", "api", "graphql", "-F", "owner="+owner, "-F", "repo="+name, "-F", "n="+strconv.Itoa(number),
+		"-f", "query="+query, "--jq", "[.data.repository.pullRequest.userContentEdits.nodes[].editedAt]").Output()
+	if err != nil {
+		t.Fatalf("read the body's edits of %s#%d: %v", queueRepo, number, err)
+	}
+	var edits []time.Time
+	if err := json.Unmarshal(out, &edits); err != nil {
+		t.Fatalf("read the body's edits of %s#%d: %v\n%s", queueRepo, number, err, out)
+	}
+	var last time.Time
+	for _, at := range edits {
+		if at.After(last) {
+			last = at
+		}
+	}
+	return last
 }
 
 // ensureLabel creates the label in queueRepo unless it is there already: the fixtures' label, and the marking of the
