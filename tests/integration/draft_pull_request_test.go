@@ -26,7 +26,9 @@ const (
 // The real Claude Code runs the built-in agent's copy and the built-in skills of this checkout against queueRepo, on a
 // fixture issue the test opens, from a clone that may push. The issue then has exactly one pull request: an open draft
 // from a branch other than the base branch, into the base branch. The base branch is where it was: nothing was pushed
-// to it, and nothing was merged.
+// to it, and nothing was merged. The work came from a worktree of the session's own: the pull request's head branch is
+// checked out under the execution's workspace, at the pull request's head commit, and the task's clone is still on the
+// base branch, at the commit it had before the run, with nothing changed in it.
 func TestEligibleIssueBecomesALinkedDraftPullRequest(t *testing.T) {
 	claude := realClaude(t)
 	base := sandboxBase(t)
@@ -44,6 +46,7 @@ func TestEligibleIssueBecomesALinkedDraftPullRequest(t *testing.T) {
 	if out, err := exec.Command("git", "-C", clone, "remote", "set-url", "--push", "origin", "https://github.com/"+queueRepo).CombinedOutput(); err != nil {
 		t.Fatalf("git remote set-url --push: %v\n%s", err, out)
 	}
+	checkedOut, cloneHead := git(t, clone, "rev-parse", "--abbrev-ref", "HEAD"), git(t, clone, "rev-parse", "HEAD")
 	home := t.TempDir()
 	d := startDaemon(t, home)
 	useClaude(d, claude, clone)
@@ -57,8 +60,9 @@ func TestEligibleIssueBecomesALinkedDraftPullRequest(t *testing.T) {
 		t.Errorf("execution %s = %v (%v), want completed\n%s", id, x["status"], x["errorMessage"], runFiles(dir))
 	}
 
+	events := d.events(id)
 	var created []map[string]any
-	for _, e := range d.events(id) {
+	for _, e := range events {
 		if e["type"] == "pull_request.created" {
 			created = append(created, e)
 		}
@@ -97,6 +101,108 @@ func TestEligibleIssueBecomesALinkedDraftPullRequest(t *testing.T) {
 	if after := branchHead(t, base); after != before {
 		t.Errorf("the head of %s moved from %s to %s during the run, want it unchanged", base, before, after)
 	}
+
+	workspace := contextWorkspace(t, dir)
+	var own []worktree
+	for _, w := range worktrees(t, clone)[1:] {
+		if w.Branch == pr.Head && within(t, workspace, w.Path) {
+			own = append(own, w)
+		}
+	}
+	if len(own) != 1 {
+		t.Errorf("git worktree list in the clone gives %d worktrees of %s under the workspace %s, want 1: %+v", len(own),
+			pr.Head, workspace, worktrees(t, clone))
+	} else if own[0].Head != pr.HeadOID {
+		t.Errorf("the worktree %s is at %s, want %s, the head of %s on GitHub", own[0].Path, own[0].Head, pr.HeadOID, pr.URL)
+	}
+	if b, head := git(t, clone, "rev-parse", "--abbrev-ref", "HEAD"), git(t, clone, "rev-parse", "HEAD"); b != base ||
+		b != checkedOut || head != cloneHead {
+		t.Errorf("the clone's checkout is %s at %s after the run, want %s at %s, as before it, on the base branch %s", b,
+			head, checkedOut, cloneHead, base)
+	}
+	if status := git(t, clone, "status", "--porcelain"); status != "" {
+		t.Errorf("git status --porcelain in the clone printed %q after the run, want nothing", status)
+	}
+	changed := false
+	for _, e := range events {
+		p, _ := e["payload"].(map[string]any)
+		item, _ := e["workItemId"].(string)
+		if e["type"] == "workspace.changed" && strings.EqualFold(item, issueKey(issue)) && p["branch"] == pr.Head {
+			changed = true
+		}
+	}
+	if !changed {
+		t.Errorf("execution %s logged no workspace.changed event for %s with the branch %s\n%s", id, issueKey(issue), pr.Head,
+			runFiles(dir))
+	}
+}
+
+// worktree is an entry of git worktree list --porcelain: its path, its head commit, and its branch, without
+// refs/heads/, empty when the worktree is detached.
+type worktree struct {
+	Path, Head, Branch string
+}
+
+// worktrees lists the worktrees of the clone, the clone's own checkout first, as git worktree list --porcelain gives
+// them.
+func worktrees(t *testing.T, clone string) []worktree {
+	t.Helper()
+	var list []worktree
+	for _, entry := range strings.Split(git(t, clone, "worktree", "list", "--porcelain"), "\n\n") {
+		var w worktree
+		for _, line := range strings.Split(entry, "\n") {
+			key, value, _ := strings.Cut(line, " ")
+			switch key {
+			case "worktree":
+				w.Path = value
+			case "HEAD":
+				w.Head = value
+			case "branch":
+				w.Branch = strings.TrimPrefix(value, "refs/heads/")
+			}
+		}
+		list = append(list, w)
+	}
+	return list
+}
+
+// within reports whether path is dir or lies under it, both read with their symbolic links resolved: git gives a
+// worktree's real path, and the daemon's home may be under a link, such as macOS's /var.
+func within(t *testing.T, dir, path string) bool {
+	t.Helper()
+	realDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Errorf("filepath.EvalSymlinks(%q): %v", dir, err)
+		return false
+	}
+	realPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Errorf("filepath.EvalSymlinks(%q): %v", path, err)
+		return false
+	}
+	rel, err := filepath.Rel(realDir, realPath)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// contextWorkspace is the workspace the execution's context.json gives its session, paths.workspace.
+func contextWorkspace(t *testing.T, dir string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, "context.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ctx struct {
+		Paths struct {
+			Workspace string `json:"workspace"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal(data, &ctx); err != nil {
+		t.Fatalf("context.json: %v", err)
+	}
+	if ctx.Paths.Workspace == "" {
+		t.Fatalf("context.json gives no paths.workspace:\n%s", data)
+	}
+	return ctx.Paths.Workspace
 }
 
 // draftPRTask is a task made of the built-in issue implementer as selecting it copies it, with the open issues of
@@ -324,14 +430,15 @@ func branchesHolding(folder string) ([]string, error) {
 
 // linkedPR is a pull request of queueRepo that GitHub links to an issue.
 type linkedPR struct {
-	Number int    `json:"number"`
-	URL    string `json:"url"`
-	State  string `json:"state"`
-	Draft  bool   `json:"isDraft"`
-	Merged bool   `json:"merged"`
-	Base   string `json:"baseRefName"`
-	Head   string `json:"headRefName"`
-	Body   string `json:"body"`
+	Number  int    `json:"number"`
+	URL     string `json:"url"`
+	State   string `json:"state"`
+	Draft   bool   `json:"isDraft"`
+	Merged  bool   `json:"merged"`
+	Base    string `json:"baseRefName"`
+	Head    string `json:"headRefName"`
+	HeadOID string `json:"headRefOid"`
+	Body    string `json:"body"`
 }
 
 // linkingPullRequests lists the pull requests of queueRepo, in any state, that GitHub links to the issue as closing
@@ -339,7 +446,7 @@ type linkedPR struct {
 func linkingPullRequests(issue int) ([]linkedPR, error) {
 	const query = `query($owner: String!, $repo: String!, $n: Int!) { repository(owner: $owner, name: $repo) {
   issue(number: $n) { closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {
-    nodes { number url state isDraft merged baseRefName headRefName body } } } } }`
+    nodes { number url state isDraft merged baseRefName headRefName headRefOid body } } } } }`
 	owner, name, _ := strings.Cut(queueRepo, "/")
 	out, err := exec.Command("gh", "api", "graphql", "-F", "owner="+owner, "-F", "repo="+name, "-F", "n="+strconv.Itoa(issue),
 		"-f", "query="+query, "--jq", ".data.repository.issue.closedByPullRequestsReferences.nodes").Output()
