@@ -40,8 +40,10 @@ way.
 Resume a managed draft pull request when its work item (`OWNER/REPO#<issue>`) in `context.json` `workItems` has
 status `in_progress` or `failed` — tests failed, or the work was left incomplete or interrupted. Skip it when the item
 reads `needs_attention`, or when its `resumes` reached `maxResumeAttempts` or its `failures` exceeded
-`maxFailedRetries`; report it with outcome `needs_attention` instead. A resumed item's branch is the pull request's
-`headRefName` from the listing above, which hf-github-worktree §2 works on.
+`maxFailedRetries`; report it with outcome `needs_attention` instead, and give it no `kind`, `pullRequest`, or
+`tests`: the execution neither resumed nor updated it, and HarmFlow would count a `kind` `resume` as a resumption
+and record a `pullRequest` as one this execution updated. A resumed item's branch is the pull request's `headRefName`
+from the listing above, which hf-github-worktree §2 works on.
 
 An issue whose processing failed before any pull request linked it — a push that failed, `gh` unreachable, a daemon
 restart mid-run — is **work to retry**. Take as work to retry each work item in `context.json` `workItems` that
