@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -312,6 +313,7 @@ type hookedEvents struct {
 	deleted func(executionID string)
 	checked map[string]int // events checked, by type
 	invalid []string
+	count   atomic.Int64 // events appended
 }
 
 func newHookedEvents(t *testing.T, log *eventlog.Log, v *schema.Validator) *hookedEvents {
@@ -335,9 +337,13 @@ func (h *hookedEvents) Append(ev domain.Event) domain.Event {
 		hook(ev)
 	}
 	stored := h.Log.Append(ev)
+	h.count.Add(1)
 	h.check(stored)
 	return stored
 }
+
+// appended is how many events were appended so far.
+func (h *hookedEvents) appended() int64 { return h.count.Load() }
 
 // check validates the JSON the log writes for the event, as a line of its execution's JSONL and as its SSE data.
 func (h *hookedEvents) check(ev domain.Event) {
@@ -527,27 +533,45 @@ func (e *env) create(id, extra string) {
 	}
 }
 
-// A loaded host can take seconds to run each process a fake harness starts, while the daemon's own work stays fast.
-// poll spends its budget only while no fake attempt is running, from Prepare to its parser's Finish, so a daemon that
-// hangs still fails within the budget; slow processes stretch it up to processCeiling in all.
+// A loaded host can take seconds to run each process an execution starts — a fake harness, a script task's program,
+// and the ps and sysctl that identify the program — while the daemon's own work stays fast. poll spends its budget only
+// while no fake attempt is running, from Prepare to its parser's Finish, and no script program is, from its attempt's
+// start to its end, so a daemon that hangs still fails within the budget. Slow processes stretch it up to processCeiling
+// after the daemon's last event, so a run that goes on logging its steps is never cut short, and one that stalls is.
 const processCeiling = 3 * time.Minute
 
 // poll checks cond every 20 ms until it holds, and reports whether it did.
 func (e *env) poll(budget time.Duration, cond func() bool) bool {
-	start, last := time.Now(), time.Now()
+	moved, last := time.Now(), time.Now()
+	seen := e.events.appended()
 	for spent := time.Duration(0); ; time.Sleep(20 * time.Millisecond) {
 		if cond() {
 			return true
 		}
 		now := time.Now()
-		if !e.claude.running() && !e.codex.running() {
+		if !e.claude.running() && !e.codex.running() && !e.programRunning() {
 			spent += now.Sub(last)
 		}
+		if n := e.events.appended(); n != seen {
+			seen, moved = n, now
+		}
 		last = now
-		if spent >= budget || now.Sub(start) >= processCeiling {
+		if spent >= budget || now.Sub(moved) >= processCeiling {
 			return false
 		}
 	}
+}
+
+// programRunning reports whether a script task's program is running: its attempt started and has not ended.
+func (e *env) programRunning() bool {
+	e.app.mu.Lock()
+	defer e.app.mu.Unlock()
+	for _, x := range e.app.executions {
+		if at := x.CurrentAttempt(); x.Script != nil && at != nil && at.Outcome == domain.AttemptRunning {
+			return true
+		}
+	}
+	return false
 }
 
 // wait returns the execution once it has one of the statuses; a final status it does not want fails at once.
