@@ -651,6 +651,11 @@ describe("the events timeline from the keyboard", () => {
     act(() => void on.dispatchEvent(e));
     return e.defaultPrevented;
   };
+  /** The rows, and the elements inside them, that are a button, link, or form control, or have a tabIndex of 0 or more. */
+  const tabStopsInRows = () =>
+    options()
+      .flatMap((o) => [o, ...o.querySelectorAll<HTMLElement>("*")])
+      .filter((el) => el.matches("button, a[href], input, select, textarea") || Number(el.getAttribute("tabindex") ?? -1) >= 0 || el.tabIndex >= 0);
 
   // happy-dom lays nothing out, so the rows the list scrolls into view are counted instead.
   let scrolled: Element[];
@@ -669,6 +674,19 @@ describe("the events timeline from the keyboard", () => {
     expect(list().getAttribute("aria-label")).toBe("Event timeline");
     expect(options()).toHaveLength(4);
     expect(selected()).toEqual(at(3));
+  });
+
+  it("is one tab stop: no row, and nothing inside a row, is in the tab order, before or after a key moves the selection", async () => {
+    await open(x, steps, capture());
+    await choose("Events");
+    expect(list().tabIndex).toBe(0);
+    expect(options()).toHaveLength(4);
+    // Each row holds elements of its own, so the check below reaches inside every one of them.
+    expect(options().every((o) => o.querySelector("*") !== null)).toBe(true);
+    expect(tabStopsInRows()).toEqual([]);
+    expect(press("Home")).toBe(true);
+    expect(selected()).toEqual(at(0));
+    expect(tabStopsInRows()).toEqual([]);
   });
 
   it("moves the selection with ↑ and ↓, without wrapping, and turns Follow off once it moves", async () => {
@@ -732,6 +750,17 @@ describe("the events timeline from the keyboard", () => {
     expect(press("Enter")).toBe(false);
     expect(selected()).toEqual(at(3));
     expect(follow().checked).toBe(true);
+  });
+
+  it("leaves ↑, ↓, Home, and End alone with Alt held", async () => {
+    await open(x, steps, capture());
+    await choose("Events");
+    act(() => list().focus());
+    expect(document.activeElement).toBe(list());
+    for (const key of ["ArrowUp", "ArrowDown", "Home", "End"]) expect(press(key, list(), { altKey: true }), key).toBe(false);
+    expect(selected()).toEqual(at(3));
+    expect(follow().checked).toBe(true);
+    expect(scrolled).toEqual([]);
   });
 });
 
