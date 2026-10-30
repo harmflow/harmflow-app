@@ -41,17 +41,22 @@ for the same issue. Each call prints the open pull requests it finds, as a JSON 
 ```bash
 gh api "repos/OWNER/REPO/pulls?head=OWNER:<branch>&state=open" --jq '[.[] | {number, url: .html_url, headRefName: .head.ref}]'
 gh api graphql -F owner=OWNER -F repo=REPO -f query='query($owner: String!, $repo: String!) {
-  repository(owner: $owner, name: $repo) { pullRequests(states: OPEN, first: 100) { nodes { number url headRefName
-    closingIssuesReferences(first: 25) { nodes { number } } } } } }' --jq '[.data.repository.pullRequests.nodes[] | select(any(.closingIssuesReferences.nodes[]; .number == <issue>)) | {number, url, headRefName}]'
+  repository(owner: $owner, name: $repo) { defaultBranchRef { name } pullRequests(states: OPEN, first: 100) { nodes {
+    number url headRefName baseRefName closingIssuesReferences(first: 25) { nodes { number } } } } } }' --jq '.data.repository | .defaultBranchRef.name as $default | [.pullRequests.nodes[] | select(any(.closingIssuesReferences.nodes[]; .number == <issue>) or (.baseRefName != $default and (.headRefName | split("/") | last | test("^<issue>(-|$)")))) | {number, url, headRefName}]'
 ```
 
-The first reads the pull requests from the work branch. The second reads the open pull requests that close the item's
-issue, from any branch, by the `closingIssuesReferences` hf-github-issue-queue §1 reads to find a managed draft's
-issue, so that selecting and publishing agree on what the item's pull request is.
+The first reads the pull requests from the work branch. The second reads the open pull requests of the item's issue,
+from any branch, as hf-github-issue-queue §1 matches a managed draft to its issue, so that selecting and publishing
+agree on what the item's pull request is. A pull request is the issue's when its `closingIssuesReferences` holds the
+issue. GitHub links a pull request's `Closes #<n>` to its issue only when the pull request goes into the repository's
+default branch, so one into another branch — the pull request of a task whose base branch is not the default one — is
+also the issue's when its `headRefName` carries the issue's number: the number that starts the last segment of the
+name, followed by a hyphen or by nothing, which hf-github-worktree §2 puts in every work branch.
+`harmflow/42-retry-limit` carries 42; `harmflow/142-retry-limit` does not.
 
 - **The first finds one:** it is the item's pull request. Push, and update it (§4). Another pull request the second
   finds is a second one already open for the issue: name it in the report's warnings (`conflicting_activity`).
-- **Only the second finds one:** an open pull request from another branch closes the issue, so the item already has
+- **Only the second finds one:** an open pull request from another branch is the issue's, so the item already has
   its pull request, on a branch this session did not work on. Push nothing, open no pull request, and never move your
   commits onto that branch, which could overwrite or tangle work a person or another firing put there. The item's
   outcome is `needs_attention` (§5), and the report's warnings get a `conflicting_activity` entry that names the work

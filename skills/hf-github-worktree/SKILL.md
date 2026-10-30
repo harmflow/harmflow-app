@@ -46,7 +46,10 @@ message yourself, nor add to it what the calls printed.
 
 ## 2. Create or reuse the worktree
 
-Name a new item's branch as the task's prompt specifies; by default `harmflow/<issue-number>-<short-slug>`. A resumed
+Name a new item's branch as the task's prompt specifies; by default `harmflow/<issue-number>-<short-slug>`. Whatever
+the naming, the last segment of the name starts with the issue's number, followed by a hyphen or by nothing: GitHub
+links a pull request into a branch other than the repository's default one to no issue, and hf-github-issue-queue §1
+and hf-github-draft-pr §3 then find the pull request's issue by that number. A resumed
 managed draft pull request is worked on its own head branch, the `headRefName` hf-github-issue-queue §1 lists for it,
 never on a branch named afresh, even when the prompt would name it differently now: a branch of another name finds no
 pull request and starts from the base branch, as a new item's would. The worktree path is

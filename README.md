@@ -200,6 +200,12 @@ A GitHub task does in its repositories what its prompt, agents, and skills say: 
 built-in issue implementer, which never merges. A file that still names the type `github-issue-implementation` and its
 block `githubIssueImplementation` loads as before, and saving it writes the new names.
 
+A repository's `baseBranch` is `main` unless it names another, and any branch is accepted. GitHub links a pull
+request's `Closes #<n>` to its issue only when the pull request goes into the repository's default branch. With
+another base branch, the built-in skills find a pull request's issue by the number its work branch carries, 42 in
+`harmflow/42-retry-limit`, and GitHub does not close the issue when the pull request merges: the issue is closed by
+hand, or when that branch reaches the default one.
+
 ## How a task runs
 
 <table>

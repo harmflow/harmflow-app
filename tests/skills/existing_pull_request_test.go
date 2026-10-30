@@ -2,6 +2,7 @@ package skills
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,11 +23,16 @@ const draftPRSkill = "../../skills/hf-github-draft-pr/SKILL.md"
 // workBranch is the branch the session works issue 42 of harmflow/example on.
 const workBranch = "harmflow/42-retry-limit"
 
-// stubPullRequest is a pull request of harmflow/example as the stub holds it: its number, its head branch, whether it
-// is open, and the issues its body closes.
+// defaultBranch is harmflow/example's default branch, the only one into which GitHub links a pull request's closing
+// references to their issues.
+const defaultBranch = "main"
+
+// stubPullRequest is a pull request of harmflow/example as the stub holds it: its number, its head branch, the branch
+// it goes into, whether it is open, and the issues its body closes. GitHub links those issues only into defaultBranch.
 type stubPullRequest struct {
 	number int
 	branch string
+	base   string // defaultBranch when empty
 	open   bool
 	closes []int
 }
@@ -44,8 +50,10 @@ var openOnly = regexp.MustCompile(`states:\s*\[?\s*OPEN\s*\]?`)
 // two gh api commands the skill writes, through the real gh, against a stub that answers as GitHub does for the pull
 // requests from a branch and for a repository's open pull requests with the issues they close. Each case needs one of
 // the two: only the lookup from the work branch finds a pull request that closes no issue, and only the lookup by issue
-// finds one from another branch. Only the last case answers that the item has no pull request, so that the session
-// opens one.
+// finds one from another branch. A pull request into a branch other than the default one closes no issue on GitHub,
+// whatever its body says, so the lookup by issue finds it by the issue's number at the start of its branch's last
+// segment, and finds no pull request into the default branch that way. Only the cases named none answer that the item
+// has no pull request, so that the session opens one.
 func TestExistingPullRequest(t *testing.T) {
 	gh, err := exec.LookPath("gh")
 	if err != nil {
@@ -72,6 +80,29 @@ func TestExistingPullRequest(t *testing.T) {
 				{number: 49, branch: "harmflow/42-add-retry-limit", closes: []int{42}},
 				{number: 52, branch: "harmflow/43-log-level", open: true, closes: []int{43}},
 			},
+			found{}},
+		{"an open pull request from the work branch into another branch",
+			[]stubPullRequest{{number: 53, branch: workBranch, base: "develop", open: true, closes: []int{42}}},
+			found{53, "https://github.com/harmflow/example/pull/53", workBranch}},
+		{"an open pull request from another branch into another branch carries the issue's number",
+			[]stubPullRequest{{number: 54, branch: "fix/42-add-retry-limit", base: "develop", open: true, closes: []int{42}}},
+			found{54, "https://github.com/harmflow/example/pull/54", "fix/42-add-retry-limit"}},
+		// Into another branch, a pull request is the issue's only by a branch whose last segment starts with 42 and a
+		// hyphen, or is 42: not 142, not 42 later in the name, not 42 in a segment before the last, and never a closed
+		// one.
+		{"none into another branch",
+			[]stubPullRequest{
+				{number: 55, branch: "harmflow/142-retry-limit", base: "develop", open: true, closes: []int{142}},
+				{number: 56, branch: "harmflow/42retry-limit", base: "develop", open: true},
+				{number: 57, branch: "harmflow/retry-limit-42", base: "develop", open: true},
+				{number: 58, branch: "42/add-retry-limit", base: "develop", open: true},
+				{number: 59, branch: "fix/42-add-retry-limit", base: "develop", closes: []int{42}},
+			},
+			found{}},
+		// Into the default branch, GitHub's link decides: a pull request whose body closes no issue is not the issue's,
+		// though its branch carries the issue's number.
+		{"none into the default branch from a branch that carries the issue's number",
+			[]stubPullRequest{{number: 60, branch: "fix/42-add-retry-limit", open: true}},
 			found{}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -150,8 +181,9 @@ func branchAnswer(t *testing.T, r *http.Request, pulls []stubPullRequest) any {
 }
 
 // issueAnswer is what the GraphQL endpoint answers to the query of the repository's pull requests: open ones only
-// when the query asks for that state, with each field the query asks for, and an error for a field the stub does not
-// know.
+// when the query asks for that state, with each field the query asks for, the closing references only of a pull
+// request into the default branch, the default branch's name when the query asks for it, and an error for a field the
+// stub does not know.
 func issueAnswer(t *testing.T, r *http.Request, pulls []stubPullRequest) any {
 	t.Helper()
 	var body map[string]any
@@ -194,6 +226,8 @@ func issueAnswer(t *testing.T, r *http.Request, pulls []stubPullRequest) any {
 				node[name] = pullURL(pr)
 			case "headRefName":
 				node[name] = pr.branch
+			case "baseRefName":
+				node[name] = cmp.Or(pr.base, defaultBranch)
 			case "closingIssuesReferences":
 				issueFields := f.path("nodes")
 				if issueFields == nil {
@@ -201,7 +235,11 @@ func issueAnswer(t *testing.T, r *http.Request, pulls []stubPullRequest) any {
 					return nil
 				}
 				issues := []map[string]any{}
-				for _, n := range pr.closes {
+				var closes []int
+				if cmp.Or(pr.base, defaultBranch) == defaultBranch {
+					closes = pr.closes
+				}
+				for _, n := range closes {
 					issue := map[string]any{}
 					for name := range issueFields.fields {
 						if name != "number" {
@@ -218,9 +256,22 @@ func issueAnswer(t *testing.T, r *http.Request, pulls []stubPullRequest) any {
 		}
 		answer = append(answer, node)
 	}
-	return map[string]any{"data": map[string]any{"repository": map[string]any{
-		"pullRequests": map[string]any{"nodes": answer},
-	}}}
+	repository := map[string]any{"pullRequests": map[string]any{"nodes": answer}}
+	for name, f := range root.path("repository").fields {
+		switch name {
+		case "pullRequests":
+		case "defaultBranchRef":
+			for refField := range f.fields {
+				if refField != "name" {
+					t.Errorf("the query asks for the default branch's %s, which the stub does not answer", refField)
+				}
+			}
+			repository[name] = map[string]any{"name": defaultBranch}
+		default:
+			t.Errorf("the query asks for a repository's %s, which the stub does not answer", name)
+		}
+	}
+	return map[string]any{"data": map[string]any{"repository": repository}}
 }
 
 // pullURL is the pull request's page on GitHub.
