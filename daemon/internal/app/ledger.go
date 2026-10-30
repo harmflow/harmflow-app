@@ -176,10 +176,11 @@ func (a *App) repairLedger() {
 	a.saveLedger()
 }
 
-// recover marks every execution a crash or restart left active as interrupted: it is never continued, and its work
-// item is resumed in a later cycle. First it ends the harness that each one's running attempt left, and what that
-// harness started, which the daemon's end does not reach. Waiting firings stay queued; startQueued then drops each one
-// whose task was disabled or deleted while the daemon was down.
+// recover marks every execution a crash or restart left active as interrupted: it is never continued, and each work
+// item its session selected counts an operational failure, so a later cycle resumes or retries it — the item its record
+// names, and every other one its log's selections name (otherSelections). First it ends the harness that each one's
+// running attempt left, and what that harness started, which the daemon's end does not reach. Waiting firings stay
+// queued; startQueued then drops each one whose task was disabled or deleted while the daemon was down.
 //
 // It reads the summary of each execution from the index of the records, and the whole record only of an execution
 // that has not ended, or of one saved at an older schema: such a record was saved before the agent's text was redacted
@@ -252,9 +253,12 @@ func (a *App) recover(ctx context.Context) error {
 	for _, x := range interrupted {
 		a.endLeftovers(ctx, x)
 		a.persistExecution(x)
+		limits := a.taskLimits(x.TaskID)
 		if x.WorkItem != "" {
-			limits := a.taskLimits(x.TaskID)
 			a.failWorkItem(x.TaskID, x.WorkItem, x.ID, x.LastOperation, limits)
+		}
+		for _, key := range a.otherSelections(x) {
+			a.failWorkItem(x.TaskID, key, x.ID, x.LastOperation, limits)
 		}
 		a.emit(domain.Event{Type: domain.EventExecutionInterrupted, TaskID: x.TaskID, ExecutionID: x.ID,
 			WorkItemID: x.WorkItem, Severity: domain.SeverityError,
@@ -262,6 +266,28 @@ func (a *App) recover(ctx context.Context) error {
 			x.ErrorText()))
 	}
 	return nil
+}
+
+// otherSelections is every work item the session of an interrupted execution selected besides the one its record
+// names, and left without a result, in the order its log first names each one. The record names only the last item a
+// session selected, and the memory of the others was lost with the daemon, so they are read from the log's
+// work_item.selected events. A log that cannot be read gives none.
+func (a *App) otherSelections(x *domain.Execution) []string {
+	events, _, err := a.d.Events.Replay(x.ID, 0, 0)
+	if err != nil {
+		a.log.Printf("reading the events of execution %s: %v", x.ID, err)
+		return nil
+	}
+	var keys []string
+	for _, e := range events {
+		key := e.WorkItemID
+		if e.Type != domain.EventWorkItemSelected || key == "" || key == x.WorkItem || slices.Contains(keys, key) ||
+			slices.ContainsFunc(x.WorkItems, func(r domain.WorkItemResult) bool { return r.Key == key }) {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 // cancelGrace is how long the task gives its processes between SIGTERM and SIGKILL; the default once the task is gone.
