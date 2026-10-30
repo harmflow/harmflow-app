@@ -796,6 +796,73 @@ func TestConflictingActivityIsLogged(t *testing.T) {
 	}
 }
 
+// harmflow-app#388: a conflict whose warning names a work item is logged under that item, and the record keeps it
+// beside the code, the repository, and the message, whatever order the session selected the items in. A warning that
+// names none belongs to the report's only work item, and to none when the report has several: never to the item the
+// session selected last.
+func TestConflictingActivityNamesItsWorkItem(t *testing.T) {
+	const said = "someone pushed to the work branch; rebased and continued"
+	for _, tc := range []struct {
+		name     string
+		selected []string // the work items the session selects, in order, which are the report's
+		named    string   // the work item the warning names
+		want     string   // the work item of the event and of the recorded warning
+	}{
+		{"named first, selected first", []string{"o/r#1", "o/r#2"}, "o/r#1", "o/r#1"},
+		{"named first, selected last", []string{"o/r#2", "o/r#1"}, "o/r#1", "o/r#1"},
+		{"none named, one work item", []string{"o/r#1"}, "", "o/r#1"},
+		{"none named, two work items", []string{"o/r#1", "o/r#2"}, "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.create("conflict", "")
+			e.claude.setScript(func(req ports.RunRequest) string {
+				var lines, items []string
+				for _, key := range tc.selected {
+					lines = append(lines, `{"type":"work_item.selected","workItem":"`+key+`","repository":"o/r","message":"Fix it"}`)
+					items = append(items, `{"key":"`+key+`","repository":"o/r","outcome":"completed"}`)
+				}
+				warning := `{"code":"conflicting_activity","message":"` + said + `","repository":"o/r"`
+				if tc.named != "" {
+					warning += `,"workItem":"` + tc.named + `"`
+				}
+				report := `{"outcome":"completed","summary":"opened the drafts","workItems":[` + strings.Join(items, ",") +
+					`],"warnings":[` + warning + `}]}`
+				return fmt.Sprintf(`printf '%%s\n' '%[2]s' >> %[1]s/progress.jsonl
+printf '%%s' '%[3]s' > %[1]s/report.json; echo 'END ok'`, req.ExecutionDir, strings.Join(lines, `' '`), report)
+			})
+			r, err := e.app.RunTask("conflict")
+			if err != nil {
+				t.Fatalf("RunTask(conflict): %v", err)
+			}
+			x := e.wait(r.ExecutionID, domain.StatusCompleted)
+			if last := tc.selected[len(tc.selected)-1]; x.WorkItem != last {
+				t.Errorf("GetExecution(%s).WorkItem = %q, want %q, the item selected last", x.ID, x.WorkItem, last)
+			}
+			if len(x.Warnings) != 1 || x.Warnings[0].Code != domain.WarningConflictingActivity ||
+				x.Warnings[0].Subject != "o/r" || x.Warnings[0].Message != said || x.Warnings[0].WorkItem != tc.want {
+				t.Errorf("GetExecution(%s).Warnings = %+v, want one %s for o/r saying %q, of work item %q", x.ID,
+					x.Warnings, domain.WarningConflictingActivity, said, tc.want)
+			}
+			e.eventKeys(r.ExecutionID, domain.EventExecutionCompleted)
+			events, _, err := e.app.ExecutionEvents(r.ExecutionID, 0, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var logged []domain.Event
+			for _, ev := range events {
+				if ev.Type == domain.EventWorkItemConflicting {
+					logged = append(logged, ev)
+				}
+			}
+			if len(logged) != 1 || logged[0].WorkItemID != tc.want || logged[0].Message != said {
+				t.Errorf("%s events = %+v, want one saying %q, of work item %q", domain.EventWorkItemConflicting, logged,
+					said, tc.want)
+			}
+		})
+	}
+}
+
 // An unprotected base branch's warning, as the worktree skill writes it — a progress line, the report's warning, or
 // both — reaches the record once with the skill's message, and the log once as a warning that a replay returns; the
 // execution continues.

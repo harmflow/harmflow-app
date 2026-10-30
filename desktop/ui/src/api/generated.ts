@@ -900,6 +900,8 @@ export interface components {
             messageKey?: components["schemas"]["MessageKey"];
             params?: components["schemas"]["MessageParams"];
             subject?: string;
+            /** @description The key of the work item the warning is about (owner/repo#123), when it is about one. */
+            workItem?: string;
         };
         ExecutionRef: {
             id: string;

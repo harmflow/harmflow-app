@@ -62,13 +62,13 @@ name, followed by a hyphen or by nothing, which hf-github-worktree §2 puts in e
 `harmflow/42-retry-limit` carries 42; `harmflow/142-retry-limit` does not.
 
 - **The first finds one:** it is the item's pull request. Push, and update it (§4). Another pull request the second
-  finds is a second one already open for the issue: name it in the report's warnings (`conflicting_activity`).
+  finds is a second one already open for the issue: name it in the report's warnings (`conflicting_activity`, §5).
 - **Only the second finds one:** an open pull request from another branch is the issue's, so the item already has
   its pull request, on a branch this session did not work on. Push nothing, open no pull request, and never move your
   commits onto that branch, which could overwrite or tangle work a person or another firing put there. The item's
-  outcome is `needs_attention` (§5), and the report's warnings get a `conflicting_activity` entry that names the work
-  branch, that pull request's branch, and its URL. Your commits stay on the local work branch, in its worktree, for a
-  person to decide.
+  outcome is `needs_attention` (§5), and the report's warnings get a `conflicting_activity` entry (§5) that names the
+  work branch, that pull request's branch, and its URL. Your commits stay on the local work branch, in its worktree,
+  for a person to decide.
 - **Neither finds one:** push, and open the pull request (§4).
 
 A call that fails decides nothing: push nothing and open no pull request, and the item's outcome is `failed`, as when
@@ -82,7 +82,7 @@ git -C <worktree> push -u origin <branch>
 
 Push only the work branch — never the base branch, never with `--force` over commits you did not make. If the push is
 rejected because the branch moved, fetch and rebase your commits on it, and record the conflict in the report's
-warnings (`conflicting_activity`).
+warnings (`conflicting_activity`, §5).
 
 - **§3 found one from the work branch:** update it — `gh pr edit <number> --repo OWNER/REPO --body-file <file>`.
 - **§3 found none:** `gh pr create --repo OWNER/REPO --draft --base BASE --head <branch> --title "<title>" --body-file <file>`,
@@ -138,3 +138,11 @@ even with failing tests; `failed` when the pull request could not be opened (kee
 `needs_attention` when a human must decide, as when §3 finds the item's pull request only from another branch, and
 then the item has no `pullRequest`. Set the report's `lastOperation` to the last external operation applied, such as
 `pushed harmflow/123-fix to OWNER/REPO` or `opened draft PR OWNER/REPO#45`.
+
+A conflict the item met (§3, §4) goes in the report's `warnings` with the key of that item in `workItem`, so that
+HarmFlow logs it under the item that met it, not under another one the execution also works:
+
+```json
+{"code":"conflicting_activity","message":"<what conflicted, and what you did>","repository":"OWNER/REPO",
+ "workItem":"OWNER/REPO#123"}
+```

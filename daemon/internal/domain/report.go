@@ -10,12 +10,14 @@ type ExecutionReport struct {
 	Warnings      []ReportWarning  `json:"warnings,omitempty"`
 }
 
-// ReportWarning is a warning in report.json: a code, the agent's message, and the repository it is about. The executor
-// records it as a Warning, keeping repository_unprotected and conflicting_activity and reading any other code as other.
+// ReportWarning is a warning in report.json: a code, the agent's message, the repository it is about, and the key of
+// the work item it is about, when it names one. The executor records it as a Warning, keeping repository_unprotected
+// and conflicting_activity and reading any other code as other.
 type ReportWarning struct {
 	Code       string `json:"code"`
 	Message    string `json:"message"`
 	Repository string `json:"repository,omitempty"`
+	WorkItem   string `json:"workItem,omitempty"`
 }
 
 // ProgressLine is one line of progress.jsonl, read while the session runs.

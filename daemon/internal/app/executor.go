@@ -190,7 +190,18 @@ func (r *run) daemonStopping() bool {
 	return r.a.stopping
 }
 
+// event emits an event of the execution; one that names no work item takes the execution's current one.
 func (r *run) event(e domain.Event) domain.Event {
+	if e.WorkItemID == "" {
+		r.a.mu.Lock()
+		e.WorkItemID = r.x.WorkItem
+		r.a.mu.Unlock()
+	}
+	return r.emit(e)
+}
+
+// emit emits an event of the execution under the work item it names, and under none when it names none.
+func (r *run) emit(e domain.Event) domain.Event {
 	e.TaskID = r.x.TaskID
 	e.ExecutionID = r.x.ID
 	if e.Attempt == 0 {
@@ -201,11 +212,6 @@ func (r *run) event(e domain.Event) domain.Event {
 		if at := r.x.CurrentAttempt(); at != nil {
 			e.Harness = at.Harness
 		}
-		r.a.mu.Unlock()
-	}
-	if e.WorkItemID == "" {
-		r.a.mu.Lock()
-		e.WorkItemID = r.x.WorkItem
 		r.a.mu.Unlock()
 	}
 	stored := r.a.emitFor(e, r.started())
@@ -627,15 +633,25 @@ func (r *run) cancelRequested() bool {
 	return r.h.cancelRequested
 }
 
-// warn records a warning on the execution and emits it once.
+// warn records a warning on the execution and emits it once, under the work item it names or, when it names none, the
+// execution's current one.
 func (r *run) warn(w domain.Warning, eventType string, emit bool) {
-	r.a.mu.Lock()
-	added := r.x.AddWarning(w)
-	r.a.mu.Unlock()
-	if added && emit {
-		r.event(domain.Event{Type: eventType, Severity: domain.SeverityWarning,
-			Payload: map[string]any{"code": w.Code, "subject": w.Subject}}.Says(w.Text))
+	if r.addWarning(w) && emit {
+		r.event(warningEvent(w, eventType))
 	}
+}
+
+// addWarning records a warning on the execution, and reports whether it was not recorded yet.
+func (r *run) addWarning(w domain.Warning) bool {
+	r.a.mu.Lock()
+	defer r.a.mu.Unlock()
+	return r.x.AddWarning(w)
+}
+
+// warningEvent is the event of a warning, under the work item the warning names.
+func warningEvent(w domain.Warning, eventType string) domain.Event {
+	return domain.Event{Type: eventType, WorkItemID: w.WorkItem, Severity: domain.SeverityWarning,
+		Payload: map[string]any{"code": w.Code, "subject": w.Subject}}.Says(w.Text)
 }
 
 // runAttempt starts one harness process and follows it to its end. It also reports whether the execution's timeout
@@ -1307,17 +1323,26 @@ func (r *run) applyReport(rep *domain.ExecutionReport) {
 	}
 	a.mu.Unlock()
 	for _, w := range rep.Warnings {
-		code := domain.WarningOther
-		eventType := ""
+		warning := domain.Warning{Code: domain.WarningOther, Subject: w.Repository, WorkItem: w.WorkItem,
+			Text: domain.Text{Message: w.Message}}
 		switch w.Code {
 		case domain.WarningRepositoryUnprotected:
-			code, eventType = domain.WarningRepositoryUnprotected, domain.EventRepositoryUnprotected
+			warning.Code = domain.WarningRepositoryUnprotected
+			r.warn(warning, domain.EventRepositoryUnprotected, true)
 		case domain.WarningConflictingActivity:
-			// The conflict is only logged; the work goes on.
-			code, eventType = domain.WarningConflictingActivity, domain.EventWorkItemConflicting
+			// The conflict is only logged; the work goes on. It belongs to the work item the warning names, or to
+			// the report's only one, and to none otherwise: the execution's current item may not be the one that
+			// met it.
+			warning.Code = domain.WarningConflictingActivity
+			if warning.WorkItem == "" && len(rep.WorkItems) == 1 {
+				warning.WorkItem = rep.WorkItems[0].Key
+			}
+			if r.addWarning(warning) {
+				r.emit(warningEvent(warning, domain.EventWorkItemConflicting))
+			}
+		default:
+			r.warn(warning, "", false)
 		}
-		r.warn(domain.Warning{Code: code, Subject: w.Repository, Text: domain.Text{Message: w.Message}},
-			eventType, eventType != "")
 	}
 	limits := r.limits()
 	for _, w := range rep.WorkItems {

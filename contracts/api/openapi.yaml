@@ -1301,6 +1301,7 @@ components:
         messageKey: { $ref: "#/components/schemas/MessageKey" }
         params: { $ref: "#/components/schemas/MessageParams" }
         subject: { type: string }
+        workItem: { type: string, description: "The key of the work item the warning is about (owner/repo#123), when it is about one." }
 
     ExecutionRef:
       type: object
