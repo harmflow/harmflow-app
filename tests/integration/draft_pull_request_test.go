@@ -35,7 +35,11 @@ func TestEligibleIssueBecomesALinkedDraftPullRequest(t *testing.T) {
 	for _, label := range []string{draftPRLabel, "harmflow"} {
 		sandboxLabel(t, label)
 	}
-	issue := draftPRFixture(t, base)
+	run := runSuffix()
+	file := draftPRDir + "/" + run + ".txt"
+	issue := labelledFixture(t, draftPRLabel, draftPRDir, base, "Draft pull request test "+run+": add "+file,
+		fmt.Sprintf("A fixture of HarmFlow's draft pull request test, which closes it when it ends.\n\n"+
+			"Add the file `%s` with the single line `%s`, and change nothing else. The repository has no tests.\n", file, run))
 	before := branchHead(t, base)
 	parent, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -50,7 +54,7 @@ func TestEligibleIssueBecomesALinkedDraftPullRequest(t *testing.T) {
 	home := t.TempDir()
 	d := startDaemon(t, home)
 	useClaude(d, claude, clone)
-	d.call("POST", "/tasks", map[string]any{"yaml": draftPRTask(d, clone, base)}, 201)
+	d.call("POST", "/tasks", map[string]any{"yaml": labelledIssuesTask(d, "draft-pr", draftPRLabel, clone, base)}, 201)
 
 	id := d.call("POST", "/tasks/draft-pr/run", nil, 202)["executionId"].(string)
 	dir := executionDir(d, id)
@@ -205,11 +209,11 @@ func contextWorkspace(t *testing.T, dir string) string {
 	return ctx.Paths.Workspace
 }
 
-// draftPRTask is a task made of the built-in issue implementer as selecting it copies it, with the open issues of
-// queueRepo labelled draftPRLabel as its only eligible ones. Its permissions allow what the built-in skills run to
+// labelledIssuesTask is the task id, made of the built-in issue implementer as selecting it copies it, with the open
+// issues of queueRepo labelled label as its only eligible ones. Its permissions allow what the built-in skills run to
 // select, implement, push, and open the draft pull request, and deny gh pr merge: a denied tool wins over every allow
 // rule, the signed-in Claude Code's own included.
-func draftPRTask(d *daemon, clone, base string) string {
+func labelledIssuesTask(d *daemon, id, label, clone, base string) string {
 	d.t.Helper()
 	copied := d.builtinAgentCopy("hf-github-issue-implementer")
 	const eligible = "- **Eligible issues:** open issues labeled `agent-ready` that are not labeled `blocked`.\n"
@@ -218,12 +222,12 @@ func draftPRTask(d *daemon, clone, base string) string {
 		d.t.Fatalf("the copy of hf-github-issue-implementer has no line %q to customize:\n%s", eligible, prompt)
 	}
 	prompt = strings.Replace(prompt, eligible, fmt.Sprintf(
-		"- **Eligible issues:** open issues of %s labelled %s; every other issue is excluded.\n", queueRepo, draftPRLabel), 1)
+		"- **Eligible issues:** open issues of %s labelled %s; every other issue is excluded.\n", queueRepo, label), 1)
 	return fmt.Sprintf(`apiVersion: harmflow/v1alpha1
 kind: Task
 metadata:
-  id: draft-pr
-  name: Draft pull request
+  id: %[6]s
+  name: %[6]s
 spec:
   type: github
   prompt: |
@@ -259,7 +263,7 @@ spec:
       ordering: oldest_first
       maxItemsPerCycle: 1
       resumeStrategy: resume_first
-`, queueRepo, clone, base, strings.ReplaceAll(prompt, "\n", "\n    "), copied["hash"])
+`, queueRepo, clone, base, strings.ReplaceAll(prompt, "\n", "\n    "), copied["hash"], id)
 }
 
 // withinDeadline is want, or less when the test binary's -timeout would stop the test first: a test stopped that way
@@ -304,19 +308,15 @@ func branchHead(t *testing.T, branch string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// draftPRFixture opens the fixture issue, labelled draftPRLabel, which asks for one new file in draftPRDir, unique to
-// the run, and returns its number. An open issue under the label is one an earlier run left when it was stopped before
-// its cleanup, and the task's prompt would make it eligible too, so it is swept first. When the test ends, failed or
-// not, the sweep runs again.
-func draftPRFixture(t *testing.T, base string) int {
+// labelledFixture opens a fixture issue in queueRepo, labelled label, with the title and the body, which ask for a
+// change in dir alone, and returns its number. An open issue under the label is one an earlier run left when it was
+// stopped before its cleanup, and the task's prompt would make it eligible too, so it is swept first. When the test
+// ends, failed or not, the sweep runs again.
+func labelledFixture(t *testing.T, label, dir, base, title, body string) int {
 	t.Helper()
-	sweepDraftPRFixtures(t, base)
-	run := runSuffix()
-	file := draftPRDir + "/" + run + ".txt"
-	body := fmt.Sprintf("A fixture of HarmFlow's draft pull request test, which closes it when it ends.\n\n"+
-		"Add the file `%s` with the single line `%s`, and change nothing else. The repository has no tests.\n", file, run)
-	out, err := exec.Command("gh", "issue", "create", "--repo", queueRepo, "--label", draftPRLabel,
-		"--title", "Draft pull request test "+run+": add "+file, "--body", body).Output()
+	sweepLabelledFixtures(t, label, dir, base)
+	out, err := exec.Command("gh", "issue", "create", "--repo", queueRepo, "--label", label, "--title", title,
+		"--body", body).Output()
 	if err != nil {
 		t.Fatalf("gh issue create: %v", err)
 	}
@@ -325,29 +325,29 @@ func draftPRFixture(t *testing.T, base string) int {
 	if err != nil {
 		t.Fatalf("gh issue create printed %q, not an issue's URL", url)
 	}
-	t.Cleanup(func() { sweepDraftPRFixtures(t, base, issue) })
+	t.Cleanup(func() { sweepLabelledFixtures(t, label, dir, base, issue) })
 	// GitHub lists a new issue under its label some seconds after it opens it, and the session may list it that way.
 	var open []int
 	for deadline := time.Now().Add(time.Minute); time.Now().Before(deadline); time.Sleep(time.Second) {
-		if open, err = labelledIssues(draftPRLabel); err == nil && slices.Contains(open, issue) {
+		if open, err = labelledIssues(label); err == nil && slices.Contains(open, issue) {
 			break
 		}
 	}
 	if err != nil || !slices.Equal(open, []int{issue}) {
 		t.Fatalf("the open issues of %s labelled %s are %v (%v), want #%d alone: the task's prompt makes each of them "+
-			"eligible", queueRepo, draftPRLabel, open, err, issue)
+			"eligible", queueRepo, label, open, err, issue)
 	}
 	return issue
 }
 
-// sweepDraftPRFixtures removes from queueRepo what the test's runs made, found by the fixtures' label and their issues,
-// never by the branch names the sessions chose. The issues are the own ones and the open ones labelled draftPRLabel:
-// GitHub lists an issue under its label only some seconds after it opens it. It closes the open pull requests that link
-// one of them, deletes their branches and every other branch that holds draftPRDir, which closes a pull request still
-// open from one, and closes the issues. The base branch is never deleted.
-func sweepDraftPRFixtures(t *testing.T, base string, own ...int) {
+// sweepLabelledFixtures removes from queueRepo what a test's runs made, found by the fixtures' label and their issues,
+// never by the branch names the sessions chose. The issues are the own ones and the open ones labelled label: GitHub
+// lists an issue under its label only some seconds after it opens it. It closes the open pull requests that link one of
+// them, deletes their branches and every other branch that holds dir, which closes a pull request still open from one,
+// and closes the issues. The base branch is never deleted.
+func sweepLabelledFixtures(t *testing.T, label, dir, base string, own ...int) {
 	t.Helper()
-	issues, err := labelledIssues(draftPRLabel)
+	issues, err := labelledIssues(label)
 	if err != nil {
 		t.Errorf("cleanup: %v", err)
 	}
@@ -356,7 +356,7 @@ func sweepDraftPRFixtures(t *testing.T, base string, own ...int) {
 			issues = append(issues, n)
 		}
 	}
-	branches, err := branchesHolding(draftPRDir)
+	branches, err := branchesHolding(dir)
 	if err != nil {
 		t.Errorf("cleanup: %v", err)
 	}
