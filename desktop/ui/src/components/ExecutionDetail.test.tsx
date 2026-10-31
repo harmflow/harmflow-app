@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 // Drives the execution detail in a DOM, against a stand-in for the daemon's local API: every view the specification
 // asks for, and the raw output read from the daemon's route, again while the execution runs.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -456,6 +458,51 @@ describe("execution detail", () => {
     expect(timeline).toContain("Base branch not protected");
     expect(timeline).toContain(said);
     expect(await choose("Results")).toContain(`Base branch not protected — ${said}`);
+  });
+
+  // harmflow-app#477: the warning the daemon records when Codex says its managed requirements override a setting
+  // HarmFlow runs it with: code other, no message key, Codex's notice as its text (app › TestSettingOverriddenIsAWarning).
+  // The notice is the approval_policy line of the fixture codex › TestParseRequirementsOverride replays.
+  describe("a harness's setting-override notice", () => {
+    const fixture = join(__dirname, "..", "..", "..", "..", "daemon", "internal", "adapters", "harness", "codex", "testdata", "requirements-override.jsonl");
+    const notice = readFileSync(fixture, "utf8")
+      .split("\n")
+      .filter((line) => line.includes("`approval_policy`"))
+      .map((line) => (JSON.parse(line) as { item: { message: string } }).item.message)[0];
+    const overridden: Execution = { ...completed, id: "exec-overridden", warnings: [{ code: "other", message: notice }] };
+    const banners = () => [...host!.querySelectorAll<HTMLElement>(".detail__body .banner")];
+
+    it("shows Codex's notice verbatim in the results, as one warning", async () => {
+      expect(notice).toMatch(/^Configured value for `approval_policy` is disallowed by requirements;/);
+      await open(overridden, [], capture(""));
+      await choose("Results");
+      const shown = banners();
+      expect(shown).toHaveLength(1);
+      expect(shown[0].className).toContain("banner--warning");
+      expect(shown[0].querySelector("strong")?.textContent).toBe("Warning");
+      expect(shown[0].textContent).toBe(`Warning — ${notice}`);
+    });
+
+    it("keeps Codex's words as Codex wrote them in pt-BR, under the pt-BR label", async () => {
+      await i18n.changeLanguage("pt-BR");
+      try {
+        await open(overridden, [], capture(""));
+        await choose("Resultados");
+        const shown = banners();
+        expect(shown).toHaveLength(1);
+        expect(shown[0].className).toContain("banner--warning");
+        expect(shown[0].querySelector("strong")?.textContent).toBe("Aviso");
+        expect(shown[0].textContent).toBe(`Aviso — ${notice}`);
+      } finally {
+        await i18n.changeLanguage("en-US");
+      }
+    });
+
+    it("shows no warning in the results of an execution with none", async () => {
+      await open(completed, [], capture(""));
+      await choose("Results");
+      expect(banners().filter((b) => b.className.includes("banner--warning"))).toEqual([]);
+    });
   });
 
   // harmflow-app#39: a failover's attempts and their sum, each figure with its source, the estimate said as such, and
