@@ -32,9 +32,10 @@ CI runs these checks on the Go code; run them before you finish.
 | Vet and unit tests, under the race detector | `GOFLAGS=-race make test-daemon` |
 | Integration tests and coverage floors | `make coverage-daemon` |
 
-`make test-daemon` includes the tests of `daemon/internal/archtest`, which fail on an import that breaks the layers and
-on an exported name of the daemon without a doc comment. No linter checks the other rules, so review holds them. A
-change is done when every rule in this file holds in the code it adds or changes.
+`make test-daemon` includes the tests of `daemon/internal/archtest`, which fail on an import that breaks the layers, on
+an exported name of the daemon without a doc comment, and on a comment line of any Go module wider than the 120 columns
+of "Line length" below. No linter checks the other rules, so review holds them. A change is done when every rule in
+this file holds in the code it adds or changes.
 
 ## Set by this repository
 
@@ -57,7 +58,7 @@ change is done when every rule in this file holds in the code it adds or changes
 | Topic | Rule |
 |---|---|
 | Wrapping an error | `%w` by default, at the end of the message, as in `fmt.Errorf("load task %q: %w", id, err)`. `%v` only to hide the cause on purpose |
-| Line length | No limit for code. Comments wrap at 120 columns |
+| Line length | No limit for code. Comments wrap at 120 columns, a tab counted as one. A token no rewrap can bring within them, such as a long URL, may pass them |
 | Comparing values in tests | The standard library only: `==`, `slices.Equal`, `maps.Equal`, and `reflect.DeepEqual` for nested values. The modules take no assertion library and no `go-cmp` |
 | Optional parameters | An option struct whose zero values are the defaults, as `app.Deps` |
 | Capacity of slices and maps | A size hint only with a measured reason |

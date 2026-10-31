@@ -70,8 +70,8 @@ func TestRedact(t *testing.T) {
 	}
 }
 
-// The agent's and the harness's text reaches the daemon as structs, so every string in one is redacted in place, however
-// deep it sits; numbers, times, and unexported fields are left alone.
+// The agent's and the harness's text reaches the daemon as structs, so every string in one is redacted in place,
+// however deep it sits; numbers, times, and unexported fields are left alone.
 func TestRedactFields(t *testing.T) {
 	token := "ghp_" + strings.Repeat("a", 36)
 	type kind string

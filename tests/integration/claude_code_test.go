@@ -88,12 +88,12 @@ func TestClaudeCodeRefusesMakeInATask(t *testing.T) {
 	}
 }
 
-// A Claude Code task cites a user's agent and a user's skill, and its prompt, the copy of another user's agent, asks the
-// session to delegate to the one and use the other, each by name, and says nothing else of them. The real Claude Code
-// loads both by name from the configuration directory the daemon runs with, where HarmFlow found them, and the session
-// follows each one's own instructions: each writes a marker in the workspace with a content only those instructions
-// hold. The signed-in Claude Code reads the user's own configuration directory, so the items go there, under names
-// unique to the run, and are removed when the test ends.
+// A Claude Code task cites a user's agent and a user's skill, and its prompt, the copy of another user's agent, asks
+// the session to delegate to the one and use the other, each by name, and says nothing else of them. The real Claude
+// Code loads both by name from the configuration directory the daemon runs with, where HarmFlow found them, and the
+// session follows each one's own instructions: each writes a marker in the workspace with a content only those
+// instructions hold. The signed-in Claude Code reads the user's own configuration directory, so the items go there,
+// under names unique to the run, and are removed when the test ends.
 func TestCitedUserItemsReachARealClaudeCode(t *testing.T) {
 	claude := realClaude(t)
 	work, err := filepath.EvalSymlinks(t.TempDir())
