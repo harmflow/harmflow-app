@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
-// The topbar's banner for a window and a daemon built from different commits, and its restart of the daemon on the
-// window's build, driven in a DOM against a stand-in for the daemon's local API.
+// The topbar's warning for a daemon of another version, its banner for a window and a daemon built from different
+// commits, and that banner's restart of the daemon on the window's build, driven in a DOM against a stand-in for the
+// daemon's local API.
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -114,6 +115,52 @@ describe("the banner for a daemon built from another commit", () => {
     native.available = true;
     await show();
     expect(restartButton()?.textContent).toBe("Restart daemon");
+  });
+});
+
+describe("the warning for a daemon of another version", () => {
+  const versionWarning = "The daemon runs version 0.1.0 and this dashboard version 0.2.0. Reinstall HarmFlow so both match.";
+  const banners = () => Array.from(host!.querySelectorAll(".banner"), (b) => b.textContent ?? "");
+
+  it("names both versions when the commits are equal", async () => {
+    patchStateForTests({ appVersion: "0.2.0", appCommit: "13bd5f9", health: { ...health, commit: "13bd5f9" } });
+    await show();
+    expect(banners()).toEqual([versionWarning]);
+  });
+
+  it("shows above the commit banner when the commits differ too", async () => {
+    patchStateForTests({ appVersion: "0.2.0", appCommit: "13bd5f9", health: { ...health, commit: "f4dbab4" } });
+    native.available = true;
+    await show();
+    const shown = banners();
+    expect(shown).toHaveLength(2);
+    expect(shown[0]).toBe(versionWarning);
+    expect(shown[1]).toContain(
+      "This dashboard was built from commit 13bd5f9 and the daemon from commit f4dbab4. Restart the daemon to run this dashboard's build.",
+    );
+    expect(restartButton()?.textContent).toBe("Restart daemon");
+  });
+
+  it("names both versions when either build has no commit", async () => {
+    patchStateForTests({ appVersion: "0.2.0", appCommit: "", health: { ...health, commit: "f4dbab4" } });
+    await show();
+    expect(banners()).toEqual([versionWarning]);
+    patchStateForTests({ appCommit: "13bd5f9", health: { ...health, commit: undefined } });
+    await show();
+    expect(banners()).toEqual([versionWarning]);
+    patchStateForTests({ appCommit: "", health: { ...health, commit: "" } });
+    await show();
+    expect(banners()).toEqual([versionWarning]);
+  });
+
+  it("shows nothing when the versions are equal, whatever the commits say", async () => {
+    await show();
+    expect(text()).not.toContain("The daemon runs version");
+    expect(banners()).toHaveLength(1);
+    patchStateForTests({ health: { ...health, commit: "13bd5f9" } });
+    await show();
+    expect(text()).not.toContain("The daemon runs version");
+    expect(host!.querySelector(".banner")).toBeNull();
   });
 });
 

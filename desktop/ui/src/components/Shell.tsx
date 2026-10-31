@@ -193,8 +193,9 @@ export function commitsDiffer(appCommit?: string, daemonCommit?: string): boolea
 }
 
 /**
- * The topbar. When the window and the daemon come from different commits, a banner names both and offers to restart
- * the daemon on the window's build; only that click restarts it.
+ * The topbar. When the daemon's version differs from the window's, a warning names both, whatever the commits say.
+ * When the window and the daemon come from different commits, a banner below it names both and offers to restart the
+ * daemon on the window's build; only that click restarts it.
  */
 export function Header({
   screen,
@@ -267,6 +268,13 @@ export function Header({
         <NotificationBell onOpenExecution={onOpenExecution} />
         <MoreMenu onNavigate={onNavigate} />
       </div>
+      {mismatch ? (
+        <div className="topbar__banner">
+          <Banner tone="warning" icon="alert">
+            {t("connection.versionMismatch", { daemon: health.version, desktop: appVersion })}
+          </Banner>
+        </div>
+      ) : null}
       {commitMismatch ? (
         <div className="topbar__banner">
           <Banner
@@ -282,12 +290,6 @@ export function Header({
           >
             <div>{t("connection.commitMismatch", { daemon: daemonCommit, desktop: appCommit })}</div>
             {restart === "refused" ? <div>{t("connection.restartRefused")}</div> : null}
-          </Banner>
-        </div>
-      ) : mismatch ? (
-        <div className="topbar__banner">
-          <Banner tone="warning" icon="alert">
-            {t("connection.versionMismatch", { daemon: health.version, desktop: appVersion })}
           </Banner>
         </div>
       ) : null}
