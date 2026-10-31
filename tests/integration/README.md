@@ -42,7 +42,10 @@ installed. Each one skips unless you opt in. A helper named for the CLI decides:
 - `realClaude` (`claude_code_test.go`) skips the test unless `HARMFLOW_TEST_CLAUDE_CODE` is exactly `1` and `claude`
   is on the `PATH`;
 - `realCodex` (`codex_test.go`) skips the test unless `HARMFLOW_TEST_CODEX` is exactly `1` and `codex` is on the
-  `PATH`.
+  `PATH`;
+- `realDesktop` (`window_close_test.go`) skips the test unless it runs on macOS, `HARMFLOW_TEST_DESKTOP` is exactly
+  `1`, and `cargo` is on the `PATH`. It starts no harness: it builds the desktop shell's debug build, the only one with
+  the control channel a test drives it through, and opens its real window.
 
 A daemon package cannot import these helpers, so `daemon/internal/app` has its own `realClaude` and `realCodex`, which
 read the same variables the same way. Every test that calls one of them belongs in this table.
@@ -71,6 +74,8 @@ read the same variables the same way. Every test that calls one of them belongs 
 | `TestNamedIssueAndNoSelectionFindTheirWork` (`issue_selection_test.go`) | `HARMFLOW_TEST_CLAUDE_CODE=1` | What `TestFailedIssueIsRetriedUntilItsLimit` needs but its fixtures, and the right to open and close issues in the sandbox repository: the test opens two issues labelled `issue-selection-test`, creating that label when it is missing, and closes them when it ends, failed or not. Before it opens them, it closes what an earlier run left open under that label. Its prompt with no selection reads every open issue of the sandbox, and may select a `queue-test` fixture, which it leaves as it is: each session is stopped once it has selected its issue |
 | `TestPromptMarkingAndBranchNamingAreFollowed` (`prompt_marking_test.go`) | `HARMFLOW_TEST_CLAUDE_CODE=1` | What `TestFailedIssueIsRetriedUntilItsLimit` needs but its fixtures, and write access to the sandbox repository, to push a branch and open an issue, a label, and a pull request: its clone keeps its push URL, and its session pushes a work branch and opens a draft pull request. The test opens a fixture issue labelled `prompt-marking-test`, and its task's prompt names the branch `auto/<issue-number>` and the label `bot:auto` alone as the marking, in place of `harmflow`; it creates both labels when they are missing. When it ends, failed or not, it closes the pull request linking the issue, deletes its branch, and closes the issue, found by the issue and its label, never by the branch name; before it opens its fixture, it does the same to what an earlier run left open under that label. It never reads or changes the other fixture sets |
 | `TestIssueAssignedMeanwhileIsLoggedAsAConflict` (`conflicting_activity_test.go`) | `HARMFLOW_TEST_CLAUDE_CODE=1` | What `TestFailedIssueIsRetriedUntilItsLimit` needs but its fixtures, and write access to the sandbox repository, to push a branch, open an issue, a label, and a pull request, and assign the issue: its clone keeps its push URL, and its session pushes a work branch and opens a draft pull request. The test opens a fixture issue labelled `conflict-test`, creating that label and `harmflow` when they are missing, and assigns it to the account `gh` is signed in with once the daemon tracks it as the execution's work item. When it ends, failed or not, it closes the pull request linking the issue, deletes its branch, and closes the issue, found by the issue and its label, never by the branch name; before it opens its fixture, it does the same to what an earlier run left open under that label. It never reads or changes the other fixture sets |
+
+| `TestClosingTheWindowFollowsTheTraySetting` (`window_close_test.go`) | `HARMFLOW_TEST_DESKTOP=1` | A Mac with a display, in a signed-in user session, `cargo` on the `PATH`, and the desktop's sidecar (`make sidecar`). The test builds the shell's debug build and starts it on its own daemon's home, with the stand-in `fake-claude`, so it spends no usage. The window opens on the screen for each of its two subtests, `tray_on` and `tray_off`; the test closes it through the shell's test control channel, which raises the same close request as the window's close button, so it needs no Accessibility permission. In CI and on Linux it skips |
 
 Run one of them on its own:
 
@@ -117,4 +122,6 @@ process. Do not set them yourself.
 
 The daemon's unit tests have their own, set the same way: `HARMFLOW_TEST_CRASH_POINT`, `HARMFLOW_TEST_CRASH_DIR`,
 `HARMFLOW_TEST_CRASH_ID`, and `HARMFLOW_TEST_CRASH_CONTENT` (`daemon/internal/adapters/fsstore`), and
-`HARMFLOW_TEST_TASK_FILE_CRASH_DIR` and `HARMFLOW_TEST_TASK_FILE_CRASH_CONTENT` (`daemon/internal/app`).
+`HARMFLOW_TEST_TASK_FILE_CRASH_DIR` and `HARMFLOW_TEST_TASK_FILE_CRASH_CONTENT` (`daemon/internal/app`). The desktop
+shell has its own, `HARMFLOW_TEST_SHELL_CONTROL`, which turns on its debug build's control channel
+(`desktop/src-tauri/src/test_control.rs`) and which `TestClosingTheWindowFollowsTheTraySetting` sets.
