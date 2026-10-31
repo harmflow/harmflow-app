@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"fmt"
 	"net/http"
 	"os/exec"
 	"path/filepath"
@@ -73,38 +74,42 @@ func (s *shell) notices() (bundle string, delivered []notice) {
 // not from a stand-in for the notification plugin. The run spends no usage: the stand-in fake-claude is the harness,
 // and its error scenario fails the second execution. A debug build delivers its notices under the identity the
 // notification plugin gives a development build, Terminal's: the test skips, naming it, when macOS holds none of them,
-// which is what it does while that identity's notices are not allowed.
+// which is what it does while that identity's notices are not allowed. macOS lists every notice it still holds for the
+// identity, other processes' and earlier runs' included, so the task's name is this run's own and only the notices
+// naming it count.
 func TestChosenEventsReachMacOSAsNativeNotices(t *testing.T) {
 	bin := realDesktop(t)
 	d := startDaemon(t, t.TempDir())
 	// The texts the test expects are the interface's in en-US, whatever the system's language.
 	d.call("PATCH", "/settings", map[string]any{"language": "en-US"}, 200)
+	id := fmt.Sprintf("noticed-%x", time.Now().UnixNano())
 	events := "  notifications:\n    native:\n      events: [execution.completed, execution.failed]\n"
-	created := d.call("POST", "/tasks", map[string]any{"yaml": task("noticed", "SCENARIO=ok", events)}, 201)
+	created := d.call("POST", "/tasks", map[string]any{"yaml": task(id, "SCENARIO=ok", events)}, 201)
 	serveDashboard(t, d)
 	s := startShell(t, bin, d)
 	s.waitState(true, true)
-	_, before := s.notices()
 
-	completed := d.call("POST", "/tasks/noticed/run", nil, 202)["executionId"].(string)
+	completed := d.call("POST", "/tasks/"+id+"/run", nil, 202)["executionId"].(string)
 	if x := d.waitStatus(completed, "completed", "failed", "cancelled", "interrupted"); x["status"] != "completed" {
 		t.Fatalf("the first execution ended %v, want completed", x["status"])
 	}
-	d.call("PUT", "/tasks/noticed", map[string]any{"yaml": task("noticed", "SCENARIO=error", events), "baseRevision": created["revision"]}, 200)
-	failed := d.call("POST", "/tasks/noticed/run", nil, 202)["executionId"].(string)
+	edit := map[string]any{"yaml": task(id, "SCENARIO=error", events), "baseRevision": created["revision"]}
+	d.call("PUT", "/tasks/"+id, edit, 200)
+	failed := d.call("POST", "/tasks/"+id+"/run", nil, 202)["executionId"].(string)
 	if x := d.waitStatus(failed, "completed", "failed", "cancelled", "interrupted"); x["status"] != "failed" {
 		t.Fatalf("the second execution ended %v, want failed", x["status"])
 	}
 
-	// Each notice the interface sent since the shell started, as macOS holds it. The dashboard gets the daemon's notice
-	// from its event stream, so each one lands a moment after its execution ends.
-	want := map[string]string{"Task noticed completed": "The execution finished.", "Task noticed failed": "The execution failed:"}
+	// The notices naming the task, as macOS holds them. The dashboard gets the daemon's notice from its event stream, so
+	// each one lands a moment after its execution ends.
+	name := "Task " + id
+	want := map[string]string{name + " completed": "The execution finished.", name + " failed": "The execution failed:"}
 	var bundle string
 	var got []notice
 	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(500 * time.Millisecond) {
 		var all []notice
 		bundle, all = s.notices()
-		got = newNotices(before, all)
+		got = naming(all, name)
 		if len(got) >= len(want) {
 			break
 		}
@@ -132,20 +137,13 @@ func TestChosenEventsReachMacOSAsNativeNotices(t *testing.T) {
 	}
 }
 
-// newNotices is what all holds beyond before: macOS lists the notices it still holds for the identity, the ones other
-// processes delivered under it included.
-func newNotices(before, all []notice) []notice {
-	seen := map[notice]int{}
-	for _, n := range before {
-		seen[n]++
-	}
-	var added []notice
-	for _, n := range all {
-		if seen[n] > 0 {
-			seen[n]--
-			continue
+// naming is the notices of delivered whose title or body names the task.
+func naming(delivered []notice, name string) []notice {
+	var out []notice
+	for _, n := range delivered {
+		if strings.Contains(n.title, name) || strings.Contains(n.body, name) {
+			out = append(out, n)
 		}
-		added = append(added, n)
 	}
-	return added
+	return out
 }
