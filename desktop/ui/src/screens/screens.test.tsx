@@ -745,6 +745,72 @@ describe("the choice to keep HarmFlow in the menu bar on ⌘Q", () => {
   });
 });
 
+// Settings → Notifications: the global level offers its three values, and the one chosen is what the daemon receives.
+// What the daemon does with each level is app › TestNotificationLevelFiltersTheTasksEvents's.
+describe("the global notification level", () => {
+  let root: Root | undefined;
+  let host: HTMLElement | undefined;
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    host?.remove();
+    root = host = undefined;
+    daemon.answers.clear();
+    daemon.requests.length = 0;
+    daemon.bodies.length = 0;
+    patchStateForTests({ settings });
+  });
+
+  const settle = () => act(() => new Promise<void>((resolve) => setImmediate(resolve)));
+  const level = () => host!.querySelector<HTMLSelectElement>("#settings-notification-level")!;
+
+  async function render() {
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(<SettingsScreen section="notifications" />));
+    await settle();
+  }
+
+  /** Picks an option as the user does, so that React sees the change. */
+  async function choose(value: string) {
+    const setValue = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!;
+    await act(async () => {
+      setValue.call(level(), value);
+      level().dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await settle();
+  }
+
+  it("offers exactly all, failures and attention only, and none, with the saved level selected", async () => {
+    daemon.answers.set("/settings", settings);
+    await render();
+    expect([...level().options].map((o) => [o.value, o.textContent])).toEqual([
+      ["all", "Todas"],
+      ["failures_and_attention", "Somente falhas e atenção"],
+      ["none", "Nenhuma"],
+    ]);
+    expect(level().value).toBe("all");
+  });
+
+  it.each(["failures_and_attention", "none", "all"] as const)("sends notificationLevel %s once it is chosen", async (chosen) => {
+    const before = { ...settings, notificationLevel: chosen === "all" ? "none" : "all" } as const;
+    patchStateForTests({ settings: before });
+    daemon.answers.set("/settings", before);
+    await render();
+    expect(level().value).toBe(before.notificationLevel);
+
+    // The daemon stores the patch, and the settings read after it hold it.
+    daemon.answers.set("/settings", { ...settings, notificationLevel: chosen });
+    daemon.requests.length = 0;
+    daemon.bodies.length = 0;
+    await choose(chosen);
+    const sent = daemon.requests.map((request, i) => ({ request, body: daemon.bodies[i] })).filter((r) => r.body !== undefined);
+    expect(sent).toEqual([{ request: "PATCH /settings", body: { notificationLevel: chosen } }]);
+    expect(daemon.requests.filter((r) => !r.startsWith("GET "))).toEqual(["PATCH /settings"]);
+    expect(level().value).toBe(chosen);
+  });
+});
+
 // Settings shows its sections in a list, in three groups and About, and one section at a time (harmflow-app#251).
 describe("settings sections", () => {
   let root: Root | undefined;
