@@ -1353,7 +1353,10 @@ func (r *run) applyReport(rep *domain.ExecutionReport) {
 			if w.PullRequest.Created != nil && *w.PullRequest.Created {
 				t = domain.EventPullRequestCreated
 			}
-			if !r.sawEvent(t, w.PullRequest.URL) {
+			// A report that omits created says nothing of how the pull request came to be: one this execution
+			// announced as opened stays opened, not updated as well.
+			opened := w.PullRequest.Created == nil && r.sawEvent(domain.EventPullRequestCreated, w.PullRequest.URL)
+			if !opened && !r.sawEvent(t, w.PullRequest.URL) {
 				r.event(domain.Event{Type: t, WorkItemID: w.Key, Message: w.PullRequest.URL,
 					Payload: map[string]any{"url": w.PullRequest.URL, "number": w.PullRequest.Number, "branch": w.Branch}})
 			}
