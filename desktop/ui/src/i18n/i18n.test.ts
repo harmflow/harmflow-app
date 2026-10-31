@@ -18,6 +18,31 @@ function lookup(tree: Tree, key: string): unknown {
   return key.split(".").reduce<unknown>((node, part) => (node && typeof node === "object" ? (node as Tree)[part] : undefined), tree);
 }
 
+// A counted key may exist only in its plural forms, which i18next picks from the count.
+function defined(tree: Tree, key: string): boolean {
+  return (
+    typeof lookup(tree, key) === "string" ||
+    (typeof lookup(tree, `${key}_one`) === "string" && typeof lookup(tree, `${key}_other`) === "string")
+  );
+}
+
+// The message keys of the API contract: the items of the MessageKey schema's enum block, its comment lines skipped.
+function contractMessageKeys(): string[] {
+  const lines = readFileSync(join(__dirname, "../../../../contracts/api/openapi.yaml"), "utf8").split("\n");
+  const schema = lines.findIndex((line) => /^ {4}MessageKey:\s*$/.test(line));
+  if (schema < 0) return [];
+  const block = lines.findIndex((line, i) => i > schema && /^\s+enum:\s*$/.test(line));
+  if (block < 0) return [];
+  const keys: string[] = [];
+  for (const line of lines.slice(block + 1)) {
+    if (/^\s+#/.test(line)) continue;
+    const item = line.match(/^\s+- ([a-z0-9_]+)\s*$/);
+    if (!item) break;
+    keys.push(item[1]);
+  }
+  return keys;
+}
+
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
@@ -71,6 +96,17 @@ describe("i18n resources", () => {
     }
   });
 
+  it.each([
+    ["en-US", enUS],
+    ["pt-BR", ptBR],
+    ["es-ES", esES],
+  ])("%s has a text for every message key of the contract", (lang, resource) => {
+    const keys = contractMessageKeys();
+    expect(keys.length, "message keys read from the contract").toBeGreaterThan(0);
+    const missing = keys.filter((key) => !defined(resource as unknown as Tree, `messages.${key}`));
+    expect(missing.map((key) => `${lang} ${key}`)).toEqual([]);
+  });
+
   it("labels every notifiable event and execution status", () => {
     for (const ev of taskSchema.$defs.notifiableEvent.enum) {
       expect(typeof lookup(enUS as unknown as Tree, `notify.${ev}.title`), ev).toBe("string");
@@ -84,12 +120,7 @@ describe("i18n resources", () => {
       const text = readFileSync(file, "utf8");
       for (const match of text.matchAll(/\bt\(\s*"([a-zA-Z0-9_.-]+)"/g)) {
         const key = match[1];
-        const tree = enUS as unknown as Tree;
-        // A counted key may exist only in its plural forms, which i18next picks from the count.
-        const defined =
-          typeof lookup(tree, key) === "string" ||
-          (typeof lookup(tree, `${key}_one`) === "string" && typeof lookup(tree, `${key}_other`) === "string");
-        if (!defined) missing.push(`${file}: ${key}`);
+        if (!defined(enUS as unknown as Tree, key)) missing.push(`${file}: ${key}`);
       }
     }
     expect(missing).toEqual([]);
