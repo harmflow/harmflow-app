@@ -11,10 +11,10 @@ import (
 )
 
 // recordingStandIn writes a wrapper, named for the CLI it stands for, around one of the stand-ins in testdata. Before
-// the stand-in runs, each execution's arguments are recorded NUL-separated in $HARMFLOW_EXECUTION_DIR/args, the
-// CLAUDE_CONFIG_DIR it runs with in claude-config-dir, and its stdin, read to its end, in stdin, which the stand-in
-// then reads in turn. The read builtin stands in for cat, as in the stand-ins. The probes run with no execution
-// directory and record nothing.
+// the stand-in runs, each execution's arguments are recorded NUL-separated in $HARMFLOW_EXECUTION_DIR/args, its
+// environment as NUL-separated NAME=VALUE entries in env, the CLAUDE_CONFIG_DIR it runs with in claude-config-dir, and
+// its stdin, read to its end, in stdin, which the stand-in then reads in turn. The read builtin stands in for cat, and
+// compgen for env, as in the stand-ins. The probes run with no execution directory and record nothing.
 func recordingStandIn(t *testing.T, fake, name string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
@@ -22,6 +22,7 @@ func recordingStandIn(t *testing.T, fake, name string) string {
 	script := "#!/bin/bash\n" +
 		`[ -z "$HARMFLOW_EXECUTION_DIR" ] && exec ` + stand + ` "$@"` + "\n" +
 		`printf '%s\0' "$@" > "$HARMFLOW_EXECUTION_DIR/args"` + "\n" +
+		`for v in $(compgen -e); do printf '%s=%s\0' "$v" "${!v}"; done > "$HARMFLOW_EXECUTION_DIR/env"` + "\n" +
 		`printf '%s' "$CLAUDE_CONFIG_DIR" > "$HARMFLOW_EXECUTION_DIR/claude-config-dir"` + "\n" +
 		`IFS= read -r -d '' input` + "\n" +
 		`printf '%s' "$input" > "$HARMFLOW_EXECUTION_DIR/stdin"` + "\n" +
@@ -38,7 +39,19 @@ func recordedArgs(t *testing.T, x map[string]any) []string {
 	return strings.Split(strings.TrimSuffix(recorded(t, x, "args"), "\x00"), "\x00")
 }
 
-// recorded is what the recording stand-in recorded in an execution under the name: args, claude-config-dir, or stdin.
+// recordedEnv is the environment the recording stand-in ran with in an execution, by name.
+func recordedEnv(t *testing.T, x map[string]any) map[string]string {
+	t.Helper()
+	env := map[string]string{}
+	for _, kv := range strings.Split(strings.TrimSuffix(recorded(t, x, "env"), "\x00"), "\x00") {
+		k, v, _ := strings.Cut(kv, "=")
+		env[k] = v
+	}
+	return env
+}
+
+// recorded is what the recording stand-in recorded in an execution under the name: args, env, claude-config-dir, or
+// stdin.
 func recorded(t *testing.T, x map[string]any, name string) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(x["executionDir"].(string), name))
