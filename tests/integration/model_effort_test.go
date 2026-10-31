@@ -14,13 +14,15 @@ import (
 // the stand-in runs, each execution's arguments are recorded NUL-separated in $HARMFLOW_EXECUTION_DIR/args, the
 // CLAUDE_CONFIG_DIR it runs with in claude-config-dir, and its stdin, read to its end, in stdin, which the stand-in
 // then reads in turn. The read builtin stands in for cat, as in the stand-ins. The probes run with no execution
-// directory and record nothing.
+// directory and record nothing, and neither does Claude Code's skill list, a -p session with no permission mode, which
+// every execution sets.
 func recordingStandIn(t *testing.T, fake, name string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
 	stand := `"` + filepath.Join(repoRoot(), "tests", "integration", "testdata", fake) + `"`
 	script := "#!/bin/bash\n" +
 		`[ -z "$HARMFLOW_EXECUTION_DIR" ] && exec ` + stand + ` "$@"` + "\n" +
+		`[ "$1" = -p ] && [[ " $* " != *" --permission-mode "* ]] && exec ` + stand + ` "$@"` + "\n" +
 		`printf '%s\0' "$@" > "$HARMFLOW_EXECUTION_DIR/args"` + "\n" +
 		`printf '%s' "$CLAUDE_CONFIG_DIR" > "$HARMFLOW_EXECUTION_DIR/claude-config-dir"` + "\n" +
 		`IFS= read -r -d '' input` + "\n" +

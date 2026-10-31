@@ -269,12 +269,13 @@ type HarnessAdapter interface {
 	ValidateProfile(info HarnessInfo, model, effort string) error
 	Prepare(info HarnessInfo, req RunRequest) (Invocation, OutputParser, error)
 	// UserItem looks up an agent or skill in the user's harness configuration, as the harness finds it for workspace, a
-	// folder that is never empty. An error says the harness's list could not be read, which is not the item missing;
-	// the discovery errors are what the harness reported it could not load on the way.
-	UserItem(ctx context.Context, info HarnessInfo, kind, name, workspace string) (ResolvedItem, bool, []DiscoveryError, error)
-	// UserItems lists the agents or skills of the user's harness configuration for workspace, each name once, with the
-	// discovery errors the harness reported; an error says the list could not be read.
-	UserItems(ctx context.Context, info HarnessInfo, kind, workspace string) ([]ResolvedItem, []DiscoveryError, error)
+	// folder that is never empty, and for the folders a session of the task adds, added. An error says the harness's
+	// list could not be read, which is not the item missing; the discovery errors are what the harness reported it
+	// could not load on the way.
+	UserItem(ctx context.Context, info HarnessInfo, kind, name, workspace string, added []string) (ResolvedItem, bool, []DiscoveryError, error)
+	// UserItems lists the agents or skills of the user's harness configuration for workspace and the added folders, each
+	// name once, with the discovery errors the harness reported; an error says the list could not be read.
+	UserItems(ctx context.Context, info HarnessInfo, kind, workspace string, added []string) ([]ResolvedItem, []DiscoveryError, error)
 }
 
 // DiscoveryError is what a harness reported it could not load while it listed the user's items, such as a SKILL.md
@@ -296,16 +297,11 @@ type WorkspaceLister interface {
 	ListsPerWorkspace(kind string) bool
 }
 
-// WorkspaceFolderReader is a HarnessAdapter that finds the user's items of a kind in a folder of the workspace as well as
-// in a folder of its configuration, as its harness loads them: ReadsWorkspace says which kinds.
-type WorkspaceFolderReader interface {
-	ReadsWorkspace(kind string) bool
-}
-
-// PluginLister is a HarnessAdapter that finds a plugin's items of a kind, named `<plugin>:<name>`, in its harness's list
-// of the plugins it has enabled for a workspace, not in a folder: ListsPlugins says which kinds.
-type PluginLister interface {
-	ListsPlugins(kind string) bool
+// UnverifiedItemsAllower is a HarnessAdapter whose harness loads a task's items of a kind itself, so a list of them it
+// could not give leaves them unverified, not missing: validation warns and does not refuse the task. AllowsUnverified
+// says which kinds.
+type UnverifiedItemsAllower interface {
+	AllowsUnverified(kind string) bool
 }
 
 // HarnessCloser is a HarnessAdapter that keeps a process of its harness running between calls; Close ends it.

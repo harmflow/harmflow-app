@@ -28,6 +28,19 @@ if [ "$1 $2" = "-p /usage" ]; then
   echo "Current session: 4% used · resets 6pm (UTC)"
   exit 0
 fi
+# The skill list the daemon reads: a session it starts without a permission mode, which every execution sets, and
+# stops at its init line. The line lists a bundled skill and the skills of the configuration directory and of the
+# folder it runs in, as the real CLI lists them for a folder with no repository above it, and nothing follows.
+case " $* " in
+  *" --permission-mode "*) ;;
+  *)
+    SKILLS='"simplify"'
+    for d in "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/skills/*/ .claude/skills/*/; do
+      [ -f "${d}SKILL.md" ] && { d=${d%/}; SKILLS="$SKILLS,\"${d##*/}\""; }
+    done
+    echo '{"type":"system","subtype":"init","session_id":"fake-listing","skills":['"$SKILLS"']}'
+    exit 0 ;;
+esac
 # Shell builtins stand in for cat and dirname: on a loaded host, each process the stand-in starts can take seconds,
 # and the tests' deadlines count them.
 IFS= read -r -d '' PROMPT

@@ -340,7 +340,11 @@ export const ptBR: Resources = {
     skill_list_unreadable: "não foi possível ler a lista de skills do {{harness}} para {{workspace}}: {{detail}}",
     fallback_skill_list_unreadable:
       "{{harness}} não é um fallback válido: não foi possível ler a lista de skills dele para {{workspace}}: {{detail}}",
-    claude_plugin_output_unrecognized: "{{command}} não imprimiu nada que o HarmFlow consiga ler",
+    skill_list_unverified:
+      "o {{harness}} não conseguiu dizer quais skills carrega para {{workspace}}, então as skills da tarefa não foram verificadas: {{detail}}",
+    claude_skill_list_unrecognized: "{{command}} não imprimiu uma lista de skills que o HarmFlow consiga ler",
+    claude_skill_list_timed_out:
+      "{{command}} não imprimiu a linha init em {{timeout}}, então não se sabe quais skills o Claude Code carrega",
     codex_app_server_missing: "o Codex {{version}} não tem app server",
     codex_app_server_start_failed: "o app server do Codex não pôde iniciar: {{detail}}",
     codex_app_server_exited: "o app server do Codex encerrou",

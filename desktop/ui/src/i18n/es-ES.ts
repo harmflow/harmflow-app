@@ -341,7 +341,11 @@ export const esES: Resources = {
     skill_list_unreadable: "no se pudo leer la lista de skills de {{harness}} para {{workspace}}: {{detail}}",
     fallback_skill_list_unreadable:
       "{{harness}} no es un fallback válido: no se pudo leer su lista de skills para {{workspace}}: {{detail}}",
-    claude_plugin_output_unrecognized: "{{command}} no imprimió nada que HarmFlow pueda leer",
+    skill_list_unverified:
+      "{{harness}} no pudo decir qué skills carga para {{workspace}}, así que las skills de la tarea no están verificadas: {{detail}}",
+    claude_skill_list_unrecognized: "{{command}} no imprimió una lista de skills que HarmFlow pueda leer",
+    claude_skill_list_timed_out:
+      "{{command}} no imprimió la línea init en {{timeout}}, así que no se sabe qué skills carga Claude Code",
     codex_app_server_missing: "Codex {{version}} no tiene app server",
     codex_app_server_start_failed: "el app server de Codex no pudo iniciarse: {{detail}}",
     codex_app_server_exited: "el app server de Codex terminó",
