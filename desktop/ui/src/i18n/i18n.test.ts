@@ -6,7 +6,7 @@ import taskSchema from "../../../../contracts/schemas/task.schema.json";
 import { enUS } from "./en-US";
 import { esES } from "./es-ES";
 import { ptBR } from "./pt-BR";
-import { systemLanguage } from "./index";
+import i18n, { systemLanguage } from "./index";
 
 type Tree = { [k: string]: string | Tree };
 
@@ -25,6 +25,18 @@ function sourceFiles(dir: string): string[] {
     return /\.tsx?$/.test(name) && !name.endsWith(".test.ts") && !path.includes("/i18n/") ? [path] : [];
   });
 }
+
+// Every module of the interface but its tests, i18n/ included, since i18n/index.ts is where i18next is set up.
+function interfaceFiles(dir: string): string[] {
+  return readdirSync(dir).flatMap((name) => {
+    const path = join(dir, name);
+    if (statSync(path).isDirectory()) return interfaceFiles(path);
+    return /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name) ? [path] : [];
+  });
+}
+
+// The functions of i18next that add resources to a started instance or load them from a backend.
+const RESOURCE_LOADERS = /\b(addResourceBundle|addResources|addResource|loadResources|loadLanguages|loadNamespaces|reloadResources)\s*\(/g;
 
 describe("i18n resources", () => {
   const reference = leaves(enUS as unknown as Tree).sort();
@@ -81,6 +93,31 @@ describe("i18n resources", () => {
       }
     }
     expect(missing).toEqual([]);
+  });
+
+  // Translations are maintained in the app: its languages are the ones it ships, and none is added from outside.
+  it("holds only the three bundled languages once started, each from the resource the app ships, with no backend", async () => {
+    if (!i18n.isInitialized) await new Promise((resolve) => i18n.on("initialized", resolve));
+    expect(Object.keys(i18n.store.data).sort()).toEqual(["en-US", "es-ES", "pt-BR"]);
+    for (const [lang, resource] of [
+      ["en-US", enUS],
+      ["pt-BR", ptBR],
+      ["es-ES", esES],
+    ] as const) {
+      expect(Object.keys(i18n.store.data[lang]), lang).toEqual(["translation"]);
+      expect(i18n.getResourceBundle(lang, "translation"), lang).toBe(resource);
+    }
+    expect(i18n.modules.backend).toBeUndefined();
+    expect(i18n.options.backend).toBeUndefined();
+    expect(i18n.services.backendConnector.backend).toBeFalsy();
+  });
+
+  it("adds or loads no resource at run time", () => {
+    const calls: string[] = [];
+    for (const file of interfaceFiles(join(__dirname, ".."))) {
+      for (const match of readFileSync(file, "utf8").matchAll(RESOURCE_LOADERS)) calls.push(`${file}: ${match[1]}`);
+    }
+    expect(calls).toEqual([]);
   });
 
   it("adopts the system language when official, en-US otherwise", () => {
