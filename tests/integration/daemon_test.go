@@ -5,6 +5,7 @@ package integration
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -2304,6 +2305,142 @@ func TestRawOutputRedacted(t *testing.T) {
 	}
 	if status, _ := d.request("GET", "/executions/no-such-execution/output", nil, nil); status != 404 {
 		t.Errorf("an unknown execution answered %d", status)
+	}
+}
+
+// leakedPiece is the first piece of the secret, of eight characters or more, that text holds, or empty when it holds
+// none. Any longer piece holds one of eight, so those are the ones searched.
+func leakedPiece(text, secret string) string {
+	for i := 0; i+8 <= len(secret); i++ {
+		if piece := secret[i : i+8]; strings.Contains(text, piece) {
+			return piece
+		}
+	}
+	return ""
+}
+
+// A credential the harness printed reaches the live stream, and the replay the API serves after the run, only as
+// [REDACTED]: no frame of the execution and no replayed event holds any piece of it, and the replay holds the same
+// events, redacted text included, as the frames the client received.
+func TestStreamAndReplayCarryTheCredentialRedacted(t *testing.T) {
+	t.Parallel()
+	d := startDaemon(t, t.TempDir())
+	// The token the stand-in's secret scenario prints, built here, so no token-shaped literal is in the repository.
+	secret := "ghp_" + strings.Repeat("x", 36)
+	d.call("POST", "/tasks", map[string]any{"yaml": task("leaky-stream", "SCENARIO=secret", "")}, 201)
+	events, closeStream := d.stream(t, 0)
+	defer closeStream()
+	id := d.call("POST", "/tasks/leaky-stream/run", nil, 202)["executionId"].(string)
+	live := map[int64]map[string]any{}
+	redacted := 0
+	// The wait follows the run's pace, as in TestRunStreamAndReplay.
+	const silence = 20 * time.Second
+	quiet := time.NewTimer(silence)
+	defer quiet.Stop()
+	last := "the run request"
+	for done := false; !done; {
+		select {
+		case e, ok := <-events:
+			if !ok {
+				t.Fatalf("the stream closed; saw %d events of the execution", len(live))
+			}
+			if e.Data["executionId"] != id {
+				continue
+			}
+			checkFrame(t, e)
+			if piece := leakedPiece(string(e.Raw), secret); piece != "" {
+				t.Errorf("the %s frame %d holds %q of the credential: %s", e.Type, e.ID, piece, e.Raw)
+			}
+			if bytes.Contains(e.Raw, []byte("[REDACTED]")) {
+				redacted++
+			}
+			live[e.ID] = e.Data
+			done = e.Type == "execution.completed"
+			last = e.Type
+			quiet.Reset(silence)
+		case <-quiet.C:
+			t.Fatalf("no event of the execution in %v since %s; saw %d events and no execution.completed", silence, last,
+				len(live))
+		}
+	}
+	if redacted == 0 {
+		t.Errorf("no frame of the execution holds [REDACTED]: the credential's text was not relayed")
+	}
+
+	d.storedLog(t, id) // waits until the replay holds the execution's end
+	status, body := d.request("GET", "/executions/"+id+"/events", nil, nil)
+	var replay struct {
+		Events []map[string]any `json:"events"`
+	}
+	if err := json.Unmarshal(body, &replay); status != 200 || err != nil {
+		t.Fatalf("GET /executions/%s/events: %d %v %s", id, status, err, body)
+	}
+	if piece := leakedPiece(string(body), secret); piece != "" {
+		t.Errorf("GET /executions/%s/events holds %q of the credential: %s", id, piece, body)
+	}
+	replayed := 0
+	for _, e := range replay.Events {
+		n, _ := e["id"].(float64)
+		frame, ok := live[int64(n)]
+		if !ok {
+			continue
+		}
+		replayed++
+		if !reflect.DeepEqual(e, frame) {
+			t.Errorf("GET /executions/%s/events: event %d = %v, want the live frame's %v", id, int64(n), e, frame)
+		}
+	}
+	if replayed != len(live) {
+		t.Errorf("GET /executions/%s/events replays %d of the %d events the stream carried", id, replayed, len(live))
+	}
+}
+
+// What the daemon hands a harness — its arguments, its standard input, its environment, and the execution's
+// context.json — holds no local API token. The environment holds HarmFlow's four identifiers and no other HARMFLOW_*
+// variable, not even one the daemon itself was started with.
+func TestHarnessIsHandedNoAPIToken(t *testing.T) {
+	t.Parallel()
+	const own = "HARMFLOW_ITEST_DAEMON_ONLY"
+	d := startDaemon(t, t.TempDir(), own+"=set")
+	if d.token == "" {
+		t.Fatal("the daemon gave the tests' client no token to look for")
+	}
+	d.call("PUT", "/harnesses/claude-code", map[string]any{"path": recordingStandIn(t, "fake-claude", "claude")}, 200)
+	d.call("POST", "/tasks", map[string]any{"yaml": task("handed", "Say hi.", "")}, 201)
+	x := d.completedRun("handed")
+
+	contextJSON, err := os.ReadFile(filepath.Join(x["executionDir"].(string), "context.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, text := range map[string]string{
+		"its arguments": strings.Join(recordedArgs(t, x), "\x00"), "its standard input": recorded(t, x, "stdin"),
+		"its environment": recorded(t, x, "env"), "context.json": string(contextJSON),
+	} {
+		if strings.Contains(text, d.token) {
+			t.Errorf("the harness was handed the API token in %s", name)
+		}
+	}
+
+	env := recordedEnv(t, x)
+	want := map[string]string{"HARMFLOW_EXECUTION_ID": x["id"].(string), "HARMFLOW_TASK_ID": "handed",
+		"HARMFLOW_EXECUTION_DIR": "", "HARMFLOW_WORKSPACE": ""}
+	for k, v := range env {
+		if !strings.HasPrefix(k, "HARMFLOW_") {
+			continue
+		}
+		w, ok := want[k]
+		switch {
+		case !ok:
+			t.Errorf("the harness's environment holds %s=%s, want only HarmFlow's four identifiers", k, v)
+		case v == "" || w != "" && v != w:
+			t.Errorf("the harness's environment holds %s=%q, want %q", k, v, cmp.Or(w, "a value"))
+		}
+	}
+	for k := range want {
+		if _, ok := env[k]; !ok {
+			t.Errorf("the harness's environment lacks %s", k)
+		}
 	}
 }
 
