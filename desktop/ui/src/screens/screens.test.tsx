@@ -717,6 +717,17 @@ describe("settings sections", () => {
     if (section !== "general") expect(html).not.toContain("Mostrar o HarmFlow na barra de menus");
   });
 
+  // The languages are the ones the app ships: nothing in the panel adds, imports, or downloads one.
+  it("holds the language select alone in the language panel", async () => {
+    await render(<SettingsScreen section="general" />);
+    const panel = host!.querySelector("#settings-language")!.closest("section.panel")!;
+    expect(panel.querySelector(".panel__title")!.textContent).toBe("Idioma");
+    const rows = panel.querySelectorAll(".setting-row");
+    expect(rows).toHaveLength(1);
+    expect([...rows[0].querySelectorAll(".setting-row__control select")].map((s) => s.id)).toEqual(["settings-language"]);
+    expect([...panel.querySelectorAll("button, input, textarea, a, [role='button'], [role='link']")].map((e) => e.outerHTML)).toEqual([]);
+  });
+
   it("keeps only the icons below 640 pixels of content box, with each name as its accessible name and tooltip", async () => {
     // happy-dom lays nothing out: this stand-in reports the width a test gives.
     let resize: (width: number) => void = () => {};
