@@ -334,3 +334,69 @@ func TestDetectRecordsTheAppServer(t *testing.T) {
 		}
 	}
 }
+
+// slowTopHelp rewrites the stand-in at path so that its top-level --help outlasts the check's limit before it prints,
+// as exec ends the sleep at the check's timeout, with no child keeping the help's output open.
+func slowTopHelp(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%s) = %v, want no error", path, err)
+	}
+	script := strings.Replace(string(data), "#!/bin/bash\n", "#!/bin/bash\n[ \"$*\" = --help ] && exec sleep 30\n", 1)
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("os.WriteFile(%s) = %v, want no error", path, err)
+	}
+	return path
+}
+
+// harmflow-app#495: a top-level --help check that times out leaves Codex ready, its app server unknown, and a
+// diagnostic saying the check timed out, which the dashboard shows as a warning. A call that needs the app server is
+// tried: it lists the skills of a Codex that has one, and fails with its own error on a Codex that has none, never with
+// codex_app_server_missing. Help read in full that does not list the app server still reads as a Codex without it.
+func TestDetectReadsATopLevelHelpCheckThatTimesOutAsAppServerUnknown(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	withServer := func(t *testing.T) string {
+		path, _ := appServerStandIn(t, answer(`{"data":[]}`))
+		return path
+	}
+	without := func(t *testing.T) string { return standIn(t, `echo "codex-cli 0.163.0"`, signedIn) }
+	cases := []struct {
+		name        string
+		codex       func(t *testing.T) string
+		wantUnknown bool
+		wantKey     string // the diagnostic
+		wantListKey string // the error of the skill list; empty is none
+	}{
+		{"timed out, with an app server", func(t *testing.T) string { return slowTopHelp(t, withServer(t)) }, true,
+			"harness_help_timed_out", ""},
+		{"timed out, without an app server", func(t *testing.T) string { return slowTopHelp(t, without(t)) }, true,
+			"harness_help_timed_out", "codex_app_server_exited"},
+		{"read in full, without an app server", without, false, "", "codex_app_server_missing"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			a := appServerAdapter(t)
+			a.helpTimeout = time.Second
+			info := a.Detect(context.Background(), c.codex(t))
+			if info.Readiness != "ready" || info.FeaturesUnknown || info.Features["app-server"] ||
+				info.UnknownFeatures["app-server"] != c.wantUnknown || info.DiagnosticKey != c.wantKey {
+				t.Errorf("Detect: readiness %s, flags unknown %v, app server %v, app server unknown %v, diagnostic %q (%s); "+
+					"want ready, false, false, %v, %q", info.Readiness, info.FeaturesUnknown, info.Features["app-server"],
+					info.UnknownFeatures["app-server"], info.DiagnosticKey, info.Diagnostic, c.wantUnknown, c.wantKey)
+			}
+			if c.wantKey != "" && (info.DiagnosticParams["harness"] != Name || info.DiagnosticParams["command"] != "--help") {
+				t.Errorf("Detect: diagnostic params %v, want the harness %q and the command --help", info.DiagnosticParams,
+					Name)
+			}
+			_, _, err := a.UserItems(context.Background(), info, "skill", "/w")
+			var got string
+			if err != nil {
+				got = domain.TextOf(err).Key
+			}
+			if (err != nil) != (c.wantListKey != "") || got != c.wantListKey {
+				t.Errorf("UserItems(skill) error %v (%s), want %q", err, got, c.wantListKey)
+			}
+		})
+	}
+}

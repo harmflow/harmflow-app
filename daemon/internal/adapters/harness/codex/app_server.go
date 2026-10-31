@@ -215,7 +215,8 @@ func (a *Adapter) callLocked(ctx context.Context, info ports.HarnessInfo, method
 	if !info.Detected || info.Path == "" {
 		return domain.TextErr("harness_not_detected", "{{harness}} was not detected on this machine", "harness", Name)
 	}
-	if !info.Features["app-server"] {
+	// A help check that timed out leaves the app server unknown: the call is tried, and a missing one fails on its own.
+	if !info.Features["app-server"] && !info.UnknownFeatures["app-server"] {
 		return domain.TextErr("codex_app_server_missing", "Codex {{version}} has no app server", "version", info.Version)
 	}
 	timeout := a.listTimeout

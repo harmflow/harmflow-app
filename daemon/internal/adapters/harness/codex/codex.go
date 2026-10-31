@@ -56,7 +56,7 @@ type Adapter struct {
 	server      *appServer
 	reload      bool          // the next skills/list carries forceReload
 	listTimeout time.Duration // a call to the app server; zero is defaultListTimeout
-	helpTimeout time.Duration // the `exec --help` check; zero is the probe's own limit
+	helpTimeout time.Duration // each help check, `exec --help` and the top-level --help; zero is the probe's own limit
 }
 
 var (
@@ -165,9 +165,20 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 			"harness", Name, "command", "exec --help"))
 	}
 	// The app server lists the user's skills. Codex 0.163.0 marks the command experimental, though skills/list is in its
-	// stable schema; the help lists it either way.
-	top, _, _ := procutil.Output(ctx, a.probeTimeout(15*time.Second), a.Env, info.Path, "--help")
+	// stable schema; the help lists it either way. The top-level help reads a timeout as the flags' help does: help read
+	// in full that does not list the command reads as a Codex without it, and help the check could not read within its
+	// limit leaves it unknown, so the first call to the app server proves it.
+	top, topRead := procutil.Help(ctx, helpTimeout, a.Env, info.Path, "--help")
 	info.Features["app-server"] = strings.Contains(top, "app-server")
+	if !topRead && !info.Features["app-server"] {
+		info.UnknownFeatures = map[string]bool{"app-server": true}
+		if !info.FeaturesUnknown {
+			info.SetDiagnostic(domain.T("harness_help_timed_out",
+				"the {{harness}} {{command}} check timed out, so the flags it has are unknown; the first attempt proves them",
+				"harness", Name, "command", "--help"))
+		}
+	}
+	helpTimedOut := info.FeaturesUnknown || info.UnknownFeatures["app-server"]
 	info.VersionSupport = "supported"
 	for _, f := range requiredFlags {
 		if !info.HasFeature(f) {
@@ -212,7 +223,7 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 		// The CLI cannot tell; let the first execution prove it rather than blocking on an unknown. The unknown sign-in
 		// shows in the authentication field, so a help check that timed out keeps the diagnostic.
 		info.Readiness = "ready"
-		if !info.FeaturesUnknown {
+		if !helpTimedOut {
 			info.SetDiagnostic(domain.T("authentication_unverified", "authentication could not be verified"))
 		}
 	}

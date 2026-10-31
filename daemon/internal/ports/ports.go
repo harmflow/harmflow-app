@@ -120,6 +120,9 @@ type HarnessInfo struct {
 	// FeaturesUnknown is true when the help that lists the CLI's flags could not be read within its check's limit, so
 	// Features cannot tell a flag the CLI lacks from one the help did not get to.
 	FeaturesUnknown bool `json:"-"`
+	// UnknownFeatures are the features beyond those flags whose check could not finish within its limit, such as a
+	// command another help lists: Features reads false for each, though the CLI may have it, and the first use proves it.
+	UnknownFeatures map[string]bool `json:"-"`
 }
 
 // SetDiagnostic records what is wrong with the harness; Diagnostic is the en-US text.
