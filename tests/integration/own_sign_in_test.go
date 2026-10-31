@@ -186,9 +186,9 @@ func noLeakInHome(t *testing.T, files map[string][]byte, secrets map[string]stri
 // harmflow-app#447: tasks run on the tools' own sign-ins, and HarmFlow's files keep no credential. The stand-in Claude
 // Code, Codex, and GitHub CLI read their credentials from files of their own that HarmFlow never writes, and read
 // signed out without them. A general task on each harness, and a GitHub task whose session runs the GitHub CLI first on
-// its PATH, each complete through the real daemon. No request the test sends carries a credential, no stand-in was started
-// with one in its arguments or its environment, and no file under the daemon's home holds one, nor a piece of one of
-// eight characters or more: the files that kept what the tools printed hold [REDACTED] instead.
+// its PATH, each complete through the real daemon. No request the test sends carries a credential, no stand-in was
+// started with one in its arguments or its environment, and no file under the daemon's home holds one, nor a piece of
+// one of eight characters or more: the files that kept what the tools printed hold [REDACTED] instead.
 func TestTasksRunOnTheToolsOwnSignIns(t *testing.T) {
 	t.Parallel()
 	claude := newSignedIn(t, "claude", signedInClaude, "fake-claude", "sk-ant-oat01-")
