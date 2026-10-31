@@ -4,7 +4,8 @@
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
+import { native } from "../api/native";
 import type { Execution, ExecutionSummary, HarmflowEvent, Harness, Health, Notification, Settings, TaskSummary, WorkItem } from "../api/types";
 import { ExecutionCard } from "../components/ExecutionCard";
 import { RawCaptures } from "../components/ExecutionDetail";
@@ -33,15 +34,16 @@ function newDoc(type: "github" | "general" | "script", name: string): Doc {
   return { apiVersion: "harmflow/v1alpha1", kind: "Task", metadata: { id: slugify(name), name }, spec };
 }
 
-// The daemon as the client sees it: an answer per route, and every request it received.
-const daemon = vi.hoisted(() => ({ answers: new Map<string, unknown>(), requests: [] as string[] }));
+// The daemon as the client sees it: an answer per route, and every request it received, with its body.
+const daemon = vi.hoisted(() => ({ answers: new Map<string, unknown>(), requests: [] as string[], bodies: [] as unknown[] }));
 vi.mock("../api/transport", () => ({
   isTauri: () => false,
   EVENT_TYPES: [],
   transport: {
     mode: "http",
-    request: async (method: string, path: string) => {
+    request: async (method: string, path: string, body?: unknown) => {
       daemon.requests.push(`${method} ${path}`);
+      daemon.bodies.push(body);
       const route = path.split("?")[0];
       return daemon.answers.has(route) ? { status: 200, body: daemon.answers.get(route) } : { status: 404, body: null };
     },
@@ -678,5 +680,135 @@ describe("settings sections", () => {
     await act(async () => resize(900));
     expect(hidden().every((h) => !h)).toBe(true);
     expect(tooltip()).toBeNull(); // the list moved under it
+  });
+});
+
+// The app's hidden login item starts the tray with the daemon at sign-in, so notices work with no window open: it is
+// registered exactly while autostart is on and the tray is enabled, through every control that changes either one.
+describe("the app's hidden login item", () => {
+  let root: Root | undefined;
+  let host: HTMLElement | undefined;
+  let loginItem: MockInstance<typeof native.setLoginItem>;
+
+  beforeEach(() => {
+    daemon.requests.length = 0;
+    daemon.bodies.length = 0;
+    loginItem = vi.spyOn(native, "setLoginItem");
+  });
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    host?.remove();
+    root = host = undefined;
+    daemon.answers.clear();
+    daemon.requests.length = 0;
+    daemon.bodies.length = 0;
+    loginItem.mockRestore();
+    patchStateForTests({ settings });
+  });
+
+  const settle = () => act(() => new Promise<void>((resolve) => setImmediate(resolve)));
+  /** The requests that change something, with what each sent. */
+  const writes = () => daemon.requests.map((request, i) => ({ request, body: daemon.bodies[i] })).filter((w) => !w.request.startsWith("GET "));
+  const toggle = (id: "settings-autostart" | "settings-tray") => document.getElementById(id) as HTMLInputElement;
+
+  async function render(node: ReactNode) {
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(node));
+    await settle();
+  }
+
+  async function click(input: HTMLElement) {
+    await act(async () => input.click());
+    await settle();
+  }
+
+  /** The settings the daemon holds: the screen reads them as it opens, and once it saved a patch. */
+  const holds = (s: Partial<Settings>) => daemon.answers.set("/settings", { ...settings, ...s });
+
+  /** Opens a section of Settings on the settings before, then has the daemon store the change as after. */
+  async function open(section: "daemon" | "general", before: Partial<Settings>, after: Partial<Settings>) {
+    patchStateForTests({ settings: { ...settings, ...before } });
+    holds(before);
+    await render(<SettingsScreen section={section} />);
+    holds(after);
+  }
+
+  const autostart = (enabled: boolean) => ({ autostart: { enabled, mechanism: "launchd" as const } });
+
+  it("turns on with autostart while the tray is enabled", async () => {
+    await open("daemon", { trayEnabled: true, ...autostart(false) }, { trayEnabled: true, ...autostart(true) });
+    await click(toggle("settings-autostart"));
+    expect(writes()).toEqual([{ request: "PATCH /settings", body: { autostart: true } }]);
+    expect(loginItem.mock.calls).toEqual([[true]]);
+  });
+
+  it("stays off when autostart turns on while the tray is disabled", async () => {
+    await open("daemon", { trayEnabled: false, ...autostart(false) }, { trayEnabled: false, ...autostart(true) });
+    await click(toggle("settings-autostart"));
+    expect(writes()).toEqual([{ request: "PATCH /settings", body: { autostart: true } }]);
+    expect(loginItem.mock.calls).toEqual([[false]]);
+  });
+
+  it("turns off with autostart", async () => {
+    await open("daemon", { trayEnabled: true, ...autostart(true) }, { trayEnabled: true, ...autostart(false) });
+    await click(toggle("settings-autostart"));
+    expect(writes()).toEqual([{ request: "PATCH /settings", body: { autostart: false } }]);
+    expect(loginItem.mock.calls).toEqual([[false]]);
+  });
+
+  it("follows the tray while autostart is on", async () => {
+    await open("general", { trayEnabled: true, ...autostart(true) }, { trayEnabled: false, ...autostart(true) });
+    await click(toggle("settings-tray"));
+    expect(writes()).toEqual([{ request: "PATCH /settings", body: { trayEnabled: false } }]);
+    expect(loginItem.mock.calls).toEqual([[false]]);
+
+    holds({ trayEnabled: true, ...autostart(true) });
+    await click(toggle("settings-tray"));
+    expect(writes()).toEqual([
+      { request: "PATCH /settings", body: { trayEnabled: false } },
+      { request: "PATCH /settings", body: { trayEnabled: true } },
+    ]);
+    expect(loginItem.mock.calls).toEqual([[false], [true]]);
+  });
+
+  it("is left alone when the tray changes while autostart is off", async () => {
+    await open("general", { trayEnabled: true, ...autostart(false) }, { trayEnabled: false, ...autostart(false) });
+    await click(toggle("settings-tray"));
+    holds({ trayEnabled: true, ...autostart(false) });
+    await click(toggle("settings-tray"));
+    expect(writes().map((w) => w.body)).toEqual([{ trayEnabled: false }, { trayEnabled: true }]);
+    expect(loginItem).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["autostart", "daemon", "settings-autostart", { trayEnabled: true, ...autostart(false) }, { autostart: true }],
+    ["the tray", "general", "settings-tray", { trayEnabled: true, ...autostart(true) }, { trayEnabled: false }],
+  ] as const)("is left alone when the daemon refuses the patch of %s", async (_, section, id, before, patch) => {
+    await open(section, before, before);
+    // With no answer for /settings, the stand-in daemon refuses the patch with a 404.
+    daemon.answers.delete("/settings");
+    await click(toggle(id));
+    expect(writes()).toEqual([{ request: "PATCH /settings", body: patch }]);
+    expect(loginItem).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])("follows the tray (%s) when onboarding finishes with the autostart box checked", async (trayEnabled) => {
+    daemon.answers.set("/settings", { ...settings, trayEnabled, ...autostart(true) });
+    const onFinish = vi.fn();
+    await render(<OnboardingScreen onFinish={onFinish} onCreateTask={() => {}} onImport={() => {}} />);
+    // The footer's last button moves on: Next on steps 1 to 3, Skip on the first task, then the last step's finish.
+    const forward = () => click([...host!.querySelectorAll<HTMLButtonElement>(".onboarding__footer button")].at(-1)!);
+    await forward();
+    await forward();
+    await click(host!.querySelector<HTMLInputElement>(".onboarding__step .checkbox input")!);
+    await forward();
+    await forward();
+    expect(loginItem).not.toHaveBeenCalled();
+    await forward();
+    expect(onFinish).toHaveBeenCalledTimes(1);
+    expect(writes()).toEqual([{ request: "PATCH /settings", body: { onboardingCompleted: true, autostart: true } }]);
+    expect(loginItem.mock.calls).toEqual([[trayEnabled]]);
   });
 });
