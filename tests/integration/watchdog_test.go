@@ -15,8 +15,9 @@ import (
 	"time"
 )
 
-// watchdogEnv names the PID of the daemon the test binary watches when it runs as a daemon's watchdog rather than as the
-// tests; watchdogEnv+"_GROUP" is set when the daemon leads a process group of its own, which the watchdog then ends.
+// watchdogEnv names the PID of the daemon the test binary watches when it runs as a daemon's watchdog rather than as
+// the tests; watchdogEnv+"_GROUP" is set when the daemon leads a process group of its own, which the watchdog then
+// ends.
 const watchdogEnv = "HARMFLOW_TEST_WATCHDOG"
 
 // binaryEnv names a harmflowd already built, for a test binary that another one runs: it neither builds one nor leaves

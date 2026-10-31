@@ -296,10 +296,10 @@ func pushableClone(t *testing.T) string {
 
 // restartTask is a task made of the built-in issue implementer as selecting it copies it, with the fixture issue as its
 // one eligible issue. Its permissions allow what the built-in skills run to select, implement, push, and report, and
-// deny gh pr create unless openPullRequest is set. Leaving gh pr create out of the allowed tools is not enough where the
-// signed-in Claude Code's own settings allow more, as a rule Bash(*) does: a session there ran the push and gh pr create
-// in one call and opened its pull request. A denied tool wins over every allow rule, the user's own included, and holds
-// a command chained in the same call.
+// deny gh pr create unless openPullRequest is set. Leaving gh pr create out of the allowed tools is not enough where
+// the signed-in Claude Code's own settings allow more, as a rule Bash(*) does: a session there ran the push and
+// gh pr create in one call and opened its pull request. A denied tool wins over every allow rule, the user's own
+// included, and holds a command chained in the same call.
 func restartTask(d *daemon, clone string, issue int, openPullRequest bool) string {
 	d.t.Helper()
 	copied := d.builtinAgentCopy("hf-github-issue-implementer")

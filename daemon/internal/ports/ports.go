@@ -128,7 +128,8 @@ func (h *HarnessInfo) SetDiagnostic(t domain.Text) {
 }
 
 // HasFeature reports whether the CLI has feature, as its help listed it. With FeaturesUnknown, every feature counts as
-// there: the first attempt proves the ones it uses, and one that fails on a missing flag fails over as any attempt does.
+// there: the first attempt proves the ones it uses, and one that fails on a missing flag fails over as any attempt
+// does.
 func (h HarnessInfo) HasFeature(feature string) bool { return h.FeaturesUnknown || h.Features[feature] }
 
 // DiagnosticText is the text SetDiagnostic recorded.
@@ -296,14 +297,14 @@ type WorkspaceLister interface {
 	ListsPerWorkspace(kind string) bool
 }
 
-// WorkspaceFolderReader is a HarnessAdapter that finds the user's items of a kind in a folder of the workspace as well as
-// in a folder of its configuration, as its harness loads them: ReadsWorkspace says which kinds.
+// WorkspaceFolderReader is a HarnessAdapter that finds the user's items of a kind in a folder of the workspace
+// as well as in a folder of its configuration, as its harness loads them: ReadsWorkspace says which kinds.
 type WorkspaceFolderReader interface {
 	ReadsWorkspace(kind string) bool
 }
 
-// PluginLister is a HarnessAdapter that finds a plugin's items of a kind, named `<plugin>:<name>`, in its harness's list
-// of the plugins it has enabled for a workspace, not in a folder: ListsPlugins says which kinds.
+// PluginLister is a HarnessAdapter that finds a plugin's items of a kind, named `<plugin>:<name>`, in its harness's
+// list of the plugins it has enabled for a workspace, not in a folder: ListsPlugins says which kinds.
 type PluginLister interface {
 	ListsPlugins(kind string) bool
 }

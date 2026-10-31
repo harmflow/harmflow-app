@@ -48,7 +48,8 @@ func TestBuildCommitPrefersMake(t *testing.T) {
 	}
 }
 
-// The build time make stamps tells two builds of the same commit apart; a stamp that is missing or not RFC 3339 is none.
+// The build time make stamps tells two builds of the same commit apart; a stamp that is missing or not RFC 3339 is
+// none.
 func TestBuildTime(t *testing.T) {
 	if got, want := buildTime("2026-10-22T20:30:05Z"), time.Date(2026, 10, 22, 20, 30, 5, 0, time.UTC); !got.Equal(want) {
 		t.Errorf("got %v, want %v", got, want)

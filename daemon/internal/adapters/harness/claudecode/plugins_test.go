@@ -11,8 +11,8 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
-// pluginStandIn writes a stand-in for the claude CLI that appends the folder it runs in and its arguments to calls, then
-// runs the given case arms on "$1 $2".
+// pluginStandIn writes a stand-in for the claude CLI that appends the folder it runs in and its arguments to calls,
+// then runs the given case arms on "$1 $2".
 func pluginStandIn(t *testing.T, calls, arms string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "claude")
@@ -157,8 +157,8 @@ func TestPluginSkillsComeFromClaudeCodesPluginCommands(t *testing.T) {
 	}
 }
 
-// A CLI that was not detected lists no plugin: the other skills are listed with no error, and a plugin's skill cannot be
-// looked up, which is said so, never a missing skill.
+// A CLI that was not detected lists no plugin: the other skills are listed with no error, and a plugin's skill cannot
+// be looked up, which is said so, never a missing skill.
 func TestPluginSkillsWithNoCLI(t *testing.T) {
 	config := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", config)

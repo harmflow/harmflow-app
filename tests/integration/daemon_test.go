@@ -37,8 +37,8 @@ var binary string
 const builtAt = "2026-10-22T20:30:05Z"
 
 // starterEnv names the daemon binary when the test binary runs as the short-lived parent of
-// TestDaemonOutlivesItsStarter rather than as the tests; starterEnv+"_PID" names the file it writes the daemon's PID to,
-// and starterEnv+"_LATE", when set, a duration it waits after starting the daemon before it writes the PID.
+// TestDaemonOutlivesItsStarter rather than as the tests; starterEnv+"_PID" names the file it writes the daemon's PID
+// to, and starterEnv+"_LATE", when set, a duration it waits after starting the daemon before it writes the PID.
 const starterEnv = "HARMFLOW_TEST_STARTER"
 
 func TestMain(m *testing.M) {
@@ -4238,9 +4238,9 @@ func TestSkippedMisfireSurvivesAKill(t *testing.T) {
 	}
 }
 
-// throwawayKeychain creates an unlocked keychain file for one test, with no lock timeout, and deletes it at cleanup with
-// security delete-keychain, which also takes it off the search list. Its directory's name has a space, as the daemon
-// passes the path quoted to security's interactive mode.
+// throwawayKeychain creates an unlocked keychain file for one test, with no lock timeout, and deletes it at cleanup
+// with security delete-keychain, which also takes it off the search list. Its directory's name has a space, as the
+// daemon passes the path quoted to security's interactive mode.
 func throwawayKeychain(t *testing.T) string {
 	t.Helper()
 	if runtime.GOOS != "darwin" {

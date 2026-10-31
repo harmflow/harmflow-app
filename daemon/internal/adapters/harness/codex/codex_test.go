@@ -379,8 +379,8 @@ func feed(p *parser, lines ...string) []ports.HarnessEvent {
 	return events
 }
 
-// harmflow-app#250: Codex never exits while it waits for the network, so a wait is ended by the execution's timeout. The
-// attempt is a network failure when a wait was the last thing Codex printed, and a timeout after any other output.
+// harmflow-app#250: Codex never exits while it waits for the network, so a wait is ended by the execution's timeout.
+// The attempt is a network failure when a wait was the last thing Codex printed, and a timeout after any other output.
 func TestFinishAtTheTimeout(t *testing.T) {
 	cases := []struct {
 		name  string
