@@ -1074,7 +1074,11 @@ func (r *run) onHarnessEvent(he ports.HarnessEvent) {
 		if i, ok := r.commandIndex[he.ToolID]; ok && i < len(r.x.Commands) {
 			c := &r.x.Commands[i]
 			c.Status = status
-			c.EndedAt = &now
+			// A harness that corrects how a command ended, as Claude Code does for a refusal at the session's end, ends it
+			// again: the command keeps the time it ended.
+			if c.EndedAt == nil {
+				c.EndedAt = &now
+			}
 			c.ExitCode = he.ExitCode
 			r.x.Changed()
 			if status == "succeeded" {

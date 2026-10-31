@@ -269,6 +269,17 @@ func (p *fakeParser) Line(b []byte) []ports.HarnessEvent {
 		return []ports.HarnessEvent{{Kind: ports.HarnessToolStarted, ToolID: id, Tool: "shell", Command: cmd},
 			{Kind: ports.HarnessToolDone, ToolID: id, Tool: "shell", Declined: true}}
 	}
+	if cmd, ok := strings.CutPrefix(s, "FAILED "); ok {
+		p.tools++
+		id := "tool-" + strconv.Itoa(p.tools)
+		return []ports.HarnessEvent{{Kind: ports.HarnessToolStarted, ToolID: id, Tool: "Bash", Command: cmd},
+			{Kind: ports.HarnessToolDone, ToolID: id, Tool: "Bash", IsError: true}}
+	}
+	if s == "REFUSED last" {
+		// The harness says, after the call ended, that it refused the last call, as Claude Code's result line does.
+		return []ports.HarnessEvent{{Kind: ports.HarnessToolDone, ToolID: "tool-" + strconv.Itoa(p.tools), Tool: "Bash",
+			Declined: true}}
+	}
 	p.text = s
 	return []ports.HarnessEvent{{Kind: ports.HarnessMessage, Message: s}}
 }
@@ -664,6 +675,42 @@ func TestDeclinedCommand(t *testing.T) {
 		ends[1].MessageKey != "tool_declined" || ends[1].Message != "shell was declined" {
 		t.Errorf("tool.completed events %+v; want the second declined, a warning, \"shell was declined\" as "+
 			"tool_declined", ends)
+	}
+}
+
+// harmflow-app#541: a call the harness says it refused only after the call ended, as Claude Code does at the session's
+// end, is logged failed, then corrected. Its record reads declined, with no exit code and the time it ended, and the
+// log keeps both ends.
+func TestCommandCorrectedToDeclined(t *testing.T) {
+	e := newEnv(t)
+	e.create("corrected", "")
+	const refused = "cd /tmp && git push -q -u origin harmflow/7-x 2>&1"
+	e.claude.setScript(func(ports.RunRequest) string {
+		return "echo 'FAILED " + refused + "'; sleep 0.2; echo 'REFUSED last'; echo 'END ok'"
+	})
+	r, _ := e.app.RunTask("corrected")
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	events, _, err := e.app.ExecutionEvents(r.ExecutionID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ends []domain.Event
+	for _, ev := range events {
+		if ev.Type == domain.EventToolCompleted {
+			ends = append(ends, ev)
+		}
+	}
+	if len(ends) != 2 || ends[0].Payload["status"] != "failed" || ends[1].Payload["status"] != "declined" ||
+		ends[1].MessageKey != "tool_declined" {
+		t.Fatalf("tool.completed events %+v; want the call failed, then declined as tool_declined", ends)
+	}
+	if len(x.Commands) != 1 || x.Commands[0].Status != "declined" || x.Commands[0].ExitCode != nil ||
+		x.Commands[0].EndedAt == nil {
+		t.Fatalf("commands %+v; want %q declined, with an end and no exit code", x.Commands, refused)
+	}
+	if ended := *x.Commands[0].EndedAt; ended.After(ends[0].Timestamp) {
+		t.Errorf("command ended at %v, after its first end was logged at %v; want the time it ended kept", ended,
+			ends[0].Timestamp)
 	}
 }
 

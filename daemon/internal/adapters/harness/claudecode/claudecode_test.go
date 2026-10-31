@@ -55,6 +55,96 @@ func TestParseSuccess(t *testing.T) {
 	}
 }
 
+// toolEnds are the HarnessToolDone events among events, in order.
+func toolEnds(events []ports.HarnessEvent) []ports.HarnessEvent {
+	var out []ports.HarnessEvent
+	for _, e := range events {
+		if e.Kind == ports.HarnessToolDone {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// harmflow-app#541: a call Claude Code refused never ran. Its end is logged failed, as the stream gives it, and the
+// result line, which lists it among permission_denials, corrects it to declined, as a refusal of Codex's ends. A call
+// that ran and failed stays failed, and a session that ends with no result line keeps the refused call failed. The
+// transcript is Claude Code 2.1.309's, run with no approval surface, its ids made up.
+func TestParseDeclined(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "declined.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	parse := func(lines []string) []ports.HarnessEvent {
+		p := &parser{tools: map[string]toolUse{}}
+		var events []ports.HarnessEvent
+		for _, l := range lines {
+			events = append(events, p.Line([]byte(l))...)
+		}
+		return events
+	}
+
+	t.Run("with its result", func(t *testing.T) {
+		ends := toolEnds(parse(lines))
+		if len(ends) != 3 {
+			t.Fatalf("tool ends %+v, want the two calls' ends and one correction", ends)
+		}
+		if e := ends[0]; e.ToolID != "toolu_1" || !e.IsError || e.Declined {
+			t.Errorf("the call that ran and failed ends %+v, want failed and not declined", e)
+		}
+		if e := ends[1]; e.ToolID != "toolu_2" || !e.IsError || e.Declined {
+			t.Errorf("the refused call's end %+v, want it logged failed, as the stream gives it", e)
+		}
+		if e := ends[2]; e.ToolID != "toolu_2" || e.Tool != "Bash" || !e.Declined || e.IsError || e.ExitCode != nil {
+			t.Errorf("the result line's correction %+v, want toolu_2 declined, with no error and no exit code", e)
+		}
+	})
+
+	t.Run("with no result", func(t *testing.T) {
+		if !strings.Contains(lines[len(lines)-1], `"type":"result"`) {
+			t.Fatalf("the transcript's last line is not its result: %s", lines[len(lines)-1])
+		}
+		ends := toolEnds(parse(lines[:len(lines)-1]))
+		if len(ends) != 2 || !ends[0].IsError || !ends[1].IsError || ends[0].Declined || ends[1].Declined {
+			t.Errorf("tool ends %+v, want both calls failed and none declined", ends)
+		}
+	})
+}
+
+// harmflow-app#541: a refused edit names no changed file, before or after the result line corrects it, as a declined
+// file change of Codex's names none. The result line corrects only a call it lists whose end was an error, and each
+// once.
+func TestResultCorrectsOnlyFailedCallsItLists(t *testing.T) {
+	p := &parser{tools: map[string]toolUse{}}
+	var events []ports.HarnessEvent
+	for _, l := range []string{
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"Edit","input":{"file_path":"/work/main.go","old_string":"a","new_string":"b"}}]}}`,
+		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"Permission for this tool use was denied.","is_error":true}]}}`,
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_2","name":"Bash","input":{"command":"go test ./..."}}]}}`,
+		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_2","content":"ok","is_error":false}]}}`,
+		`{"type":"result","subtype":"success","is_error":false,"result":"done","permission_denials":[{"tool_name":"Edit","tool_use_id":"toolu_1"},{"tool_name":"Bash","tool_use_id":"toolu_2"},{"tool_name":"Bash","tool_use_id":"toolu_9"}]}`,
+		`{"type":"result","subtype":"success","is_error":false,"result":"done","permission_denials":[{"tool_name":"Edit","tool_use_id":"toolu_1"}]}`,
+	} {
+		events = append(events, p.Line([]byte(l))...)
+	}
+	for _, e := range events {
+		if e.Kind == ports.HarnessFileChanged {
+			t.Errorf("event %+v; want no changed file for a refused edit", e)
+		}
+	}
+	var corrections []ports.HarnessEvent
+	for _, e := range toolEnds(events) {
+		if e.Declined {
+			corrections = append(corrections, e)
+		}
+	}
+	if len(corrections) != 1 || corrections[0].ToolID != "toolu_1" || corrections[0].Tool != "Edit" ||
+		corrections[0].Path != "" {
+		t.Errorf("corrections %+v, want toolu_1's alone, once, with no path", corrections)
+	}
+}
+
 // A rejected plan window is a quota exhaustion, from the stream's own signal.
 func TestParseQuota(t *testing.T) {
 	p, _ := replay(t, "quota.jsonl")
