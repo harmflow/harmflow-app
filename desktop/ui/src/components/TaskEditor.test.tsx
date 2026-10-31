@@ -1,8 +1,10 @@
 // @vitest-environment happy-dom
 // Drives the task editor in a DOM, against a stand-in for the daemon's local API (harmflow-app#183). Its Form and YAML
 // tabs carry the task across through the daemon's validation, both ways, whether it allows extra usage included
-// (harmflow-app#300). A save from the YAML tab sends the text with the revision of the last successful save; a refused
-// one keeps the text and shows the daemon's error at its line, the same error a save from the form shows on its field.
+// (harmflow-app#300). While the form's document is, by value, the one the editor was loaded or last saved with, the
+// YAML tab shows the file's text, its comments included, without asking the daemon (harmflow-app#461). A save from the
+// YAML tab sends the text with the revision of the last successful save; a refused one keeps the text and shows the
+// daemon's error at its line, the same error a save from the form shows on its field.
 // The stand-in decides which error the daemon gives: that the daemon gives a document and its YAML the same one is
 // itest › TestOneSchemaForEveryEntryPoint's. ⌘S saves as the Save button does, from any focus in the editor
 // (harmflow-app#230). A save shows the warnings the daemon gives, such as a fallback that cannot load the task's skill
@@ -218,11 +220,15 @@ const click = async (target: HTMLElement) => {
   await settle();
 };
 
-/** Opens the editor on the stored task at r1, or on a new one from its template, with the app's toasts beside it. */
-async function open(mode: "create" | "edit") {
+/**
+ * Opens the editor on the stored task at r1, its file's text the daemon's serialization unless given, or on a new one
+ * from its template, with the app's toasts beside it.
+ */
+async function open(mode: "create" | "edit", file?: string) {
   serve(mode === "edit" ? 1 : 0);
   onSaved = vi.fn();
-  const from = mode === "edit" ? { task: storedTask(taskDoc("Standup notes"), "r1") } : { initial: taskDoc("Standup notes") };
+  const stored = storedTask(taskDoc("Standup notes"), "r1");
+  const from = mode === "edit" ? { task: file === undefined ? stored : { ...stored, yaml: file } } : { initial: taskDoc("Standup notes") };
   host = document.body.appendChild(document.createElement("div"));
   root = createRoot(host);
   await act(async () =>
@@ -355,10 +361,50 @@ describe("task editor tabs", () => {
     expect(sent("POST", "/tasks/validate")).toContainEqual({ yaml: taskYaml("Standup notes", CRON, true) });
     expect(extraUsage().checked).toBe(true);
 
+    // Turned off, the document is the one the editor was loaded with again, so the YAML tab shows the file's text.
     await click(extraUsage());
     await click(tab("YAML"));
-    expect(sent("POST", "/tasks/validate")).toContainEqual({ document: taskDoc("Standup notes") });
+    expect(sent("POST", "/tasks/validate")).not.toContainEqual({ document: taskDoc("Standup notes") });
     expect(yamlText()).toBe(taskYaml("Standup notes"));
+  });
+
+  // The file's text, a comment included, is not the daemon's serialization of its document (harmflow-app#461).
+  describe("on a task whose file holds a comment", () => {
+    const commented = taskYaml("Standup notes").replace("  prompt:", "  # Read out at the start of the call.\n  prompt:");
+    const documentsSent = () => sent("POST", "/tasks/validate").filter((b) => (b as TaskInput).document !== undefined);
+
+    it("shows the file's text on the YAML tab while the form's document is the one loaded, without asking the daemon", async () => {
+      await open("edit", commented);
+      await click(tab("YAML"));
+      expect(openTab()).toBe("YAML");
+      expect(yamlText()).toBe(commented);
+      expect(documentsSent()).toEqual([]);
+      expect(unsaved()).toBeNull();
+    });
+
+    it("shows the daemon's serialization after a change in the form, and the file's text once the change is undone by hand", async () => {
+      await open("edit", commented);
+      await type(nameField().querySelector("input")!, "Standup summary");
+      await click(tab("YAML"));
+      expect(documentsSent()).toEqual([{ document: taskDoc("Standup summary") }]);
+      expect(yamlText()).toBe(taskYaml("Standup summary"));
+
+      await click(tab("Form"));
+      await type(nameField().querySelector("input")!, "Standup notes");
+      await click(tab("YAML"));
+      expect(documentsSent()).toEqual([{ document: taskDoc("Standup summary") }]);
+      expect(yamlText()).toBe(commented);
+    });
+
+    it("shows the saved file's text after a save, not the text the editor was loaded with", async () => {
+      await open("edit", commented);
+      await type(nameField().querySelector("input")!, "Standup summary");
+      await save();
+      expect(sent("PUT", "/tasks/standup")).toEqual([{ document: taskDoc("Standup summary"), baseRevision: "r1" }]);
+      await click(tab("YAML"));
+      expect(documentsSent()).toEqual([]);
+      expect(yamlText()).toBe(taskYaml("Standup summary"));
+    });
   });
 });
 

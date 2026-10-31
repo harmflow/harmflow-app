@@ -2,9 +2,11 @@
 // Drives the Tasks screen's commands on a task against a stand-in for the daemon's local API: each one sends its
 // request, and the screen shows the answer. What the daemon does with each request is itest › TestTaskLifecycle's,
 // and app › TestDuplicate's and TestDisableAndDeleteWhileRunning's. After the task's file changes outside HarmFlow, the
-// list and the editor opened next show the file's definition, and a save builds on its revision (harmflow-app#304):
+// list and the editor opened next show the file's definition, its YAML tab the file's text byte for byte
+// (harmflow-app#461), and a save builds on its revision (harmflow-app#304):
 // that the daemon answers with the file as it is then is itest › TestTaskLifecycle's and TestFormDocumentIsTheFile's,
 // and app › TestExternalEdits'.
+import { EditorView } from "@codemirror/view";
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -327,6 +329,19 @@ describe("the Tasks screen after the task's file changes outside HarmFlow", () =
     validation: { valid: true, errors: [], warnings: [] },
   });
 
+  /**
+   * `POST /tasks/validate` as the daemon answers it for the changed file's text or its document: the document
+   * serialized anew, in the schema's key order and without the file's comment.
+   */
+  const validated = {
+    valid: true,
+    errors: [],
+    warnings: [],
+    document: documentOf("Standup digest", "Write the standup digest."),
+    effective: documentOf("Standup digest", "Write the standup digest."),
+    yaml: before.replace("Standup notes", "Standup digest").replace("standup notes", "standup digest"),
+  };
+
   /** The event the daemon's watcher emits once it loaded the changed file. */
   const changed: HarmflowEvent = {
     id: 41,
@@ -354,6 +369,7 @@ describe("the Tasks screen after the task's file changes outside HarmFlow", () =
   const name = (id: string) => row(id)!.querySelector(".task-row__title strong")!.textContent;
   const field = (label: string) =>
     [...host!.querySelectorAll<HTMLElement>("label.field")].find((f) => f.querySelector(".field__label")?.textContent === label)!;
+  const editorTab = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((b) => b.textContent === label)!;
   const editorButton = (label: string) =>
     [...host!.querySelectorAll<HTMLButtonElement>(".editor__actions button")].find((b) => b.textContent === label)!;
 
@@ -408,6 +424,14 @@ describe("the Tasks screen after the task's file changes outside HarmFlow", () =
     expect(daemon.requests.filter((r) => r.path === "/tasks/standup")).toEqual([req("GET", "/tasks/standup")]);
     expect(field("Name").querySelector("input")!.value).toBe("Standup digest");
     expect(field("Prompt").querySelector("textarea")!.value).toBe("Write the standup digest.");
+
+    // Its YAML tab, with nothing changed in the form: the file's text byte for byte, its comment and key order
+    // included, though the daemon's validation of the document would serialize it anew (harmflow-app#461).
+    answer("POST", "/tasks/validate", validated);
+    await click(editorTab("YAML"));
+    expect(EditorView.findFromDOM(host!.querySelector<HTMLElement>(".cm-editor")!)!.state.doc.toString()).toBe(after);
+    expect(daemon.requests.filter((r) => r.path === "/tasks/validate")).toEqual([]);
+    await click(editorTab("Form"));
 
     // The next save: one update, on the revision the file had when the editor read it.
     answer("PUT", "/tasks/standup", stored("r3", "Standup summary", "Write the standup digest.", after.replace("Standup digest", "Standup summary")));
