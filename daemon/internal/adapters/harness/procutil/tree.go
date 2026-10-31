@@ -58,7 +58,8 @@ func ReadsProcessTable() bool { return readsProcessTable }
 // as well. Every process found gets SIGTERM, and the grace period applies to all of them: once all have exited, or the
 // grace period has elapsed, each one still alive gets SIGKILL, even when the harness exited first. A process forked
 // meanwhile is found by scanning again before SIGKILL, up to killRounds times, until a scan finds no new process. A
-// harness still running gets each signal before the others, so it ends with the signal's exit, and it gets SIGTERM once.
+// harness still running gets each signal before the others, so it ends with the signal's exit, and it gets SIGTERM
+// once.
 //
 // A process is known by its pid and start time, both checked again before every signal, so a reused pid is never
 // signalled. The daemon and the processes it runs under are never signalled.
@@ -67,8 +68,8 @@ func ReadsProcessTable() bool { return readsProcessTable }
 // /usr/bin/ssh. Such a process, or one that cleared the variable, survives once it has daemonized, since then neither
 // the snapshot nor the scan finds it. The limit is larger once the harness has exited on its own: launchd has adopted
 // every process it left, so the snapshot finds none of them, and such a process survives once it has left the
-// harness's group, as Claude Code runs each Bash tool command in a session of its own, unless it descends from a process
-// found. No snapshot is taken while the harness runs.
+// harness's group, as Claude Code runs each Bash tool command in a session of its own, unless it descends from a
+// process found. No snapshot is taken while the harness runs.
 func EndTree(t Tree, grace time.Duration) []Ended {
 	if _, err := processTable(); err != nil || t.Pid <= 1 || t.Start.IsZero() {
 		endGroup(t.Group, grace)

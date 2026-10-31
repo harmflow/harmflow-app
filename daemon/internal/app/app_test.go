@@ -538,8 +538,9 @@ func (e *env) create(id, extra string) {
 // A loaded host can take seconds to run each process an execution starts — a fake harness, a script task's program,
 // and the ps and sysctl that identify the program — while the daemon's own work stays fast. poll spends its budget only
 // while no fake attempt is running, from Prepare to its parser's Finish, and no script program is, from its attempt's
-// start to its end, so a daemon that hangs still fails within the budget. Slow processes stretch it up to processCeiling
-// after the daemon's last event, so a run that goes on logging its steps is never cut short, and one that stalls is.
+// start to its end, so a daemon that hangs still fails within the budget. Slow processes stretch it up to
+// processCeiling after the daemon's last event, so a run that goes on logging its steps is never cut short, and one
+// that stalls is.
 const processCeiling = 3 * time.Minute
 
 // poll checks cond every 20 ms until it holds, and reports whether it did.
@@ -3256,8 +3257,8 @@ func TestEditWhileRunningKeepsTheStartingDefinition(t *testing.T) {
 }
 
 // harmflow-app#313: a running execution keeps the timeout it started with. With the timeout counted in seconds, the
-// edit lengthens it from 2 to 6 while the first attempt runs, and that attempt, which would succeed after 4, still times
-// out when its 2 are over. The next execution runs the edit, and the same attempt completes within its 6.
+// edit lengthens it from 2 to 6 while the first attempt runs, and that attempt, which would succeed after 4, still
+// times out when its 2 are over. The next execution runs the edit, and the same attempt completes within its 6.
 //
 // The timeout an execution read shows in its outcome and its record, not in when it ended: the timeout's end waits for
 // the attempt's processes to be ended, which a loaded machine delays by seconds. An execution that had read the edit
@@ -3305,8 +3306,8 @@ func TestEditWhileRunningKeepsTheStartingTimeout(t *testing.T) {
 }
 
 // harmflow-app#313: a running execution keeps the rate-limit retries it started with. The edit takes the task's one
-// retry away while the first attempt runs, and the rate limit that ends that attempt still retries on Claude Code, which
-// completes. The next execution runs the edit: the same rate limit fails it after one attempt, with no retry.
+// retry away while the first attempt runs, and the rate limit that ends that attempt still retries on Claude Code,
+// which completes. The next execution runs the edit: the same rate limit fails it after one attempt, with no retry.
 func TestEditWhileRunningKeepsTheStartingRateLimitRetries(t *testing.T) {
 	e := newEnv(t)
 	gates := t.TempDir()

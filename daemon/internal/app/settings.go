@@ -175,8 +175,8 @@ func (a *App) UpdateSettings(p SettingsPatch) (SettingsView, error) {
 	return a.GetSettings(), nil
 }
 
-// checkPathSettings refuses an allowed folder in a place no harness may write, and a change to the path variables or the
-// allowed folders that would put a saved task's path outside the rule, naming the task.
+// checkPathSettings refuses an allowed folder in a place no harness may write, and a change to the path variables or
+// the allowed folders that would put a saved task's path outside the rule, naming the task.
 func (a *App) checkPathSettings(p SettingsPatch) error {
 	if p.PathVariables == nil && p.AllowedFolders == nil {
 		return nil

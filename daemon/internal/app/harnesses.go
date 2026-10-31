@@ -273,10 +273,10 @@ type CatalogProblem struct {
 // Catalog lists the built-in agents and skills, offered on every harness, then the user's, each with the harnesses
 // that find it for the folder of a task with this workspace path and ID, sorted by name. That folder is the one
 // validation and an execution look the task's items up for: the workspace path, expanded, otherwise the folder HarmFlow
-// runs the task in, and HarmFlow's workspace root for neither. A user's item is left out when a task cannot cite it: its
-// name has the hf- prefix, or is not a name the task schema gives its kind. A skill's is an identifier or a plugin's
-// `<plugin>:<skill>`, listed as the harness reports it; an agent's is an identifier. A user's agent that more than one
-// harness holds is copied from the first of them by name. What a harness could not list is in Problems.
+// runs the task in, and HarmFlow's workspace root for neither. A user's item is left out when a task cannot cite it:
+// its name has the hf- prefix, or is not a name the task schema gives its kind. A skill's is an identifier or a
+// plugin's `<plugin>:<skill>`, listed as the harness reports it; an agent's is an identifier. A user's agent that
+// more than one harness holds is copied from the first of them by name. What a harness could not list is in Problems.
 func (a *App) Catalog(ctx context.Context, workspace, task string) Catalog {
 	c := Catalog{Agents: []CatalogEntry{}, Skills: []CatalogEntry{}, Problems: []CatalogProblem{}}
 	workspace = a.taskFolder(workspace, task)

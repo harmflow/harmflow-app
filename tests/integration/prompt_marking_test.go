@@ -13,9 +13,9 @@ import (
 	"time"
 )
 
-// The fixture set of TestPromptMarkingAndBranchNamingAreFollowed in queueRepo, apart from the other sets, which it never
-// reads or changes: one issue labelled promptMarkingLabel, opened by each run and closed when it ends, which asks for a
-// file in the folder of the same name.
+// The fixture set of TestPromptMarkingAndBranchNamingAreFollowed in queueRepo, apart from the other sets, which it
+// never reads or changes: one issue labelled promptMarkingLabel, opened by each run and closed when it ends, which asks
+// for a file in the folder of the same name.
 const (
 	promptMarkingLabel = "prompt-marking-test"
 	// autoLabel is the marking the task's prompt gives its pull requests in place of the built-in agent's harmflow. It

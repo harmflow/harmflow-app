@@ -95,9 +95,9 @@ func lastCwds(t *testing.T, received string) []string {
 
 const codexSkills = "  skills: [review-notes]\n"
 
-// A Codex user's skill is found where Codex finds it: a Codex task that cites it saves, a Claude Code task with Codex as
-// its fallback imports with no invalid-fallback warning, and an execution that fails over to Codex resolves it at the
-// SKILL.md Codex reports. Each lookup asks for the right workspace, never for none.
+// A Codex user's skill is found where Codex finds it: a Codex task that cites it saves, a Claude Code task with Codex
+// as its fallback imports with no invalid-fallback warning, and an execution that fails over to Codex resolves it at
+// the SKILL.md Codex reports. Each lookup asks for the right workspace, never for none.
 func TestCodexSkillsComeFromItsSkillList(t *testing.T) {
 	received := filepath.Join(t.TempDir(), "received.jsonl")
 	skill := filepath.Join(t.TempDir(), ".agents", "skills", "review-notes", "SKILL.md")
@@ -422,10 +422,10 @@ func writeSkill(t *testing.T, dir string) {
 }
 
 // A Claude Code user's skill in the workspace's .claude/skills is found for that workspace only. A task placed there
-// cites it and saves, the task editor's catalog offers it there, and an execution there, the attempt a failover hands to
-// Claude Code included, resolves it in that folder. A task placed elsewhere is refused, naming the configuration and the
-// workspace looked in, and a Codex task placed elsewhere is warned that its Claude Code fallback is invalid. A skill of
-// Claude Code's configuration directory is found for every workspace, as before.
+// cites it and saves, the task editor's catalog offers it there, and an execution there, the attempt a failover hands
+// to Claude Code included, resolves it in that folder. A task placed elsewhere is refused, naming the configuration
+// and the workspace looked in, and a Codex task placed elsewhere is warned that its Claude Code fallback is invalid.
+// A skill of Claude Code's configuration directory is found for every workspace, as before.
 func TestClaudeCodeSkillsComeFromTheWorkspace(t *testing.T) {
 	a, config := newClaudeApp(t)
 	ctx := t.Context()

@@ -27,9 +27,9 @@ const priorityStandInReport = `{"outcome":"completed","summary":"done","workItem
 
 // A GitHub task's resume priority decides what a session takes first when it has both a draft pull request to resume
 // and a new eligible issue: the draft's issue, as work to resume, under resume_first, and the new issue under
-// new_first. Each subtest opens in queueRepo, under priorityLabel, two fixture issues, oldest first, and a managed draft
-// pull request that links the first. In a daemon home of its own, a first execution through a stand-in Claude Code
-// reports the first issue's item completed with that draft and its tests failed, so the ledger keeps the item in
+// new_first. Each subtest opens in queueRepo, under priorityLabel, two fixture issues, oldest first, and a managed
+// draft pull request that links the first. In a daemon home of its own, a first execution through a stand-in Claude
+// Code reports the first issue's item completed with that draft and its tests failed, so the ledger keeps the item in
 // progress, as it keeps every draft whose tests failed, and holds nothing for the second issue. Then the real Claude
 // Code runs the built-in agent's copy and the built-in skills of this checkout once, one item a cycle, under the
 // subtest's setting. The session is stopped once the daemon tracks the issue it selects, and its clone has no push URL,

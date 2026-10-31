@@ -42,8 +42,8 @@ type pluginListing struct {
 }
 
 // pluginSkills are the skills of the plugins Claude Code has enabled for workspace, each named <plugin>:<skill> as
-// Claude Code names it, in the order of its plugin list and then of each plugin's skills. Claude Code lists them itself:
-// `claude plugin list --json`, run in the workspace so that the plugins its project enables count, then
+// Claude Code names it, in the order of its plugin list and then of each plugin's skills. Claude Code lists them
+// itself: `claude plugin list --json`, run in the workspace so that the plugins its project enables count, then
 // `claude plugin details` for each plugin enabled. A workspace not made yet has no project settings, so its list is
 // asked for in the user's home folder, where only the user's settings count. A CLI that was not detected has none. The
 // listing of each folder the list runs in is kept until ReloadUserItems, since reading it starts processes that take
