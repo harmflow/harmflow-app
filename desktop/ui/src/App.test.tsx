@@ -5,7 +5,8 @@
 // Every way out of a task editor with unsaved changes asks first, and each template pick opens an editor of its own
 // (harmflow-app#170); a new GitHub task starts as the copy of the agent its type selects (harmflow-app#280). Every
 // place a task is created offers the daemon's templates, and a pick has the daemon draft the task (harmflow-app#177).
-// ⌘+, ⌘−, and ⌘0 zoom the dashboard everywhere, and the level outlives a restart (harmflow-app#55).
+// ⌘+, ⌘−, and ⌘0 zoom the dashboard everywhere, and the level outlives a restart (harmflow-app#55). Picking a language
+// in Settings switches the interface on screen at once, with no restart (harmflow-app#534).
 // A render error never leaves the window empty, and the interface tells the shell when it has painted (harmflow-app#96).
 import { EditorView } from "@codemirror/view";
 import { readFileSync } from "node:fs";
@@ -19,7 +20,7 @@ import type { Harness, LocalizedText, Settings, Task, TaskSummary, Template } fr
 import { Root } from "./App";
 import { rootOptions } from "./components/ErrorBoundary";
 import { YamlEditor } from "./components/YamlEditor";
-import i18n from "./i18n";
+import i18n, { LANGUAGES, resources, type Language } from "./i18n";
 import { actions, getState, patchStateForTests } from "./state/store";
 
 // Which component throws during render; none unless a test says so.
@@ -639,6 +640,68 @@ describe("settings sections", () => {
     expect(open()).toBe("About");
     await act(async () => actions.navigate({ screen: "settings", section: "nowhere" }));
     expect(open()).toBe("About");
+  });
+});
+
+// Picking a language in Settings changes the interface already on screen, at once and with no restart
+// (harmflow-app#534).
+describe("language switch", () => {
+  const select = () => host!.querySelector<HTMLSelectElement>("#settings-language")!;
+  const label = () => host!.querySelector('label[for="settings-language"]')!.textContent;
+  const title = () => host!.querySelector(".topbar__title")!.textContent;
+  const open = () => host!.querySelector(".settings__title")!.textContent;
+  const openItem = () => host!.querySelector('.settings-nav__item[aria-current="page"]')!.textContent;
+  const navLabels = () => [...sidebar().querySelectorAll(".nav__label")].map((l) => l.textContent);
+  const saved = () => daemon.sent.filter((r) => r.method === "PATCH" && r.path === "/settings").map((r) => r.body);
+
+  /** Picks a language in the Settings select, as the user does. The daemon saves it and answers it from then on. */
+  async function pick(language: Language) {
+    daemon.answers.set("/settings", { ...settings, language });
+    const setValue = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!;
+    await act(async () => {
+      setValue.call(select(), language);
+      select().dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  }
+
+  /** The texts on screen read in language, compared with its resource, and Settings is still open on General. */
+  function expectShownIn(language: Language) {
+    const text = resources[language].translation;
+    expect(navLabels()).toEqual((["overview", "executions", "tasks", "history", "settings"] as const).map((k) => text.nav[k]));
+    expect(title()).toBe(text.screens.settings.title);
+    expect(label()).toBe(text.settings.language);
+    expect(open()).toBe(text.settings.sections.general);
+    expect(openItem()).toBe(text.settings.sections.general);
+  }
+
+  it.each(LANGUAGES)("switches the interface on screen from %s to each of the other languages", async (start) => {
+    const ready = vi.spyOn(native, "interfaceReady");
+    patchStateForTests({ settings: { ...settings, language: start } });
+    daemon.answers.set("/settings", { ...settings, language: start });
+    try {
+      await launch();
+      await act(async () => navButton(resources[start].translation.nav.settings).click());
+      expectShownIn(start);
+      const [shell, control] = [sidebar(), select()];
+
+      for (const language of LANGUAGES.filter((l) => l !== start)) {
+        for (const picked of [language, start]) {
+          await pick(picked);
+          expectShownIn(picked);
+          expect(document.documentElement.lang).toBe(picked);
+          expect(saved().at(-1)).toEqual({ language: picked });
+          // Nothing was mounted again, and the shell was told only once that the interface is ready.
+          expect(sidebar()).toBe(shell);
+          expect(select()).toBe(control);
+          expect(ready).toHaveBeenCalledTimes(1);
+        }
+      }
+      expect(saved()).toHaveLength(4);
+    } finally {
+      ready.mockRestore();
+      // Puts back the language the other tests start in; the switch under test is the select's alone.
+      await act(async () => void i18n.changeLanguage("en-US"));
+    }
   });
 });
 
