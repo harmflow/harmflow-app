@@ -183,7 +183,7 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.app_handle().state::<Arc<AppState>>();
-                if state.tray_enabled() {
+                if window::close_hides(state.tray_enabled()) {
                     api.prevent_close();
                     window::hide_main(window.app_handle());
                 }
@@ -220,7 +220,7 @@ pub fn run() {
         // Closing the last window ends only the interface when the tray is disabled; with the tray, the app stays. The
         // app menu's Quit and the tray's Quit interface exit with a code, which this lets through.
         RunEvent::ExitRequested { api, code, .. } => {
-            if code.is_none() && app.state::<Arc<AppState>>().tray_enabled() {
+            if window::exit_prevented(app.state::<Arc<AppState>>().tray_enabled(), code) {
                 api.prevent_exit();
             }
         }

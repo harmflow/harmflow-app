@@ -731,6 +731,55 @@ describe("the executions screen's cards", () => {
   });
 });
 
+// Settings → General, harmflow-app#464: the tray option is on with the daemon's fresh settings, and switching it off
+// saves it and tells the shell, which then lets a close of the window end the interface instead of hiding it.
+describe("the tray option", () => {
+  let root: Root | undefined;
+  let host: HTMLElement | undefined;
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    host?.remove();
+    root = host = undefined;
+    daemon.answers.clear();
+    daemon.requests.length = 0;
+    daemon.bodies.length = 0;
+    patchStateForTests({ settings });
+    vi.restoreAllMocks();
+  });
+
+  const settle = () => act(() => new Promise<void>((resolve) => setImmediate(resolve)));
+  const trayToggle = () => {
+    const label = [...host!.querySelectorAll<HTMLLabelElement>("label.setting-row__label")].find((l) => l.textContent === "Mostrar o HarmFlow na barra de menus")!;
+    return document.getElementById(label.htmlFor) as HTMLInputElement;
+  };
+
+  it("is on with the fresh settings, and switched off sends one patch and tells the shell", async () => {
+    const shell = vi.spyOn(native, "setTrayEnabled").mockResolvedValue();
+    daemon.answers.set("/settings", settings);
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(<SettingsScreen />));
+    await settle();
+    expect(trayToggle().checked).toBe(true);
+    expect(trayToggle().disabled).toBe(false);
+
+    // The daemon stores the patch, and the settings read after it hold it.
+    daemon.answers.set("/settings", { ...settings, trayEnabled: false });
+    daemon.requests.length = 0;
+    daemon.bodies.length = 0;
+    shell.mockClear();
+    await act(async () => trayToggle().click());
+    await settle();
+    expect(daemon.requests.filter((r) => !r.startsWith("GET "))).toEqual(["PATCH /settings"]);
+    expect(daemon.bodies[daemon.requests.indexOf("PATCH /settings")]).toEqual({ trayEnabled: false });
+    // A settings refresh sends the stored value to the shell too, so every call says false, and there is one at least.
+    expect(shell).toHaveBeenCalledWith(false);
+    expect(shell.mock.calls.every(([enabled]) => enabled === false)).toBe(true);
+    expect(trayToggle().checked).toBe(false);
+  });
+});
+
 // Settings → General: keeping HarmFlow in the menu bar on ⌘Q sits under the tray option, and needs the tray.
 describe("the choice to keep HarmFlow in the menu bar on ⌘Q", () => {
   let root: Root | undefined;
@@ -742,6 +791,7 @@ describe("the choice to keep HarmFlow in the menu bar on ⌘Q", () => {
     root = host = undefined;
     daemon.answers.clear();
     daemon.requests.length = 0;
+    daemon.bodies.length = 0;
     patchStateForTests({ settings });
   });
 
