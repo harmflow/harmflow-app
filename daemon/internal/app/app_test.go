@@ -748,6 +748,47 @@ printf '%%s' '%[2]s' > %[1]s/report.json; echo 'END ok'`, req.ExecutionDir, repo
 	}
 }
 
+// A report that omits created does not log an update for a pull request the session announced as opened: its URL keeps
+// the one pull_request.created. One the session did not announce still gets its pull_request.updated from the report.
+func TestReportWithoutCreatedKeepsAnOpenedPullRequestOpened(t *testing.T) {
+	e := newEnv(t)
+	e.create("announcer", "")
+	const opened, unannounced = "https://github.com/o/r/pull/2", "https://github.com/o/r/pull/3"
+	e.claude.setScript(func(req ports.RunRequest) string {
+		item := func(key, url string, number int) string {
+			return fmt.Sprintf(`{"key":"%s","outcome":"completed","pullRequest":{"number":%d,"url":"%s"}}`, key, number, url)
+		}
+		report := `{"outcome":"completed","summary":"opened a draft","workItems":[` + item("o/r#1", opened, 2) + `,` +
+			item("o/r#4", unannounced, 3) + `]}`
+		return fmt.Sprintf(`echo '{"type":"pull_request.created","workItem":"o/r#1","url":"%[3]s","number":2,"branch":"fix/1-x"}' >> %[1]s/progress.jsonl
+printf '%%s' '%[2]s' > %[1]s/report.json; echo 'END ok'`, req.ExecutionDir, report, opened)
+	})
+	res, err := e.app.RunTask("announcer")
+	if err != nil || res.Outcome != "started" {
+		t.Fatalf("run: %v %+v", err, res)
+	}
+	e.wait(res.ExecutionID, domain.StatusCompleted)
+	e.eventKeys(res.ExecutionID, domain.EventExecutionCompleted)
+	events, _, err := e.app.ExecutionEvents(res.ExecutionID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]int{}
+	for _, ev := range events {
+		if ev.Type == domain.EventPullRequestCreated || ev.Type == domain.EventPullRequestUpdated {
+			url, _ := ev.Payload["url"].(string)
+			got[ev.Type+" "+url]++
+		}
+	}
+	want := map[string]int{
+		domain.EventPullRequestCreated + " " + opened:      1,
+		domain.EventPullRequestUpdated + " " + unannounced: 1,
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("pull request events by type and URL: %v, want %v", got, want)
+	}
+}
+
 // A conflict the agent met keeps its code in the record, and its log holds it as a warning that a replay returns; the
 // execution continues.
 func TestConflictingActivityIsLogged(t *testing.T) {
