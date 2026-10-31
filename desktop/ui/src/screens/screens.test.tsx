@@ -33,15 +33,21 @@ function newDoc(type: "github" | "general" | "script", name: string): Doc {
   return { apiVersion: "harmflow/v1alpha1", kind: "Task", metadata: { id: slugify(name), name }, spec };
 }
 
-// The daemon as the client sees it: an answer per route, and every request it received.
-const daemon = vi.hoisted(() => ({ answers: new Map<string, unknown>(), requests: [] as string[] }));
+// The daemon as the client sees it: an answer per route, every request it received, and the body of each one that sent
+// a body.
+const daemon = vi.hoisted(() => ({
+  answers: new Map<string, unknown>(),
+  requests: [] as string[],
+  bodies: [] as { request: string; body: unknown }[],
+}));
 vi.mock("../api/transport", () => ({
   isTauri: () => false,
   EVENT_TYPES: [],
   transport: {
     mode: "http",
-    request: async (method: string, path: string) => {
+    request: async (method: string, path: string, body?: unknown) => {
       daemon.requests.push(`${method} ${path}`);
+      if (body !== undefined) daemon.bodies.push({ request: `${method} ${path}`, body });
       const route = path.split("?")[0];
       return daemon.answers.has(route) ? { status: 200, body: daemon.answers.get(route) } : { status: 404, body: null };
     },
@@ -566,6 +572,71 @@ describe("the choice to keep HarmFlow in the menu bar on ⌘Q", () => {
     await act(async () => keepToggle().click());
     await settle();
     expect(daemon.requests.filter((r) => !r.startsWith("GET "))).toEqual([]);
+  });
+});
+
+// Settings → Notifications: the global level offers its three values, and the one chosen is what the daemon receives.
+// What the daemon does with each level is app › TestNotificationLevelFiltersTheTasksEvents's.
+describe("the global notification level", () => {
+  let root: Root | undefined;
+  let host: HTMLElement | undefined;
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    host?.remove();
+    root = host = undefined;
+    daemon.answers.clear();
+    daemon.requests.length = 0;
+    daemon.bodies.length = 0;
+    patchStateForTests({ settings });
+  });
+
+  const settle = () => act(() => new Promise<void>((resolve) => setImmediate(resolve)));
+  const level = () => host!.querySelector<HTMLSelectElement>("#settings-notification-level")!;
+
+  async function render() {
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(<SettingsScreen section="notifications" />));
+    await settle();
+  }
+
+  /** Picks an option as the user does, so that React sees the change. */
+  async function choose(value: string) {
+    const setValue = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!;
+    await act(async () => {
+      setValue.call(level(), value);
+      level().dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await settle();
+  }
+
+  it("offers exactly all, failures and attention only, and none, with the saved level selected", async () => {
+    daemon.answers.set("/settings", settings);
+    await render();
+    expect([...level().options].map((o) => [o.value, o.textContent])).toEqual([
+      ["all", "Todas"],
+      ["failures_and_attention", "Somente falhas e atenção"],
+      ["none", "Nenhuma"],
+    ]);
+    expect(level().value).toBe("all");
+  });
+
+  it.each(["failures_and_attention", "none", "all"] as const)("sends notificationLevel %s once it is chosen", async (chosen) => {
+    const before = { ...settings, notificationLevel: chosen === "all" ? "none" : "all" } as const;
+    patchStateForTests({ settings: before });
+    daemon.answers.set("/settings", before);
+    await render();
+    expect(level().value).toBe(before.notificationLevel);
+
+    // The daemon stores the patch, and the settings read after it hold it.
+    daemon.answers.set("/settings", { ...settings, notificationLevel: chosen });
+    daemon.requests.length = 0;
+    daemon.bodies.length = 0;
+    await choose(chosen);
+    expect(daemon.bodies).toEqual([{ request: "PATCH /settings", body: { notificationLevel: chosen } }]);
+    expect(daemon.requests.filter((r) => !r.startsWith("GET "))).toEqual(["PATCH /settings"]);
+    expect(level().value).toBe(chosen);
   });
 });
 
