@@ -129,4 +129,6 @@ process. Do not set them yourself.
 
 The daemon's unit tests have their own, set the same way: `HARMFLOW_TEST_CRASH_POINT`, `HARMFLOW_TEST_CRASH_DIR`,
 `HARMFLOW_TEST_CRASH_ID`, and `HARMFLOW_TEST_CRASH_CONTENT` (`daemon/internal/adapters/fsstore`), and
-`HARMFLOW_TEST_TASK_FILE_CRASH_DIR` and `HARMFLOW_TEST_TASK_FILE_CRASH_CONTENT` (`daemon/internal/app`).
+`HARMFLOW_TEST_TASK_FILE_CRASH_DIR` and `HARMFLOW_TEST_TASK_FILE_CRASH_CONTENT` (`daemon/internal/app`). The desktop
+shell has its own, `HARMFLOW_TEST_SHELL_CONTROL`, which turns on its debug build's control channel
+(`desktop/src-tauri/src/test_control.rs`) and which `TestClosingTheWindowFollowsTheTraySetting` sets.
