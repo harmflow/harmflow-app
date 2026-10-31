@@ -1,2 +1,8 @@
 packages:
   - ui
+
+# GHSA-g3hv-75wg-m249 marks every minimatch below 11.0.1, and each @redocly/openapi-core 1.x release, which
+# openapi-typescript asks for, pins minimatch to 5.1.9. Remove this override once a @redocly/openapi-core release
+# takes a patched minimatch.
+overrides:
+  '@redocly/openapi-core>minimatch': '>=11.0.1'
