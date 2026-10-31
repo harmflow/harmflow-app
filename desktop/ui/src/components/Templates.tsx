@@ -2,17 +2,11 @@
 // the Tasks screen, the Overview's empty state, and onboarding.
 import { useTranslation } from "react-i18next";
 import type { Template } from "../api/types";
+import { toneClass, typeGlyph } from "../lib/taskType";
 import { localized, offeredTemplates } from "../lib/templates";
 import { useStore } from "../state/store";
-import { Icon, type IconName } from "./Icon";
+import { Icon } from "./Icon";
 import { Modal, cx } from "./ui";
-
-/** Each task type's icon, and whether it takes the violet tint. */
-const TYPE_ICONS: Record<string, { icon: IconName; violet?: boolean }> = {
-  github: { icon: "code" },
-  general: { icon: "sparkle", violet: true },
-  script: { icon: "terminal" },
-};
 
 /** One button per template the daemon offers, named and described in the interface's language. */
 export function TemplateButtons({ onPick, disabled }: { onPick: (template: string) => void; disabled?: boolean }) {
@@ -22,11 +16,11 @@ export function TemplateButtons({ onPick, disabled }: { onPick: (template: strin
   return (
     <div className="templates">
       {templates.map((tpl: Template) => {
-        const look = TYPE_ICONS[tpl.type ?? ""] ?? { icon: "sparkle" };
+        const glyph = typeGlyph(tpl.type);
         return (
           <button key={tpl.id} type="button" className="template" disabled={disabled} onClick={() => onPick(tpl.id)}>
-            <span className={cx("template__icon", look.violet && "template__icon--violet")}>
-              <Icon name={look.icon} size={24} />
+            <span className={cx("template__icon", toneClass(glyph.tone))}>
+              <Icon name={glyph.icon} size={24} />
             </span>
             <strong>{localized(tpl.name, i18n.language)}</strong>
             <span className="muted">{localized(tpl.description, i18n.language)}</span>

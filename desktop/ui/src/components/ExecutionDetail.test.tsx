@@ -1206,3 +1206,26 @@ describe("a script task's execution", () => {
     expect(body()).toContain("Implement org/core-banking#123.");
   });
 });
+
+describe("the detail header's glyph", () => {
+  const glyph = () => {
+    const span = host!.querySelector<HTMLElement>(".detail__header .exec-card__glyph")!;
+    return { icon: span.querySelector("svg")!.dataset.icon, tones: [...span.classList].filter((c) => c.startsWith("type-glyph--")) };
+  };
+  const typed = (taskType: string): Execution => ({ ...completed, id: `exec-glyph-${taskType}`, taskType, workItem: undefined, workItems: [] });
+
+  it("shows each task type's glyph and tone, the New task dialog's, never the settings gear", async () => {
+    for (const [taskType, expected] of [
+      ["github", { icon: "code", tones: ["type-glyph--blue"] }],
+      ["general", { icon: "sparkle", tones: ["type-glyph--violet"] }],
+      ["script", { icon: "terminal", tones: ["type-glyph--blue"] }],
+      ["webhook", { icon: "dot", tones: ["type-glyph--blue"] }],
+    ] as const) {
+      await open(typed(taskType), [], capture());
+      expect(glyph(), taskType).toEqual(expected);
+      act(() => root!.unmount());
+      host!.remove();
+    }
+    root = host = undefined;
+  });
+});

@@ -5,7 +5,7 @@
 // list and the editor opened next show the file's definition, its YAML tab the file's text byte for byte
 // (harmflow-app#461), and a save builds on its revision (harmflow-app#304):
 // that the daemon answers with the file as it is then is itest › TestTaskLifecycle's and TestFormDocumentIsTheFile's,
-// and app › TestExternalEdits'.
+// and app › TestExternalEdits'. Each row shows its task type's glyph and tone (harmflow-app#471).
 import { EditorView } from "@codemirror/view";
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -124,6 +124,24 @@ async function click(target: HTMLElement) {
   await act(async () => target.click());
   await settle();
 }
+
+describe("the Tasks screen's rows", () => {
+  it("show each task type's glyph and tone, the New task dialog's, and one fallback for a type it does not know", async () => {
+    const typed = (type: string): TaskSummary => ({ ...standup, id: `${type}-task`, name: `A ${type} task`, type });
+    await open(["github", "general", "script", "webhook"].map(typed));
+    const glyph = (id: string) => {
+      const span = row(id)!.querySelector<HTMLElement>(".task-row__glyph")!;
+      return {
+        icon: span.querySelector("svg")!.dataset.icon,
+        tones: [...span.classList].filter((c) => c.startsWith("type-glyph--")),
+      };
+    };
+    expect(glyph("github-task")).toEqual({ icon: "code", tones: ["type-glyph--blue"] });
+    expect(glyph("general-task")).toEqual({ icon: "sparkle", tones: ["type-glyph--violet"] });
+    expect(glyph("script-task")).toEqual({ icon: "terminal", tones: ["type-glyph--blue"] });
+    expect(glyph("webhook-task")).toEqual({ icon: "dot", tones: ["type-glyph--blue"] });
+  });
+});
 
 describe("the Tasks screen's toggle", () => {
   it("disables a task, reads the list again to show it disabled, and enables it", async () => {
