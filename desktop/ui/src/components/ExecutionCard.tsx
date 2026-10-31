@@ -6,6 +6,7 @@ import type { ExecutionSummary } from "../api/types";
 import { isActive } from "../api/types";
 import { fieldText } from "../lib/daemonText";
 import { formatTime } from "../lib/format";
+import { toneClass, typeGlyph } from "../lib/taskType";
 import { buildTimeline } from "../lib/timeline";
 import { useStore } from "../state/store";
 import { HarnessLabel } from "./Shell";
@@ -66,7 +67,7 @@ export function ExecutionCard({
   const { t, i18n } = useTranslation();
   const step = useCurrentStep(execution);
   const active = isActive(execution.status);
-  const isGithub = execution.taskType === "github";
+  const glyph = typeGlyph(execution.taskType);
 
   return (
     <article
@@ -77,8 +78,8 @@ export function ExecutionCard({
       aria-pressed={selected}
     >
       <header className="exec-card__header">
-        <span className="exec-card__glyph" aria-hidden="true">
-          <Icon name={isGithub ? "code" : "settings"} size={20} />
+        <span className={cx("exec-card__glyph", toneClass(glyph.tone))} aria-hidden="true">
+          <Icon name={glyph.icon} size={20} />
         </span>
         <h3 className="exec-card__title" title={execution.taskName}>
           {execution.workItem ? `${execution.taskName} · ${execution.workItem.split("/").pop()}` : execution.taskName}

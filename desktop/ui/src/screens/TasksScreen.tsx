@@ -15,6 +15,7 @@ import { daemonText } from "../lib/daemonText";
 import { formatRelative } from "../lib/format";
 import { useNow } from "../lib/hooks";
 import type { Doc } from "../lib/taskForm";
+import { toneClass, typeGlyph } from "../lib/taskType";
 import { actions, useStore } from "../state/store";
 import { ImportDialog } from "./ImportDialog";
 
@@ -219,8 +220,8 @@ function TaskList({ onView, onOpenExecution }: { onView: (v: TaskView) => void; 
             <article key={task.id} className={cx("task-row", !task.enabled && "task-row--disabled")}>
               <div className="task-row__main" onClick={() => onView({ kind: "edit", id: task.id })}>
                 <div className="task-row__title">
-                  <span className="task-row__glyph">
-                    <Icon name={task.type === "github" ? "code" : "sparkle"} size={18} />
+                  <span className={cx("task-row__glyph", toneClass(typeGlyph(task.type).tone))}>
+                    <Icon name={typeGlyph(task.type).icon} size={18} />
                   </span>
                   <strong>{task.name}</strong>
                   <span className="mono muted small">{task.id}</span>
