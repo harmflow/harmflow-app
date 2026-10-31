@@ -40,6 +40,17 @@ function fallbackYaml(doc: Doc): string {
   return JSON.stringify(doc, null, 2) + "\n";
 }
 
+/** Whether two JSON values are equal by value: key order aside, and a key set to undefined as one never set. */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) return a.length === (b as unknown[]).length && a.every((v, i) => sameValue(v, (b as unknown[])[i]));
+  const keys = (o: object) => Object.keys(o).filter((k) => (o as Record<string, unknown>)[k] !== undefined);
+  const ka = keys(a);
+  return ka.length === keys(b).length && ka.every((k) => sameValue((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
+}
+
 export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck }: TaskEditorProps) {
   const { t } = useTranslation();
   const catalog = useStore((s) => s.catalog);
@@ -50,6 +61,10 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
   const [tab, setTab] = useState<EditorTab>("form");
   const [doc, setDoc] = useState<Doc>(() => (task?.document as Doc) ?? initial ?? {});
   const [yaml, setYaml] = useState<string>(() => task?.yaml ?? (initial ? fallbackYaml(initial) : ""));
+  // The file's text as the editor was loaded or last saved with it, and the document of that moment. The daemon's
+  // serialization of a document keeps no comment and no key order, so the YAML tab shows this text while the form's
+  // document is still that one, by value.
+  const stored = useRef<{ doc: Doc; yaml: string } | null>(task ? { doc: task.document as Doc, yaml: task.yaml } : null);
   const [baseRevision, setBaseRevision] = useState(task?.revision);
   const [validation, setValidation] = useState<ValidationResult | null>(task?.validation ?? null);
   const [dirty, setDirty] = useState(false);
@@ -109,7 +124,9 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
   const switchTab = async (next: EditorTab) => {
     if (next === tab) return;
     try {
-      if (next === "yaml") {
+      if (next === "yaml" && stored.current && sameValue(doc, stored.current.doc)) {
+        setYaml(stored.current.yaml);
+      } else if (next === "yaml") {
         const res = await api.validateTask({ document: doc });
         setYaml(res.yaml ?? fallbackYaml(doc));
         setValidation(res);
@@ -140,6 +157,7 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
       setBaseRevision(saved.revision);
       setDoc(saved.document as Doc);
       setYaml(saved.yaml);
+      stored.current = { doc: saved.document as Doc, yaml: saved.yaml };
       setValidation(saved.validation ?? null);
       openedAtEvent.current = getState().externalChanges[saved.id] ?? openedAtEvent.current;
       void actions.refreshTasks();
@@ -181,6 +199,7 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
     const fresh = await api.task(task.id);
     setDoc(fresh.document as Doc);
     setYaml(fresh.yaml);
+    stored.current = { doc: fresh.document as Doc, yaml: fresh.yaml };
     setBaseRevision(fresh.revision);
     setValidation(fresh.validation ?? null);
     setDirty(false);
