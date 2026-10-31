@@ -42,7 +42,10 @@ installed. Each one skips unless you opt in. A helper named for the CLI decides:
 - `realClaude` (`claude_code_test.go`) skips the test unless `HARMFLOW_TEST_CLAUDE_CODE` is exactly `1` and `claude`
   is on the `PATH`;
 - `realCodex` (`codex_test.go`) skips the test unless `HARMFLOW_TEST_CODEX` is exactly `1` and `codex` is on the
-  `PATH`.
+  `PATH`;
+- `realDesktop` (`desktop_test.go`) skips the test unless it runs on macOS, `HARMFLOW_TEST_DESKTOP` is exactly
+  `1`, and `cargo` is on the `PATH`. It starts no harness: it builds the desktop shell's debug build, the only one with
+  the control channel a test drives it through, and opens its real window.
 
 A daemon package cannot import these helpers, so `daemon/internal/app` has its own `realClaude` and `realCodex`, which
 read the same variables the same way. Every test that calls one of them belongs in this table.
@@ -71,6 +74,7 @@ read the same variables the same way. Every test that calls one of them belongs 
 | `TestNamedIssueAndNoSelectionFindTheirWork` (`issue_selection_test.go`) | `HARMFLOW_TEST_CLAUDE_CODE=1` | What `TestFailedIssueIsRetriedUntilItsLimit` needs but its fixtures, and the right to open and close issues in the sandbox repository: the test opens two issues labelled `issue-selection-test`, creating that label when it is missing, and closes them when it ends, failed or not. Before it opens them, it closes what an earlier run left open under that label. Its prompt with no selection reads every open issue of the sandbox, and may select a `queue-test` fixture, which it leaves as it is: each session is stopped once it has selected its issue |
 | `TestPromptMarkingAndBranchNamingAreFollowed` (`prompt_marking_test.go`) | `HARMFLOW_TEST_CLAUDE_CODE=1` | What `TestFailedIssueIsRetriedUntilItsLimit` needs but its fixtures, and write access to the sandbox repository, to push a branch and open an issue, a label, and a pull request: its clone keeps its push URL, and its session pushes a work branch and opens a draft pull request. The test opens a fixture issue labelled `prompt-marking-test`, and its task's prompt names the branch `auto/<issue-number>` and the label `bot:auto` alone as the marking, in place of `harmflow`; it creates both labels when they are missing. When it ends, failed or not, it closes the pull request linking the issue, deletes its branch, and closes the issue, found by the issue and its label, never by the branch name; before it opens its fixture, it does the same to what an earlier run left open under that label. It never reads or changes the other fixture sets |
 | `TestIssueAssignedMeanwhileIsLoggedAsAConflict` (`conflicting_activity_test.go`) | `HARMFLOW_TEST_CLAUDE_CODE=1` | What `TestFailedIssueIsRetriedUntilItsLimit` needs but its fixtures, and write access to the sandbox repository, to push a branch, open an issue, a label, and a pull request, and assign the issue: its clone keeps its push URL, and its session pushes a work branch and opens a draft pull request. The test opens a fixture issue labelled `conflict-test`, creating that label and `harmflow` when they are missing, and assigns it to the account `gh` is signed in with once the daemon tracks it as the execution's work item. When it ends, failed or not, it closes the pull request linking the issue, deletes its branch, and closes the issue, found by the issue and its label, never by the branch name; before it opens its fixture, it does the same to what an earlier run left open under that label. It never reads or changes the other fixture sets |
+| `TestChosenEventsReachMacOSAsNativeNotices` (`native_notices_test.go`) | `HARMFLOW_TEST_DESKTOP=1` | A Mac with a display, in a signed-in user session, `cargo` and `pnpm` on the `PATH`, the desktop's dependencies (`make deps`) and its sidecar (`make sidecar`), and nothing else answering at `localhost:1420`. The test starts its own daemon with the stand-in `fake-claude`, so it spends no usage, serves the interface from its dev server, which the shell's debug build loads, and starts the shell. A task that notifies on `execution.completed` and `execution.failed` completes once and fails once, and the test reads the notices macOS delivered for the shell through its test control channel, expecting one of each with the interface's en-US title and body. A debug build delivers its notices under the identity the notification plugin gives a development build, Terminal's: allow Terminal's notifications once before the run, or the test skips, naming the identity. In CI and on Linux it skips |
 
 Run one of them on its own:
 
@@ -117,4 +121,6 @@ process. Do not set them yourself.
 
 The daemon's unit tests have their own, set the same way: `HARMFLOW_TEST_CRASH_POINT`, `HARMFLOW_TEST_CRASH_DIR`,
 `HARMFLOW_TEST_CRASH_ID`, and `HARMFLOW_TEST_CRASH_CONTENT` (`daemon/internal/adapters/fsstore`), and
-`HARMFLOW_TEST_TASK_FILE_CRASH_DIR` and `HARMFLOW_TEST_TASK_FILE_CRASH_CONTENT` (`daemon/internal/app`).
+`HARMFLOW_TEST_TASK_FILE_CRASH_DIR` and `HARMFLOW_TEST_TASK_FILE_CRASH_CONTENT` (`daemon/internal/app`). The desktop
+shell has its own, `HARMFLOW_TEST_SHELL_CONTROL`, which turns on its debug build's control channel
+(`desktop/src-tauri/src/test_control.rs`) and which `TestChosenEventsReachMacOSAsNativeNotices` sets.

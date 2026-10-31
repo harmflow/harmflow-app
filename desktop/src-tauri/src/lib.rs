@@ -6,6 +6,8 @@ mod menu;
 mod notice;
 mod sse;
 mod state;
+#[cfg(all(debug_assertions, target_os = "macos"))]
+mod test_control;
 mod tray;
 mod window;
 
@@ -167,6 +169,8 @@ pub fn run() {
             notice::listen(app.handle())?;
             sse::spawn(app.handle().clone());
             tray::schedule_refresh(app.handle().clone());
+            #[cfg(all(debug_assertions, target_os = "macos"))]
+            test_control::listen(app.handle());
             // A normal start shows the window once the interface has painted, not before (harmflow-app#96).
             if start_hidden {
                 window::hide_main(app.handle());
