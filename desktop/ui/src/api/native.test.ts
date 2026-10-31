@@ -3,7 +3,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { native } from "./native";
 
-const plugin = vi.hoisted(() => ({ isPermissionGranted: vi.fn(async () => true), sendNotification: vi.fn() }));
+const plugin = vi.hoisted(() => ({
+  isPermissionGranted: vi.fn(async () => true),
+  requestPermission: vi.fn(async (): Promise<NotificationPermission> => "granted"),
+  sendNotification: vi.fn(),
+}));
 vi.mock("@tauri-apps/plugin-notification", () => plugin);
 
 const webview = vi.hoisted(() => ({ setZoom: vi.fn(async (_scale: number) => {}) }));
@@ -55,5 +59,21 @@ describe("native.notify", () => {
     plugin.isPermissionGranted.mockResolvedValueOnce(false);
     await native.notify("Failed", "Implement GitHub issues", "exec-8f3a2c");
     expect(plugin.sendNotification).not.toHaveBeenCalled();
+  });
+
+  // harmflow-app#515: the user denied the notices. The request reports the denial, and each later notice is dropped
+  // without an error, so a denied permission fails nothing.
+  it("sends nothing and fails nothing when the permission is denied", async () => {
+    plugin.isPermissionGranted.mockResolvedValue(false);
+    plugin.requestPermission.mockResolvedValueOnce("denied");
+    try {
+      await expect(native.ensureNotificationPermission()).resolves.toBe(false);
+      await expect(native.notify("Task ticking completed", "The execution finished.", "exec-8f3a2c")).resolves.toBeUndefined();
+      await expect(native.notify("Task ticking failed", "The execution failed: boom", "exec-9b1d4e")).resolves.toBeUndefined();
+      expect(plugin.requestPermission).toHaveBeenCalledTimes(1);
+      expect(plugin.sendNotification).not.toHaveBeenCalled();
+    } finally {
+      plugin.isPermissionGranted.mockResolvedValue(true);
+    }
   });
 });

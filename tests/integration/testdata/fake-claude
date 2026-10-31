@@ -2,7 +2,7 @@
 # A stand-in for the Claude Code CLI that speaks its stream-json format. The task's prompt picks the scenario:
 # SCENARIO=ok (default), SCENARIO=quota, SCENARIO=quotausage (a quota after the result line reported usage and cost),
 # SCENARIO=leftover (a quota after starting a background process it leaves running, whose pid is in leftover.pid),
-# SCENARIO=slow, SCENARIO=session, SCENARIO=stray, SCENARIO=report, SCENARIO=secret, SCENARIO=ticks (a message every
+# SCENARIO=error (a session that ends in an error, which fails the execution), SCENARIO=slow, SCENARIO=session, SCENARIO=stray, SCENARIO=report, SCENARIO=secret, SCENARIO=ticks (a message every
 # half second for five seconds, then success), SCENARIO=push (commits on a branch of the workspace's repository, pushes
 # it, reports the push, and waits), SCENARIO=pullrequest (reports a pull request and waits). A session of push or
 # pullrequest whose context.json lists an interrupted execution repeats nothing and ends at once. With PARTIAL=1 in the
@@ -91,6 +91,10 @@ case "$SCENARIO" in
     echo $! > "$HARMFLOW_EXECUTION_DIR/leftover.tmp" && mv "$HARMFLOW_EXECUTION_DIR/leftover.tmp" "$HARMFLOW_EXECUTION_DIR/leftover.pid"
     echo '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rateLimitType":"five_hour","resetsAt":1}}'
     echo '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Claude AI usage limit reached"}'
+    exit 1 ;;
+  error)
+    # A session that ends in an error other than a quota, which fails the execution.
+    echo '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"The stand-in failed on purpose."}'
     exit 1 ;;
   slow)
     sleep 300 &
