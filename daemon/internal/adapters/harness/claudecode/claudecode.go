@@ -714,6 +714,7 @@ func toolName(rule string) string {
 
 type toolUse struct {
 	name, path string
+	failed     bool // its tool_result was an error, which a refusal is too
 }
 
 type parser struct {
@@ -791,6 +792,10 @@ type streamLine struct {
 	Usage        *apiUsage             `json:"usage"`
 	ModelUsage   map[string]modelUsage `json:"modelUsage"`
 	RateLimit    *rateLimitInfo        `json:"rate_limit_info"`
+	// PermissionDenials, on the result line, are the calls Claude Code refused during the session.
+	PermissionDenials []struct {
+		ToolUseID string `json:"tool_use_id"`
+	} `json:"permission_denials"`
 }
 
 type contentBlock struct {
@@ -874,7 +879,11 @@ func (p *parser) Line(line []byte) []ports.HarnessEvent {
 			if c.Type != "tool_result" {
 				continue
 			}
-			use := p.tools[c.ToolUseID]
+			use, known := p.tools[c.ToolUseID]
+			if known && c.IsError {
+				use.failed = true
+				p.tools[c.ToolUseID] = use
+			}
 			out = append(out, ports.HarnessEvent{Kind: ports.HarnessToolDone, ToolID: c.ToolUseID, Tool: use.name,
 				IsError: c.IsError, Output: classify.Truncate(resultText(c.Content), 4000)})
 			if !c.IsError && use.path != "" && containsStr([]string{"Edit", "Write", "MultiEdit", "NotebookEdit"}, use.name) {
@@ -901,8 +910,28 @@ func (p *parser) Line(line []byte) []ports.HarnessEvent {
 		if sl.SessionID != "" {
 			p.sessionID = sl.SessionID
 		}
+		return p.declined(sl)
 	}
 	return nil
+}
+
+// declined corrects the end of each call the result line lists as refused: the call never ran, so it ends declined,
+// as a refusal of Codex's does, with no error, no exit code, and no changed file. Only a call whose end was an error is
+// corrected, each once; the refusal's own text, which changes between versions, is not read. Until the session's
+// result, and in a session that ends with none, the call stays failed.
+func (p *parser) declined(sl streamLine) []ports.HarnessEvent {
+	var out []ports.HarnessEvent
+	for _, d := range sl.PermissionDenials {
+		use, ok := p.tools[d.ToolUseID]
+		if !ok || !use.failed {
+			continue
+		}
+		use.failed = false
+		p.tools[d.ToolUseID] = use
+		out = append(out, ports.HarnessEvent{Kind: ports.HarnessToolDone, ToolID: d.ToolUseID, Tool: use.name,
+			Declined: true})
+	}
+	return out
 }
 
 // countMessage keeps a message's usage once: the CLI repeats it on every content-block line of the message, so
