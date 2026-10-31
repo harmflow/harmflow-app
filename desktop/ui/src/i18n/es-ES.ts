@@ -478,7 +478,6 @@ export const esES: Resources = {
     authentication_unverified: "no se pudo verificar la autenticación",
     codex_requirements_disallow:
       "los requisitos gestionados de Codex no permiten {{settings}}, con lo que HarmFlow lo ejecuta, así que Codex pasa a usar lo que permiten: {{allowed}}",
-    gh_auth_problem: "gh auth status informó de un problema",
   },
   cronFields: {
     minute: "minuto",
