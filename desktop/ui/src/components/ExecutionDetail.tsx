@@ -10,6 +10,7 @@ import { isActive } from "../api/types";
 import type { Tone } from "../design/tokens";
 import { daemonText, eventText, fieldText } from "../lib/daemonText";
 import { formatBytes, formatDateTime, formatDuration, formatTime, elapsedMs } from "../lib/format";
+import { toneClass, typeGlyph } from "../lib/taskType";
 import { buildTimeline, changedFilesFromEvents, toolKey, type TimelineItem } from "../lib/timeline";
 import { actions, useStore } from "../state/store";
 import { CostsTab } from "./CostsTab";
@@ -77,6 +78,7 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
   // A script task runs a program: its output and the program as it ran, and no harness, model, prompt, conversation, or
   // cost.
   const isScript = exec.taskType === "script";
+  const glyph = typeGlyph(exec.taskType);
 
   const tabs: TabDef<TabKey>[] = isScript
     ? [
@@ -104,8 +106,8 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
   return (
     <section className="detail panel">
       <header className="detail__header">
-        <span className="exec-card__glyph exec-card__glyph--lg" aria-hidden="true">
-          <Icon name={exec.taskType === "github" ? "code" : isScript ? "terminal" : "settings"} size={24} />
+        <span className={cx("exec-card__glyph exec-card__glyph--lg", toneClass(glyph.tone))} aria-hidden="true">
+          <Icon name={glyph.icon} size={24} />
         </span>
         <div className="detail__heading">
           <div className="detail__title-row">

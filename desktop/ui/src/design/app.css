@@ -1268,10 +1268,8 @@ body:has([aria-modal="true"]) .tooltip {
   width: 36px;
   height: 36px;
   flex: none;
-  border: 1px solid rgba(var(--hf-rgb-blue), 0.45);
+  border: 1px solid;
   border-radius: var(--hf-radius-md);
-  background: var(--hf-color-blue-soft);
-  color: var(--hf-color-blue);
 }
 
 .exec-card__glyph--lg {
@@ -3334,8 +3332,6 @@ button.queue-item:hover,
   width: 28px;
   height: 28px;
   border-radius: var(--hf-radius-sm);
-  background: var(--hf-color-blue-soft);
-  color: var(--hf-color-blue);
 }
 
 .task-row__desc {
@@ -3398,11 +3394,18 @@ button.queue-item:hover,
   width: 42px;
   height: 42px;
   border-radius: var(--hf-radius-md);
+}
+
+/* A task type's tone, as lib/taskType.ts gives it, on the glyph of every view that shows the type: the template, the
+   task row, and the execution card and detail. After those rules, so that its border color wins over the card's. */
+.type-glyph--blue {
+  border-color: rgba(var(--hf-rgb-blue), 0.45);
   background: var(--hf-color-blue-soft);
   color: var(--hf-color-blue);
 }
 
-.template__icon--violet {
+.type-glyph--violet {
+  border-color: rgba(var(--hf-rgb-violet), 0.45);
   background: var(--hf-color-violet-soft);
   color: var(--hf-color-violet);
 }
