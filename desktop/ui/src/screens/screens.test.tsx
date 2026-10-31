@@ -5,6 +5,7 @@ import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { native } from "../api/native";
 import type { Execution, ExecutionSummary, HarmflowEvent, Harness, Health, Notification, Settings, TaskSummary, WorkItem } from "../api/types";
 import { ExecutionCard } from "../components/ExecutionCard";
 import { RawCaptures } from "../components/ExecutionDetail";
@@ -33,15 +34,16 @@ function newDoc(type: "github" | "general" | "script", name: string): Doc {
   return { apiVersion: "harmflow/v1alpha1", kind: "Task", metadata: { id: slugify(name), name }, spec };
 }
 
-// The daemon as the client sees it: an answer per route, and every request it received.
-const daemon = vi.hoisted(() => ({ answers: new Map<string, unknown>(), requests: [] as string[] }));
+// The daemon as the client sees it: an answer per route, and every request it received, with the body of each write.
+const daemon = vi.hoisted(() => ({ answers: new Map<string, unknown>(), requests: [] as string[], bodies: [] as unknown[] }));
 vi.mock("../api/transport", () => ({
   isTauri: () => false,
   EVENT_TYPES: [],
   transport: {
     mode: "http",
-    request: async (method: string, path: string) => {
+    request: async (method: string, path: string, body?: unknown) => {
       daemon.requests.push(`${method} ${path}`);
+      if (method !== "GET") daemon.bodies.push(body);
       const route = path.split("?")[0];
       return daemon.answers.has(route) ? { status: 200, body: daemon.answers.get(route) } : { status: 404, body: null };
     },
@@ -664,6 +666,55 @@ describe("the executions screen's cards", () => {
   });
 });
 
+// Settings → General, harmflow-app#464: the tray option is on with the daemon's fresh settings, and switching it off
+// saves it and tells the shell, which then lets a close of the window end the interface instead of hiding it.
+describe("the tray option", () => {
+  let root: Root | undefined;
+  let host: HTMLElement | undefined;
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    host?.remove();
+    root = host = undefined;
+    daemon.answers.clear();
+    daemon.requests.length = 0;
+    daemon.bodies.length = 0;
+    patchStateForTests({ settings });
+    vi.restoreAllMocks();
+  });
+
+  const settle = () => act(() => new Promise<void>((resolve) => setImmediate(resolve)));
+  const trayToggle = () => {
+    const label = [...host!.querySelectorAll<HTMLLabelElement>("label.setting-row__label")].find((l) => l.textContent === "Mostrar o HarmFlow na barra de menus")!;
+    return document.getElementById(label.htmlFor) as HTMLInputElement;
+  };
+
+  it("is on with the fresh settings, and switched off sends one patch and tells the shell", async () => {
+    const shell = vi.spyOn(native, "setTrayEnabled").mockResolvedValue();
+    daemon.answers.set("/settings", settings);
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(<SettingsScreen />));
+    await settle();
+    expect(trayToggle().checked).toBe(true);
+    expect(trayToggle().disabled).toBe(false);
+
+    // The daemon stores the patch, and the settings read after it hold it.
+    daemon.answers.set("/settings", { ...settings, trayEnabled: false });
+    daemon.requests.length = 0;
+    daemon.bodies.length = 0;
+    shell.mockClear();
+    await act(async () => trayToggle().click());
+    await settle();
+    expect(daemon.requests.filter((r) => !r.startsWith("GET "))).toEqual(["PATCH /settings"]);
+    expect(daemon.bodies).toEqual([{ trayEnabled: false }]);
+    // A settings refresh sends the stored value to the shell too, so every call says false, and there is one at least.
+    expect(shell).toHaveBeenCalledWith(false);
+    expect(shell.mock.calls.every(([enabled]) => enabled === false)).toBe(true);
+    expect(trayToggle().checked).toBe(false);
+  });
+});
+
 // Settings → General: keeping HarmFlow in the menu bar on ⌘Q sits under the tray option, and needs the tray.
 describe("the choice to keep HarmFlow in the menu bar on ⌘Q", () => {
   let root: Root | undefined;
@@ -675,6 +726,7 @@ describe("the choice to keep HarmFlow in the menu bar on ⌘Q", () => {
     root = host = undefined;
     daemon.answers.clear();
     daemon.requests.length = 0;
+    daemon.bodies.length = 0;
     patchStateForTests({ settings });
   });
 

@@ -71,9 +71,42 @@ pub fn hide_main<R: Runtime>(app: &AppHandle<R>) {
     let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 }
 
+/// Whether closing the window only hides it, as `menu::quit_hides` decides for ⌘Q: while the tray is shown. Otherwise
+/// the close goes through. The daemon runs on either way (harmflow-app#464).
+pub fn close_hides(tray_enabled: bool) -> bool {
+    tray_enabled
+}
+
+/// Whether the app stays when it is asked to exit: when the last window closed, with no exit code, while the tray is
+/// shown. Without the tray only the interface ends. The app menu's Quit and the tray's Quit interface exit with a code,
+/// which always goes through.
+pub fn exit_prevented(tray_enabled: bool, code: Option<i32>) -> bool {
+    tray_enabled && code.is_none()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn with_the_tray_a_close_only_hides_the_window_and_the_app_stays() {
+        assert!(close_hides(true));
+        assert!(exit_prevented(true, None));
+    }
+
+    #[test]
+    fn without_the_tray_a_close_and_its_exit_go_through() {
+        assert!(!close_hides(false));
+        assert!(!exit_prevented(false, None));
+    }
+
+    #[test]
+    fn an_exit_with_a_code_always_goes_through() {
+        for tray_enabled in [true, false] {
+            assert!(!exit_prevented(tray_enabled, Some(0)), "tray {tray_enabled}");
+            assert!(!exit_prevented(tray_enabled, Some(1)), "tray {tray_enabled}");
+        }
+    }
 
     // The arguments: start_hidden, visible, decided, ready, fallback_elapsed.
 
