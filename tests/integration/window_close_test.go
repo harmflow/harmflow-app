@@ -71,7 +71,9 @@ func startShell(t *testing.T, bin string, d *daemon) *shell {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	s := &shell{t: t, cmd: cmd, in: in, answers: make(chan map[string]any, 16), exited: make(chan struct{})}
+	// One answer at most is left unread: a close's, when the shell exited first.
+	s := &shell{t: t, cmd: cmd, in: in, answers: make(chan map[string]any, 1), exited: make(chan struct{})}
+	// Both goroutines stop once the shell exits, which the cleanup below makes sure of.
 	go func() {
 		// The shell may print lines of its own: only a JSON object is an answer.
 		lines := bufio.NewScanner(out)
