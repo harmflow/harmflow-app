@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -138,17 +139,20 @@ func TestCancelledSelectionCountsNoFailure(t *testing.T) {
 }
 
 // harmflow-app#312 and #440: an ignored report loses its work items' results, so the execution needs attention, with
-// the reason it was ignored, and every item its session selected counts a failure.
+// the reason it was ignored, and every item its session selected counts a failure. harmflow-app#506: a report that
+// breaks its schema is ignored with a reason and a warning that both name the schema error, the field the validator
+// found at fault and what is wrong with it.
 func TestIgnoredReportNeedsAttention(t *testing.T) {
 	for _, tc := range []struct {
 		name, report, key string
+		path              string // the field the validator reports at fault; empty for a case with no schema error
 	}{
 		{"not following its schema", `{"outcome":"completed","workItems":[{"key":"o/r#1","outcome":"completed",` +
-			`"pullRequest":"https://github.com/o/r/pull/9"}]}`, "report_schema_invalid"},
-		{"not JSON", `{"outcome":`, "report_not_json"},
+			`"pullRequest":"https://github.com/o/r/pull/9"}]}`, "report_schema_invalid", "/workItems/0/pullRequest"},
+		{"not JSON", `{"outcome":`, "report_not_json", ""},
 		// The schema bounds an issue number only from below, and no int holds this one.
 		{"not fitting its fields", `{"outcome":"completed","workItems":[{"key":"o/r#1","outcome":"completed",` +
-			`"issueNumber":100000000000000000000}]}`, "report_not_decodable"},
+			`"issueNumber":100000000000000000000}]}`, "report_not_decodable", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newEnv(t)
@@ -158,12 +162,30 @@ func TestIgnoredReportNeedsAttention(t *testing.T) {
 			if x.ErrorKey != tc.key || x.ErrorMessage == "" {
 				t.Errorf("error of the execution: %q %q; want the key %s and its text", x.ErrorKey, x.ErrorMessage, tc.key)
 			}
-			warned := false
-			for _, w := range x.Warnings {
-				warned = warned || w.Key == tc.key
+			var warning *domain.Warning
+			for i := range x.Warnings {
+				if x.Warnings[i].Key == tc.key {
+					warning = &x.Warnings[i]
+					break
+				}
 			}
-			if !warned {
+			if warning == nil {
 				t.Errorf("warnings %+v; want one with the key %s", x.Warnings, tc.key)
+			}
+			if tc.path != "" {
+				namesError := func(params map[string]string, message string) bool {
+					return params["path"] == tc.path && params["detail"] != "" &&
+						strings.Contains(message, params["path"]) && strings.Contains(message, params["detail"])
+				}
+				if !namesError(x.ErrorParams, x.ErrorMessage) {
+					t.Errorf("error of the execution: params %v, text %q; want the path %s, a detail, and a text holding both",
+						x.ErrorParams, x.ErrorMessage, tc.path)
+				}
+				if warning != nil && (!namesError(warning.Params, warning.Message) ||
+					warning.Params["detail"] != x.ErrorParams["detail"]) {
+					t.Errorf("warning %s: params %v, text %q; want the error's path %s and detail %q, and a text holding both",
+						tc.key, warning.Params, warning.Message, tc.path, x.ErrorParams["detail"])
+				}
 			}
 			for _, key := range []string{"o/r#1", "o/r#2"} {
 				if w := ledgerItem(e, "ignored", key); w == nil || w.Status != domain.WorkItemFailed || w.Failures != 1 {
