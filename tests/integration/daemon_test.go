@@ -1511,6 +1511,122 @@ func formDocument(t *testing.T, id string) map[string]any {
 	return doc
 }
 
+// Claude Code adds the allow rules of the user's settings to a task's permissions, so a rule there that allows more
+// lifts a restriction the task declares. A custom task that allows only Read and a workspace_write task are saved and
+// then run on the stand-in Claude Code, each case on a daemon whose configuration folder (CLAUDE_CONFIG_DIR) is its
+// own, never the machine's. With rules that allow Bash(*) and Write(/tmp/**), each task gets a warning naming the
+// user's settings, on the task and on its execution, with a policy.unenforced event: the tool allowlist on the first,
+// the edit directories on the second. A settings file that is not valid JSON cannot be checked, so both remain; with
+// no file neither shows; and a Write rule inside the second task's workspace leaves its edits limited. Warnings are
+// matched by the restriction they name, never counted, so the shell and extra-usage warnings count for no case.
+func TestClaudeCodeUserSettingsThatLiftARestrictionAreWarned(t *testing.T) {
+	t.Parallel()
+	type restricted struct {
+		id, subject, key string
+		extra            func(work string) string
+	}
+	allowlist := restricted{id: "custom-read", subject: "tool_allowlist", key: "restriction_claude_allow_rules",
+		extra: func(string) string {
+			return "  permissions:\n    profile: custom\n    custom:\n      allowedTools: [Read]\n"
+		}}
+	edits := restricted{id: "workspace-write", subject: "edit_directories", key: "restriction_claude_edit_rules",
+		extra: func(work string) string {
+			return "  workspace:\n    path: " + strconv.Quote(work) + "\n  permissions:\n    profile: workspace_write\n"
+		}}
+	allows := func(rules ...string) string {
+		return mustJSON(map[string]any{"permissions": map[string]any{"allow": rules}})
+	}
+	cases := []struct {
+		name string
+		// settings is the user's settings.json, given the second task's workspace; nil writes no file.
+		settings func(work string) string
+		// warned says, for each task the case checks, whether its restriction is warned.
+		warned map[string]bool
+	}{
+		{name: "rules that allow more",
+			settings: func(string) string { return allows("Bash(*)", "Write(/tmp/**)") },
+			warned:   map[string]bool{allowlist.id: true, edits.id: true}},
+		{name: "not valid JSON",
+			settings: func(string) string { return `{"permissions": {"allow": ["Bash(*)"` },
+			warned:   map[string]bool{allowlist.id: true, edits.id: true}},
+		{name: "no settings file",
+			warned: map[string]bool{allowlist.id: false, edits.id: false}},
+		{name: "a write rule inside the workspace",
+			settings: func(work string) string { return allows("Write(/" + work + "/**)") },
+			warned:   map[string]bool{edits.id: false}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			home := t.TempDir()
+			config := filepath.Join(home, "claude")
+			if err := os.MkdirAll(config, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			// Resolved, as the adapter compares an editing rule's path with the workspace.
+			work, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.settings != nil {
+				if err := os.WriteFile(filepath.Join(config, "settings.json"), []byte(c.settings(work)), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			d := startDaemon(t, home, "CLAUDE_CONFIG_DIR="+config)
+			// Outside the home folder, so an allowed folder.
+			d.call("PATCH", "/settings", map[string]any{"allowedFolders": []any{work}}, 200)
+			for _, r := range []restricted{allowlist, edits} {
+				want, checked := c.warned[r.id]
+				if !checked {
+					continue
+				}
+				saved := d.call("POST", "/tasks", map[string]any{"yaml": task(r.id, "Say hi.", r.extra(work))}, 201)
+				// A task's warning names the field it is about, so the restriction is told by the warning's text.
+				w := policyWarning(saved["warnings"], "messageKey", r.key)
+				if got := w != nil; got != want {
+					t.Errorf("POST /tasks %s warnings = %v, want a %s warning: %v", r.id, saved["warnings"], r.key, want)
+				}
+				if params, _ := w["params"].(map[string]any); w != nil && params["sources"] != "user" {
+					t.Errorf("POST /tasks %s warning %v names %v, want the user's settings", r.id, w, params["sources"])
+				}
+
+				x := d.completedRun(r.id)
+				w = policyWarning(x["warnings"], "subject", r.subject)
+				if got := w != nil; got != want {
+					t.Errorf("completedRun(%s) warnings = %v, want a %s warning: %v", r.id, x["warnings"], r.subject, want)
+				}
+				if params, _ := w["params"].(map[string]any); w != nil && (w["messageKey"] != r.key || params["sources"] != "user") {
+					t.Errorf("completedRun(%s) warning %v, want %s naming the user's settings", r.id, w, r.key)
+				}
+				var event map[string]any
+				for _, e := range d.events(x["id"].(string)) {
+					if p, _ := e["payload"].(map[string]any); e["type"] == "policy.unenforced" && p["subject"] == r.subject {
+						event = e
+					}
+				}
+				if got := event != nil; got != want {
+					t.Errorf("completedRun(%s) events hold a policy.unenforced event on %s: %v, want %v", r.id, r.subject, got, want)
+				}
+				if event != nil && event["messageKey"] != r.key {
+					t.Errorf("completedRun(%s) policy.unenforced event %v, want the key %s", r.id, event, r.key)
+				}
+			}
+		})
+	}
+}
+
+// policyWarning is the policy_unenforced warning among warnings, as the API serves them, whose field has the value, or
+// nil when none has.
+func policyWarning(warnings any, field, value string) map[string]any {
+	list, _ := warnings.([]any)
+	for _, raw := range list {
+		if w, _ := raw.(map[string]any); w["code"] == "policy_unenforced" && w[field] == value {
+			return w
+		}
+	}
+	return nil
+}
+
 // A new GitHub task, from the built-in template of the GitHub type, selects the built-in issue implementer of this
 // checkout, an agent and not a skill: it is copied whole, with no field left out, it brings the built-in skills it
 // uses, and the task the template builds, with the implementer's copy as its prompt and the agent as its origin, is

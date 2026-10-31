@@ -88,6 +88,9 @@ type fakeHarness struct {
 	// quota answers ReadQuota when set; otherwise every read finds a quota with nothing used. quotaReads counts them.
 	quota      func() (domain.Quota, error)
 	quotaReads int
+	// restrictions are what Prepare reports, at a save's policy check and at each attempt; none by default, as a harness
+	// that enforces everything.
+	restrictions []ports.Restriction
 }
 
 func (f *fakeHarness) ID() string   { return f.id }
@@ -173,8 +176,10 @@ func (f *fakeHarness) Prepare(_ ports.HarnessInfo, req ports.RunRequest) (ports.
 	if f.script != nil {
 		script = f.script(req)
 	}
+	restrictions := slices.Clone(f.restrictions)
 	f.mu.Unlock()
-	return ports.Invocation{Path: "/bin/sh", Args: []string{"-c", script}, Env: req.Env, Dir: req.WorkDir}, parser, nil
+	return ports.Invocation{Path: "/bin/sh", Args: []string{"-c", script}, Env: req.Env, Dir: req.WorkDir,
+		Restrictions: restrictions}, parser, nil
 }
 
 func (f *fakeHarness) setScript(s func(ports.RunRequest) string) {
@@ -5837,13 +5842,58 @@ func (e *env) noticeParams(eventType string) map[string]string {
 	return params
 }
 
-// An unenforced restriction runs with a warning on the task and on the execution.
-func TestPolicyWarningIsShown(t *testing.T) {
-	e := newEnv(t)
+// A restriction the harness reports as not enforced is named by a warning on the task when it is saved; the task still
+// runs, and its execution holds the same warning and a policy.unenforced event naming it. The warnings are matched by
+// the restriction they name, so another one, such as the extra-usage warning, counts neither for nor against it.
+func TestUnenforcedRestrictionIsWarnedOnTheTaskAndTheExecution(t *testing.T) {
+	const key = "restriction_claude_allow_rules"
+	text := domain.T(key, "Claude Code adds the allow rules of its {{where}} to the task's tool list",
+		"where", "user settings", "sources", "user")
+	e := newEnv(t, func(e *env) {
+		e.claude.restrictions = []ports.Restriction{
+			{Name: "read_only", Enforced: true, Text: domain.Text{Message: "enforced"}},
+			{Name: "tool_allowlist", Enforced: false, Text: text},
+		}
+	})
 	e.create("policy", "")
-	if v, _ := e.app.GetTask("policy"); len(v.Warnings) != 0 {
-		t.Errorf("the fake enforces everything, got %+v", v.Warnings)
+	v, err := e.app.GetTask("policy")
+	if err != nil {
+		t.Fatal(err)
 	}
+	if w := warningKeyed(v.Warnings, key); w == nil || w.Code != domain.WarningPolicyUnenforced {
+		t.Errorf("GetTask(policy) warnings = %+v, want a %s warning keyed %s", v.Warnings, domain.WarningPolicyUnenforced, key)
+	}
+	for _, w := range v.Warnings {
+		if w.Message == "enforced" {
+			t.Errorf("GetTask(policy) warnings = %+v, want none for the enforced restriction", v.Warnings)
+		}
+	}
+
+	r, _ := e.app.RunTask("policy")
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	var got []domain.Warning
+	for _, w := range x.Warnings {
+		if w.Code == domain.WarningPolicyUnenforced && (w.Subject == "tool_allowlist" || w.Subject == "read_only") {
+			got = append(got, w)
+		}
+	}
+	if len(got) != 1 || got[0].Subject != "tool_allowlist" || got[0].Key != key || got[0].Params["where"] != "user settings" {
+		t.Errorf("execution warnings = %+v, want one %s warning on tool_allowlist keyed %s", x.Warnings,
+			domain.WarningPolicyUnenforced, key)
+	}
+	if keys := e.eventKeys(x.ID, domain.EventExecutionCompleted); keys[domain.EventPolicyUnenforced] != key {
+		t.Errorf("events %v, want %s keyed %s", keys, domain.EventPolicyUnenforced, key)
+	}
+}
+
+// warningKeyed is the first warning whose message has the key, or nil when none has.
+func warningKeyed(ws []domain.Warning, key string) *domain.Warning {
+	for i := range ws {
+		if ws[i].Key == key {
+			return &ws[i]
+		}
+	}
+	return nil
 }
 
 // Cancelling the context Start received ends the scheduler, watcher, and maintenance loops, as Stop does.
