@@ -373,7 +373,7 @@ export const ptBR: Resources = {
     restriction_claude_allow_rules:
       "o Claude Code soma as regras de permissão das suas $t(claudeSettings.{{sources}}) à lista de ferramentas da tarefa, e elas permitem mais que a lista ou não puderam ser lidas; as configurações gerenciadas não são verificadas",
     restriction_claude_edit_rules:
-      "o Claude Code soma as regras de permissão das suas $t(claudeSettings.{{sources}}) às permissões da tarefa, e elas permitem editar arquivos fora do workspace e das pastas adicionadas ou não puderam ser lidas; as configurações gerenciadas não são verificadas",
+      "o Claude Code soma as regras de permissão e as pastas adicionais das suas $t(claudeSettings.{{sources}}) às permissões da tarefa, e elas permitem editar arquivos fora do workspace e das pastas adicionadas ou não puderam ser lidas; as configurações gerenciadas não são verificadas",
     restriction_codex_tool_lists:
       "o Codex não tem lista de ferramentas permitidas ou negadas; as listas personalizadas não são aplicadas",
     harness_version_untested: "{{harness}} {{version}} é mais novo que as versões com que o HarmFlow foi testado",
