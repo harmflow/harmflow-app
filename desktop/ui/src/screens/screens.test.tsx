@@ -504,6 +504,34 @@ describe("the executions screen's cards", () => {
     expect(runBy).toEqual(["Claude Code", "Programa"]);
   });
 
+  it("shows each task type's glyph and tone on the card, the New task dialog's, never the settings gear", async () => {
+    const types = ["github", "general", "script", "webhook"];
+    await render(
+      <>
+        {types.map((taskType) => (
+          <ExecutionCard
+            key={taskType}
+            execution={{ ...running, id: `exec-${taskType}`, taskType }}
+            selected={false}
+            onSelect={() => {}}
+            onCancel={() => {}}
+            cancelling={false}
+          />
+        ))}
+      </>,
+    );
+    const glyphs = [...host!.querySelectorAll<HTMLElement>(".exec-card__glyph")].map((span) => ({
+      icon: span.querySelector("svg")!.dataset.icon,
+      tones: [...span.classList].filter((c) => c.startsWith("type-glyph--")),
+    }));
+    expect(glyphs).toEqual([
+      { icon: "code", tones: ["type-glyph--blue"] },
+      { icon: "sparkle", tones: ["type-glyph--violet"] },
+      { icon: "terminal", tones: ["type-glyph--blue"] },
+      { icon: "dot", tones: ["type-glyph--blue"] },
+    ]);
+  });
+
   it("disables the card's Cancel for a finished execution", async () => {
     const onCancel = vi.fn();
     await render(<ExecutionCard execution={finished} selected={false} onSelect={() => {}} onCancel={onCancel} cancelling={false} />);

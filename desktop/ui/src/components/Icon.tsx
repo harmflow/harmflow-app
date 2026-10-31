@@ -202,8 +202,10 @@ export interface IconProps extends Omit<SVGProps<SVGSVGElement>, "name"> {
 }
 
 export function Icon({ name, size = 18, title, ...rest }: IconProps) {
+  const drawn = Object.hasOwn(paths, name) ? name : "dot";
   return (
     <svg
+      data-icon={drawn}
       width={size}
       height={size}
       viewBox="0 0 24 24"
@@ -217,7 +219,7 @@ export function Icon({ name, size = 18, title, ...rest }: IconProps) {
       {...rest}
     >
       {title ? <title>{title}</title> : null}
-      {paths[name] ?? paths.dot}
+      {paths[drawn]}
     </svg>
   );
 }
