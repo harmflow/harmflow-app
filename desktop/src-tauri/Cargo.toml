@@ -25,11 +25,12 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"
 futures-util = "0.3"
 dirs = "7"
 
-# The debug build's test control channel reads the app menu macOS shows and quits as the Dock does
-# (src/test_control.rs). Both are already in the lockfile through Tauri.
+# The debug build's test control channel reads the app menu macOS shows, quits as the Dock does, and reads back the
+# notices macOS delivered (src/test_control.rs). All three are already in the lockfile through Tauri.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSEvent", "NSMenu", "NSMenuItem", "NSResponder"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSBundle", "NSEnumerator", "NSString", "NSUserNotification"] }
 
 [profile.release]
 codegen-units = 1
