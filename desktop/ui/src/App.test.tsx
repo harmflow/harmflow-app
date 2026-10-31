@@ -8,6 +8,7 @@
 // ⌘+, ⌘−, and ⌘0 zoom the dashboard everywhere, and the level outlives a restart (harmflow-app#55).
 // A render error never leaves the window empty, and the interface tells the shell when it has painted (harmflow-app#96).
 // A first launch opens in the system's language when it is official, and in en-US otherwise (harmflow-app#633).
+// Notices the daemon held while no dashboard ran show as unread once it starts (harmflow-app#522).
 import { EditorView } from "@codemirror/view";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -67,8 +68,13 @@ vi.mock("./api/transport", () => ({
   },
 }));
 
-// No event stream or periodic refresh: each test sets the state it needs.
-vi.mock("./state/store", async (importOriginal) => ({ ...(await importOriginal<typeof import("./state/store")>()), startSync: () => {} }));
+// No event stream or periodic refresh: each test sets the state it needs, unless it asks for the real start's fetches.
+const sync = vi.hoisted(() => ({ real: false }));
+
+vi.mock("./state/store", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./state/store")>();
+  return { ...original, startSync: () => (sync.real ? original.startSync() : undefined) };
+});
 
 const settings: Settings = {
   language: "en-US",
@@ -1387,5 +1393,54 @@ describe("first launch", () => {
     expect(welcome()).toBe("Welcome to HarmFlow");
     expect(i18n.language).toBe("en-US");
     expect(document.documentElement.lang).toBe("en-US");
+  });
+});
+
+// harmflow-app#522: two tasks failed while no desktop app ran, and the daemon holds both notices as unread. The
+// dashboard started afterwards fetches them as it starts, with no live event, and shows both in the header's bell,
+// unread, without marking either read. It runs the real start, so it comes last: the start opens once per module.
+describe("notices held while no dashboard ran", () => {
+  const settle = () => act(() => new Promise<void>((resolve) => setImmediate(resolve)));
+  const held = (id: string, task: string, executionId: string) => ({
+    id,
+    createdAt: new Date().toISOString(),
+    eventType: "execution.failed",
+    taskId: task,
+    executionId,
+    title: "Execution failed",
+    body: `Task ${task} failed: boom`,
+    severity: "error",
+    read: false,
+    params: { taskName: `Task ${task}`, executionId, error: "boom" },
+  });
+
+  it("shows both unread with their translated titles once it starts, and marks neither read", async () => {
+    daemon.answers.set("/notifications?unread=true", [held("ntf-2", "second", "exec-2"), held("ntf-1", "first", "exec-1")]);
+    const notify = vi.spyOn(native, "notify");
+    // The real start also sets the periodic refreshes: under fake intervals, none of them ever fires.
+    vi.useFakeTimers({ toFake: ["setInterval"] });
+    sync.real = true;
+    try {
+      await launch();
+      await settle(); // the start's fetches answer
+
+      expect(daemon.sent.filter((r) => r.path === "/notifications?unread=true")).toHaveLength(1);
+      const bell = host!.querySelector<HTMLButtonElement>('button[aria-label="Notifications"]')!;
+      expect(bell.querySelector(".badge")?.textContent).toBe("2");
+      await act(async () => bell.click());
+      await settle();
+      const titles = [...host!.querySelectorAll(".notice .notice__title")].map((t) => t.textContent);
+      expect(titles).toEqual(["Task second failed", "Task first failed"]);
+
+      expect(daemon.sent.filter((r) => r.path.startsWith("/notifications/read"))).toEqual([]);
+      expect(getState().unread.map((n) => n.id)).toEqual(["ntf-2", "ntf-1"]);
+      // Fetched, not received live: the shell is asked for no native notice.
+      expect(notify).not.toHaveBeenCalled();
+    } finally {
+      sync.real = false;
+      vi.useRealTimers();
+      notify.mockRestore();
+      patchStateForTests({ unread: [] });
+    }
   });
 });
