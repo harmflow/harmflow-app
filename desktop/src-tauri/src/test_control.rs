@@ -3,7 +3,8 @@
 //! with one JSON line on its standard output. A test closes the window as its close button does, reads the window's and
 //! the tray's state, and opens the dashboard as the tray's item does, with no Accessibility permission
 //! (harmflow-app#464). It reads the app menu macOS shows, chooses one of its items or one of the tray's, and asks the
-//! app to quit as the Dock's Quit does (harmflow-app#655). A test of what else the shell does adds its own command here.
+//! app to quit as the Dock's Quit does (harmflow-app#655). It reads the notices macOS delivered for the shell
+//! (harmflow-app#515). A test of what else the shell does adds its own command here.
 
 use std::io::{BufRead, Write};
 use std::sync::mpsc;
@@ -39,6 +40,8 @@ enum Command<'a> {
     ChooseTray(&'a str),
     /// Sends the app `terminate:`, the request macOS sends when the user quits it from the Dock.
     Terminate,
+    /// The notices macOS's notification center holds as delivered for the shell, with the identity they were sent under.
+    Notices,
 }
 
 fn parse(line: &str) -> Option<Command<'_>> {
@@ -52,6 +55,7 @@ fn parse(line: &str) -> Option<Command<'_>> {
         ("choose-app-menu", id) if !id.is_empty() => Some(Command::ChooseAppMenu(id)),
         ("choose-tray", id) if !id.is_empty() => Some(Command::ChooseTray(id)),
         ("terminate", "") => Some(Command::Terminate),
+        ("notices", "") => Some(Command::Notices),
         _ => None,
     }
 }
@@ -113,7 +117,31 @@ fn run<R: Runtime>(app: &AppHandle<R>, command: Command) -> Value {
             });
             json!({ "ok": true })
         }
+        Command::Notices => delivered(),
     }
+}
+
+/// The notices delivered for the shell, read back from macOS's notification center: the notification plugin hands
+/// macOS each notice through that center, under the bundle identifier it set for the process. Until the first notice
+/// sets one, an unbundled debug build has none and no center to read, which the answer says with `bundle: null`.
+#[allow(deprecated)] // The plugin delivers through NSUserNotificationCenter, so its notices are read there too.
+fn delivered() -> Value {
+    use objc2_foundation::{NSBundle, NSUserNotificationCenter};
+
+    let Some(bundle) = NSBundle::mainBundle().bundleIdentifier() else {
+        return json!({ "bundle": null, "notices": [] });
+    };
+    let notices: Vec<Value> = NSUserNotificationCenter::defaultUserNotificationCenter()
+        .deliveredNotifications()
+        .iter()
+        .map(|n| {
+            json!({
+                "title": n.title().map(|s| s.to_string()).unwrap_or_default(),
+                "body": n.informativeText().map(|s| s.to_string()).unwrap_or_default(),
+            })
+        })
+        .collect();
+    json!({ "bundle": bundle.to_string(), "notices": notices })
 }
 
 /// The ids of the app menu's items, from the menu Tauri built, in the order macOS lists them.
@@ -227,11 +255,12 @@ mod tests {
         assert_eq!(parse("choose-app-menu app:quit\n"), Some(Command::ChooseAppMenu("app:quit")));
         assert_eq!(parse("choose-tray  quit"), Some(Command::ChooseTray("quit")));
         assert_eq!(parse("terminate"), Some(Command::Terminate));
+        assert_eq!(parse("notices\n"), Some(Command::Notices));
     }
 
     #[test]
     fn an_unknown_line_is_no_command() {
-        for line in ["", "quit", "Close", "open dashboard", "state now", "choose-app-menu", "choose-tray ", "terminate x"] {
+        for line in ["", "quit", "Close", "open dashboard", "state now", "choose-app-menu", "choose-tray ", "terminate x", "notice", "notices x"] {
             assert_eq!(parse(line), None, "{line:?}");
         }
     }
