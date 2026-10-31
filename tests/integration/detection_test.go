@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -184,6 +185,43 @@ func TestReadyHarnessesOnlyProbeAndRun(t *testing.T) {
 				t.Errorf("%s invocations = %v, want the probes and one run", c.harness, counts)
 			}
 		})
+	}
+}
+
+// harmflow-app#512: a test's daemon starts only the stand-ins of testdata/. With a Claude Code and a Codex that record
+// each invocation first on the daemon's PATH, and empty configuration folders of the test's own, neither one runs from
+// the daemon's start to its stop, and both folders hold only what the test made.
+func TestDaemonStartRunsOnlyTheStandIns(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	claudeConfig, codexHome := filepath.Join(home, "claude"), filepath.Join(home, "codex")
+	for _, dir := range []string{claudeConfig, codexHome} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claude, codex := standIn(t, "fake-claude", "claude"), standIn(t, "fake-codex", "codex")
+	before := configEntries(t, home, claudeConfig, codexHome)
+
+	d := startDaemon(t, home, "CLAUDE_CONFIG_DIR="+claudeConfig,
+		"PATH="+filepath.Dir(claude.path)+":"+filepath.Dir(codex.path)+":"+os.Getenv("PATH"))
+	fakes := fakeHarnesses()
+	for id, path := range fakes {
+		if h := d.harness(id); h["path"] != path {
+			t.Errorf("GET /harnesses: %s is at %v, want the stand-in %s", id, h["path"], path)
+		}
+	}
+	// A probe still running when the daemon stops is caught too.
+	d.stop()
+	for _, c := range []cli{claude, codex} {
+		if got := c.invocations(t); len(got) != 0 {
+			t.Errorf("%s on the daemon's PATH was invoked with %q, want it never run", c.path, got)
+		}
+	}
+	after := configEntries(t, home, claudeConfig, codexHome)
+	if !reflect.DeepEqual(after, before) {
+		t.Errorf("after the daemon stopped, the configuration folders hold %v, want only what the test made, %v", after,
+			before)
 	}
 }
 

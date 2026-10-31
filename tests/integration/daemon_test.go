@@ -140,6 +140,7 @@ func startDaemonWith(t *testing.T, home string, o daemonOptions, env ...string) 
 		builtins = repoRoot()
 	}
 	_ = os.Remove(filepath.Join(home, "run", "daemon.json"))
+	setStandInsBeforeStart(t, home)
 	cmd := exec.Command(binary, "--home", home, "--builtins", builtins)
 	// Codex's configuration is the test's own, never the user's.
 	cmd.Env = daemonEnv(append(append([]string{"CODEX_HOME=" + filepath.Join(home, "codex")}, store...), env...))
@@ -196,12 +197,40 @@ func awaitRuntime(home string, timeout time.Duration) (base, token string) {
 	return "", ""
 }
 
+// fakeHarnesses are the paths of the stand-in CLIs of testdata/, by harness id.
+func fakeHarnesses() map[string]string {
+	fakes := filepath.Join(repoRoot(), "tests", "integration", "testdata")
+	return map[string]string{"claude-code": filepath.Join(fakes, "fake-claude"), "codex": filepath.Join(fakes, "fake-codex")}
+}
+
+// setStandInsBeforeStart sets the stand-ins' paths by hand in the home's state/harnesses.json, where the daemon keeps
+// them, so its first detection checks those paths only and never runs a Claude Code or Codex the machine has installed
+// (harmflow-app#512). A home that already has the file keeps it: a test that set its own paths, or a daemon started
+// again on the same home.
+func setStandInsBeforeStart(t *testing.T, home string) {
+	t.Helper()
+	file := filepath.Join(home, "state", "harnesses.json")
+	if _, err := os.Stat(file); !errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	paths, err := json.Marshal(fakeHarnesses())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, paths, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // useFakeHarnesses points the daemon at the stand-in CLIs of testdata/.
 func (d *daemon) useFakeHarnesses() {
 	d.t.Helper()
-	fakes := filepath.Join(repoRoot(), "tests", "integration", "testdata")
-	d.call("PUT", "/harnesses/claude-code", map[string]any{"path": filepath.Join(fakes, "fake-claude")}, 200)
-	d.call("PUT", "/harnesses/codex", map[string]any{"path": filepath.Join(fakes, "fake-codex")}, 200)
+	fakes := fakeHarnesses()
+	d.call("PUT", "/harnesses/claude-code", map[string]any{"path": fakes["claude-code"]}, 200)
+	d.call("PUT", "/harnesses/codex", map[string]any{"path": fakes["codex"]}, 200)
 }
 
 func (d *daemon) stop() {
