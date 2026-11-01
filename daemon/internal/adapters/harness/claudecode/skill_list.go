@@ -3,10 +3,10 @@ package claudecode
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -118,13 +118,13 @@ func (a *Adapter) listSkills(ctx context.Context, info ports.HarnessInfo, dir st
 	}
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
-	stop := func() {
+	// Every way out stops the session, and a session that ended on its own still has what it left running ended.
+	defer func() {
 		p.Stop(skillListGrace)
 		<-p.Done()
-	}
+	}()
 	select {
 	case line := <-init:
-		stop()
 		return initSkillNames(line)
 	case <-p.Done():
 		// Every line is read once the session is done, so an init line it printed before it ended is in the channel.
@@ -133,14 +133,16 @@ func (a *Adapter) listSkills(ctx context.Context, info ports.HarnessInfo, dir st
 			return initSkillNames(line)
 		default:
 		}
-		return nil, skillListFailed(ownWords(p.StderrTail(), fmt.Errorf("exit code %d before the init line", p.ExitCode())))
+		if stderr := strings.TrimSpace(p.StderrTail()); stderr != "" {
+			return nil, skillListFailed(stderr)
+		}
+		return nil, domain.TextErr("harness_exit_code", "{{harness}} exited with code {{code}}", "harness", Name,
+			"code", strconv.Itoa(p.ExitCode()))
 	case <-timer.C:
-		stop()
 		return nil, domain.TextErr("claude_skill_list_timed_out",
 			"{{command}} printed no init line within {{timeout}}, so the skills Claude Code loads are unknown",
 			"command", skillListCommand, "timeout", timeout.String())
 	case <-ctx.Done():
-		stop()
 		return nil, ctx.Err()
 	}
 }
@@ -155,14 +157,6 @@ func initSkillNames(line []byte) ([]string, error) {
 	return *l.Skills, nil
 }
 
-// ownWords is what a failed command said, its standard error, or else how it failed.
-func ownWords(stderr string, err error) string {
-	if s := strings.TrimSpace(stderr); s != "" {
-		return s
-	}
-	return err.Error()
-}
-
 func skillListFailed(detail string) error {
 	return domain.TextErr("command_failed", "{{command}} failed: {{detail}}", "command", skillListCommand,
 		"detail", detail)
@@ -172,8 +166,8 @@ func skillListFailed(detail string) error {
 // agents from its configuration directory.
 func (a *Adapter) ListsPerWorkspace(kind string) bool { return kind == "skill" }
 
-// AllowsUnverified implements ports.UnverifiedItemsAllower: Claude Code loads a task's skills itself, so a skill list it
-// could not give leaves them unverified rather than missing.
+// AllowsUnverified implements ports.UnverifiedItemsAllower: Claude Code loads a task's skills itself, so a skill list
+// it could not give leaves them unverified rather than missing.
 func (a *Adapter) AllowsUnverified(kind string) bool { return kind == "skill" }
 
 // ReloadUserItems implements ports.ItemReloader: the next lookup of the skills asks Claude Code for its list again.
