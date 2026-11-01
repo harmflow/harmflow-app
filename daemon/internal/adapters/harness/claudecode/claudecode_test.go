@@ -303,8 +303,19 @@ func TestPrepareTranslatesPermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := strings.Join(inv.Args, " ")
-	if !strings.Contains(args, "--permission-mode dontAsk") || strings.Contains(args, "Bash") {
+	if !strings.Contains(args, "--permission-mode dontAsk") {
 		t.Errorf("read_only args: %s", args)
+	}
+	// No writing or shell tool is given, and a deny rule takes each one away from the session (harmflow-app#603).
+	tools, _ := flagValue(inv.Args, "--tools")
+	denied, _ := flagValue(inv.Args, "--disallowedTools")
+	for _, tool := range []string{"Bash", "Edit", "Write", "MultiEdit", "NotebookEdit"} {
+		if slices.Contains(strings.Split(tools, ","), tool) {
+			t.Errorf("read_only --tools = %q, want no %s", tools, tool)
+		}
+		if !slices.Contains(strings.Split(denied, ","), tool) {
+			t.Errorf("read_only --disallowedTools = %q, want %s in it", denied, tool)
+		}
 	}
 	for _, r := range inv.Restrictions {
 		if !r.Enforced {
