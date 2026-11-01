@@ -57,7 +57,7 @@ func notifiable(e domain.Event) string {
 // the next execution; any other event reads the current one. The global level is a setting, not part of the
 // task, and applies at once.
 func (a *App) notifyFor(e domain.Event, started *domain.TaskDocument) {
-	if signInEvents[e.Type] {
+	if signInEvents[e.Type] || tokenEvents[e.Type] {
 		a.notifySignIn(e)
 		return
 	}
@@ -126,14 +126,19 @@ func (a *App) notifyFor(e domain.Event, started *domain.TaskDocument) {
 	a.keepNotice(n)
 }
 
-// signInAttention are the sign-in events that pass the "failures and attention only" level: a sign-in that waits for
-// the user, and one that ended without signing the harness in.
+// signInAttention are the sign-in and token events that pass the "failures and attention only" level: a sign-in that
+// waits for the user, one that ended without signing the harness in, a token the harness rejected, and one that
+// expires soon.
 var signInAttention = map[string]bool{
 	domain.EventHarnessSignInStarted: true, domain.EventHarnessSignInTimedOut: true, domain.EventHarnessSignInFailed: true,
+	domain.EventHarnessTokenRejected: true, domain.EventHarnessTokenExpiring: true,
 }
 
-// notifySignIn creates the notice of a sign-in's event when the global level lets it through. A sign-in concerns a
-// harness, not a task, so no task's choice of events applies.
+// tokenEvents are the events of a harness's long-lived token, whose notices follow a sign-in's.
+var tokenEvents = map[string]bool{domain.EventHarnessTokenRejected: true, domain.EventHarnessTokenExpiring: true}
+
+// notifySignIn creates the notice of a sign-in's or a token's event when the global level lets it through. Both
+// concern a harness, not a task, so no task's choice of events applies.
 func (a *App) notifySignIn(e domain.Event) {
 	a.mu.Lock()
 	level := a.settings.NotificationLevel
@@ -152,9 +157,9 @@ func (a *App) notifySignIn(e domain.Event) {
 			Key: e.MessageKey, Params: e.Params}).Params
 	}
 	switch e.Type {
-	case domain.EventHarnessSignInStarted:
+	case domain.EventHarnessSignInStarted, domain.EventHarnessTokenExpiring:
 		n.Severity = "warning"
-	case domain.EventHarnessSignInTimedOut, domain.EventHarnessSignInFailed:
+	case domain.EventHarnessSignInTimedOut, domain.EventHarnessSignInFailed, domain.EventHarnessTokenRejected:
 		n.Severity = "error"
 	}
 	n.Title, n.Body = englishNotice(e.Type, "", n.Params)
@@ -232,6 +237,10 @@ func englishNotice(kind, task string, p map[string]string) (string, string) {
 		return "Sign-in not completed", p["reason"]
 	case domain.EventHarnessSignInFailed:
 		return "Sign-in stopped", p["reason"]
+	case domain.EventHarnessTokenRejected:
+		return p["harnessName"] + " token rejected", p["reason"]
+	case domain.EventHarnessTokenExpiring:
+		return p["harnessName"] + " token expiring", p["reason"]
 	}
 	return kind, task
 }
