@@ -12,7 +12,8 @@
 // workspace path is offered the skills of the folder it runs in, which validation reads (harmflow-app#283).
 // An editor open on a task warns when the stream delivers a change of its file made outside HarmFlow, and a save from it
 // afterwards reports the conflict and overwrites nothing; each banner's actions load the file or keep the edit
-// (harmflow-app#593). What the daemon does with the changed file is itest › TestTaskLifecycle's and app ›
+// (harmflow-app#593). Each later change warns again, after the user kept their edits, loaded the file, or saved past
+// the last one (harmflow-app#592). What the daemon does with the changed file is itest › TestTaskLifecycle's and app ›
 // TestExternalEdits'.
 import { EditorView } from "@codemirror/view";
 import { isDeepStrictEqual } from "node:util";
@@ -218,6 +219,7 @@ function close() {
   root = host = undefined;
   daemon.routes.clear();
   daemon.requests.length = 0;
+  patchStateForTests({ externalChanges: {} });
 }
 
 afterEach(close);
@@ -520,6 +522,53 @@ describe("task editor warnings", () => {
     expect(sent("PUT", "/tasks/standup")).toEqual([{ document: taskDoc(name), baseRevision: "r1" }]);
     expect(toasts("success")).toContain("Saved.");
     expect(warnings()).toEqual([text]);
+  });
+});
+
+describe("task editor outside changes", () => {
+  /** The store as a `task.changed_externally` event with this ID leaves it: the task's last outside change. */
+  const changeOutside = (id: number) => act(async () => patchStateForTests({ externalChanges: { standup: id } }));
+  const warning = () => host!.querySelector(".banner--warning .banner__text")?.textContent ?? null;
+  const warningButton = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>(".banner--warning button")].find((b) => b.textContent === label)!;
+  const changedText = "This task's file was changed outside HarmFlow while you were editing.";
+
+  it("warns again about a later change after Keep my edits, and not again about the one it answered", async () => {
+    await open("edit");
+    expect(warning()).toBeNull();
+    await changeOutside(41);
+    expect(warning()).toBe(changedText);
+    await click(warningButton("Keep my edits"));
+    expect(warning()).toBeNull();
+
+    await changeOutside(41);
+    expect(warning()).toBeNull();
+    await changeOutside(42);
+    expect(warning()).toBe(changedText);
+  });
+
+  it("warns again about a later change after Load the file's version", async () => {
+    await open("edit");
+    daemon.routes.set("GET /tasks/standup", () => ({ status: 200, body: storedTask(taskDoc("Standup digest"), "r2") }));
+    await changeOutside(41);
+    await click(warningButton("Load the file's version"));
+    expect(warning()).toBeNull();
+    expect(nameField().querySelector("input")!.value).toBe("Standup digest");
+
+    await changeOutside(42);
+    expect(warning()).toBe(changedText);
+  });
+
+  it("warns again about a later change after a save past the one it answered", async () => {
+    await open("edit");
+    await changeOutside(41);
+    await click(warningButton("Keep my edits"));
+    await type(nameField().querySelector("input")!, "Standup summary");
+    await save();
+    expect(sent("PUT", "/tasks/standup")).toEqual([{ document: taskDoc("Standup summary"), baseRevision: "r1" }]);
+    expect(warning()).toBeNull();
+
+    await changeOutside(42);
+    expect(warning()).toBe(changedText);
   });
 });
 
