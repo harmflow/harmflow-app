@@ -3223,6 +3223,156 @@ func TestHeldBackFiringsRecorded(t *testing.T) {
 	}
 }
 
+// firings is a copy of the task's firing history, oldest first.
+func (e *env) firings(id string) []firingRecord {
+	e.app.mu.Lock()
+	defer e.app.mu.Unlock()
+	return append([]firingRecord(nil), e.app.firings[id]...)
+}
+
+// A run by hand is a firing of its own in the task's history: started on an idle task, then queued, coalesced, or
+// skipped by the overlap policy of a running one. The records share the history of the scheduled firings and survive a
+// restart.
+func TestManualFiringsRecordedAcrossRestart(t *testing.T) {
+	e := newEnv(t)
+	e.create("busy", "")
+	e.create("skipper", "  concurrency:\n    overlappingRuns: skip\n")
+	e.create("daily", "  schedule:\n    cron: \"0 9 * * *\"\n    timezone: UTC\n")
+	e.claude.setScript(func(ports.RunRequest) string { return slow })
+
+	startedAt := e.clock.Now()
+	first, err := e.app.RunTask("busy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.wait(first.ExecutionID, domain.StatusRunning)
+	e.prepared(e.claude)
+	e.clock.Advance(time.Minute)
+	queuedAt := e.clock.Now()
+	second, _ := e.app.RunTask("busy")
+	e.clock.Advance(time.Minute)
+	coalescedAt := e.clock.Now()
+	third, _ := e.app.RunTask("busy")
+	if second.Outcome != "queued" || third.Outcome != "coalesced" || third.ExecutionID != second.ExecutionID {
+		t.Fatalf("RunTask(busy) = %+v, then %+v; want queued, then coalesced into it", second, third)
+	}
+	wantBusy := []firingRecord{
+		{ScheduledFor: startedAt, ProcessedAt: startedAt, Trigger: domain.TriggerManual, Outcome: "started",
+			ExecutionID: first.ExecutionID},
+		{ScheduledFor: queuedAt, ProcessedAt: queuedAt, Trigger: domain.TriggerManual, Policy: domain.OverlapQueue,
+			Outcome: "queued", ExecutionID: second.ExecutionID},
+		{ScheduledFor: coalescedAt, ProcessedAt: coalescedAt, Trigger: domain.TriggerManual, Policy: domain.OverlapQueue,
+			Outcome: "coalesced", ExecutionID: second.ExecutionID},
+	}
+	if got := e.firings("busy"); !reflect.DeepEqual(got, wantBusy) {
+		t.Errorf("busy's history:\n got %+v\nwant %+v", got, wantBusy)
+	}
+
+	running, err := e.app.RunTask("skipper")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.wait(running.ExecutionID, domain.StatusRunning)
+	// busy's run keeps the harness prepared, so prepared would return at once: wait for this run's own preparation, or
+	// it may take the script set below and end before it is cancelled.
+	if !e.poll(10*time.Second, func() bool { return e.claude.promptCount() == 2 }) {
+		t.Fatal("skipper's run was never prepared")
+	}
+	e.clock.Advance(time.Minute)
+	skippedAt := e.clock.Now()
+	if r, _ := e.app.RunTask("skipper"); r.Outcome != "skipped" {
+		t.Fatalf("RunTask(skipper) = %+v, want skipped", r)
+	}
+	skipper := e.firings("skipper")
+	if len(skipper) != 2 || skipper[0].Outcome != "started" || skipper[0].Policy != "" ||
+		skipper[0].ExecutionID != running.ExecutionID {
+		t.Fatalf("skipper's history: %+v", skipper)
+	}
+	if got := skipper[1]; !got.ScheduledFor.Equal(skippedAt) || !got.ProcessedAt.Equal(skippedAt) ||
+		got.Trigger != domain.TriggerManual || got.Policy != domain.OverlapSkip || got.Outcome != "skipped" ||
+		got.ExecutionID != running.ExecutionID || got.ReasonKey != "firing_skipped" || got.Reason == "" || got.Missed != 0 {
+		t.Errorf("skipper's skipped run: %+v", got)
+	}
+
+	e.claude.setScript(func(ports.RunRequest) string { return "echo 'END ok'" })
+	for _, id := range []string{first.ExecutionID, running.ExecutionID} {
+		if err := e.app.CancelExecution(id); err != nil {
+			t.Fatal(err)
+		}
+		e.wait(id, domain.StatusCancelled)
+	}
+	e.wait(second.ExecutionID, domain.StatusCompleted)
+	e.clock.Advance(58 * time.Minute) // 09:01, a minute after daily is due, so the firing is on time
+	e.app.Tick()
+	runs := e.executions("daily")
+	if len(runs) != 1 {
+		t.Fatalf("daily: %+v", runs)
+	}
+	e.wait(runs[0].ID, domain.StatusCompleted)
+	daily := e.firings("daily")
+	if len(daily) != 1 || daily[0].Trigger != domain.TriggerSchedule || daily[0].Outcome != "started" {
+		t.Fatalf("daily's history: %+v", daily)
+	}
+
+	e = e.restart(t)
+	for id, want := range map[string][]firingRecord{"busy": wantBusy, "skipper": skipper, "daily": daily} {
+		if got := e.firings(id); !reflect.DeepEqual(got, want) {
+			t.Errorf("%s's history after a restart:\n got %+v\nwant %+v", id, got, want)
+		}
+	}
+}
+
+// A run by hand the daemon refuses — of a disabled task, of one pending deletion, of a script task on a system it does
+// not declare — is no firing: the caller gets the refusal, and the history gains no record.
+func TestRefusedManualRunsRecordNoFiring(t *testing.T) {
+	e := newEnv(t)
+	e.create("off", "")
+	if _, err := e.app.SetEnabled(t.Context(), "off", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.app.RunTask("off"); err == nil {
+		t.Error("RunTask(off) of a disabled task = nil error, want a refusal")
+	} else if ae, ok := err.(*Error); !ok || ae.Code != CodeTaskDisabled {
+		t.Errorf("RunTask(off) = %#v, want %s", err, CodeTaskDisabled)
+	}
+	if got := e.firings("off"); len(got) != 0 {
+		t.Errorf("off's history: %+v, want none", got)
+	}
+
+	e.create("going", "")
+	e.claude.setScript(func(ports.RunRequest) string { return slow })
+	r, err := e.app.RunTask("going")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.wait(r.ExecutionID, domain.StatusRunning)
+	e.prepared(e.claude)
+	if pending, err := e.app.DeleteTask("going"); err != nil || !pending {
+		t.Fatalf("DeleteTask(going) = %v, %v; want pending", pending, err)
+	}
+	if _, err := e.app.RunTask("going"); err == nil {
+		t.Error("RunTask(going) of a task pending deletion = nil error, want a refusal")
+	} else if ae, ok := err.(*Error); !ok || ae.Code != CodeConflict || ae.Key != "task_being_deleted" {
+		t.Errorf("RunTask(going) = %#v, want %s task_being_deleted", err, CodeConflict)
+	}
+	if got := e.firings("going"); len(got) != 1 || got[0].ExecutionID != r.ExecutionID {
+		t.Errorf("going's history: %+v, want only the run that started", got)
+	}
+
+	e.createScript("windows", "  script:\n    command: [/bin/echo]\n    systems: [windows]\n")
+	if _, err := e.app.RunTask("windows"); err == nil {
+		t.Error("RunTask(windows) on an undeclared system = nil error, want a refusal")
+	} else if ae, ok := err.(*Error); !ok || ae.Code != CodeConflict || ae.Key != "script_system_not_declared" {
+		t.Errorf("RunTask(windows) = %#v, want %s script_system_not_declared", err, CodeConflict)
+	}
+	if got := e.firings("windows"); len(got) != 0 {
+		t.Errorf("windows's history: %+v, want none", got)
+	}
+	if err := e.app.CancelExecution(r.ExecutionID); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A firing due while the machine slept is a misfire however soon the machine wakes, here 60 seconds after it; a sleep
 // that ended before a firing's time changes nothing.
 func TestMisfireDuringSleep(t *testing.T) {
