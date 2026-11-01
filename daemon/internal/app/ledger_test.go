@@ -5,6 +5,7 @@ import (
 	"log"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -73,6 +74,88 @@ func TestSkippedItemKeepsItsStatus(t *testing.T) {
 		if w := ledgerItem(e, "skipper", key); w != nil {
 			t.Errorf("%s, skipped and never held before: %+v; want no entry", key, w)
 		}
+	}
+}
+
+// harmflow-app#569: a work_item.selected line whose key is not owner/repo#<number> changes neither the execution's
+// record nor the ledger, and the log says it was ignored, with its key, under no work item. A key of that form is
+// tracked as before, and a line of another form after it leaves the record naming that one.
+func TestSelectionOfAKeyOfAnotherFormIsIgnored(t *testing.T) {
+	const ignoredText = "its selection was ignored"
+	for _, tc := range []struct {
+		name    string
+		keys    []string // the keys the session selects, in order; "" writes a line without workItem
+		tracked string   // the work item the record and the ledger name, "" for none
+		ignored []string // the keys the log says were ignored, in order
+		wait    string   // a text the log holds once the daemon has read every line
+	}{
+		{"another form", []string{"o/r#81 8"}, "", []string{"o/r#81 8"}, ignoredText},
+		{"no key", []string{""}, "", []string{""}, ignoredText},
+		{"owner/repo#<number>", []string{"o/r#81"}, "o/r#81", nil, "Select o/r#81"},
+		{"another form after owner/repo#<number>", []string{"o/r#81", "o/r#81 8"}, "o/r#81", []string{"o/r#81 8"},
+			ignoredText},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.create("selector", "")
+			var lines []string
+			for _, key := range tc.keys {
+				line := `{"type":"work_item.selected","repository":"o/r","message":"Select ` + key + `"`
+				if key != "" {
+					line += `,"workItem":"` + key + `"`
+				}
+				lines = append(lines, line+"}")
+			}
+			x := runTask(e, "selector", domain.StatusCompleted, `P="$HARMFLOW_EXECUTION_DIR/progress.jsonl"; L="`+
+				e.app.d.Paths.Logs+`/$HARMFLOW_EXECUTION_ID.jsonl"
+printf '%s\n' '`+strings.Join(lines, `' '`)+`' >> "$P"
+until grep -qF '`+tc.wait+`' "$L"; do sleep 0.05; done
+echo 'END ok'`)
+
+			if x.WorkItem != tc.tracked {
+				t.Errorf("GetExecution(%s).WorkItem = %q, want %q", x.ID, x.WorkItem, tc.tracked)
+			}
+			var held, want []string
+			for _, w := range e.app.Queue().WorkItems {
+				if w.TaskID == "selector" {
+					held = append(held, w.Key)
+				}
+			}
+			if tc.tracked != "" {
+				want = []string{tc.tracked}
+			}
+			if !slices.Equal(held, want) {
+				t.Errorf("ledger holds %q for the task, want %q", held, want)
+			}
+			if w := ledgerItem(e, "selector", tc.tracked); tc.tracked != "" && (w == nil ||
+				w.Status != domain.WorkItemFailed || w.Failures != 1 || w.LastExecutionID != x.ID) {
+				t.Errorf("%s, selected and left without a result: %+v; want failed, with one failure, by %s", tc.tracked,
+					w, x.ID)
+			}
+
+			events, _, err := e.app.ExecutionEvents(x.ID, 0, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var ignored []string
+			for _, ev := range events {
+				switch {
+				case ev.Type != domain.EventWorkItemSelected:
+				case ev.MessageKey == "work_item_key_invalid":
+					ignored = append(ignored, ev.Params["workItem"])
+					if ev.WorkItemID != "" || ev.Severity != domain.SeverityWarning ||
+						!strings.Contains(ev.Message, ignoredText) {
+						t.Errorf("ignored selection logged as %+v; want a warning under no work item saying %q", ev,
+							ignoredText)
+					}
+				case ev.WorkItemID != tc.tracked:
+					t.Errorf("work_item.selected logged under %q, want %q", ev.WorkItemID, tc.tracked)
+				}
+			}
+			if !slices.Equal(ignored, tc.ignored) {
+				t.Errorf("the log says %q were ignored, want %q", ignored, tc.ignored)
+			}
+		})
 	}
 }
 
