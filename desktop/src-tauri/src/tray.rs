@@ -26,10 +26,52 @@ const MAX_LISTED: usize = 5;
 static ICON_IDLE: &[u8] = include_bytes!("../icons/tray-idle.png");
 static ICON_EXECUTING: &[u8] = include_bytes!("../icons/tray-executing.png");
 
+/// The tray's icon.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Icon {
+    Idle,
+    Executing,
+}
+
+impl Icon {
+    fn bytes(self) -> &'static [u8] {
+        match self {
+            Icon::Idle => ICON_IDLE,
+            Icon::Executing => ICON_EXECUTING,
+        }
+    }
+}
+
+/// What the tray shows: its icon, the count beside it, and the executions its menu lists, as `menu_entries` lists
+/// them. Only the executions that actually run count; queued and ended ones change nothing.
+#[derive(Debug)]
+struct TrayState {
+    icon: Icon,
+    /// The count the macOS build sets as the tray's title; `None` while nothing runs.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    title: Option<String>,
+    running: Vec<ActiveExecution>,
+}
+
+impl TrayState {
+    /// The state for executions already known to run, as `AppState::tray_running` keeps them.
+    fn of_running(running: Vec<ActiveExecution>) -> Self {
+        let (icon, title) =
+            if running.is_empty() { (Icon::Idle, None) } else { (Icon::Executing, Some(running.len().to_string())) };
+        Self { icon, title, running }
+    }
+
+    /// The state for the daemon's answer to `GET /executions?active=true`, with the executions `running_of` reads
+    /// from it; `None` when the answer holds no list.
+    fn from_answer(answer: &Value) -> Option<Self> {
+        running_of(answer).map(Self::of_running)
+    }
+}
+
 pub fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let menu = build_menu(app, &[])?;
     TrayIconBuilder::with_id(TRAY_ID)
-        .icon(Image::from_bytes(ICON_IDLE)?)
+        .icon(Image::from_bytes(Icon::Idle.bytes())?)
         .icon_as_template(true)
         .tooltip("HarmFlow")
         .menu(&menu)
@@ -86,18 +128,17 @@ fn build_menu<R: Runtime>(app: &AppHandle<R>, running: &[ActiveExecution]) -> ta
 /// Rebuilds the menu and the icon from the executions the state holds.
 pub fn render<R: Runtime>(app: &AppHandle<R>) {
     let state = app.state::<Arc<AppState>>();
-    let running = state.tray_running.lock().map(|r| r.clone()).unwrap_or_default();
+    let shown = TrayState::of_running(state.tray_running.lock().map(|r| r.clone()).unwrap_or_default());
     let Some(tray) = app.tray_by_id(TRAY_ID) else { return };
-    if let Ok(menu) = build_menu(app, &running) {
+    if let Ok(menu) = build_menu(app, &shown.running) {
         let _ = tray.set_menu(Some(menu));
     }
-    let icon = if running.is_empty() { ICON_IDLE } else { ICON_EXECUTING };
-    if let Ok(image) = Image::from_bytes(icon) {
+    if let Ok(image) = Image::from_bytes(shown.icon.bytes()) {
         let _ = tray.set_icon(Some(image));
         let _ = tray.set_icon_as_template(true);
     }
     #[cfg(target_os = "macos")]
-    let _ = tray.set_title(if running.is_empty() { None } else { Some(running.len().to_string()) });
+    let _ = tray.set_title(shown.title.as_deref());
     let _ = tray.set_visible(state.tray_enabled());
 }
 
@@ -149,9 +190,9 @@ fn running_of(answer: &Value) -> Option<Vec<ActiveExecution>> {
 
 async fn refresh(app: &AppHandle, state: &AppState) {
     let res = state.daemon.request("GET", "/executions?active=true&limit=50", None).await;
-    let Some(running) = running_of(&res.body) else { return };
+    let Some(shown) = TrayState::from_answer(&res.body) else { return };
     if let Ok(mut current) = state.tray_running.lock() {
-        *current = running;
+        *current = shown.running;
     }
     render(app);
 }
@@ -240,6 +281,30 @@ mod tests {
         (1..=n).map(|i| ActiveExecution { id: format!("exec-{i}"), label: format!("Task {i}") }).collect()
     }
 
+    /// An execution as `GET /executions?active=true` lists it.
+    fn execution(id: &str, status: &str) -> Value {
+        json!({ "id": id, "status": status, "taskName": "Nightly", "workItem": null })
+    }
+
+    fn state_of(executions: Vec<Value>) -> TrayState {
+        TrayState::from_answer(&Value::Array(executions)).expect("a list is an answer")
+    }
+
+    /// The ids of the executions the menu lists by name for `running`.
+    fn listed_ids(running: &[ActiveExecution]) -> Vec<String> {
+        items(&menu_entries(running, defaults))
+            .iter()
+            .filter_map(|(id, _, _)| id.strip_prefix(EXECUTION_PREFIX))
+            .map(str::to_string)
+            .collect()
+    }
+
+    fn assert_idle(shown: &TrayState, case: &str) {
+        assert_eq!(shown.icon, Icon::Idle, "{case}");
+        assert_eq!(shown.title, None, "{case}");
+        assert!(listed_ids(&shown.running).is_empty(), "{case}");
+    }
+
     #[test]
     fn with_nothing_running_the_menu_holds_its_fixed_items() {
         assert_eq!(
@@ -325,5 +390,71 @@ mod tests {
         };
         assert_eq!(items(&menu_entries(&running(3), label))[0].1, "3 em execução");
         assert_eq!(stop_dialog(3, label).message, "3 execuções em andamento.");
+    }
+
+    #[test]
+    fn queued_work_and_an_empty_list_keep_the_idle_icon() {
+        assert_idle(&state_of(vec![]), "empty");
+        assert_idle(&state_of(vec![execution("exec-1", "queued"), execution("exec-2", "queued")]), "queued");
+    }
+
+    #[test]
+    fn each_active_status_changes_the_icon() {
+        for status in ["preparing", "running", "switching_harness", "testing", "publishing"] {
+            let shown = state_of(vec![execution("exec-1", status)]);
+            assert_eq!(shown.icon, Icon::Executing, "{status}");
+            assert_eq!(shown.title.as_deref(), Some("1"), "{status}");
+            assert_eq!(listed_ids(&shown.running).len(), 1, "{status}");
+        }
+    }
+
+    #[test]
+    fn only_the_running_executions_count_and_are_listed() {
+        let shown =
+            state_of(vec![execution("exec-1", "running"), execution("exec-2", "queued"), execution("exec-3", "running")]);
+        assert_eq!(shown.icon, Icon::Executing);
+        assert_eq!(shown.title.as_deref(), Some("2"));
+        assert_eq!(listed_ids(&shown.running), ["exec-1", "exec-3"]);
+    }
+
+    #[test]
+    fn ended_executions_leave_the_icon_idle() {
+        for status in ["completed", "failed", "cancelled", "interrupted", "no_work", "needs_attention"] {
+            assert_idle(&state_of(vec![execution("exec-1", status)]), status);
+        }
+    }
+
+    #[test]
+    fn an_answer_without_a_list_changes_nothing() {
+        assert!(TrayState::from_answer(&json!({ "error": "unavailable" })).is_none());
+        assert!(TrayState::from_answer(&Value::Null).is_none());
+    }
+
+    #[test]
+    fn the_kept_executions_give_the_same_state_as_the_answer() {
+        // `render` rebuilds the state from what `refresh` kept, so it shows what the answer gave.
+        let answer = state_of(vec![execution("exec-1", "testing"), execution("exec-2", "queued")]);
+        let kept = TrayState::of_running(answer.running.clone());
+        assert_eq!(kept.icon, answer.icon);
+        assert_eq!(kept.title, answer.title);
+        assert_eq!(kept.running.len(), answer.running.len());
+        assert_idle(&TrayState::of_running(Vec::new()), "nothing kept");
+    }
+
+    #[test]
+    fn the_menu_lists_at_most_five_by_name() {
+        let shown = state_of((1..=7).map(|n| execution(&format!("exec-{n}"), "running")).collect());
+        assert_eq!(shown.title.as_deref(), Some("7"));
+        assert_eq!(listed_ids(&shown.running).len(), MAX_LISTED);
+    }
+
+    #[test]
+    fn a_listed_execution_reads_as_its_task_and_work_item() {
+        let shown = state_of(vec![
+            json!({ "id": "exec-1", "status": "running", "taskName": "Queue", "workItem": "owner/repo#12" }),
+            json!({ "id": "exec-2", "status": "running", "taskName": "Nightly" }),
+        ]);
+        let labels: Vec<&str> = shown.running.iter().map(|e| e.label.as_str()).collect();
+        assert_eq!(labels, ["Queue — owner/repo#12", "Nightly"]);
     }
 }
