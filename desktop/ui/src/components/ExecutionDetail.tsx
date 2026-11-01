@@ -140,7 +140,7 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
               </span>
             ) : null}
             <span className="meta mono">
-              <Icon name="clock" size={14} /> <Elapsed start={exec.startedAt ?? exec.createdAt} end={exec.endedAt} />
+              <Icon name="clock" size={14} /> <Elapsed start={exec.startedAt ?? exec.createdAt} end={exec.endedAt} locale={i18n.language} />
             </span>
           </div>
         </div>
@@ -689,7 +689,7 @@ function CommandList({ commands, locale }: { commands: Execution["commands"]; lo
               <td className="mono cell-wrap">{c.command}</td>
               <td className="mono">{c.exitCode ?? "—"}</td>
               <td className="mono">{formatTime(c.startedAt, locale)}</td>
-              <td className="mono">{c.startedAt ? formatDuration(elapsedMs(c.startedAt, c.endedAt)) : "—"}</td>
+              <td className="mono">{c.startedAt ? formatDuration(elapsedMs(c.startedAt, c.endedAt), locale) : "—"}</td>
             </tr>
           ))}
         </tbody>
@@ -798,7 +798,7 @@ function Attempts({ detail, locale }: { detail?: Execution; locale: string }) {
               [t("executions.detail.harnessVersion"), a.harnessVersion ? <span className="mono">{a.harnessVersion}</span> : null],
               [t("executions.detail.reason"), fieldText(a.reason, a.reasonKey, a.reasonParams) ?? null],
               [t("executions.detail.started"), formatDateTime(a.startedAt, locale)],
-              [t("executions.detail.duration"), <Elapsed start={a.startedAt} end={a.endedAt} />],
+              [t("executions.detail.duration"), <Elapsed start={a.startedAt} end={a.endedAt} locale={locale} />],
               [t("executions.detail.exitCode"), a.exitCode !== undefined ? <span className="mono">{a.exitCode}</span> : null],
               [
                 t("executions.detail.error"),

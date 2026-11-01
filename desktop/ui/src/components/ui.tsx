@@ -21,9 +21,9 @@ export function cx(...classes: Array<string | false | null | undefined>): string
 }
 
 /** The time since start, ticking every second until end is set: only this label renders again, not its screen. */
-export function Elapsed({ start, end }: { start?: string | null; end?: string | null }) {
+export function Elapsed({ start, end, locale }: { start?: string | null; end?: string | null; locale: string }) {
   const now = useNow(end ? null : 1000);
-  return <>{formatElapsed(start, end, now)}</>;
+  return <>{formatElapsed(start, end, locale, now)}</>;
 }
 
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "danger-outline";

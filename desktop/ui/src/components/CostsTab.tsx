@@ -104,7 +104,7 @@ function Summary({ cost, active, onReceipt }: { cost: ExecutionCost; active: boo
         <div className="costs-tile">
           <span className="costs-tile__label">{t("executions.detail.costs.perMinute")}</span>
           <span className="costs-tile__value">{cost.cost !== undefined && minutes >= 1 / 60 ? formatUsd(cost.cost / minutes, locale) : "—"}</span>
-          <span className="costs-tile__sub">{t("executions.detail.costs.perMinuteHint", { duration: formatDuration(cost.runMs) })}</span>
+          <span className="costs-tile__sub">{t("executions.detail.costs.perMinuteHint", { duration: formatDuration(cost.runMs, locale) })}</span>
         </div>
       </div>
 

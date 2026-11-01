@@ -116,7 +116,7 @@ export function ExecutionCard({
           <dd className="mono">
             {formatTime(execution.startedAt ?? execution.createdAt, i18n.language)}
             <span className="exec-card__elapsed">
-              <Icon name="clock" size={13} /> <Elapsed start={execution.startedAt ?? execution.createdAt} end={execution.endedAt} />
+              <Icon name="clock" size={13} /> <Elapsed start={execution.startedAt ?? execution.createdAt} end={execution.endedAt} locale={i18n.language} />
             </span>
           </dd>
         </div>
