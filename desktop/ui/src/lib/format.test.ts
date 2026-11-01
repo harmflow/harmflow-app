@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { elapsedMs, formatBytes, formatDuration, formatElapsed, formatRelative } from "./format";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { elapsedMs, formatBytes, formatDateTime, formatDuration, formatElapsed, formatRelative, formatTime } from "./format";
 
 describe("formatDuration", () => {
   it.each([
@@ -35,11 +35,48 @@ describe("elapsed time", () => {
 
 describe("locale formatting", () => {
   const now = Date.parse("2026-10-20T12:00:00Z");
+  const afternoon = "2026-10-20T15:30:45Z";
+
+  // formatTime takes no zone, so the host is pinned to UTC; the patterns allow any space ICU puts between parts.
+  beforeAll(() => {
+    vi.stubEnv("TZ", "UTC");
+  });
+
+  afterAll(() => {
+    vi.unstubAllEnvs();
+  });
 
   it("says relative times in the selected language", () => {
-    expect(formatRelative("2026-10-20T12:18:00Z", "en-US", now)).toMatch(/18 min/);
-    expect(formatRelative("2026-10-20T09:00:00Z", "pt-BR", now)).toMatch(/3 h/);
-    expect(formatRelative("2026-10-20T12:18:00Z", "es-ES", now)).toMatch(/18 min/);
+    expect(formatRelative("2026-10-20T12:18:00Z", "en-US", now)).toMatch(/^in\s18\smin/);
+    expect(formatRelative("2026-10-20T09:00:00Z", "en-US", now)).toMatch(/^3\shr\.?\sago$/);
+    expect(formatRelative("2026-10-20T12:18:00Z", "pt-BR", now)).toMatch(/^em\s18\smin/);
+    expect(formatRelative("2026-10-20T09:00:00Z", "pt-BR", now)).toMatch(/^há\s3\sh/);
+    expect(formatRelative("2026-10-20T12:18:00Z", "es-ES", now)).toMatch(/^dentro\sde\s18\smin/);
+    expect(formatRelative("2026-10-20T09:00:00Z", "es-ES", now)).toMatch(/^hace\s3\sh/);
+  });
+
+  it("tells the time on a 12-hour clock in en-US and a 24-hour one in pt-BR and es-ES", () => {
+    expect(formatTime(afternoon, "en-US")).toMatch(/^03:30:45\sPM$/);
+    expect(formatTime(afternoon, "en-US", false)).toMatch(/^03:30\sPM$/);
+    for (const locale of ["pt-BR", "es-ES"]) {
+      expect(formatTime(afternoon, locale)).toBe("15:30:45");
+      expect(formatTime(afternoon, locale, false)).toBe("15:30");
+    }
+  });
+
+  it("orders the date and names the month in the selected language", () => {
+    expect(formatDateTime(afternoon, "en-US", "UTC")).toMatch(/^Oct\s20,\s2026,\s3:30\sPM$/);
+    expect(formatDateTime(afternoon, "pt-BR", "UTC")).toMatch(/^20\sde\sout\.?\sde\s2026,?\s15:30$/);
+    expect(formatDateTime(afternoon, "es-ES", "UTC")).toMatch(/^20\soct\.?\s2026,?\s15:30$/);
+  });
+
+  it("gives the date and time of the zone it is given", () => {
+    // 01:30 on the 21st in UTC is 22:30 on the 20th in São Paulo, three hours behind.
+    const pastMidnight = "2026-10-21T01:30:00Z";
+    expect(formatDateTime(pastMidnight, "en-US", "UTC")).toMatch(/^Oct\s21,\s2026,\s1:30\sAM$/);
+    expect(formatDateTime(pastMidnight, "en-US", "America/Sao_Paulo")).toMatch(/^Oct\s20,\s2026,\s10:30\sPM$/);
+    expect(formatDateTime(pastMidnight, "pt-BR", "America/Sao_Paulo")).toMatch(/^20\sde\sout\.?\sde\s2026,?\s22:30$/);
+    expect(formatDateTime(pastMidnight, "es-ES", "America/Sao_Paulo")).toMatch(/^20\soct\.?\s2026,?\s22:30$/);
   });
 
   it("formats sizes with the locale's separators", () => {
