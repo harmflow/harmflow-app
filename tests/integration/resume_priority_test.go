@@ -53,33 +53,11 @@ func TestResumePriorityDecidesBetweenADraftAndANewIssue(t *testing.T) {
 		{"new_first", false, "new_first puts the new issue before the draft to resume"},
 	} {
 		t.Run(c.strategy, func(t *testing.T) {
-			resumable, fresh, draft := priorityFixtures(t)
+			resumable, fresh, draft := priorityFixtures(t, priorityLabel, true)
 			clone := shallowClone(t)
 			home := t.TempDir()
 			d := startDaemon(t, home)
-			stand := standIn(t, "fake-claude", "claude",
-				"\nSCENARIO=ok\n", "\nSCENARIO=report\n",
-				`{"type":"test.completed","status":"passed","message":"12 passed"}`,
-				`{"type":"test.completed","status":"failed","message":"1 failed"}`,
-				priorityStandInReport, priorityReport(t, resumable, draft))
-			useClaude(d, stand.path, clone)
-			d.call("POST", "/tasks", map[string]any{"yaml": priorityTask(d, clone, c.strategy)}, 201)
-
-			first := d.call("POST", "/tasks/queue/run", nil, 202)["executionId"].(string)
-			if x := d.waitEnd(first, 2*time.Minute); x["status"] != "completed" {
-				t.Fatalf("the stand-in's execution %s = %v (%v), want completed\n%s", first, x["status"], x["errorMessage"],
-					runFiles(executionDir(d, first)))
-			}
-			// What a draft whose tests failed leaves in the ledger, and what the next execution must find there.
-			want := map[string]any{"status": "in_progress", "testsStatus": "failed", "resumes": 0.0, "branch": draft.Head,
-				"pullRequestUrl": draft.URL}
-			if item := priorityQueued(d, issueKey(resumable)); !priorityHolds(item, want) {
-				t.Fatalf("after the stand-in's execution, GET /queue gives %s as %v, want %v", issueKey(resumable), item, want)
-			}
-			if item := priorityQueued(d, issueKey(fresh)); item != nil {
-				t.Fatalf("after the stand-in's execution, GET /queue tracks %s, which no execution took: %v", issueKey(fresh),
-					item)
-			}
+			want := priorityFailedDraft(t, d, clone, priorityTask(d, clone, c.strategy), resumable, fresh, draft)
 
 			useClaude(d, claude, clone)
 			id := d.call("POST", "/tasks/queue/run", nil, 202)["executionId"].(string)
@@ -292,31 +270,36 @@ func labelledPriorityTask(d *daemon, clone, label, strategy string) string {
 	return strings.Replace(task, from, "resumeStrategy: "+strategy, 1)
 }
 
-// priorityFixtures opens the two fixture issues in queueRepo, one after the other, and the managed draft pull request
-// that links the first, and returns the issues' numbers, oldest first, with the pull request. It creates the labels it
-// uses when queueRepo lacks them. What an earlier run left open under priorityLabel, when it was stopped before its
-// cleanup, would come first in the queue's order, so it is closed first; when the subtest ends, failed or not, the same
-// cleanup closes this run's. It returns once GitHub shows the fixtures as the session reads them.
-func priorityFixtures(t *testing.T) (resumable, fresh int, draft restartPR) {
+// priorityFixtures opens the two fixture issues in queueRepo, labelled label, one after the other, and the draft pull
+// request that links the first, which carries the task's marking when marked, and returns the issues' numbers, oldest
+// first, with the pull request. It creates the labels it uses when queueRepo lacks them. What an earlier run left open
+// under label, when it was stopped before its cleanup, would come first in the queue's order, so it is closed first;
+// when the test ends, failed or not, the same cleanup closes this run's. It returns once GitHub shows the fixtures as
+// the session reads them.
+func priorityFixtures(t *testing.T, label string, marked bool) (resumable, fresh int, draft restartPR) {
 	t.Helper()
-	for _, label := range []string{priorityLabel, "harmflow"} {
-		sandboxLabel(t, label)
+	labels := []string{label}
+	if marked {
+		labels = append(labels, "harmflow")
 	}
-	closeLabelledFixtures(t, priorityLabel)
+	for _, l := range labels {
+		sandboxLabel(t, l)
+	}
+	closeLabelledFixtures(t, label)
 	var own []int
-	t.Cleanup(func() { closeLabelledFixtures(t, priorityLabel, own...) })
+	t.Cleanup(func() { closeLabelledFixtures(t, label, own...) })
 	run := runSuffix()
 	for which := 1; which <= 2; which++ {
 		if which > 1 {
 			// GitHub stamps an issue's creation to the second, and the queue reads the issues in that order.
 			time.Sleep(time.Second)
 		}
-		own = append(own, priorityIssue(t, run, which, priorityLabel))
+		own = append(own, priorityIssue(t, run, which, label))
 	}
 	resumable, fresh = own[0], own[1]
-	draft = priorityDraft(t, run, resumable)
+	draft = priorityDraft(t, run, resumable, label, marked)
 	own = append(own, draft.Number)
-	awaitPriorityListed(t, resumable, fresh, draft.Number)
+	awaitPriorityListed(t, label, resumable, fresh, draft.Number)
 	return resumable, fresh, draft
 }
 
@@ -342,17 +325,17 @@ func priorityIssue(t *testing.T, run string, which int, label string) int {
 }
 
 // priorityDraft opens, from a branch of its own whose one commit adds the file the issue asks for, a draft pull request
-// of queueRepo into its default branch, which links the issue with Closes #<issue> and carries the task's marking: the
-// label harmflow and the line naming the task queue, which queueTask's task is. It is also labelled priorityLabel, by
-// which the cleanup finds it. The branch is named neither as the built-in agent names a work branch nor after the
-// issue.
-func priorityDraft(t *testing.T, run string, issue int) restartPR {
+// of queueRepo into its default branch, which links the issue with Closes #<issue>. When marked, it carries the task's
+// marking: the label harmflow and the line naming the task queue, which queueTask's task is; otherwise it carries
+// neither. It is also labelled label, by which the cleanup finds it. The branch is named neither as the built-in agent
+// names a work branch nor after the issue.
+func priorityDraft(t *testing.T, run string, issue int, label string, marked bool) restartPR {
 	t.Helper()
 	base := sandboxBase(t)
 	sha := newWorkAPI(t, "repos/"+queueRepo+"/git/ref/heads/"+base, "--jq", ".object.sha")
 	branch := "add-note-" + run
 	newWorkAPI(t, "repos/"+queueRepo+"/git/refs", "-f", "ref=refs/heads/"+branch, "-f", "sha="+sha)
-	// Until the pull request carries priorityLabel, nothing leads the cleanup to the branch, and deleting the branch
+	// Until the pull request carries label, nothing leads the cleanup to the branch, and deleting the branch
 	// closes a pull request still open from it.
 	abandon := func(format string, args ...any) {
 		t.Helper()
@@ -364,7 +347,10 @@ func priorityDraft(t *testing.T, run string, issue int) restartPR {
 		"-f", "message=Add "+file, "-f", "content="+base64.StdEncoding.EncodeToString([]byte(run+"\n")))
 	var out string
 	if err == nil {
-		body := fmt.Sprintf("Adds `%s`.\n\nCloses #%d\n\nManaged by HarmFlow task queue.\n", file, issue)
+		body := fmt.Sprintf("Adds `%s`.\n\nCloses #%d\n", file, issue)
+		if marked {
+			body += "\nManaged by HarmFlow task queue.\n"
+		}
 		out, err = newWorkGh("repos/"+queueRepo+"/pulls", "-f", "title=Add the note "+file, "-f", "head="+branch,
 			"-f", "base="+base, "-F", "draft=true", "-f", "body="+body, "--jq", "{number, url: .html_url}")
 	}
@@ -375,24 +361,27 @@ func priorityDraft(t *testing.T, run string, issue int) restartPR {
 	if err := json.Unmarshal([]byte(out), &pr); err != nil || pr.Number == 0 || pr.URL == "" {
 		abandon("open the draft pull request from %s: %q, %v", branch, out, err)
 	}
-	if _, err := newWorkGh(fmt.Sprintf("repos/%s/issues/%d/labels", queueRepo, pr.Number), "-f", "labels[]=harmflow",
-		"-f", "labels[]="+priorityLabel); err != nil {
+	labels := []string{"-f", "labels[]=" + label}
+	if marked {
+		labels = append(labels, "-f", "labels[]=harmflow")
+	}
+	if _, err := newWorkGh(append([]string{fmt.Sprintf("repos/%s/issues/%d/labels", queueRepo, pr.Number)}, labels...)...); err != nil {
 		abandon("label the draft pull request %s: %v", pr.URL, err)
 	}
 	return pr
 }
 
 // awaitPriorityListed waits until GitHub shows the fixtures as the session reads them: the open issues of queueRepo
-// labelled priorityLabel are the two issues, oldest first, and the pull request is linked to the first. GitHub lists a
-// new issue under its label, and links a pull request to the issue it closes, only some seconds after it makes them,
-// and a session that ran before would find no draft to resume.
-func awaitPriorityListed(t *testing.T, resumable, fresh, pr int) {
+// labelled label are the two issues, oldest first, and the pull request is linked to the first. GitHub lists a new
+// issue under its label, and links a pull request to the issue it closes, only some seconds after it makes them, and a
+// session that ran before would find no draft to resume.
+func awaitPriorityListed(t *testing.T, label string, resumable, fresh, pr int) {
 	t.Helper()
 	want := []int{resumable, fresh}
 	var listed, linking []int
 	var err error
 	for deadline := time.Now().Add(time.Minute); time.Now().Before(deadline); time.Sleep(time.Second) {
-		if listed, err = labelledIssues(priorityLabel); err != nil {
+		if listed, err = labelledIssues(label); err != nil {
 			continue
 		}
 		if linking, err = newWorkLinking(resumable); err != nil {
@@ -403,7 +392,7 @@ func awaitPriorityListed(t *testing.T, resumable, fresh, pr int) {
 		}
 	}
 	t.Fatalf("after a minute, the open issues of %s labelled %s are %v and the pull requests linking #%d are %v (%v); "+
-		"want %v, and #%d among them", queueRepo, priorityLabel, listed, resumable, linking, err, want, pr)
+		"want %v, and #%d among them", queueRepo, label, listed, resumable, linking, err, want, pr)
 }
 
 // priorityReport is the report.json of an execution that opened the draft pull request for the issue and whose tests
@@ -429,6 +418,36 @@ func priorityReport(t *testing.T, issue int, pr restartPR) string {
 		t.Fatalf("the stand-in's report %s holds a single quote", data)
 	}
 	return string(data)
+}
+
+// priorityFailedDraft creates the task, given as YAML, and runs it once through a stand-in Claude Code that reports the
+// resumable issue's item completed with the draft pull request and its tests failed. It checks that the ledger then
+// keeps the item in progress, as it keeps every draft whose tests failed, and holds nothing for the fresh issue, and
+// returns the fields the item holds there, which the next execution must find.
+func priorityFailedDraft(t *testing.T, d *daemon, clone, task string, resumable, fresh int, draft restartPR) map[string]any {
+	t.Helper()
+	stand := standIn(t, "fake-claude", "claude",
+		"\nSCENARIO=ok\n", "\nSCENARIO=report\n",
+		`{"type":"test.completed","status":"passed","message":"12 passed"}`,
+		`{"type":"test.completed","status":"failed","message":"1 failed"}`,
+		priorityStandInReport, priorityReport(t, resumable, draft))
+	useClaude(d, stand.path, clone)
+	d.call("POST", "/tasks", map[string]any{"yaml": task}, 201)
+
+	first := d.call("POST", "/tasks/queue/run", nil, 202)["executionId"].(string)
+	if x := d.waitEnd(first, 2*time.Minute); x["status"] != "completed" {
+		t.Fatalf("the stand-in's execution %s = %v (%v), want completed\n%s", first, x["status"], x["errorMessage"],
+			runFiles(executionDir(d, first)))
+	}
+	want := map[string]any{"status": "in_progress", "testsStatus": "failed", "resumes": 0.0, "branch": draft.Head,
+		"pullRequestUrl": draft.URL}
+	if item := priorityQueued(d, issueKey(resumable)); !priorityHolds(item, want) {
+		t.Fatalf("after the stand-in's execution, GET /queue gives %s as %v, want %v", issueKey(resumable), item, want)
+	}
+	if item := priorityQueued(d, issueKey(fresh)); item != nil {
+		t.Fatalf("after the stand-in's execution, GET /queue tracks %s, which no execution took: %v", issueKey(fresh), item)
+	}
+	return want
 }
 
 // priorityQueued is the daemon's work item under key, as GET /queue lists it: nil when it lists none.
