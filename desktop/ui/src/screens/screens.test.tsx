@@ -645,6 +645,41 @@ describe("the choice to keep HarmFlow in the menu bar on ⌘Q", () => {
   });
 });
 
+// Settings → General: the language select offers the three official languages and no other, and apart from them the
+// choice to follow the system's language (harmflow-app#525).
+describe("the language setting", () => {
+  let root: Root | undefined;
+  let host: HTMLElement | undefined;
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    host?.remove();
+    root = host = undefined;
+    daemon.answers.clear();
+    daemon.requests.length = 0;
+  });
+
+  it("offers pt-BR, en-US, and es-ES, each once, and the system's language apart from them", async () => {
+    daemon.answers.set("/settings", settings);
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(<SettingsScreen section="general" />));
+    await act(() => new Promise<void>((resolve) => setImmediate(resolve)));
+
+    const select = host!.querySelector<HTMLSelectElement>("select#settings-language")!;
+    const options = [...select.options].map((o) => ({ value: o.value, label: o.textContent }));
+    // Each language is named in its own language, whatever the interface's.
+    expect(options.filter((o) => o.value !== "system")).toEqual([
+      { value: "pt-BR", label: "Português (Brasil)" },
+      { value: "en-US", label: "English (US)" },
+      { value: "es-ES", label: "Español" },
+    ]);
+    // Following the system picks one of the three; it is a choice, not a fourth language.
+    expect(options.filter((o) => o.value === "system")).toEqual([{ value: "system", label: "Idioma do sistema" }]);
+    expect(select.value).toBe("pt-BR");
+  });
+});
+
 // Settings shows its sections in a list, in three groups and About, and one section at a time (harmflow-app#251).
 describe("settings sections", () => {
   let root: Root | undefined;

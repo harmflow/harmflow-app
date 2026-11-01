@@ -98,6 +98,55 @@ func TestKeepTrayOnQuitIsOffByDefaultAndKeepsAPatch(t *testing.T) {
 	}
 }
 
+// harmflow-app#525: the language setting takes the three official languages and the choice to follow the system's,
+// and refuses any other language with settings_language_invalid, leaving the saved language as it was.
+func TestLanguageSettingTakesOnlyTheOfficialLanguages(t *testing.T) {
+	for _, tc := range []struct {
+		language string
+		accepted bool
+	}{
+		{"pt-BR", true},
+		{"en-US", true},
+		{"es-ES", true},
+		{"system", true},
+		{"fr-FR", false},
+		{"pt-PT", false},
+		{"pt-br", false},
+		{"en", false},
+	} {
+		t.Run(tc.language, func(t *testing.T) {
+			e := newEnv(t)
+			// The language saved before the patch differs from the one the patch asks for, so a patch that applied, or
+			// one that changed nothing, shows.
+			before := "es-ES"
+			if tc.language == before {
+				before = "pt-BR"
+			}
+			if _, err := e.app.UpdateSettings(SettingsPatch{Language: &before}); err != nil {
+				t.Fatalf("UpdateSettings(language %q): %v", before, err)
+			}
+			want := before
+			v, err := e.app.UpdateSettings(SettingsPatch{Language: &tc.language})
+			if tc.accepted {
+				want = tc.language
+				if err != nil || v.Language != want {
+					t.Errorf("UpdateSettings(language %q) = %q, %v, want %q, nil", tc.language, v.Language, err, want)
+				}
+			} else if code, key := appErrorKey(err); code != CodeValidationFailed || key != "settings_language_invalid" {
+				t.Errorf("UpdateSettings(language %q) = %s %s %v, want %s settings_language_invalid", tc.language, code,
+					key, err, CodeValidationFailed)
+			}
+			if got := e.app.GetSettings().Language; got != want {
+				t.Errorf("GetSettings().Language = %q after language %q, want %q", got, tc.language, want)
+			}
+			e = e.restart(t)
+			if got := e.app.GetSettings().Language; got != want {
+				t.Errorf("GetSettings().Language = %q after language %q and a restart, want %q", got, tc.language, want)
+			}
+		})
+	}
+}
+
 // A use-case error keeps its text through any wrapping, as the firing history records it.
 func TestErrorTextFindsAWrappedError(t *testing.T) {
 	want := domain.T("task_not_found", "no task {{task}}", "task", "nightly")
