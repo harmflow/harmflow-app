@@ -238,10 +238,10 @@ func restartFixture(t *testing.T) (issue int, file string) {
 	t.Helper()
 	run := runSuffix()
 	file = "restart-test/" + run + ".txt"
-	body := fmt.Sprintf("A fixture of HarmFlow's restart test, which closes it when it ends.\n\n"+
-		"Add the file `%s` with the single line `%s`, and change nothing else. The repository has no tests.\n", file, run)
+	body := fmt.Sprintf("Add the file `%s` with the single line `%s`, and change nothing else. The repository has no "+
+		"tests.\n", file, run)
 	out, err := exec.Command("gh", "issue", "create", "--repo", queueRepo, "--label", restartLabel,
-		"--title", "Restart test "+run+": add "+file, "--body", body).Output()
+		"--title", "Add the note "+file, "--body", body).Output()
 	if err != nil {
 		t.Fatalf("gh issue create: %v", err)
 	}
