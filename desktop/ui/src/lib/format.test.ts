@@ -2,16 +2,34 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { elapsedMs, formatBytes, formatDateTime, formatDuration, formatElapsed, formatRelative, formatTime } from "./format";
 
 describe("formatDuration", () => {
+  // The same durations in each language: the locale's narrow units, the two largest at most, no zero padding.
   it.each([
-    [0, "0s"],
-    [45_000, "45s"],
-    [512_000, "8m 32s"],
-    [60_000, "1m 00s"],
-    [3_840_000, "1h 04m"],
-    [2 * 86_400_000 + 3 * 3_600_000, "2d 3h"],
-    [-5_000, "0s"],
-  ])("%d ms reads %s", (ms, text) => {
-    expect(formatDuration(ms)).toBe(text);
+    [0, "en-US", "0s"],
+    [45_000, "en-US", "45s"],
+    [512_000, "en-US", "8m 32s"],
+    [60_000, "en-US", "1m"],
+    [3_840_000, "en-US", "1h 4m"],
+    [2 * 86_400_000 + 3 * 3_600_000, "en-US", "2d 3h"],
+    [2 * 86_400_000 + 3 * 3_600_000 + 512_000, "en-US", "2d 3h"],
+    [-5_000, "en-US", "0s"],
+    [0, "pt-BR", "0 s"],
+    [45_000, "pt-BR", "45 s"],
+    [512_000, "pt-BR", "8 min 32 s"],
+    [60_000, "pt-BR", "1 min"],
+    [3_840_000, "pt-BR", "1 h 4 min"],
+    [2 * 86_400_000 + 3 * 3_600_000, "pt-BR", "2 dias 3 h"],
+    [2 * 86_400_000 + 3 * 3_600_000 + 512_000, "pt-BR", "2 dias 3 h"],
+    [-5_000, "pt-BR", "0 s"],
+    [0, "es-ES", "0s"],
+    [45_000, "es-ES", "45s"],
+    [512_000, "es-ES", "8min 32s"],
+    [60_000, "es-ES", "1min"],
+    [3_840_000, "es-ES", "1h 4min"],
+    [2 * 86_400_000 + 3 * 3_600_000, "es-ES", "2d 3h"],
+    [2 * 86_400_000 + 3 * 3_600_000 + 512_000, "es-ES", "2d 3h"],
+    [-5_000, "es-ES", "0s"],
+  ])("%d ms in %s reads %s", (ms, locale, text) => {
+    expect(formatDuration(ms, locale)).toBe(text);
   });
 });
 
@@ -20,11 +38,15 @@ describe("elapsed time", () => {
 
   it("runs to now while the execution has no end", () => {
     expect(elapsedMs(start, undefined, Date.parse("2026-10-20T19:31:46Z"))).toBe(512_000);
-    expect(formatElapsed(start, undefined, Date.parse("2026-10-20T19:31:46Z"))).toBe("8m 32s");
+    expect(formatElapsed(start, undefined, "en-US", Date.parse("2026-10-20T19:31:46Z"))).toBe("8m 32s");
   });
 
   it("stops at the end once there is one", () => {
-    expect(formatElapsed(start, "2026-10-20T19:24:14Z", Date.parse("2026-10-21T00:00:00Z"))).toBe("1m 00s");
+    expect(formatElapsed(start, "2026-10-20T19:24:14Z", "en-US", Date.parse("2026-10-21T00:00:00Z"))).toBe("1m");
+  });
+
+  it("reads in the language it is given", () => {
+    expect(formatElapsed(start, "2026-10-20T19:31:46Z", "pt-BR")).toBe("8 min 32 s");
   });
 
   it("is zero without a start or with an unreadable date", () => {

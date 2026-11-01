@@ -466,9 +466,9 @@ describe("the executions screen's cards", () => {
       { ...running, id: "exec-handbook", taskId: "handbook-docs", taskName: "Handbook docs", harness: "codex", status: "switching_harness", repository: "org/handbook", workItem: "org/handbook#7", createdAt: "2026-10-20T18:14:58-03:00", startedAt: "2026-10-20T18:15:00-03:00" },
     ];
     const shown = [
-      { title: "Core issues · core-banking#123", task: "core-issues", runBy: "Claude Code", repository: "org/core-banking", elapsed: "8m 32s", state: "Executando" },
-      { title: "Payments fixes · payments#45", task: "payments-fixes", runBy: "Codex", repository: "org/payments", elapsed: "5s", state: "Preparando" },
-      { title: "Handbook docs · handbook#7", task: "handbook-docs", runBy: "Codex", repository: "org/handbook", elapsed: "1h 15m", state: "Trocando de harness" },
+      { title: "Core issues · core-banking#123", task: "core-issues", runBy: "Claude Code", repository: "org/core-banking", elapsed: "8 min 32 s", state: "Executando" },
+      { title: "Payments fixes · payments#45", task: "payments-fixes", runBy: "Codex", repository: "org/payments", elapsed: "5 s", state: "Preparando" },
+      { title: "Handbook docs · handbook#7", task: "handbook-docs", runBy: "Codex", repository: "org/handbook", elapsed: "1 h 15 min", state: "Trocando de harness" },
     ];
     for (const e of three) daemon.answers.set(`/executions/${e.id}/events`, { events: [], logExpired: false });
     daemon.answers.set(`/executions/${three[0].id}`, { ...detail, ...three[0] });

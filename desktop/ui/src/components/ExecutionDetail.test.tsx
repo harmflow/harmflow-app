@@ -213,6 +213,35 @@ describe("execution detail", () => {
     }
   });
 
+  it("writes an attempt's start time and duration as the interface's language does, and again when it changes (harmflow-app#642)", async () => {
+    // The start time is written in the machine's time zone: the test sets one, so it reads the same on any machine.
+    vi.stubEnv("TZ", "UTC");
+    try {
+      await open(completed, [], capture());
+      await choose("Attempts");
+      // The second attempt ran from 09:00 to 09:20.
+      const shown = (key: "executions.detail.started" | "executions.detail.duration") =>
+        [...host!.querySelectorAll(".attempt")[1].querySelectorAll(".kv__row")]
+          .find((row) => row.querySelector("dt")!.textContent === i18n.t(key))!
+          .querySelector("dd")!.textContent;
+      const read = () => ({ started: shown("executions.detail.started"), duration: shown("executions.detail.duration") });
+
+      const english = read();
+      expect(english).toEqual({ started: "Oct 21, 2026, 9:00 AM", duration: "20m" });
+
+      await act(async () => void (await i18n.changeLanguage("pt-BR")));
+      await settle();
+      const portuguese = read();
+      expect(portuguese).toEqual({ started: "21 de out. de 2026, 09:00", duration: "20 min" });
+
+      expect(portuguese.started).not.toBe(english.started);
+      expect(portuguese.duration).not.toBe(english.duration);
+    } finally {
+      vi.unstubAllEnvs();
+      await act(async () => void (await i18n.changeLanguage("en-US")));
+    }
+  });
+
   it("shows a failover's switch events in its timeline, in order, each with its own tone", async () => {
     // A quota failover's events as the daemon emits them, in the order itest › TestFailoverAcrossHarnesses reads.
     const failedOver: Execution = { ...completed, id: "exec-failed-over" };

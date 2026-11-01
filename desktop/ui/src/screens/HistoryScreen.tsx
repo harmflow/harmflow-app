@@ -144,7 +144,7 @@ export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpe
                     </td>
                     <td>{t(`trigger.${r.trigger}`)}</td>
                     <td className="mono small">{formatDateTime(r.startedAt ?? r.createdAt, i18n.language)}</td>
-                    <td className="mono">{r.startedAt ? formatElapsed(r.startedAt, r.endedAt) : "—"}</td>
+                    <td className="mono">{r.startedAt ? formatElapsed(r.startedAt, r.endedAt, i18n.language) : "—"}</td>
                     <td>
                       {r.testsStatus ? (
                         <Chip tone={r.testsStatus === "passed" ? "success" : r.testsStatus === "failed" ? "danger" : "neutral"} icon="test">

@@ -5,17 +5,39 @@ const MINUTE = 60 * SECOND;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
-/** A compact duration such as `45s`, `8m 32s`, `1h 04m`, or `2d 3h`. Negative values read as zero. */
-export function formatDuration(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / SECOND));
-  const d = Math.floor(total / 86400);
-  const h = Math.floor((total % 86400) / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  if (d > 0) return `${d}d ${h}h`;
-  if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m`;
-  if (m > 0) return `${m}m ${String(s).padStart(2, "0")}s`;
-  return `${s}s`;
+type DurationUnit = "days" | "hours" | "minutes" | "seconds";
+
+const DURATION_UNITS: Array<[DurationUnit, number]> = [
+  ["days", DAY],
+  ["hours", HOUR],
+  ["minutes", MINUTE],
+  ["seconds", SECOND],
+];
+
+// TypeScript's libraries do not declare Intl.DurationFormat yet; WebKit has it since Safari 16.4.
+type DurationFormat = {
+  format(duration: Partial<Record<DurationUnit, number>>): string;
+};
+const DurationFormat = (
+  Intl as unknown as {
+    DurationFormat: new (locale: string, options: { style: "narrow"; secondsDisplay: "always" | "auto" }) => DurationFormat;
+  }
+).DurationFormat;
+
+/** A compact duration in the locale's narrow units, its two largest at most: en-US `45s`, `8m 32s`, `1h 4m`, `2d 3h`.
+ * Negative values read as zero. */
+export function formatDuration(ms: number, locale: string): string {
+  let rest = Math.max(0, Math.floor(ms / SECOND)) * SECOND;
+  const amounts = DURATION_UNITS.map(([unit, size]): [DurationUnit, number] => {
+    const amount = Math.floor(rest / size);
+    rest -= amount * size;
+    return [unit, amount];
+  });
+  const largest = amounts.findIndex(([, amount]) => amount > 0);
+  // Zero has no largest unit: it reads as zero seconds.
+  const from = largest < 0 ? amounts.length - 1 : largest;
+  const shown = Object.fromEntries(amounts.slice(from, from + 2));
+  return new DurationFormat(locale, { style: "narrow", secondsDisplay: largest < 0 ? "always" : "auto" }).format(shown);
 }
 
 /** Elapsed time from start to end, or to now while the end is unknown. */
@@ -27,8 +49,8 @@ export function elapsedMs(start?: string | null, end?: string | null, now: numbe
   return Math.max(0, to - from);
 }
 
-export function formatElapsed(start?: string | null, end?: string | null, now?: number): string {
-  return formatDuration(elapsedMs(start, end, now));
+export function formatElapsed(start: string | undefined | null, end: string | undefined | null, locale: string, now?: number): string {
+  return formatDuration(elapsedMs(start, end, now), locale);
 }
 
 export function formatTime(iso: string | undefined | null, locale: string, withSeconds = true): string {
