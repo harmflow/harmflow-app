@@ -369,10 +369,10 @@ func listings(t *testing.T, log string) []string {
 
 // A Claude Code task's skills are the ones Claude Code lists for its workspace and added folders, and only those. A
 // task whose workspace is a folder of a repository cites the repository's skill, a bundled one, and a plugin's, and
-// saves; one placed elsewhere is refused, naming Claude Code's skill list for its workspace; a skill on disk that Claude
-// Code does not list is not found. The folder a task adds with a writable path counts, in the task editor's catalog,
-// on save, and in an execution. A failover to Claude Code reads the same list. Each list is asked for once per
-// workspace and added folders, and again after a refresh.
+// saves; one placed elsewhere is refused, naming Claude Code's skill list for its workspace; a skill on disk that
+// Claude Code does not list is not found. The folder a task adds with a writable path counts, in the task editor's
+// catalog, on save, and in an execution. A failover to Claude Code reads the same list. Each list is asked for once
+// per workspace and added folders, and again after a refresh.
 func TestClaudeCodeSkillsComeFromItsSkillList(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "listings.log")
 	a := newClaudeAppOn(t, initClaude(log))
