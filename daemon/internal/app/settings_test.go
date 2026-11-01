@@ -98,6 +98,29 @@ func TestKeepTrayOnQuitIsOffByDefaultAndKeepsAPatch(t *testing.T) {
 	}
 }
 
+// harmflow-app#464: the tray is on in the settings of a fresh data folder, and a patch turns it off and back on,
+// each of which a restart of the daemon keeps: the shell reads the stored choice at start to decide what closing the
+// window does.
+func TestTrayIsOnByDefaultAndARestartKeepsAPatch(t *testing.T) {
+	e := newEnv(t)
+	if got := e.app.GetSettings().TrayEnabled; !got {
+		t.Fatalf("GetSettings().TrayEnabled = %v on a fresh data folder, want true", got)
+	}
+	for _, on := range []bool{false, true} {
+		v, err := e.app.UpdateSettings(SettingsPatch{TrayEnabled: &on})
+		if err != nil {
+			t.Fatalf("UpdateSettings(trayEnabled: %v): %v", on, err)
+		}
+		if v.TrayEnabled != on {
+			t.Errorf("UpdateSettings(trayEnabled: %v) = trayEnabled %v", on, v.TrayEnabled)
+		}
+		e = e.restart(t)
+		if got := e.app.GetSettings().TrayEnabled; got != on {
+			t.Errorf("GetSettings().TrayEnabled = %v after a restart, want %v", got, on)
+		}
+	}
+}
+
 // A use-case error keeps its text through any wrapping, as the firing history records it.
 func TestErrorTextFindsAWrappedError(t *testing.T) {
 	want := domain.T("task_not_found", "no task {{task}}", "task", "nightly")
