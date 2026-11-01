@@ -145,9 +145,9 @@ func TestSkillListIsCachedPerWorkspaceAndAddedFolders(t *testing.T) {
 	}
 }
 
-// When Claude Code cannot answer — not detected, ending before its init line, printing an init line with no skill
-// list, or reaching the timeout — the lookup fails with an error, never an empty list, and nothing is kept, so the
-// next lookup asks again.
+// When Claude Code cannot answer — not detected, ending before its init line with its error or silently, printing an
+// init line with no skill list, or reaching the timeout — the lookup fails with an error, never an empty list, and
+// nothing is kept, so the next lookup asks again.
 func TestSkillListThatClaudeCodeCannotGive(t *testing.T) {
 	for _, c := range []struct {
 		name, body, wantKey, wantDetail string
@@ -155,6 +155,7 @@ func TestSkillListThatClaudeCodeCannotGive(t *testing.T) {
 	}{
 		{"not detected", "", "harness_not_detected", "", false},
 		{"a failing CLI", "echo 'Not logged in' >&2\nexit 1", "command_failed", "Not logged in", true},
+		{"a silent exit", "exit 3", "harness_exit_code", "", true},
 		{"no skill list", `echo '{"type":"system","subtype":"init","model":"x"}'`, "claude_skill_list_unrecognized", "", true},
 		{"no init line in time", "sleep 30", "claude_skill_list_timed_out", "", true},
 	} {
