@@ -6118,6 +6118,37 @@ func TestNotificationLevels(t *testing.T) {
 	}
 }
 
+// harmflow-app#522: two tasks that notify on execution.failed fail once each while no desktop app runs and nothing
+// reads the event stream. The daemon holds both notices as unread, one per task, each naming its execution, for the
+// dashboard to show when it opens.
+func TestFailuresWithNoDesktopAreHeldUnread(t *testing.T) {
+	e := newEnv(t)
+	e.claude.setScript(func(ports.RunRequest) string { return "echo 'END error'" })
+	failed := map[string]string{} // task → its failed execution
+	for _, id := range []string{"first", "second"} {
+		e.create(id, "  notifications:\n    native:\n      events: [execution.failed]\n")
+		r, _ := e.app.RunTask(id)
+		e.wait(r.ExecutionID, domain.StatusFailed)
+		e.idle(id) // the notice is decided once the execution has returned
+		failed[id] = r.ExecutionID
+	}
+
+	unread := e.app.Notifications(true)
+	if len(unread) != 2 {
+		t.Fatalf("unread notices %+v, want two, one per failed task", unread)
+	}
+	for _, n := range unread {
+		want, ok := failed[n.TaskID]
+		if !ok || n.EventType != domain.EventExecutionFailed || n.ExecutionID != want || n.Params["executionId"] != want {
+			t.Errorf("notice %+v, want an execution.failed notice of one of the tasks, naming its failed execution", n)
+		}
+		delete(failed, n.TaskID)
+	}
+	if len(failed) != 0 {
+		t.Errorf("no notice for the tasks %v", failed)
+	}
+}
+
 // Whether a running execution notifies is decided by the definition it started with, its task's name included; an
 // edit to the task's notifications applies from the next execution.
 func TestNoticesFollowTheStartingDefinition(t *testing.T) {
