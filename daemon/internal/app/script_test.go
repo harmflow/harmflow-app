@@ -668,6 +668,94 @@ func TestScriptTaskSharesTheScheduler(t *testing.T) {
 	e.idle("busy")
 }
 
+// eventID is the ID of the execution's first event of the type in its log, or 0 when it has none.
+func (e *env) eventID(executionID, eventType string) int64 {
+	e.t.Helper()
+	events, _, err := e.app.ExecutionEvents(executionID, 0, 0)
+	if err != nil {
+		e.t.Fatalf("ExecutionEvents(%s): %v", executionID, err)
+	}
+	for _, ev := range events {
+		if ev.Type == eventType {
+			return ev.ID
+		}
+	}
+	return 0
+}
+
+// A script task on an interval with the queue policy keeps one waiting firing while its program runs, however many of
+// its schedule's firings arrive, and that firing starts once the running execution has ended on its own.
+func TestScriptScheduledFiringsQueue(t *testing.T) {
+	e := newEnv(t)
+	dir := t.TempDir()
+	hold, pid := filepath.Join(dir, "hold"), filepath.Join(dir, "pid")
+	if err := os.WriteFile(hold, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.createScript("every", fmt.Sprintf("  script:\n    command: [/bin/sh, -c, \"echo $$ > %s; while [ -e %s ]; do sleep 0.05; done\"]\n"+
+		"  schedule:\n    interval: 2m\n  concurrency:\n    overlappingRuns: queue\n", pid, hold))
+	// fireNext moves the clock just past the task's next firing and lets the scheduler tick, as its loop would.
+	fireNext := func() firingRecord {
+		t.Helper()
+		v, err := e.app.GetTask("every")
+		if err != nil || v.NextFireAt == nil {
+			t.Fatalf("GetTask(every) = next %v, %v; want a next firing", v.NextFireAt, err)
+		}
+		e.clock.Advance(v.NextFireAt.Sub(e.clock.Now()) + time.Second)
+		e.app.Tick()
+		return e.lastFiring("every")
+	}
+
+	first := fireNext()
+	if first.Outcome != "started" || first.Trigger != domain.TriggerSchedule {
+		t.Fatalf("first firing %+v, want started on the schedule", first)
+	}
+	waitForPid(t, pid)
+	second, third := fireNext(), fireNext()
+	if second.Outcome != "queued" || second.Trigger != domain.TriggerSchedule || second.ExecutionID == first.ExecutionID {
+		t.Errorf("second firing %+v, want queued on the schedule, apart from %s", second, first.ExecutionID)
+	}
+	if third.Outcome != "coalesced" || third.ExecutionID != second.ExecutionID {
+		t.Errorf("third firing %+v, want coalesced into %s", third, second.ExecutionID)
+	}
+	var waiting []ExecutionSummary
+	for _, x := range e.executions("every") {
+		if x.Status == domain.StatusQueued {
+			waiting = append(waiting, x)
+		}
+	}
+	if len(waiting) != 1 || waiting[0].ID != second.ExecutionID || waiting[0].Trigger != domain.TriggerSchedule {
+		t.Fatalf("waiting executions %+v, want only %s, on the schedule", waiting, second.ExecutionID)
+	}
+	if x, _ := e.app.GetExecution(first.ExecutionID); x.Status != domain.StatusRunning {
+		t.Fatalf("first execution is %s while its program runs, want running", x.Status)
+	}
+
+	// The program ends on its own, with exit code 0; nothing is cancelled.
+	if err := os.Remove(hold); err != nil {
+		t.Fatal(err)
+	}
+	done := e.wait(first.ExecutionID, domain.StatusCompleted)
+	next := e.wait(second.ExecutionID, domain.StatusCompleted)
+	e.idle("every")
+	for _, x := range []ExecutionView{done, next} {
+		if len(x.Attempts) != 1 || x.Attempts[0].ExitCode == nil || *x.Attempts[0].ExitCode != 0 {
+			t.Errorf("execution %s attempts %+v, want one that exited 0", x.ID, x.Attempts)
+		}
+	}
+	if next.Trigger != domain.TriggerSchedule {
+		t.Errorf("waiting execution's trigger %s, want %s", next.Trigger, domain.TriggerSchedule)
+	}
+	// The waiting execution starts only after the first one has ended: event IDs increase across every execution's log.
+	ended, started := e.eventID(first.ExecutionID, domain.EventExecutionCompleted), e.eventID(second.ExecutionID, domain.EventExecutionStarted)
+	if ended == 0 || started <= ended {
+		t.Errorf("first execution ended at event %d and the waiting one started at %d, want it to start after", ended, started)
+	}
+	if xs := e.executions("every"); len(xs) != 2 {
+		t.Errorf("%d executions, want 2: %+v", len(xs), xs)
+	}
+}
+
 // A script task goes through every use case a task has, none of which may assume a harness.
 func TestScriptTaskThroughEveryUseCase(t *testing.T) {
 	e := newEnv(t)
