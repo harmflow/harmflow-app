@@ -24,7 +24,7 @@ var usageLineRe = regexp.MustCompile(`(?m)^[ \t]*(Current [^:\n]+):[ \t]*(\d+(?:
 // ReadQuota implements ports.QuotaReader with `claude -p "/usage"`, which runs no turn and makes no model call: the
 // plan windows it prints, each reset in the CLI's own words.
 func (a *Adapter) ReadQuota(ctx context.Context, info ports.HarnessInfo) (domain.Quota, error) {
-	out, _, err := procutil.Output(ctx, quotaTimeout, a.Env, info.Path, "-p", "/usage")
+	out, _, err := procutil.Output(ctx, quotaTimeout, a.withToken(a.Env), info.Path, "-p", "/usage")
 	if err != nil {
 		return domain.Quota{}, domain.TextErr("command_failed", "{{command}} failed: {{detail}}",
 			"command", `claude -p "/usage"`, "detail", err.Error())

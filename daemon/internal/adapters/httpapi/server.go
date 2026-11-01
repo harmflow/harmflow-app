@@ -106,6 +106,8 @@ func (s *Server) Handler() http.Handler {
 	})
 	h("PUT /api/v1/harnesses/{harnessId}", s.setHarnessPath)
 	h("POST /api/v1/harnesses/{harnessId}/sign-in", s.signInHarness)
+	h("PUT /api/v1/harnesses/{harnessId}/token", s.setHarnessToken)
+	h("DELETE /api/v1/harnesses/{harnessId}/token", s.deleteHarnessToken)
 	h("GET /api/v1/tools", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.App.Tools(r.Context())) })
 	h("GET /api/v1/catalog", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
@@ -306,6 +308,33 @@ func (s *Server) signInHarness(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 202, info)
+}
+
+// setHarnessToken saves a harness's long-lived token; the harness comes back checked again, without the token's value.
+func (s *Server) setHarnessToken(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := decode(r, &body); err != nil {
+		fail(w, err)
+		return
+	}
+	info, err := s.App.SetHarnessToken(r.Context(), r.PathValue("harnessId"), body.Token)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, 200, info)
+}
+
+// deleteHarnessToken removes a harness's long-lived token; the harness comes back checked on its own sign-in.
+func (s *Server) deleteHarnessToken(w http.ResponseWriter, r *http.Request) {
+	info, err := s.App.DeleteHarnessToken(r.Context(), r.PathValue("harnessId"))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, 200, info)
 }
 
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {

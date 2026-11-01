@@ -23,13 +23,13 @@ func (a *App) Harnesses() []ports.HarnessInfo {
 	out := []ports.HarnessInfo{}
 	for _, id := range a.adapterIDs() {
 		if info, ok := a.inventory[id]; ok {
-			out = append(out, a.withSignInLocked(id, info))
+			out = append(out, a.withTokenLocked(id, a.withSignInLocked(id, info)))
 		} else {
 			ad := a.adapters[id]
 			info := ports.HarnessInfo{ID: id, Name: ad.Name(), Authentication: "unknown", Readiness: "checking",
 				Installations: []string{}, Models: []ports.ModelInfo{}, Efforts: []string{}, EnforceableControls: []string{}}
 			info.SetDiagnostic(domain.T("detection_running", "detection is running"))
-			out = append(out, a.withSignInLocked(id, info))
+			out = append(out, a.withTokenLocked(id, a.withSignInLocked(id, info)))
 		}
 	}
 	return out
@@ -71,6 +71,10 @@ func (a *App) detect(ctx context.Context, id string) ports.HarnessInfo {
 	manual := a.manualPaths[id]
 	a.mu.Unlock()
 	info := ad.Detect(ctx, manual)
+	if info.Authentication == "invalid" && a.rejectToken(id) {
+		// The harness rejected its saved token: check it again without, on its own sign-in.
+		info = ad.Detect(ctx, manual)
+	}
 	info.LastCheckedAt = a.now()
 	// Taken only once Detect returns, so a slow check never holds up Stop; see announceMu.
 	a.announceMu.RLock()
@@ -82,7 +86,7 @@ func (a *App) detect(ctx context.Context, id string) ports.HarnessInfo {
 	}
 	a.signInDiagnosticLocked(id, &info)
 	a.inventory[id] = info
-	info = a.withSignInLocked(id, info)
+	info = a.withTokenLocked(id, a.withSignInLocked(id, info))
 	a.mu.Unlock()
 	a.emit(domain.Event{Type: domain.EventHarnessChecked, Harness: id, Severity: domain.SeverityInfo,
 		Payload: map[string]any{"readiness": info.Readiness}})

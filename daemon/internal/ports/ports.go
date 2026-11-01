@@ -79,10 +79,13 @@ type RawCapture struct {
 	Text   string
 }
 
-// SecretStore keeps the local API token in the operating system's credential store.
+// SecretStore keeps a secret in the operating system's credential store: the local API token, or a harness's
+// long-lived token.
 type SecretStore interface {
 	Get() (string, error)
 	Set(token string) error
+	// Delete removes the secret; a store that holds none is no error.
+	Delete() error
 	Kind() string
 }
 
@@ -118,8 +121,12 @@ type HarnessInfo struct {
 	DiagnosticParams    map[string]string `json:"diagnosticParams,omitempty"`
 	// SignIn is the state of the sign-in the daemon can run for the harness, SignInAvailable or SignInRunning; empty
 	// for a harness that has none. The use cases set it, not detection.
-	SignIn   string          `json:"signIn,omitempty"`
-	Features map[string]bool `json:"-"`
+	SignIn string `json:"signIn,omitempty"`
+	// TakesToken says the daemon can keep a long-lived token for the harness, and Token is the one the user saved,
+	// without its value; nil when none is saved. The use cases set both, not detection.
+	TakesToken bool            `json:"takesToken,omitempty"`
+	Token      *TokenInfo      `json:"token,omitempty"`
+	Features   map[string]bool `json:"-"`
 	// FeaturesUnknown is true when the help that lists the CLI's flags could not be read within its check's limit, so
 	// Features cannot tell a flag the CLI lacks from one the help did not get to.
 	FeaturesUnknown bool `json:"-"`
@@ -332,6 +339,20 @@ type HarnessCloser interface {
 // output names it.
 type HarnessIdentifier interface {
 	Identify(ctx context.Context, path string) error
+}
+
+// TokenInfo is a harness's long-lived token as the inventory shows it, never its value: when the user saved it, when it
+// expires by the count of its year, and whether the harness rejected it, so it is no longer used.
+type TokenInfo struct {
+	SavedAt   time.Time `json:"savedAt"`
+	ExpiresAt time.Time `json:"expiresAt"`
+	Rejected  bool      `json:"rejected"`
+}
+
+// TokenSignIn is a HarnessAdapter whose harness can run on a long-lived token the user gives HarmFlow, in place of its
+// own sign-in: UseToken sets the token its checks and sessions run with from then on, none when token is empty.
+type TokenSignIn interface {
+	UseToken(token string)
 }
 
 // The states of HarnessInfo.SignIn: the daemon can start a sign-in for the harness, or one runs.

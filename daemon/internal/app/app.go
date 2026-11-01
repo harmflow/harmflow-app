@@ -113,6 +113,9 @@ type Deps struct {
 	// MisfireAfter is how late a firing may be before it counts as missed though no unavailability was seen: the clock
 	// jumped, or the daemon could not run.
 	MisfireAfter time.Duration
+	// HarnessTokens gives the credential store item of a harness's long-lived token; nil when the daemon keeps its
+	// secrets in no credential store, so it keeps no token.
+	HarnessTokens func(harness string) ports.SecretStore
 	// SignInTimeout is how long a harness's sign-in waits for the user to approve it in the browser; ten minutes when
 	// zero.
 	SignInTimeout time.Duration
@@ -173,6 +176,8 @@ type App struct {
 	quotaReads map[string]*sync.Mutex
 	// signIns holds each harness's sign-in, by harness id; a.wg counts the ones that run.
 	signIns map[string]*signInState
+	// tokens holds the record of each harness's long-lived token, by harness id; the token is in the credential store.
+	tokens map[string]*tokenRecord
 	// unavailableUntil is when the daemon last became available again, at its start or when the machine woke: a firing
 	// scheduled before it and still due came due while the daemon or the machine was down, and is a misfire however
 	// late it is.
@@ -252,7 +257,8 @@ func New(d Deps) (*App, error) {
 		firings: map[string][]firingRecord{}, ledger: map[string]map[string]*domain.WorkItem{},
 		applied: map[string][]string{}, accepting: true,
 		adapters: map[string]ports.HarnessAdapter{}, quotas: map[string]quotaReading{}, quotaReads: map[string]*sync.Mutex{},
-		signIns: map[string]*signInState{}, records: map[string]*recordLock{}, ShutdownRequested: make(chan struct{}),
+		signIns: map[string]*signInState{}, tokens: map[string]*tokenRecord{}, records: map[string]*recordLock{},
+		ShutdownRequested: make(chan struct{}),
 	}
 	for _, h := range d.Harnesses {
 		a.adapters[h.ID()] = h
@@ -295,8 +301,10 @@ func (a *App) Start(ctx context.Context) error {
 	if err := a.recover(ctx); err != nil {
 		return err
 	}
-	a.repairLedger() // after recovery, so that every execution its items name has ended
+	a.repairLedger()      // after recovery, so that every execution its items name has ended
+	a.loadHarnessTokens() // before detection, which checks each harness with its token
 	a.refreshHarnessesAsync(detectCtx)
+	a.noticeTokenExpiry()
 	a.emit(domain.Event{Type: domain.EventDaemonStarted, Payload: map[string]any{"version": a.d.Version, "pid": os.Getpid()}}.Says(
 		domain.T("daemon_started", "HarmFlow daemon {{version}} started", "version", a.d.Version)))
 	a.mu.Lock()

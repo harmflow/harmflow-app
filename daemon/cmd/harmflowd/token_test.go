@@ -28,7 +28,8 @@ type fakeRead struct {
 	err   error
 }
 
-func (f *fakeKeychain) Kind() string { return "keychain" }
+func (f *fakeKeychain) Kind() string  { return "keychain" }
+func (f *fakeKeychain) Delete() error { return nil }
 
 func (f *fakeKeychain) Get() (string, error) {
 	r := f.reads[min(f.gets, len(f.reads)-1)]
@@ -232,4 +233,23 @@ func readFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+// harmflow-app#733: a harness's long-lived token is an item of the Keychain the local API token's is in, one per
+// harness; a daemon whose token store is a file keeps none.
+func TestHarnessTokens(t *testing.T) {
+	t.Setenv("HARMFLOW_TOKEN_STORE", "file")
+	if harnessTokens() != nil {
+		t.Error("harnessTokens() with the file store gives a store, want none")
+	}
+	t.Setenv("HARMFLOW_TOKEN_STORE", "")
+	t.Setenv("HARMFLOW_KEYCHAIN", "/tmp/throwaway.keychain-db")
+	stores := harnessTokens()
+	if stores == nil {
+		t.Fatal("harnessTokens() with the Keychain gives no store")
+	}
+	want := secret.Keychain{Service: harnessTokenService, Account: "claude-code", Path: "/tmp/throwaway.keychain-db"}
+	if got, ok := stores("claude-code").(secret.Keychain); !ok || got != want {
+		t.Errorf("harnessTokens()(claude-code) = %#v, want %#v", stores("claude-code"), want)
+	}
 }

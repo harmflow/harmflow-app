@@ -507,8 +507,14 @@ func (r *run) attempts(ctx context.Context, start func(harness string) error) (d
 				return domain.StatusFailed, domain.T("execution_timed_out", "the execution timeout elapsed")
 			}
 			if end.SignedOut {
-				// The sign-in runs for the next executions, beside this one, which fails over or fails as it would anyway.
-				a.signInWhenSignedOut(profile.Provider)
+				// A saved token the harness rejected is dropped, and a check on the harness's own sign-in decides whether
+				// its sign-in starts. Either way it runs for the next executions, beside this one, which fails over or fails
+				// as it would anyway.
+				if a.rejectToken(profile.Provider) {
+					a.detect(ctx, profile.Provider)
+				} else {
+					a.signInWhenSignedOut(profile.Provider)
+				}
 			}
 			a.mu.Lock()
 			at := r.x.CurrentAttempt()

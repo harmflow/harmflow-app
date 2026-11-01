@@ -1,12 +1,12 @@
 // The AI tools list: each harness detected, where, at which version, and whether it is ready.
 // Credentials are never shown.
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
 import type { Harness, Tool } from "../api/types";
 import type { Tone } from "../design/tokens";
 import { fieldText } from "../lib/daemonText";
-import { formatRelative } from "../lib/format";
+import { formatDateTime, formatRelative } from "../lib/format";
 import { useDraft, type DraftReport } from "../lib/hooks";
 import { actions } from "../state/store";
 import { HarnessMark, Icon, type IconName } from "./Icon";
@@ -89,6 +89,64 @@ export function ToolRow({ tool }: { tool: Tool }) {
           : t("harness.notDetected")}
       </Chip>
     </div>
+  );
+}
+
+/**
+ * A harness's long-lived token: a field that saves one, or the one saved — when, until when, and whether the harness
+ * rejected it — with a control that removes it. The token goes to the daemon, which keeps it in the credential store,
+ * and is never shown again.
+ */
+export function TokenControl({ harness, locale }: { harness: Harness; locale: string }) {
+  const { t } = useTranslation();
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const run = async (change: () => Promise<unknown>) => {
+    setBusy(true);
+    try {
+      await change();
+      setValue("");
+      await actions.refreshHarnesses();
+    } catch (err) {
+      toast(t("harness.tokenFailed", { message: (err as Error).message }), "danger");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const token = harness.token;
+  if (token) {
+    return (
+      <span className="inline-actions">
+        <span>{t("harness.tokenSaved", { saved: formatDateTime(token.savedAt, locale), expires: formatDateTime(token.expiresAt, locale) })}</span>
+        {token.rejected ? (
+          <Chip tone="danger" icon="alert">
+            {t("harness.tokenRejected")}
+          </Chip>
+        ) : null}
+        <Button size="sm" variant="ghost" icon="trash" disabled={busy} onClick={() => void run(() => api.removeHarnessToken(harness.id))}>
+          {t("harness.tokenRemove")}
+        </Button>
+      </span>
+    );
+  }
+  return (
+    <span className="inline-form">
+      <TextInput
+        type="password"
+        autoComplete="off"
+        spellCheck={false}
+        aria-label={t("harness.token")}
+        value={value}
+        placeholder={t("harness.tokenPlaceholder")}
+        onChange={(e) => setValue(e.target.value)}
+        className="mono"
+      />
+      <Button size="sm" variant="primary" icon="key" disabled={busy || !value.trim()} onClick={() => void run(() => api.setHarnessToken(harness.id, value.trim()))}>
+        {t("harness.tokenSave")}
+      </Button>
+    </span>
   );
 }
 
@@ -195,6 +253,8 @@ export function HarnessInventory({ harness, locale, onDraft }: { harness: Harnes
               {t(`harness.authentication.${harness.authentication}`)}
             </Chip>,
           ],
+          // Only a harness the daemon keeps a token for has the row.
+          ...(harness.takesToken ? [[t("harness.token"), <TokenControl harness={harness} locale={locale} />] as [string, ReactNode]] : []),
           [t("harness.models"), harness.models.length ? <span className="mono">{harness.models.map((m) => m.id).join(", ")}</span> : null],
           [t("harness.efforts"), harness.efforts.length ? <span className="mono">{harness.efforts.join(", ")}</span> : null],
           [t("harness.controls"), harness.enforceableControls?.length ? <span className="mono">{harness.enforceableControls.join(", ")}</span> : null],

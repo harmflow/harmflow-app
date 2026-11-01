@@ -85,6 +85,9 @@ export const api = {
   setHarnessPath: (id: HarnessId, path: string | null) => call<Harness>("PUT", `/harnesses/${id}`, { path }),
   /** Starts the harness's own sign-in, which the user approves in the browser, or joins the one that runs. */
   signInHarness: (id: HarnessId) => call<Harness>("POST", `/harnesses/${id}/sign-in`),
+  /** Saves the harness's long-lived token in the credential store; the answer never carries it back. */
+  setHarnessToken: (id: HarnessId, token: string) => call<Harness>("PUT", `/harnesses/${id}/token`, { token }),
+  removeHarnessToken: (id: HarnessId) => call<Harness>("DELETE", `/harnesses/${id}/token`),
   tools: () => call<Tool[]>("GET", "/tools"),
   /**
    * What a task can cite; a harness that finds the user's items per workspace, as Codex and Claude Code their skills,

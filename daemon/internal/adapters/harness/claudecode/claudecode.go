@@ -59,6 +59,10 @@ type Adapter struct {
 	helpTimeout      time.Duration                   // the --help check; zero is defaultHelpTimeout
 	skillListTimeout time.Duration                   // the skill list's session; zero is defaultSkillListTimeout
 	signInStep       time.Duration                   // the wait for each screen of the sign-in; zero is defaultSignInStep
+
+	// tokenMu guards token alone: the skill list reads it while it holds mu.
+	tokenMu sync.Mutex
+	token   string // the long-lived token UseToken set, empty for none
 }
 
 // defaultHelpTimeout bounds the --help check; help it could not read by then leaves the flags unknown.
@@ -72,7 +76,31 @@ var (
 	_ ports.WorkspaceLister        = (*Adapter)(nil)
 	_ ports.UnverifiedItemsAllower = (*Adapter)(nil)
 	_ ports.ItemReloader           = (*Adapter)(nil)
+	_ ports.TokenSignIn            = (*Adapter)(nil)
 )
+
+// tokenVariable carries a long-lived token, the one `claude setup-token` prints, to the CLI in place of its own
+// sign-in.
+const tokenVariable = "CLAUDE_CODE_OAUTH_TOKEN"
+
+// UseToken implements ports.TokenSignIn: every check and session from then on runs with token in tokenVariable, none
+// when it is empty. The sign-in of SignIn never does, since it signs in the CLI's own way.
+func (a *Adapter) UseToken(token string) {
+	a.tokenMu.Lock()
+	a.token = token
+	a.tokenMu.Unlock()
+}
+
+// withToken is env with the long-lived token UseToken set, in a copy; env itself when none is set.
+func (a *Adapter) withToken(env []string) []string {
+	a.tokenMu.Lock()
+	token := a.token
+	a.tokenMu.Unlock()
+	if token == "" {
+		return env
+	}
+	return append(slices.Clone(env), tokenVariable+"="+token)
+}
 
 // ReportsExtraUsage implements ports.ExtraUsageReporter: every rate-limit report of the stream says whether the session
 // is using extra usage.
@@ -162,7 +190,7 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 	if helpTimeout == 0 {
 		helpTimeout = defaultHelpTimeout
 	}
-	help, read := procutil.Help(ctx, helpTimeout, a.Env, info.Path, "--help")
+	help, read := procutil.Help(ctx, helpTimeout, a.withToken(a.Env), info.Path, "--help")
 	for _, f := range append(requiredFlags, "--plugin-dir", "--effort", "--agents", "--add-dir", "--tools",
 		"--disallowedTools", "--no-session-persistence", "--model") {
 		info.Features[f] = strings.Contains(help, f)
@@ -209,7 +237,7 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 
 	// Signed out only when the CLI says so, which it does exiting 1; a probe killed at its timeout, or failing
 	// otherwise, leaves the sign-in unknown.
-	status, statusErr, err := procutil.Output(ctx, 20*time.Second, a.Env, info.Path, "auth", "status")
+	status, statusErr, err := procutil.Output(ctx, 20*time.Second, a.withToken(a.Env), info.Path, "auth", "status")
 	var st struct {
 		LoggedIn *bool `json:"loggedIn"`
 	}
@@ -439,7 +467,7 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 			args = append(args, "--add-dir", d)
 		}
 	}
-	inv := ports.Invocation{Path: info.Path, Args: args, Env: req.Env, Dir: req.WorkDir, Stdin: req.Prompt,
+	inv := ports.Invocation{Path: info.Path, Args: args, Env: a.withToken(req.Env), Dir: req.WorkDir, Stdin: req.Prompt,
 		Restrictions: restrictions}
 	return inv, &parser{tools: map[string]toolUse{}}, nil
 }

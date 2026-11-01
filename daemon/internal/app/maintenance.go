@@ -24,6 +24,7 @@ func (a *App) maintenanceLoop(ctx context.Context) {
 			return
 		case <-t.C:
 			a.ApplyRetention()
+			a.noticeTokenExpiry()
 		}
 	}
 }

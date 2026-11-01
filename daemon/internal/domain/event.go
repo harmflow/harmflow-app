@@ -41,6 +41,8 @@ const (
 	EventHarnessSignInCompleted  = "harness.sign_in_completed"
 	EventHarnessSignInTimedOut   = "harness.sign_in_timed_out"
 	EventHarnessSignInFailed     = "harness.sign_in_failed"
+	EventHarnessTokenRejected    = "harness.token_rejected"
+	EventHarnessTokenExpiring    = "harness.token_expiring"
 	EventScriptStarted           = "script.started"
 	EventScriptOutput            = "script.output"
 	EventScriptExited            = "script.exited"
