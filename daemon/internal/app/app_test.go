@@ -213,12 +213,12 @@ func (f *fakeHarness) holding() bool {
 }
 
 // fakeParser also reads "USAGE <input tokens>", the usage so far, which is final once the attempt ends well,
-// "CMD <command>", a shell command the session ran to success, "DECLINED <command>", one the harness declined before
-// it ran, and "OVERRIDE <notice>", the harness's notice that its requirements override a setting HarmFlow ran it
-// with. "WAIT network" is a wait for the network, as Codex
-// prints one again and again without exiting: the first of a stretch is an event, and a timeout that ends a wait is a
-// network failure. Any other line is the agent's message, and the last one is what a quota end reports as its final
-// text, as the real adapters do.
+// "CMD <command>", a shell command the session ran to success, "BEGIN <command>", one that starts and succeeds at the
+// next "RAN", "DECLINED <command>", one the harness declined before it ran, and "OVERRIDE <notice>", the harness's
+// notice that its requirements override a setting HarmFlow ran it with. "WAIT network" is a wait for the network, as
+// Codex prints one again and again without exiting: the first of a stretch is an event, and a timeout that ends a wait
+// is a network failure. Any other line is the agent's message, and the last one is what a quota end reports as its
+// final text, as the real adapters do.
 type fakeParser struct {
 	last     string
 	text     string
@@ -256,6 +256,14 @@ func (p *fakeParser) Line(b []byte) []ports.HarnessEvent {
 	}
 	if notice, ok := strings.CutPrefix(s, "OVERRIDE "); ok {
 		return []ports.HarnessEvent{{Kind: ports.HarnessSettingOverridden, Message: notice}}
+	}
+	if cmd, ok := strings.CutPrefix(s, "BEGIN "); ok {
+		p.tools++
+		return []ports.HarnessEvent{{Kind: ports.HarnessToolStarted, ToolID: "tool-" + strconv.Itoa(p.tools), Tool: "Bash",
+			Command: cmd}}
+	}
+	if s == "RAN" {
+		return []ports.HarnessEvent{{Kind: ports.HarnessToolDone, ToolID: "tool-" + strconv.Itoa(p.tools), Tool: "Bash"}}
 	}
 	if cmd, ok := strings.CutPrefix(s, "CMD "); ok {
 		p.tools++
@@ -641,6 +649,47 @@ func (e *env) idle(task string) {
 }
 
 const slow = "echo working; sleep 30; echo 'END ok'"
+
+// harmflow-app#700: the command that writes a progress line recording a pull request leaves that pull request as the
+// execution's last operation, whether the daemon reads the line before the command ends or after. A command that does
+// not name the progress file, and one that starts once the line was read, still become the last operation.
+func TestProgressLineKeepsItsPullRequestAsTheLastOperation(t *testing.T) {
+	const url = "https://github.com/o/r/pull/9"
+	const writer = `E=dir; printf line >> "$E/progress.jsonl"`
+	const push = "git push -u origin harmflow/9-x"
+	line := `printf '%s\n' '{"type":"pull_request.created","url":"` + url +
+		`","number":9,"message":"Opened a draft"}' >> "$P"`
+	// Waits until the execution's log has a text, so that the next step follows what the daemon already took in.
+	logged := func(text string) string { return `until grep -qF '` + text + `' "$L"; do sleep 0.05; done` }
+	for _, tc := range []struct {
+		name  string
+		steps []string
+		want  string
+	}{
+		{"writer ends after the line is read", []string{"echo 'BEGIN " + writer + "'", line, logged("Opened a draft"),
+			"echo RAN"}, "pull_request.created " + url},
+		{"writer ends before the line is read", []string{"echo 'BEGIN " + writer + "'", "echo RAN",
+			logged("tool.completed"), line, logged("Opened a draft")}, "pull_request.created " + url},
+		{"another command ends after the line is read", []string{"echo 'BEGIN " + push + "'", line,
+			logged("Opened a draft"), "echo RAN"}, push},
+		{"a later command names the progress file", []string{line, logged("Opened a draft"), "echo 'CMD " + writer + "'"},
+			writer},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.create("progress", "")
+			logs := e.app.d.Paths.Logs
+			e.claude.setScript(func(ports.RunRequest) string {
+				return `P="$HARMFLOW_EXECUTION_DIR/progress.jsonl"; L="` + logs + `/$HARMFLOW_EXECUTION_ID.jsonl"
+` + strings.Join(tc.steps, "\n") + "\necho 'END ok'"
+			})
+			r, _ := e.app.RunTask("progress")
+			if x := e.wait(r.ExecutionID, domain.StatusCompleted); x.LastOperation != tc.want {
+				t.Errorf("last operation %q, want %q", x.LastOperation, tc.want)
+			}
+		})
+	}
+}
 
 // harmflow-app#441: a command the harness declined never ran. Its record and its tool.completed read declined, the
 // event is a warning of its own, and the attempt's last operation stays the last command that ran.
