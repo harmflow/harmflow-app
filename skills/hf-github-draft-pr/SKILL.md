@@ -97,6 +97,8 @@ rejected because the branch moved, fetch and rebase your commits on it, and reco
 warnings (`conflicting_activity`, §5).
 
 - **§3 found one from the work branch:** update it — `gh pr edit <number> --repo OWNER/REPO --body-file <file>`.
+  Edit it also when this session added no commit and its body reads as the one already there: checking the pull
+  request is not updating it, and `pull_request.updated` follows the edit, never a check without one.
 - **§3 found none:** `gh pr create --repo OWNER/REPO --draft --base BASE --head <branch> --title "<title>" --body-file <file>`,
   adding the label of the task's marking (by default `--label harmflow`; create the label first with
   `gh label create harmflow --repo OWNER/REPO --color 7C3AED` if it does not exist).
