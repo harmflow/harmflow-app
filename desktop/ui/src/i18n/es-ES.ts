@@ -1165,6 +1165,8 @@ export const esES: Resources = {
     stopConfirmRunning:
       "Hay {{count}} ejecuciones en curso. Detener el daemon ahora las interrumpe; quedarán registradas como interrumpidas.",
     stopped: "El daemon se está deteniendo.",
+    stopFailedTitle: "El daemon no se detuvo",
+    stopFailedOk: "Aceptar",
     notificationLevel: "Nivel de notificación",
     notificationLevelHint: "Se aplica sobre los eventos que elige cada tarea.",
     notificationLevels: { all: "Todas", failures_and_attention: "Solo fallos y atención", none: "Ninguna" },

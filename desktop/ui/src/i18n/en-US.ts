@@ -1144,6 +1144,8 @@ export const enUS = {
     stopConfirmRunning:
       "{{count}} executions are running. Stopping the daemon now interrupts them; they will be recorded as interrupted.",
     stopped: "The daemon is stopping.",
+    stopFailedTitle: "The daemon did not stop",
+    stopFailedOk: "OK",
     notificationLevel: "Notification level",
     notificationLevelHint: "Applies on top of the events each task chooses.",
     notificationLevels: { all: "All", failures_and_attention: "Failures and attention only", none: "None" },

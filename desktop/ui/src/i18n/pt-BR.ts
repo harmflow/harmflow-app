@@ -1170,6 +1170,8 @@ export const ptBR: Resources = {
     stopConfirmRunning:
       "{{count}} execuções estão em andamento. Parar o daemon agora as interrompe; elas serão registradas como interrompidas.",
     stopped: "O daemon está parando.",
+    stopFailedTitle: "O daemon não parou",
+    stopFailedOk: "OK",
     notificationLevel: "Nível de notificação",
     notificationLevelHint: "Vale por cima dos eventos que cada tarefa escolhe.",
     notificationLevels: { all: "Todas", failures_and_attention: "Somente falhas e atenção", none: "Nenhuma" },
