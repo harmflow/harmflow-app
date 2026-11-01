@@ -33,8 +33,8 @@ const standInReport = `{"outcome":"completed","summary":"done","workItems":[{"ke
 // completed with its tests failed and that pull request, so the daemon's ledger keeps the item in progress, as it keeps
 // every draft whose tests failed. Then the real Claude Code runs the built-in agent's copy and the built-in skills of
 // this checkout against queueRepo once, from a clone that may push. It selects the fixture issue alone and reports it
-// resumed, with the test's pull request, which it updated during the execution and left an open draft whose branch holds
-// a commit beyond the test's. No other pull request links the issue.
+// resumed, with the test's pull request, which it updated during the execution and left an open draft whose branch
+// holds a commit beyond the test's. No other pull request links the issue.
 func TestDraftWhoseTestsFailedIsResumedOnItsPullRequest(t *testing.T) {
 	claude := realClaude(t)
 	for _, label := range []string{resumeDraftLabel, "harmflow"} {
