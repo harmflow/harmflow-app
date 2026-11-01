@@ -15,7 +15,7 @@ import { TaskForm } from "../components/TaskForm";
 import i18n from "../i18n";
 import { formatBytes, formatDateTime } from "../lib/format";
 import { slugify, type Doc } from "../lib/taskForm";
-import { getState, patchStateForTests } from "../state/store";
+import { actions, getState, patchStateForTests } from "../state/store";
 import { ExecutionsScreen } from "./ExecutionsScreen";
 import { HistoryScreen } from "./HistoryScreen";
 import { OnboardingScreen } from "./OnboardingScreen";
@@ -588,6 +588,79 @@ describe("the executions screen's cards", () => {
     await act(async () => cancel.click());
     expect(onCancel).not.toHaveBeenCalled();
     expect(writes()).toEqual([]);
+  });
+
+  // A running execution's card shows its current step, never a percentage: the latest timeline item of the events the
+  // store holds, else the daemon's step in the interface's language, else the waiting text. The store's events come
+  // from its own replay of the stand-in daemon's answers.
+  describe("its step row", () => {
+    /** Answers the execution's stored events as the local API does, lets the store read them, and renders its card. */
+    async function showCard(execution: ExecutionSummary, events: HarmflowEvent[]) {
+      daemon.answers.set(`/executions/${execution.id}/events`, { events, logExpired: false });
+      await act(() => actions.loadEvents(execution.id));
+      await render(<ExecutionCard execution={execution} selected={false} onSelect={() => {}} onCancel={() => {}} cancelling={false} />);
+      return host!.querySelector(".exec-card")!;
+    }
+    // Only the row's own text, so that the rest of the card cannot satisfy an assertion.
+    const stepOf = (card: Element) => card.querySelector("[data-testid='execution-step'] .exec-card__step-text")!.textContent;
+    function expectNoPercentage(card: Element) {
+      expect(card.textContent).not.toMatch(/\d\s*%/);
+      expect(card.querySelector("progress, [role='progressbar'], [aria-valuenow]")).toBeNull();
+    }
+
+    let held: ReturnType<typeof getState>["events"];
+    beforeAll(() => {
+      held = getState().events;
+    });
+    afterEach(() => {
+      patchStateForTests({ events: held });
+    });
+
+    it("shows the daemon's step when the store holds no events", async () => {
+      const card = await showCard({ ...running, id: "exec-step-daemon", currentStep: "Running tests", currentStepKey: undefined }, []);
+      expect(getState().events["exec-step-daemon"]).toEqual([]);
+      expect(stepOf(card)).toBe("Running tests");
+      expectNoPercentage(card);
+    });
+
+    it("shows a step the daemon names by key in the interface's language, with its parameters", async () => {
+      const card = await showCard(
+        {
+          ...running,
+          id: "exec-step-key",
+          currentStep: "Starting Claude Code",
+          currentStepKey: "step_starting_harness",
+          currentStepParams: { harness: "Claude Code" },
+        },
+        [],
+      );
+      expect(stepOf(card)).toBe("Iniciando Claude Code");
+      expectNoPercentage(card);
+    });
+
+    it("shows the latest timeline item of the events over the daemon's step, and follows a later event", async () => {
+      const execution: ExecutionSummary = { ...running, id: "exec-step-events", currentStep: "Running tests" };
+      const card = await showCard(execution, [
+        ev("execution.started", { executionId: execution.id, message: "Loading configuration" }),
+        ev("tool.started", { executionId: execution.id, payload: { toolUseId: "t1", tool: "Bash", input: { command: "./gradlew build" } } }),
+      ]);
+      expect(stepOf(card)).toBe("Bash · ./gradlew build");
+      expectNoPercentage(card);
+
+      // A later event, as the store's next read after the last one it holds gets it.
+      const later = ev("test.started", { executionId: execution.id, message: "./gradlew test" });
+      daemon.answers.set(`/executions/${execution.id}/events`, { events: [later], logExpired: false });
+      await act(() => actions.loadEvents(execution.id));
+      expect(daemon.requests.at(-1)).toBe(`GET /executions/${execution.id}/events?after=${later.id - 1}&limit=5000`);
+      expect(stepOf(card)).toBe("Executando testes · ./gradlew test");
+      expectNoPercentage(card);
+    });
+
+    it("shows the waiting text in the interface's language before any step", async () => {
+      const card = await showCard({ ...running, id: "exec-step-none", currentStep: undefined }, []);
+      expect(stepOf(card)).toBe("Aguardando a primeira etapa…");
+      expectNoPercentage(card);
+    });
   });
 });
 
