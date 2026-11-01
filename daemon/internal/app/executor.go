@@ -1348,14 +1348,8 @@ func (r *run) applyReport(rep *domain.ExecutionReport) {
 	}
 	r.x.WorkItems = append([]domain.WorkItemResult{}, rep.WorkItems...)
 	for _, w := range rep.WorkItems {
-		if r.x.WorkItem == "" {
-			r.x.WorkItem = w.Key
-		}
 		if w.Repository != "" && r.x.Repository == "" {
 			r.x.Repository = w.Repository
-		}
-		if w.PullRequest != nil && w.PullRequest.URL != "" {
-			r.x.PullRequestURL = w.PullRequest.URL
 		}
 		if w.Tests != nil && w.Tests.Status != "" {
 			r.x.TestsStatus = w.Tests.Status
@@ -1363,6 +1357,15 @@ func (r *run) applyReport(rep *domain.ExecutionReport) {
 		for _, f := range w.ChangedFiles {
 			r.x.AddChangedFile(f)
 		}
+	}
+	// The record names the report's first work item, whichever item the session selected last, with that item's own
+	// pull request, or none when the report gives that item none: another item's pull request, perhaps in another
+	// repository, would name work the record's item did not do. A report with no work item leaves the record as the
+	// session's progress lines left it.
+	if len(rep.WorkItems) > 0 {
+		first := rep.WorkItems[0]
+		r.x.WorkItem = first.Key
+		r.x.PullRequestURL = prURL(first)
 	}
 	a.mu.Unlock()
 	for _, w := range rep.Warnings {
