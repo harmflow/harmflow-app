@@ -5,7 +5,9 @@
 // list and the editor opened next show the file's definition, its YAML tab the file's text byte for byte
 // (harmflow-app#461), and a save builds on its revision (harmflow-app#304):
 // that the daemon answers with the file as it is then is itest › TestTaskLifecycle's and TestFormDocumentIsTheFile's,
-// and app › TestExternalEdits'. Each row shows its task type's glyph and tone (harmflow-app#471).
+// and app › TestExternalEdits'. Each row shows its task type's glyph and tone (harmflow-app#471). A script task that
+// declares only other systems shows the daemon's warning on its row, in the interface's language, and Run now shows
+// the daemon's refusal (harmflow-app#559): that the daemon warns and refuses is app › TestScriptDoesNotRunOnAnUndeclaredSystem's.
 import { EditorView } from "@codemirror/view";
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -65,6 +67,7 @@ const copy: TaskSummary = { ...standup, id: "standup-copy", name: "Standup notes
 let root: Root | undefined;
 let host: HTMLElement | undefined;
 let onView = vi.fn<(v: TaskView) => void>();
+let onOpenExecution = vi.fn<(id: string) => void>();
 
 beforeAll(async () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -96,12 +99,13 @@ const settle = () => act(() => new Promise<void>((resolve) => setImmediate(resol
 async function open(tasks: TaskSummary[]) {
   patchStateForTests({ tasks, tasksLoaded: true });
   onView = vi.fn();
+  onOpenExecution = vi.fn();
   host = document.body.appendChild(document.createElement("div"));
   root = createRoot(host);
   await act(async () =>
     root!.render(
       <>
-        <TasksScreen view={{ kind: "list" }} onView={onView} onOpenExecution={() => {}} />
+        <TasksScreen view={{ kind: "list" }} onView={onView} onOpenExecution={onOpenExecution} />
         <Toasts />
       </>,
     ),
@@ -140,6 +144,66 @@ describe("the Tasks screen's rows", () => {
     expect(glyph("general-task")).toEqual({ icon: "sparkle", tones: ["type-glyph--violet"] });
     expect(glyph("script-task")).toEqual({ icon: "terminal", tones: ["type-glyph--blue"] });
     expect(glyph("webhook-task")).toEqual({ icon: "dot", tones: ["type-glyph--blue"] });
+  });
+});
+
+describe("the Tasks screen on a script task declared for another system", () => {
+  // The daemon's text on macOS for a script task that declares only Windows: the task's warning and Run now's refusal.
+  const notHere = {
+    message: "this task runs only on windows, not on macos",
+    messageKey: "script_system_not_declared",
+    params: { systems: "windows", system: "macos" },
+  } as const;
+  /** The script tasks as the daemon lists them on macOS: only the one that does not declare macOS has a warning. */
+  const script = (id: string, warnings: TaskSummary["warnings"]): TaskSummary => ({
+    id,
+    name: `Audit (${id})`,
+    type: "script",
+    enabled: true,
+    revision: "r1",
+    harness: "",
+    schedule: "1h",
+    warnings,
+  });
+  const windowsOnly = script("windows-only", [{ code: "other", subject: "/spec/script/systems", ...notHere }]);
+  const macosToo = script("macos-too", []);
+  const anySystem = script("any-system", []);
+
+  // The interface's language, the daemon's text translated from its key and parameters; the daemon's English stays
+  // only in en-US.
+  const languages = [
+    { language: "en-US", count: "1 warning", text: "this task runs only on windows, not on macos", label: "Warning" },
+    { language: "pt-BR", count: "1 aviso", text: "esta tarefa só executa em windows, não em macos", label: "Aviso" },
+  ];
+
+  afterEach(async () => {
+    await act(async () => void (await i18n.changeLanguage("en-US")));
+  });
+
+  const chips = (id: string) => [...row(id)!.querySelectorAll<HTMLElement>(".task-row__title .chip")];
+
+  it.each(languages)("shows in $language the row's warning chip, whose title names the declared systems and this one", async ({ language, count, text, label }) => {
+    await act(async () => void (await i18n.changeLanguage(language)));
+    await open([windowsOnly, macosToo, anySystem]);
+
+    expect(chips("windows-only").map((c) => ({ text: c.textContent, title: c.title, warning: c.classList.contains("chip--warning") }))).toEqual([
+      { text: count, title: `${label}: ${text}`, warning: true },
+    ]);
+    // A task that declares this system, or none, has no warning from the daemon, and its row shows none.
+    expect(chips("macos-too")).toEqual([]);
+    expect(chips("any-system")).toEqual([]);
+  });
+
+  it.each(languages)("shows in $language Run now's refusal, naming the declared systems and this one, and opens no execution", async ({ language, text }) => {
+    answer("POST", "/tasks/windows-only/run", { error: { code: "conflict", ...notHere } }, 409);
+    await act(async () => void (await i18n.changeLanguage(language)));
+    await open([windowsOnly]);
+
+    await click(button("windows-only", i18n.t("common.runNow")));
+    expect(daemon.requests).toEqual([req("POST", "/tasks/windows-only/run")]);
+    expect(toasts()).toEqual([{ tone: "danger", text }]);
+    expect(onOpenExecution).not.toHaveBeenCalled();
+    expect(onView).not.toHaveBeenCalled();
   });
 });
 
