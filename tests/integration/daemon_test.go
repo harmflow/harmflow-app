@@ -502,6 +502,8 @@ func TestAPIGuardOnEveryRoute(t *testing.T) {
 	control := []guardedRoute{
 		{"POST /harnesses/refresh", "/harnesses/refresh", nil},
 		{"PUT /harnesses/{harnessId}", "/harnesses/claude-code", map[string]any{"path": nil}},
+		// A sign-in let through would start a session and leave a notice.
+		{"POST /harnesses/{harnessId}/sign-in", "/harnesses/claude-code/sign-in", nil},
 		{"PUT /templates/{templateId}", "/templates/hf-general", map[string]any{"yaml": "kind: TaskTemplate\n"}},
 		{"DELETE /templates/{templateId}", "/templates/hf-general", nil},
 		{"POST /templates/{templateId}/draft", "/templates/hf-general/draft", map[string]any{"language": "en-US"}},
