@@ -572,6 +572,96 @@ describe("task editor outside changes", () => {
   });
 });
 
+describe("task editor on a script task declared for another system", () => {
+  /** A script task that declares the given systems, as the daemon reads its file. */
+  const scriptDoc = (systems: string[]): Doc => ({
+    apiVersion: "harmflow/v1alpha1",
+    kind: "Task",
+    metadata: { id: "audit", name: "Audit" },
+    spec: { type: "script", script: { command: ["/bin/echo"], ...(systems.length ? { systems } : {}) }, schedule: { interval: "1h" } },
+  });
+  const scriptYaml = (systems: string[]) =>
+    [
+      "apiVersion: harmflow/v1alpha1",
+      "kind: Task",
+      "metadata:",
+      "  id: audit",
+      "  name: Audit",
+      "spec:",
+      "  type: script",
+      "  script:",
+      "    command: [/bin/echo]",
+      ...(systems.length ? [`    systems: [${systems.join(", ")}]`] : []),
+      "  schedule:",
+      "    interval: 1h",
+      "",
+    ].join("\n");
+  /** The daemon's warning on macOS for a script task that declares only Windows, as its validation gives it. */
+  const notHere: ValidationIssue = {
+    path: "/spec/script/systems",
+    code: "other",
+    message: "this task runs only on windows, not on macos",
+    messageKey: "script_system_not_declared",
+    params: { systems: "windows", system: "macos" },
+  };
+  /** The task as `GET /tasks/audit` answers it on macOS: a warning only when it does not declare macOS. */
+  const scriptTask = (systems: string[]): Task => {
+    const warned = systems.length > 0 && !systems.includes("macos");
+    const warnings = warned ? [notHere] : [];
+    const { message, messageKey, params } = notHere;
+    return {
+      id: "audit",
+      name: "Audit",
+      type: "script",
+      enabled: true,
+      revision: "r1",
+      harness: "",
+      schedule: "1h",
+      warnings: warned ? [{ code: "other", subject: "/spec/script/systems", message, messageKey, params }] : [],
+      document: scriptDoc(systems),
+      effective: scriptDoc(systems),
+      yaml: scriptYaml(systems),
+      path: "audit.yaml",
+      validation: { valid: true, errors: [], warnings },
+    };
+  };
+
+  async function openScript(systems: string[]) {
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () =>
+      root!.render(
+        <>
+          <TaskEditor mode="edit" task={scriptTask(systems)} onClose={() => {}} onSaved={vi.fn()} />
+          <Toasts />
+        </>,
+      ),
+    );
+    await settle();
+  }
+
+  afterEach(async () => {
+    await act(async () => void (await i18n.changeLanguage("en-US")));
+  });
+
+  it.each([
+    ["en-US", "Warning: this task runs only on windows, not on macos /spec/script/systems"],
+    ["pt-BR", "Aviso: esta tarefa só executa em windows, não em macos /spec/script/systems"],
+  ])("lists in %s the warning that names the declared systems and this one, with its field path", async (language, text) => {
+    await act(async () => void (await i18n.changeLanguage(language)));
+    await openScript(["windows"]);
+    expect(warnings()).toEqual([text]);
+  });
+
+  it.each([
+    ["this system", ["macos"]],
+    ["no system", []],
+  ])("lists no such warning for a task that declares %s", async (_, systems) => {
+    await openScript(systems);
+    expect(warnings()).toEqual([]);
+  });
+});
+
 describe("task editor catalog", () => {
   it.each(["edit", "create"] as const)(
     "asks in %s mode for the skills of the folder the task runs in when it sets no workspace path, as validation reads it",
