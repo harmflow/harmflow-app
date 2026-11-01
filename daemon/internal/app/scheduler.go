@@ -18,9 +18,11 @@ type scheduleState struct {
 	LastFiredAt *time.Time `json:"lastFiredAt,omitempty"`
 }
 
-// firingRecord is what became of one firing the scheduler processed, kept so no firing is lost silently. For a
-// catch-up, ScheduledFor is the first missed time and Missed how many misfires it covers; Policy is the missed-run
-// policy a misfire followed. A skipped firing says why, as a text the desktop translates.
+// firingRecord is what became of one firing the daemon processed, scheduled or by hand, kept so no firing is lost
+// silently. For a catch-up, ScheduledFor is the first missed time and Missed how many misfires it covers; Policy is the
+// missed-run policy a misfire followed. For a manual firing, ScheduledFor is when the run was asked for, as
+// ProcessedAt is, and Policy is the overlap policy it followed when the task was running. A skipped firing says why,
+// as a text the desktop translates.
 type firingRecord struct {
 	ScheduledFor time.Time         `json:"scheduledFor"`
 	ProcessedAt  time.Time         `json:"processedAt"`
@@ -325,10 +327,14 @@ type FiringResult struct {
 	// reason says why a firing was skipped, and cause is the execution it was skipped for, as the firing record keeps.
 	reason domain.Text
 	cause  string
+	// policy is the overlap policy a firing of a running task followed; it is empty when the task was idle.
+	policy string
 }
 
-// RunTask is the manual trigger.
+// RunTask is the manual trigger. A run it starts, queues, coalesces, or skips is recorded in the task's firing
+// history; a run it refuses is not.
 func (a *App) RunTask(id string) (FiringResult, error) {
+	asked := a.now()
 	e, err := a.entry(id)
 	if err != nil {
 		return FiringResult{}, err
@@ -348,7 +354,21 @@ func (a *App) RunTask(id string) (FiringResult, error) {
 	if pending {
 		return FiringResult{}, newError(CodeConflict, domain.T("task_being_deleted", "the task is being deleted"))
 	}
-	return a.fire(id, domain.TriggerManual, nil)
+	res, err := a.fire(id, domain.TriggerManual, nil)
+	if err != nil {
+		return res, err
+	}
+	r := firingRecord{ScheduledFor: asked, ProcessedAt: asked, Trigger: domain.TriggerManual, Policy: res.policy,
+		Outcome: res.Outcome, ExecutionID: res.ExecutionID}
+	if res.Outcome == "skipped" {
+		r.ExecutionID = res.cause
+		r.because(res.reason)
+	}
+	a.mu.Lock()
+	a.recordFiringLocked(id, r)
+	a.mu.Unlock()
+	a.saveSchedule()
+	return res, nil
 }
 
 // fire starts an execution, or applies the overlap policy when the task is running: one firing waits and later
@@ -387,7 +407,8 @@ func (a *App) fire(taskID string, trigger domain.Trigger, scheduledFor *time.Tim
 	}
 	now := a.now()
 	if running || waiting != nil {
-		if doc.Effective().Spec.Concurrency.OverlappingRuns == domain.OverlapSkip {
+		policy := doc.Effective().Spec.Concurrency.OverlappingRuns
+		if policy == domain.OverlapSkip {
 			// The skip is logged with the execution that caused it, as a coalesced firing is with the one it joined; an
 			// execution just claimed stays queued until it starts.
 			cause := active
@@ -402,14 +423,14 @@ func (a *App) fire(taskID string, trigger domain.Trigger, scheduledFor *time.Tim
 			reason := domain.T("firing_skipped", "the task was running; this firing was skipped, per its overlap policy")
 			a.emit(domain.Event{Type: domain.EventFiringSkipped, TaskID: taskID, ExecutionID: causeID,
 				Severity: domain.SeverityWarning, Payload: map[string]any{"trigger": string(trigger)}}.Says(reason))
-			return FiringResult{Outcome: "skipped", reason: reason, cause: causeID}, nil
+			return FiringResult{Outcome: "skipped", reason: reason, cause: causeID, policy: policy}, nil
 		}
 		if waiting != nil {
 			a.mu.Unlock()
 			a.emit(domain.Event{Type: domain.EventFiringCoalesced, TaskID: taskID, ExecutionID: waiting.ID,
 				Payload: map[string]any{"trigger": string(trigger)}}.Says(
 				domain.T("firing_coalesced", "a firing already waits; this one coalesced into it")))
-			return FiringResult{Outcome: "coalesced", ExecutionID: waiting.ID}, nil
+			return FiringResult{Outcome: "coalesced", ExecutionID: waiting.ID, policy: policy}, nil
 		}
 		x := domain.NewExecution(doc, trigger, scheduledFor, now)
 		a.addExecutionLocked(x)
@@ -420,7 +441,7 @@ func (a *App) fire(taskID string, trigger domain.Trigger, scheduledFor *time.Tim
 			Payload: map[string]any{"trigger": string(trigger), "status": string(status)}})
 		a.emit(domain.Event{Type: domain.EventFiringQueued, TaskID: taskID, ExecutionID: x.ID}.Says(
 			domain.T("firing_queued", "the task is running; this firing waits for it")))
-		return FiringResult{Outcome: "queued", ExecutionID: x.ID}, nil
+		return FiringResult{Outcome: "queued", ExecutionID: x.ID, policy: policy}, nil
 	}
 	x := domain.NewExecution(doc, trigger, scheduledFor, now)
 	a.addExecutionLocked(x)
