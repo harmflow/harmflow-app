@@ -140,6 +140,79 @@ func TestScriptTaskOverTheAPI(t *testing.T) {
 	}
 }
 
+// A script program's output reaches the event stream while the program runs: each line arrives as a script.output
+// event with its stream, redacted, while the execution still reads running.
+func TestScriptOutputStreamsWhileItRuns(t *testing.T) {
+	t.Parallel()
+	d := startDaemon(t, t.TempDir())
+	token := "ghp_" + strings.Repeat("c", 36)
+	d.call("POST", "/tasks", map[string]any{"yaml": scriptTask("talking", fmt.Sprintf(`  script:
+    inline:
+      interpreter: [/bin/sh]
+      source: |
+        echo one
+        echo two
+        echo "%s" >&2
+        echo three >&2
+        sleep 600
+  execution:
+    cancelGraceSeconds: 1
+`, token))}, 201)
+	events, closeStream := d.stream(t, 0)
+	defer closeStream()
+	id := d.call("POST", "/tasks/talking/run", nil, 202)["executionId"].(string)
+	streams := map[string][]string{}
+	// The wait follows the run's pace: it fails once silence passes with no event of the execution, not at a fixed time
+	// from the request.
+	const silence = 20 * time.Second
+	quiet := time.NewTimer(silence)
+	defer quiet.Stop()
+	last := "the run request"
+	for received := 0; received < 4; {
+		select {
+		case e, ok := <-events:
+			if !ok {
+				t.Fatalf("the stream closed; received %d lines: %v", received, streams)
+			}
+			if e.Data["executionId"] != id {
+				continue
+			}
+			checkFrame(t, e)
+			last = e.Type
+			quiet.Reset(silence)
+			switch e.Type {
+			case "script.output":
+				payload, _ := e.Data["payload"].(map[string]any)
+				stream := fmt.Sprint(payload["stream"])
+				streams[stream] = append(streams[stream], fmt.Sprint(e.Data["message"]))
+				if strings.Contains(string(e.Raw), "ghp_") {
+					t.Errorf("a streamed line carries the token: %s", e.Raw)
+				}
+				received++
+			case "script.exited", "execution.completed", "execution.failed", "execution.cancelled", "execution.interrupted":
+				t.Fatalf("%s arrived before the program's four lines; received %v", e.Type, streams)
+			}
+		case <-quiet.C:
+			t.Fatalf("no event of the execution in %v since %s; received %v", silence, last, streams)
+		}
+	}
+	if x := d.call("GET", "/executions/"+id, nil, 200); x["status"] != "running" {
+		t.Errorf("GET /executions/%s after the four lines: status %v, want running", id, x["status"])
+	}
+	// Each stream keeps its own order; across the two streams the order is the one the lines arrived in.
+	if got := strings.Join(streams["stdout"], "|"); got != "one|two" {
+		t.Errorf("stdout lines %q, want %q", got, "one|two")
+	}
+	if got := strings.Join(streams["stderr"], "|"); got != "[REDACTED]|three" {
+		t.Errorf("stderr lines %q, want %q", got, "[REDACTED]|three")
+	}
+	if len(streams) != 2 {
+		t.Errorf("streams %v, want stdout and stderr", streams)
+	}
+	d.call("POST", "/executions/"+id+"/cancel", nil, 202)
+	d.waitStatus(id, "cancelled")
+}
+
 // Cancelling a script execution ends its program and the child it started in the background.
 func TestScriptCancelEndsItsProcesses(t *testing.T) {
 	t.Parallel()
