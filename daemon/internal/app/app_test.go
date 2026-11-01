@@ -891,6 +891,50 @@ func TestPullRequestNotOpenedFailsTheExecution(t *testing.T) {
 	}
 }
 
+// An execution's record holds its report's first work item with that item's own pull request, or with none when the
+// report gives that item none, never another item's, whatever repository it is in and whichever item the session
+// selected last.
+func TestRecordPairsItsWorkItemWithItsOwnPullRequest(t *testing.T) {
+	const docsPR, appPR = "https://github.com/acme/docs/pull/337", "https://github.com/acme/app/pull/605"
+	item := func(key, url string) string {
+		if url == "" {
+			return `{"key":"` + key + `","outcome":"completed"}`
+		}
+		return `{"key":"` + key + `","outcome":"completed","pullRequest":{"url":"` + url + `"}}`
+	}
+	// The session selects both items through progress.jsonl, the report's second one last, and reports once the
+	// daemon has logged that selection in the log under {{logs}}.
+	const selectBoth = `P="$HARMFLOW_EXECUTION_DIR/progress.jsonl"; L="{{logs}}/$HARMFLOW_EXECUTION_ID.jsonl"
+printf '%s\n' '{"type":"work_item.selected","workItem":"acme/docs#337","message":"Select the docs"}' \
+	'{"type":"work_item.selected","workItem":"acme/app#605","message":"Select the app"}' >> "$P"
+until grep -qF 'Select the app' "$L"; do sleep 0.05; done
+`
+	for _, tc := range []struct {
+		name, progress, first, second, wantURL string
+	}{
+		{name: "each item with its own pull request", first: item("acme/docs#337", docsPR),
+			second: item("acme/app#605", appPR), wantURL: docsPR},
+		{name: "the first item without one", first: item("acme/docs#337", ""), second: item("acme/app#605", appPR)},
+		{name: "the second item selected last", progress: selectBoth, first: item("acme/docs#337", docsPR),
+			second: item("acme/app#605", appPR), wantURL: docsPR},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.create("pairing", "")
+			script := strings.ReplaceAll(tc.progress, "{{logs}}", e.app.d.Paths.Logs) +
+				withReport(`{"outcome":"completed","summary":"two items","workItems":[`+tc.first+`,`+tc.second+`]}`)
+			x := runTask(e, "pairing", domain.StatusCompleted, script)
+			if x.WorkItem != "acme/docs#337" || x.PullRequestURL != tc.wantURL {
+				t.Errorf("record = work item %q, pull request %q, want %q, %q", x.WorkItem, x.PullRequestURL,
+					"acme/docs#337", tc.wantURL)
+			}
+			if len(x.WorkItems) != 2 {
+				t.Errorf("record lists %d work items, want the report's 2: %+v", len(x.WorkItems), x.WorkItems)
+			}
+		})
+	}
+}
+
 // harmflow-app#615: a draft opened with failing tests is not a pull request left unopened: its execution still ends
 // completed, with no error, and its item stays in progress to resume, its worktree kept.
 func TestDraftWithFailingTestsCompletesTheExecution(t *testing.T) {
