@@ -122,7 +122,7 @@ export function ExecutionCard({
         </div>
       </dl>
 
-      <div className="exec-card__step" title={step}>
+      <div className="exec-card__step" title={step} data-testid="execution-step">
         <span className="exec-card__step-label">{t("executions.card.step")}</span>
         <span className="mono exec-card__step-text">{step ?? t("executions.card.waitingStep")}</span>
       </div>
