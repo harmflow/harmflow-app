@@ -1169,6 +1169,47 @@ describe("a script task's execution", () => {
     }
   });
 
+  it("adds each output line of a running program as it arrives, with its stream, and no reload", async () => {
+    const running: Execution = {
+      ...script,
+      id: "exec-script-live",
+      status: "running",
+      endedAt: undefined,
+      errorMessage: undefined,
+      errorKey: undefined,
+      errorParams: undefined,
+      attempts: [{ ...script.attempts[0], endedAt: undefined, outcome: "running", exitCode: undefined }],
+      script: { ...script.script!, exitCode: undefined },
+    };
+    const on = { executionId: running.id };
+    await open(running, [event(1, "script.started", { ...on, message: "sh started", messageKey: "script_started", params: { program: "sh" } })], capture());
+    await choose("Output");
+    const shown = () => [...host!.querySelectorAll<HTMLElement>(".script-line")].map((l) => [l.dataset.stream, l.textContent]);
+    expect(shown()).toEqual([]);
+
+    const reads = () => daemon.requests.filter((r) => r.startsWith(`GET /executions/${running.id}`)).length;
+    const before = reads();
+    // The stream hands each event to the store, which the view reads.
+    const arrive = (e: HarmflowEvent) =>
+      act(async () => patchStateForTests({ events: { ...getState().events, [running.id]: [...getState().events[running.id], e] } }));
+
+    await arrive(event(2, "script.output", { ...on, message: "one", payload: { stream: "stdout" } }));
+    expect(shown()).toEqual([["stdout", "outone\n"]]);
+    await arrive(event(3, "script.output", { ...on, message: "token [REDACTED]", payload: { stream: "stderr" } }));
+    expect(shown()).toEqual([
+      ["stdout", "outone\n"],
+      ["stderr", "errtoken [REDACTED]\n"],
+    ]);
+    await arrive(event(4, "script.output", { ...on, message: "two", payload: { stream: "stdout" } }));
+    expect(shown()).toEqual([
+      ["stdout", "outone\n"],
+      ["stderr", "errtoken [REDACTED]\n"],
+      ["stdout", "outtwo\n"],
+    ]);
+    expect(selectedTab()).toMatch(/^Output/);
+    expect(reads()).toBe(before);
+  });
+
   it("offers no chat view and opens on its events timeline", async () => {
     const x: Execution = { ...script, id: "exec-script-no-chat" };
     await open(x, lines, capture("audit\n"));
