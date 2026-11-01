@@ -158,6 +158,57 @@ func TestScriptCancelEndsItsProcesses(t *testing.T) {
 	}
 }
 
+// A program that exits on its own with code 0 leaves no process behind: the daemon ends the child it started in the
+// background before the execution ends, and the execution keeps the result the exit status gives. Where the daemon
+// reads the process table, the log names the child it ended. The program writes the child's pid only once the child
+// runs sleep, so the name the log gives it is not that of the shell the child is until it execs.
+func TestScriptExitEndsWhatTheProgramLeft(t *testing.T) {
+	t.Parallel()
+	d := startDaemon(t, t.TempDir())
+	dir := t.TempDir()
+	d.call("POST", "/tasks", map[string]any{"yaml": scriptTask("leaves", fmt.Sprintf(`  script:
+    command: [/bin/sh, -c, "sleep 600 >/dev/null 2>&1 & c=$!; i=0; while [ $i -lt 50 ]; do case $(ps -o ucomm= -p $c) in sleep*) break;; esac; sleep 0.05; i=$((i+1)); done; echo $c > %s/child"]
+  execution:
+    cancelGraceSeconds: 1
+`, dir))}, 201)
+	id := d.call("POST", "/tasks/leaves/run", nil, 202)["executionId"].(string)
+	x := d.waitStatus(id, "completed", "failed", "cancelled", "interrupted")
+	child := readPid(t, filepath.Join(dir, "child"))
+	t.Cleanup(func() {
+		if !gone(child) {
+			_ = syscall.Kill(child, syscall.SIGKILL)
+		}
+	})
+	if x["status"] != "completed" {
+		t.Fatalf("status %v, want completed; error %v", x["status"], x["errorMessage"])
+	}
+	if !gone(child) {
+		t.Errorf("the background child %d survived the program's exit", child)
+	}
+	attempts := x["attempts"].([]any)
+	if len(attempts) != 1 {
+		t.Fatalf("attempts %v, want one", attempts)
+	}
+	if a := attempts[0].(map[string]any); a["outcome"] != "succeeded" || a["exitCode"] != float64(0) {
+		t.Errorf("attempt %v, want succeeded with exit code 0", a)
+	}
+	events := d.waitEvent(id, "execution.completed")["events"].([]any)
+	// Without the process table the daemon ends the program's group alone, which names no process.
+	t.Run("the log names the child", func(t *testing.T) {
+		needProcessTable(t)
+		named := false
+		for _, raw := range events {
+			ev := raw.(map[string]any)
+			p, _ := ev["payload"].(map[string]any)
+			named = named || ev["type"] == "process.ended" && ev["messageKey"] == "process_left_ended" &&
+				p["pid"] == float64(child) && p["executable"] == "sleep"
+		}
+		if !named {
+			t.Errorf("the log does not name the background child %d as process_left_ended", child)
+		}
+	})
+}
+
 // A daemon killed while a script runs leaves the program running in its own group; started again, it marks the
 // execution interrupted and ends what the program left.
 func TestRestartEndsWhatTheScriptLeft(t *testing.T) {
