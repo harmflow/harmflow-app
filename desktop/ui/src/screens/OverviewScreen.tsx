@@ -61,7 +61,7 @@ export function OverviewScreen({
               {health ? (
                 <span className="mono muted">
                   {t("overview.pid", { pid: health.pid })} ·{" "}
-                  {t("overview.uptime", { time: formatDuration(now - Date.parse(health.startedAt)) })}
+                  {t("overview.uptime", { time: formatDuration(now - Date.parse(health.startedAt), locale) })}
                 </span>
               ) : null}
             </div>

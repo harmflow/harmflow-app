@@ -325,7 +325,7 @@ function PathsSection({ report }: { report: DraftReport }) {
 }
 
 function DaemonSection() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const settings = useStore((s) => s.settings);
   const health = useStore((s) => s.health);
   const running = useStore((s) => s.stats?.running ?? 0);
@@ -372,7 +372,7 @@ function DaemonSection() {
           hint={
             health ? (
               <span className="mono">
-                {t("overview.pid", { pid: health.pid })} · {t("overview.uptime", { time: formatDuration(now - Date.parse(health.startedAt)) })}
+                {t("overview.pid", { pid: health.pid })} · {t("overview.uptime", { time: formatDuration(now - Date.parse(health.startedAt), i18n.language) })}
               </span>
             ) : undefined
           }
