@@ -72,7 +72,11 @@ func (a *App) loadSchedule() {
 	}
 }
 
+// saveSchedule writes the schedules and the firing records. Saves run one at a time, each from its snapshot to the end
+// of its write (schedMu), so a save that took an older snapshot never writes after one that took a newer.
 func (a *App) saveSchedule() {
+	a.schedMu.Lock()
+	defer a.schedMu.Unlock()
 	a.mu.Lock()
 	f := scheduleFile{SchemaVersion: "1", Tasks: map[string]*scheduleState{}, Firings: map[string][]firingRecord{}}
 	for id, s := range a.sched {
