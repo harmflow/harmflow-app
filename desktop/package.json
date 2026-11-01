@@ -15,5 +15,10 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.12.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "@redocly/openapi-core>minimatch": "^11.0.1"
+    }
   }
 }
