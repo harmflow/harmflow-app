@@ -506,6 +506,10 @@ func (r *run) attempts(ctx context.Context, start func(harness string) error) (d
 			if end.Class == domain.ClassTimeout || timedOut {
 				return domain.StatusFailed, domain.T("execution_timed_out", "the execution timeout elapsed")
 			}
+			if end.SignedOut {
+				// The sign-in runs for the next executions, beside this one, which fails over or fails as it would anyway.
+				a.signInWhenSignedOut(profile.Provider)
+			}
 			a.mu.Lock()
 			at := r.x.CurrentAttempt()
 			prev = append(prev, previousAttempt{Number: at.Number, Harness: at.Harness, Model: at.Model,
