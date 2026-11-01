@@ -1,7 +1,10 @@
 package integration
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -37,12 +40,13 @@ func TestFailingTestsStillOpenADraftPullRequest(t *testing.T) {
 		sandboxLabel(t, label)
 	}
 	base := sandboxBase(t)
-	sweepSuiteFixtures(t, retryLimitLabel, base)
+	sweepFailingTestsFixtures(t, base)
 	before := branchHead(t, base)
 	clone := cloneWithSuite(t, base, sandboxSuite)
 	issue := suiteFixture(t, retryLimitLabel, base, "Raise the retry limit to 5",
 		"Jobs give up too early when the network is slow.\n\n"+
 			"In `settings.json`, raise `retries` from 3 to 5, and change nothing else.\n")
+	t.Cleanup(func() { sweepFailingTestsFixtures(t, base, issue) })
 	home := t.TempDir()
 	d := startDaemon(t, home)
 	useClaude(d, claude, clone)
@@ -296,6 +300,58 @@ func sweepSuiteFixtures(t *testing.T, label, base string, own ...int) {
 			t.Errorf("cleanup: gh issue close %d: %v\n%s", n, err, out)
 		}
 	}
+}
+
+// sweepFailingTestsFixtures removes from queueRepo what the test's runs left: what sweepSuiteFixtures finds by the
+// fixture issues and their label, and then every branch but base that holds the package.json of sandboxSuite, such as
+// one whose pull request went into a base other than the default branch, where GitHub links it to no issue. Every work
+// branch of a run holds that file, which only the clone's base branch adds, and no other fixture set's branch holds it.
+// Deleting a branch closes the pull request still open from it.
+func sweepFailingTestsFixtures(t *testing.T, base string, own ...int) {
+	t.Helper()
+	sweepSuiteFixtures(t, retryLimitLabel, base, own...)
+	branches, err := branchesHoldingSuiteFile(sandboxSuite, "package.json")
+	if err != nil {
+		t.Errorf("cleanup: %v", err)
+	}
+	for _, b := range branches {
+		if b == base {
+			t.Errorf("cleanup: %s holds the package.json of %s, and stays: it is the base branch", base, sandboxSuite)
+			continue
+		}
+		if out, err := exec.Command("gh", "api", "-X", "DELETE", "repos/"+queueRepo+"/git/refs/heads/"+b).CombinedOutput(); err != nil {
+			t.Errorf("cleanup: deleting the branch %s: %v\n%s", b, err, out)
+		}
+	}
+}
+
+// branchesHoldingSuiteFile lists the branches of queueRepo whose file at path is the one testdata/<suite> holds at the
+// same path, byte for byte: GitHub gives each file the SHA of its Git blob, which the fixture's own bytes give too.
+func branchesHoldingSuiteFile(suite, path string) ([]string, error) {
+	data, err := os.ReadFile(filepath.Join("testdata", suite, path))
+	if err != nil {
+		return nil, fmt.Errorf("read the %s of %s: %w", path, suite, err)
+	}
+	sum := sha1.Sum(fmt.Appendf(nil, "blob %d\x00%s", len(data), data))
+	blob := hex.EncodeToString(sum[:])
+	out, err := exec.Command("gh", "api", "--paginate", "repos/"+queueRepo+"/branches?per_page=100", "--jq", ".[].name").Output()
+	if err != nil {
+		return nil, fmt.Errorf("list the branches of %s: %w", queueRepo, err)
+	}
+	var branches []string
+	for _, b := range strings.Fields(string(out)) {
+		got, err := exec.Command("gh", "api", "repos/"+queueRepo+"/contents/"+path+"?ref="+b, "--jq", ".sha").Output()
+		var exit *exec.ExitError
+		switch {
+		case err == nil:
+			if strings.TrimSpace(string(got)) == blob {
+				branches = append(branches, b)
+			}
+		case !errors.As(err, &exit):
+			return nil, fmt.Errorf("read %s on %s: %w", path, b, err)
+		}
+	}
+	return branches, nil
 }
 
 // markdownSection is the text under the heading line of body, up to the next heading of the same level, or "" when no
