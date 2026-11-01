@@ -67,6 +67,8 @@ A failed or interrupted execution in `recentExecutions` does not keep it out. An
 is never retried. Work to retry is not new work: it never counts against `maxDiscoveredPerCycle`, and §2 never takes it.
 Report it with `kind` `new` — no pull request is resumed, so it counts toward `maxFailedRetries` only.
 
+Finding work to resume or to retry here selects nothing yet: build §2's list too, and let §3 decide which comes first.
+
 ## 2. New issues
 
 New work is the cycle's first `maxDiscoveredPerCycle` **eligible** issues across all the task's repositories together,
@@ -139,12 +141,22 @@ is resumed under §1, and a `failed` item no pull request links is retried under
 
 The work of §1 is one list: the managed draft pull requests to resume, then the work to retry. New issues are the one
 list of §2, across all the task's repositories, in the task's `ordering` — never one repository's issues after
-another's. Merge the two lists by `resumeStrategy`, then take the first `maxItemsPerCycle` items.
+another's. Build both lists before you select anything, then merge them by `resumeStrategy` and take the first
+`maxItemsPerCycle` items:
 
-For each selected item, append one line to `progress.jsonl`:
+- `resume_first`: every item of §1 — the drafts to resume, then the work to retry — and then the new issues.
+- `new_first`: every new issue, and then every item of §1. Work to retry is an item of §1 like a draft to resume: under
+  `new_first`, a new eligible issue comes before it, whatever their ages.
+
+For example, `context.json` lists `OWNER/REPO#12` as `failed`, with `failures: 1`, no pull request links it, and
+`maxFailedRetries` is 3, so it is work to retry. `OWNER/REPO#15`, opened later, is a new eligible issue, and nothing
+is left to resume. With `maxItemsPerCycle: 1`, `resume_first` selects `#12`, and `new_first` selects `#15`.
+
+For each selected item, append one line to `progress.jsonl`. Its `message` is the issue's title, then ` — from `
+and the list the item came from: `drafts to resume`, `work to retry`, or `new issues`.
 
 ```json
-{"type":"work_item.selected","workItem":"OWNER/REPO#123","repository":"OWNER/REPO","message":"<issue title>"}
+{"type":"work_item.selected","workItem":"OWNER/REPO#123","repository":"OWNER/REPO","message":"<issue title> — from new issues"}
 ```
 
 Then read its issue's assignees, the logins it prints, and keep them: hf-github-draft-pr §3 reads them again before it

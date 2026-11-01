@@ -4,6 +4,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -18,6 +20,10 @@ const (
 	priorityLabel = "resume-priority-test"
 	priorityDir   = "notes"
 )
+
+// retryPriorityLabel marks the two fixture issues TestResumePriorityDecidesBetweenWorkToRetryAndANewIssue opens in
+// queueRepo, which the test owns alone, as priorityLabel is TestResumePriorityDecidesBetweenADraftAndANewIssue's.
+const retryPriorityLabel = "retry-priority-test"
 
 // priorityStandInReport is the report.json the report scenario of fake-claude writes, which the first execution's
 // stand-in replaces with the fixture's.
@@ -108,12 +114,177 @@ func TestResumePriorityDecidesBetweenADraftAndANewIssue(t *testing.T) {
 	}
 }
 
+// A GitHub task's resume priority also decides between work to retry — an issue whose processing failed before any
+// pull request linked it — and a new eligible issue: the issue to retry under resume_first, and the new issue under
+// new_first, though the issue to retry is the older. Each subtest opens in queueRepo, under retryPriorityLabel, two
+// fixture issues, oldest first, and no pull request. In a daemon home of its own, a first execution through a stand-in
+// Claude Code reports the first issue's item failed with no pull request, so the ledger holds it failed once, under a
+// retry limit of one, and holds nothing for the second issue. Then the real Claude Code runs the built-in agent's copy
+// and the built-in skills of this checkout once, one item a cycle, under the subtest's setting. The session is stopped
+// once the daemon tracks the issue it selects, and its clone has no push URL, so no branch and no pull request of its
+// reaches GitHub. Its work_item.selected line must also name the list the issue came from.
+func TestResumePriorityDecidesBetweenWorkToRetryAndANewIssue(t *testing.T) {
+	claude := realClaude(t)
+	for _, c := range []struct {
+		strategy string
+		// takesRetry is whether the session must select the issue to retry rather than the new one.
+		takesRetry bool
+		reason     string
+	}{
+		{"resume_first", true, "resume_first puts the work to retry before the new issue"},
+		{"new_first", false, "new_first puts the new issue before the work to retry"},
+	} {
+		t.Run(c.strategy, func(t *testing.T) {
+			retry, fresh := retryPriorityFixtures(t)
+			clone := shallowClone(t)
+			home := t.TempDir()
+			d := startDaemon(t, home)
+			stand := standIn(t, "fake-claude", "claude",
+				"\nSCENARIO=ok\n", "\nSCENARIO=report\n",
+				priorityStandInReport, retryPriorityReport(t, retry))
+			useClaude(d, stand.path, clone)
+			d.call("POST", "/tasks", map[string]any{"yaml": retryPriorityTask(d, clone, c.strategy)}, 201)
+
+			first := d.call("POST", "/tasks/queue/run", nil, 202)["executionId"].(string)
+			// The execution's own status is left unread: what the next execution reads is the item's.
+			d.waitEnd(first, 2*time.Minute)
+			// What an issue that failed with no pull request leaves in the ledger, and what makes it work to retry.
+			want := map[string]any{"status": "failed", "failures": 1.0, "resumes": 0.0}
+			item := priorityQueued(d, issueKey(retry))
+			if !priorityHolds(item, want) || item["pullRequestUrl"] != nil {
+				t.Fatalf("after the stand-in's execution, GET /queue gives %s as %v, want %v and no pull request",
+					issueKey(retry), item, want)
+			}
+			if item := priorityQueued(d, issueKey(fresh)); item != nil {
+				t.Fatalf("after the stand-in's execution, GET /queue tracks %s, which no execution took: %v", issueKey(fresh),
+					item)
+			}
+
+			useClaude(d, claude, clone)
+			id := d.call("POST", "/tasks/queue/run", nil, 202)["executionId"].(string)
+			dir := executionDir(d, id)
+			got := selectedIssue(t, d, id, dir)
+			waitTracked(t, d, home, id, dir, got)
+			d = restartMidRun(t, d, home, claude, clone)
+			if x := d.call("GET", "/executions/"+id, nil, 200); x["status"] != "interrupted" {
+				t.Errorf("execution %s after the stop at selection: status %v, want interrupted", id, x["status"])
+			}
+
+			if item := contextItem(t, dir, retry); !priorityHolds(item, want) || item["pullRequestUrl"] != nil {
+				t.Errorf("the context.json of execution %s lists %s as %v, want %v and no pull request", id, issueKey(retry),
+					item, want)
+			}
+			if item := contextItem(t, dir, fresh); item != nil {
+				t.Errorf("the context.json of execution %s lists %s, which no execution took: %v", id, issueKey(fresh), item)
+			}
+			wantKey, wantList := issueKey(fresh), "new issues"
+			if c.takesRetry {
+				wantKey, wantList = issueKey(retry), "work to retry"
+			}
+			if selected := selectedWorkItems(t, dir); len(selected) != 1 || !strings.EqualFold(selected[0], wantKey) {
+				t.Errorf("progress.jsonl selects %v, want %s alone, since %s: hf-github-issue-queue does not order as it "+
+					"states\n%s", selected, wantKey, c.reason, runFiles(dir))
+			}
+			if msg := selectedMessage(t, dir); !strings.HasSuffix(msg, " — from "+wantList) {
+				t.Errorf("the work_item.selected message is %q, want the issue's title and \" — from %s\"", msg, wantList)
+			}
+		})
+	}
+}
+
+// retryPriorityTask is the task priorityTask makes, with its eligible-issues line taking the open issues of queueRepo
+// labelled retryPriorityLabel instead.
+func retryPriorityTask(d *daemon, clone, strategy string) string {
+	d.t.Helper()
+	return labelledPriorityTask(d, clone, retryPriorityLabel, strategy)
+}
+
+// retryPriorityFixtures opens the two fixture issues in queueRepo, labelled retryPriorityLabel, one after the other,
+// and returns their numbers, oldest first. It creates the label when queueRepo lacks it. What an earlier run left open
+// under the label is closed first, as priorityFixtures does, and so is this run's when the subtest ends, failed or not.
+// It returns once GitHub lists the two issues under the label, oldest first, as the session reads them.
+func retryPriorityFixtures(t *testing.T) (retry, fresh int) {
+	t.Helper()
+	sandboxLabel(t, retryPriorityLabel)
+	closeLabelledFixtures(t, retryPriorityLabel)
+	var own []int
+	t.Cleanup(func() { closeLabelledFixtures(t, retryPriorityLabel, own...) })
+	run := runSuffix()
+	for which := 1; which <= 2; which++ {
+		if which > 1 {
+			// GitHub stamps an issue's creation to the second, and the queue reads the issues in that order.
+			time.Sleep(time.Second)
+		}
+		own = append(own, priorityIssue(t, run, which, retryPriorityLabel))
+	}
+	want := slices.Clone(own)
+	var listed []int
+	var err error
+	for deadline := time.Now().Add(time.Minute); time.Now().Before(deadline); time.Sleep(time.Second) {
+		if listed, err = labelledIssues(retryPriorityLabel); err == nil && slices.Equal(listed, want) {
+			return want[0], want[1]
+		}
+	}
+	t.Fatalf("after a minute, the open issues of %s labelled %s are %v (%v), want %v", queueRepo, retryPriorityLabel,
+		listed, err, want)
+	return 0, 0
+}
+
+// retryPriorityReport is the report.json of an execution whose processing of the issue failed before it opened any
+// pull request: the issue's item failed, as new work, with no branch, no pull request, and no tests run.
+func retryPriorityReport(t *testing.T, issue int) string {
+	t.Helper()
+	data, err := json.Marshal(map[string]any{
+		"outcome": "failed",
+		"summary": "The push failed, so no pull request was opened.",
+		"workItems": []any{map[string]any{
+			"key": issueKey(issue), "kind": "new", "repository": queueRepo, "issueNumber": issue, "outcome": "failed",
+			"tests": map[string]any{"status": "not_run", "summary": "no test ran"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The stand-in writes the report between single quotes.
+	if strings.Contains(string(data), "'") {
+		t.Fatalf("the stand-in's report %s holds a single quote", data)
+	}
+	return string(data)
+}
+
+// selectedMessage is the message of the first work_item.selected line of the session's progress.jsonl, empty when it
+// has none.
+func selectedMessage(t *testing.T, dir string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, "progress.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range strings.Split(string(data), "\n") {
+		var line struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		}
+		if json.Unmarshal([]byte(l), &line) == nil && line.Type == "work_item.selected" {
+			return line.Message
+		}
+	}
+	return ""
+}
+
 // priorityTask is the task queueTask makes, with its eligible-issues line taking the open issues of queueRepo labelled
 // priorityLabel, its queue in the oldest-first order, and strategy as its resume priority.
 func priorityTask(d *daemon, clone, strategy string) string {
 	d.t.Helper()
+	return labelledPriorityTask(d, clone, priorityLabel, strategy)
+}
+
+// labelledPriorityTask is the task queueTask makes, with its eligible-issues line taking the open issues of queueRepo
+// labelled label, its queue in the oldest-first order, and strategy as its resume priority.
+func labelledPriorityTask(d *daemon, clone, label, strategy string) string {
+	d.t.Helper()
 	task := issueQueueTask(d, clone,
-		fmt.Sprintf("open issues of %s labelled %s; every other issue is excluded.", queueRepo, priorityLabel), "oldest_first")
+		fmt.Sprintf("open issues of %s labelled %s; every other issue is excluded.", queueRepo, label), "oldest_first")
 	const from = "resumeStrategy: resume_first"
 	if !strings.Contains(task, from) {
 		d.t.Fatalf("issueQueueTask's task has no %q to replace:\n%s", from, task)
@@ -140,7 +311,7 @@ func priorityFixtures(t *testing.T) (resumable, fresh int, draft restartPR) {
 			// GitHub stamps an issue's creation to the second, and the queue reads the issues in that order.
 			time.Sleep(time.Second)
 		}
-		own = append(own, priorityIssue(t, run, which))
+		own = append(own, priorityIssue(t, run, which, priorityLabel))
 	}
 	resumable, fresh = own[0], own[1]
 	draft = priorityDraft(t, run, resumable)
@@ -154,15 +325,15 @@ func priorityFile(run string, which int) string {
 	return fmt.Sprintf("%s/%s-%d.txt", priorityDir, run, which)
 }
 
-// priorityIssue opens the run's which-th fixture issue in queueRepo, labelled priorityLabel, and returns its number.
-// Its text reads as a small real task, as the sandbox asks of every fixture.
-func priorityIssue(t *testing.T, run string, which int) int {
+// priorityIssue opens the run's which-th fixture issue in queueRepo, labelled label, and returns its number. Its text
+// reads as a small real task, as the sandbox asks of every fixture.
+func priorityIssue(t *testing.T, run string, which int, label string) int {
 	t.Helper()
 	file := priorityFile(run, which)
 	out := newWorkAPI(t, "repos/"+queueRepo+"/issues", "-f", "title=Add the note "+file,
 		"-f", fmt.Sprintf("body=Add the file `%s` with the single line `%s`, and change nothing else. "+
 			"The repository has no tests.\n", file, run),
-		"-f", "labels[]="+priorityLabel, "--jq", ".number")
+		"-f", "labels[]="+label, "--jq", ".number")
 	n, err := strconv.Atoi(out)
 	if err != nil {
 		t.Fatalf("open the fixture issue %d: %q, %v", which, out, err)
