@@ -282,6 +282,109 @@ func TestScriptExitEndsWhatTheProgramLeft(t *testing.T) {
 	})
 }
 
+// A script task on a one-minute interval with the queue policy keeps one waiting firing while its program runs, on the
+// real daemon's own firings, and that firing starts once the running execution has ended on its own. The program is
+// held by a file the test removes once the second firing has coalesced, so the case takes a little over two minutes
+// from its first firing.
+func TestScriptScheduledFiringsQueueOverTheAPI(t *testing.T) {
+	t.Parallel()
+	d := startDaemon(t, t.TempDir())
+	hold := filepath.Join(t.TempDir(), "hold")
+	if err := os.WriteFile(hold, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d.call("POST", "/tasks", map[string]any{"yaml": scriptTask("every-minute", fmt.Sprintf(
+		"  script:\n    command: [/bin/sh, -c, \"while [ -e %s ]; do sleep 0.2; done\"]\n"+
+			"  schedule:\n    interval: 1m\n  concurrency:\n    overlappingRuns: queue\n", hold))}, 201)
+	// until polls the task's executions over the API until cond holds of them, for up to a firing and a half beyond
+	// budget: the scheduler ticks every few seconds, and a loaded host stretches each step.
+	until := func(budget time.Duration, what string, cond func([]map[string]any) bool) []map[string]any {
+		t.Helper()
+		deadline := time.Now().Add(budget + 90*time.Second)
+		for {
+			runs := d.list("/executions?taskId=every-minute")
+			if cond(runs) {
+				return runs
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: executions %v", what, runs)
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
+
+	// The first firing comes at most a minute after the save, and its program runs until the file goes.
+	runs := until(time.Minute, "the first firing never started", func(runs []map[string]any) bool {
+		return len(runs) == 1 && runs[0]["status"] == "running"
+	})
+	if runs[0]["trigger"] != "schedule" {
+		t.Fatalf("the first execution: %v", runs[0])
+	}
+	first := runs[0]["id"].(string)
+	// The next firing waits; the one after coalesces into it, which the waiting execution's log records.
+	runs = until(time.Minute, "the second firing never waited", func(runs []map[string]any) bool { return len(runs) == 2 })
+	var waiting string
+	for _, r := range runs {
+		if r["id"] != first {
+			waiting = r["id"].(string)
+			if r["status"] != "queued" || r["trigger"] != "schedule" {
+				t.Fatalf("the second execution: %v, want queued on the schedule", r)
+			}
+		}
+	}
+	coalesced := func() bool {
+		for _, raw := range d.call("GET", "/executions/"+waiting+"/events", nil, 200)["events"].([]any) {
+			e := raw.(map[string]any)
+			if payload, _ := e["payload"].(map[string]any); e["type"] == "firing.coalesced" && payload["trigger"] == "schedule" {
+				return true
+			}
+		}
+		return false
+	}
+	runs = until(time.Minute, "the third firing never coalesced", func(runs []map[string]any) bool {
+		return len(runs) != 2 || coalesced()
+	})
+	if len(runs) != 2 {
+		t.Fatalf("executions after the third firing: %v, want the running one and one waiting", runs)
+	}
+	for _, r := range runs {
+		want := "queued"
+		if r["id"] == first {
+			want = "running"
+		}
+		if r["status"] != want {
+			t.Errorf("execution %v is %v after the third firing, want %s", r["id"], r["status"], want)
+		}
+	}
+
+	// The program ends on its own, with exit code 0, and the waiting execution runs it after.
+	if err := os.Remove(hold); err != nil {
+		t.Fatal(err)
+	}
+	ended, started := d.waitStatus(first, "completed"), d.waitStatus(waiting, "completed")
+	for _, x := range []map[string]any{ended, started} {
+		if script, _ := x["script"].(map[string]any); script == nil || script["exitCode"] != float64(0) {
+			t.Errorf("execution %v: script %v, want exit code 0", x["id"], x["script"])
+		}
+	}
+	// Event IDs increase across every execution's log, so the waiting execution's start follows the first one's end.
+	eventID := func(id, eventType string) float64 {
+		for _, raw := range d.call("GET", "/executions/"+id+"/events", nil, 200)["events"].([]any) {
+			if e := raw.(map[string]any); e["type"] == eventType {
+				return e["id"].(float64)
+			}
+		}
+		return 0
+	}
+	if end, start := eventID(first, "execution.completed"), eventID(waiting, "execution.started"); end == 0 || start <= end {
+		t.Errorf("the first execution ended at event %.0f and the waiting one started at %.0f, want it to start after",
+			end, start)
+	}
+	if runs := d.list("/executions?taskId=every-minute"); len(runs) != 2 {
+		t.Errorf("executions at the end: %v, want 2", runs)
+	}
+}
+
 // A daemon killed while a script runs leaves the program running in its own group; started again, it marks the
 // execution interrupted and ends what the program left.
 func TestRestartEndsWhatTheScriptLeft(t *testing.T) {
