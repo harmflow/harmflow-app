@@ -509,6 +509,40 @@ func TestPrepareSandbox(t *testing.T) {
 	}
 }
 
+// A read_only task runs in Codex's read-only sandbox, with approvals off and the execution's folder added, and its
+// network blocked. Until a real run proves that the sandbox refuses Codex's own file changes, the profile itself is
+// reported as not enforced, with its key, and the task still runs.
+func TestPrepareReadOnlyIsNotEnforced(t *testing.T) {
+	a := &Adapter{Home: t.TempDir()}
+	info := ports.HarnessInfo{Path: "/bin/codex", Features: map[string]bool{"--add-dir": true}}
+	perm := *domain.TaskDocument{}.Effective().Spec.Permissions
+	perm.Profile = domain.ProfileReadOnly
+	inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, ExecutionDir: "/x"})
+	if err != nil {
+		t.Fatalf("Prepare(read_only) = %v, want no error: the task still runs", err)
+	}
+	args := strings.Join(inv.Args, " ")
+	for _, want := range []string{"--sandbox read-only", `approval_policy="never"`, "--add-dir /x"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("Prepare(read_only) args = %s, want %q in them", args, want)
+		}
+	}
+	if strings.Contains(args, "workspace-write") {
+		t.Errorf("Prepare(read_only) args = %s, want no workspace-write sandbox", args)
+	}
+	got := map[string]ports.Restriction{}
+	for _, r := range inv.Restrictions {
+		got[r.Name] = r
+	}
+	if r, ok := got["read_only"]; !ok || r.Enforced || r.Text.Key != "restriction_codex_read_only" || r.Text.Message == "" {
+		t.Errorf("Prepare(read_only) read_only restriction = %+v (found %t), want not enforced, with the key "+
+			"restriction_codex_read_only and its text", r, ok)
+	}
+	if r, ok := got["network"]; !ok || !r.Enforced {
+		t.Errorf("Prepare(read_only) network restriction = %+v (found %t), want enforced", r, ok)
+	}
+}
+
 // A task that sets no model or effort, or sets default, passes Codex no model and no reasoning effort, so those of
 // Codex's own configuration apply. TestPrepareSandbox shows a set model and effort reaching it.
 func TestPrepareLeavesTheDefaultsToCodex(t *testing.T) {

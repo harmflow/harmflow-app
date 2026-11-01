@@ -475,9 +475,12 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 	switch perm.Profile {
 	case domain.ProfileReadOnly:
 		args = append(args, "--sandbox", sandboxReadOnly)
+		// A real read_only session wrote a file in its workspace, with no shell call naming it: until a real run proves
+		// that the sandbox refuses every write, Codex's own file changes included, the profile is not enforced.
 		restrictions = append(restrictions,
-			ports.Restriction{Name: "read_only", Enforced: true,
-				Text: domain.Text{Message: "Codex's read-only sandbox blocks every write"}},
+			ports.Restriction{Name: "read_only", Enforced: false,
+				Text: domain.T("restriction_codex_read_only",
+					"Codex's read-only sandbox is not proven to refuse the file changes Codex makes itself; the session may change files in its workspace")},
 			ports.Restriction{Name: "network", Enforced: true,
 				Text: domain.Text{Message: "Codex's read-only sandbox blocks network access"}})
 	default:

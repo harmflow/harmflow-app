@@ -15,17 +15,29 @@ import (
 )
 
 // A read_only task on the real Codex asks the session to write one file inside its workspace and one outside it.
-// Codex's read-only sandbox refuses both: after the execution neither file exists, and the execution carries no warning
-// that the profile is not enforced.
+// Codex's read-only sandbox refuses the file outside. Until a real run proves that it refuses every write, Codex's own
+// file changes included, the execution warns that read_only is not enforced: a file inside the workspace is logged with
+// the workspace changes that show what wrote it, and only the warning's absence fails.
 func TestReadOnlyRealCodexWritesNothing(t *testing.T) {
 	h := codexForPermissions(t)
 	w := newWriteTargets(t)
 	r := runWithProfile(t, h, "read_only", w, w.prompt("a file edit or a shell command"))
 
 	r.wantAttemptAtOutside(t, w)
-	wantAbsent(t, w.inside)
 	wantAbsent(t, w.outside)
-	r.wantEnforced(t, "read_only", "restrictToWorkspace")
+	r.wantEnforced(t, "restrictToWorkspace")
+	if !slices.ContainsFunc(r.unenforced, func(u unenforced) bool {
+		return u.subject == "read_only" && u.key == "restriction_codex_read_only"
+	}) {
+		t.Errorf("the execution's unenforced restrictions are %v, want the one for read_only, about Codex's file changes",
+			r.unenforced)
+	}
+	if data, err := os.ReadFile(w.inside); err == nil {
+		t.Logf("after the execution %s exists, holding %q: the write the execution's warning for read_only covers",
+			w.inside, strings.TrimSpace(string(data)))
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("reading %s: %v", w.inside, err)
+	}
 }
 
 // A workspace_write task on the real Codex asks the session to write one file inside its workspace and one outside it.

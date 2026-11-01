@@ -381,6 +381,8 @@ export const esES: Resources = {
       "Claude Code suma las reglas de permiso y las carpetas adicionales de su $t(claudeSettings.{{sources}}) a los permisos de la tarea, y permiten editar archivos fuera del espacio de trabajo y de las carpetas añadidas o no se pudieron leer; la configuración administrada no se comprueba",
     restriction_codex_tool_lists:
       "Codex no tiene listas de herramientas permitidas o denegadas; las listas personalizadas no se aplican",
+    restriction_codex_read_only:
+      "no está probado que el sandbox de solo lectura de Codex rechace los cambios de archivos que hace el propio Codex; la sesión puede cambiar archivos de su espacio de trabajo",
     harness_version_untested: "{{harness}} {{version}} es más reciente que las versiones con las que se probó HarmFlow",
     harness_version_unknown: "{{harness}} no informó un número de versión, así que HarmFlow no sabe si se probó con ella",
     quota_unread: "no se pudo leer la cuota de {{harness}}, así que el intento empezó sin esa comprobación: {{detail}}",
