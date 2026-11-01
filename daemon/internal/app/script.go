@@ -19,6 +19,9 @@ import (
 // A script task runs a program of the user's instead of a harness session: one process per execution, as
 // its only attempt, with no failover, and an outcome from the program's exit status.
 
+// identify reads a started program's process identity. Only a test replaces it, to make the read fail.
+var identify = procutil.Identify
+
 // currentOS names the running system as a script task declares it.
 func currentOS() string {
 	switch runtime.GOOS {
@@ -273,7 +276,7 @@ func (r *run) runScript(ctx context.Context, deadline time.Time) (domain.Executi
 		r.endScript(domain.AttemptFailed, reason, -1, "")
 		return domain.StatusFailed, reason
 	}
-	if id, err := procutil.Identify(ctx, proc.Pid()); err == nil {
+	if id, err := identify(ctx, proc.Pid()); err == nil {
 		a.mu.Lock()
 		rec.Process = &domain.ProcessIdentity{Group: id.Group, LeaderStart: id.LeaderStart, Boot: id.Boot}
 		r.x.Changed()
