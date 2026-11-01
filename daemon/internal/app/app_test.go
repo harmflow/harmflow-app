@@ -1256,6 +1256,44 @@ func TestOverlapSkip(t *testing.T) {
 	}
 }
 
+// With skip, a firing that comes while a script task's program runs is dropped, and the running execution's log records
+// it.
+func TestScriptOverlapSkip(t *testing.T) {
+	e := newEnv(t)
+	dir := t.TempDir()
+	e.createScript("skipper", fmt.Sprintf("  script:\n    command: [/bin/sh, -c, \"echo $$ > %s/pid; sleep 600\"]\n"+
+		"  concurrency:\n    overlappingRuns: skip\n  execution:\n    cancelGraceSeconds: 1\n", dir))
+	first, err := e.app.RunTask("skipper")
+	if err != nil || first.Outcome != "started" {
+		t.Fatalf("RunTask(skipper) = %+v, %v, want started", first, err)
+	}
+	waitForPid(t, filepath.Join(dir, "pid"))
+	if r, _ := e.app.RunTask("skipper"); r.Outcome != "skipped" {
+		t.Fatalf("RunTask(skipper) while its program runs = %+v, want skipped", r)
+	}
+	events, _, err := e.app.ExecutionEvents(first.ExecutionID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var skipped []domain.Event
+	for _, ev := range events {
+		if ev.Type == domain.EventFiringSkipped {
+			skipped = append(skipped, ev)
+		}
+	}
+	if len(skipped) != 1 || skipped[0].Payload["trigger"] != string(domain.TriggerManual) {
+		t.Errorf("firing.skipped in the running execution's log = %+v, want one for the manual run", skipped)
+	}
+	if err := e.app.CancelExecution(first.ExecutionID); err != nil {
+		t.Fatal(err)
+	}
+	e.wait(first.ExecutionID, domain.StatusCancelled)
+	e.idle("skipper")
+	if n := len(e.executions("skipper")); n != 1 {
+		t.Errorf("%d executions, want 1", n)
+	}
+}
+
 // Different tasks run in parallel on the same harness; cancelling one leaves the others.
 func TestParallelTasksAndIsolatedCancel(t *testing.T) {
 	e := newEnv(t)
@@ -1279,6 +1317,78 @@ func TestParallelTasksAndIsolatedCancel(t *testing.T) {
 		}
 		_ = e.app.CancelExecution(id)
 	}
+}
+
+// A script task runs at the same time as a general task, and cancelling either execution leaves the other running to
+// its own end. The program and the harness each wait for a gate file of their own, a minute at most.
+func TestScriptTaskRunsBesideAnotherTask(t *testing.T) {
+	e := newEnv(t)
+	gates := t.TempDir()
+	wait := func(gate string) string {
+		return fmt.Sprintf("i=0; while [ ! -e %s ] && [ $i -lt 1200 ]; do sleep 0.05; i=$((i+1)); done",
+			filepath.Join(gates, gate))
+	}
+	e.createScript("script", fmt.Sprintf("  script:\n    command: [/bin/sh, -c, %q]\n  execution:\n    cancelGraceSeconds: 1\n",
+		wait("script")))
+	e.create("general", "")
+	e.claude.setScript(func(ports.RunRequest) string { return "echo working; " + wait("general") + "; echo 'END ok'" })
+	open := func(gate string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(gates, gate), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	start := func() (script, general string) {
+		t.Helper()
+		for _, id := range []string{"script", "general"} {
+			r, err := e.app.RunTask(id)
+			if err != nil || r.Outcome != "started" {
+				t.Fatalf("RunTask(%s) = %+v, %v, want started", id, r, err)
+			}
+			if id == "script" {
+				script = r.ExecutionID
+			} else {
+				general = r.ExecutionID
+			}
+		}
+		e.wait(script, domain.StatusRunning)
+		e.wait(general, domain.StatusRunning)
+		e.prepared(e.claude)
+		return script, general
+	}
+
+	// Cancelling the script task's execution leaves the general task's running, and it completes.
+	script, general := start()
+	if err := e.app.CancelExecution(script); err != nil {
+		t.Fatal(err)
+	}
+	e.wait(script, domain.StatusCancelled)
+	e.idle("script")
+	if x, _ := e.app.GetExecution(general); x.Status != domain.StatusRunning {
+		t.Errorf("the general task's execution is %s after cancelling the script task's, want running", x.Status)
+	}
+	open("general")
+	e.wait(general, domain.StatusCompleted)
+	e.idle("general")
+
+	// Cancelling the general task's execution leaves the script task's running, and its program completes.
+	if err := os.Remove(filepath.Join(gates, "general")); err != nil {
+		t.Fatal(err)
+	}
+	script, general = start()
+	if err := e.app.CancelExecution(general); err != nil {
+		t.Fatal(err)
+	}
+	e.wait(general, domain.StatusCancelled)
+	e.idle("general")
+	if x, _ := e.app.GetExecution(script); x.Status != domain.StatusRunning {
+		t.Errorf("the script task's execution is %s after cancelling the general task's, want running", x.Status)
+	}
+	open("script")
+	if x := e.wait(script, domain.StatusCompleted); x.Script == nil || x.Script.ExitCode == nil || *x.Script.ExitCode != 0 {
+		t.Errorf("the script task's record = %+v, want the program's exit code 0", x.Script)
+	}
+	e.idle("script")
 }
 
 // Three tasks run at once on the same harness; one fails when its harness exits with an error, and the other two keep
@@ -3194,8 +3304,38 @@ func TestMisfiresAcrossRestart(t *testing.T) {
 	nextFires()
 }
 
+// A script task's firings missed while the daemon was down are caught up once after the restart, for the first missed
+// firing, as for any task; the next firing is the next occurrence.
+func TestScriptMisfiresAcrossRestart(t *testing.T) {
+	e := newEnv(t)
+	e.createScript("daily", "  script:\n    command: [/bin/echo, hi]\n  schedule:\n    cron: \"0 9 * * *\"\n    timezone: UTC\n")
+	e.app.Stop(domain.Text{Message: "test restart"}) // at 08:00, before the first firing
+	e.clock.Advance(3 * 24 * time.Hour)              // the daemon was down for three days
+	e = e.restart(t)
+	e.app.Tick()
+	// The start's own tick may have taken the firing and still be starting it.
+	var runs []ExecutionSummary
+	e.poll(10*time.Second, func() bool { runs = e.executions("daily"); return len(runs) > 0 })
+	if len(runs) != 1 || runs[0].Trigger != domain.TriggerCatchUp {
+		t.Fatalf("executions(daily) = %+v, want one catch-up", runs)
+	}
+	x := e.wait(runs[0].ID, domain.StatusCompleted)
+	e.idle("daily")
+	if first := time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC); x.ScheduledFor == nil || !x.ScheduledFor.Equal(first) {
+		t.Errorf("catch-up scheduled for %v, want %v", x.ScheduledFor, first)
+	}
+	if x.Script == nil || x.Script.ExitCode == nil || *x.Script.ExitCode != 0 {
+		t.Errorf("the catch-up's script record = %+v, want the program's exit code 0", x.Script)
+	}
+	next := time.Date(2026, 10, 23, 9, 0, 0, 0, time.UTC)
+	if view, _ := e.app.GetTask("daily"); view.NextFireAt == nil || !view.NextFireAt.Equal(next) {
+		t.Errorf("GetTask(daily).NextFireAt = %v, want %v", view.NextFireAt, next)
+	}
+}
+
 // A changed schedule takes effect at once, however it changes: an edit through the API, an edit of the task file, or a
-// change of the time zone alone. The next firing follows the new schedule, and the old one never fires.
+// change of the time zone alone, and for a script task as for any task. The next firing follows the new schedule, and
+// the old one never fires.
 func TestChangedScheduleTakesEffect(t *testing.T) {
 	bangkok, err := time.LoadLocation("Asia/Bangkok")
 	if err != nil {
@@ -3206,17 +3346,24 @@ func TestChangedScheduleTakesEffect(t *testing.T) {
 		name     string
 		from, to string // the schedule block, before and after the change
 		external bool   // the task file is edited, and the scan picks it up
+		script   bool   // the task is a script task, whose program exits at once
 		next     time.Time
 	}{
-		{"cron through the API", `cron: "0 18 * * *"`, `cron: "30 10 * * *"`, false, day.Add(10*time.Hour + 30*time.Minute)},
-		{"cron in the task file", `cron: "0 18 * * *"`, `cron: "30 10 * * *"`, true, day.Add(10*time.Hour + 30*time.Minute)},
+		{"cron through the API", `cron: "0 18 * * *"`, `cron: "30 10 * * *"`, false, false, day.Add(10*time.Hour + 30*time.Minute)},
+		{"cron in the task file", `cron: "0 18 * * *"`, `cron: "30 10 * * *"`, true, false, day.Add(10*time.Hour + 30*time.Minute)},
 		// 18:00 in Bangkok, UTC+7 all year, is 11:00 UTC.
-		{"time zone alone", "timezone: UTC", "timezone: Asia/Bangkok", false, time.Date(2026, 10, 20, 18, 0, 0, 0, bangkok)},
+		{"time zone alone", "timezone: UTC", "timezone: Asia/Bangkok", false, false, time.Date(2026, 10, 20, 18, 0, 0, 0, bangkok)},
+		{"cron of a script task through the API", `cron: "0 18 * * *"`, `cron: "30 10 * * *"`, false, true, day.Add(10*time.Hour + 30*time.Minute)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newEnv(t)
 			e.clock.Advance(2 * time.Hour) // 10:00 UTC
-			e.create("moved", "  schedule:\n    cron: \"0 18 * * *\"\n    timezone: UTC\n")
+			schedule := "  schedule:\n    cron: \"0 18 * * *\"\n    timezone: UTC\n"
+			if tc.script {
+				e.createScript("moved", "  script:\n    command: [/bin/echo, hi]\n"+schedule)
+			} else {
+				e.create("moved", schedule)
+			}
 			view, _ := e.app.GetTask("moved")
 			if want := day.Add(18 * time.Hour); view.NextFireAt == nil || !view.NextFireAt.Equal(want) {
 				t.Fatalf("next firing before the change %v, want %v", view.NextFireAt, want)
@@ -3262,6 +3409,38 @@ func TestChangedScheduleTakesEffect(t *testing.T) {
 				t.Errorf("next firing after it ran %v, want %v", view.NextFireAt, want)
 			}
 		})
+	}
+}
+
+// A script task's cron expression with a named time zone fires at that time in that zone, not in the system's, which
+// is UTC here: 18:00 in Bangkok, UTC+7 all year, is 11:00 UTC.
+func TestScriptTaskFiresInItsTimeZone(t *testing.T) {
+	bangkok, err := time.LoadLocation("Asia/Bangkok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, 10, 20, 18, 0, 0, 0, bangkok)
+	e := newEnv(t)
+	e.createScript("zoned", "  script:\n    command: [/bin/echo, hi]\n  schedule:\n    cron: \"0 18 * * *\"\n"+
+		"    timezone: Asia/Bangkok\n")
+	if view, _ := e.app.GetTask("zoned"); view.NextFireAt == nil || !view.NextFireAt.Equal(want) {
+		t.Fatalf("GetTask(zoned).NextFireAt = %v, want %v", view.NextFireAt, want)
+	}
+	e.clock.Advance(want.Sub(e.clock.Now()) - time.Minute) // 10:59 UTC
+	e.app.Tick()
+	if runs := e.executions("zoned"); len(runs) != 0 {
+		t.Fatalf("executions(zoned) before 18:00 in Bangkok = %+v, want none", runs)
+	}
+	e.clock.Advance(90 * time.Second) // 11:00:30 UTC
+	e.app.Tick()
+	runs := e.executions("zoned")
+	if len(runs) != 1 {
+		t.Fatalf("executions(zoned) after 18:00 in Bangkok = %+v, want one", runs)
+	}
+	x := e.wait(runs[0].ID, domain.StatusCompleted)
+	e.idle("zoned")
+	if x.Trigger != domain.TriggerSchedule || x.ScheduledFor == nil || !x.ScheduledFor.Equal(want) {
+		t.Errorf("execution trigger %s, scheduled for %v; want schedule at %v", x.Trigger, x.ScheduledFor, want)
 	}
 }
 
@@ -3584,6 +3763,34 @@ func TestMisfireDuringSleep(t *testing.T) {
 	}
 	if runs = e.executions("daily-skip"); len(runs) != 1 || runs[0].Trigger != domain.TriggerSchedule {
 		t.Fatalf("on-time firing of daily-skip: %+v", runs)
+	}
+}
+
+// With the missed-run policy skip, a script task whose firing came due while the computer slept runs no catch-up, and
+// the skipped firing is recorded with the policy, as for any task.
+func TestScriptMisfireDuringSleepIsSkipped(t *testing.T) {
+	e := newEnv(t)
+	e.createScript("asleep", "  script:\n    command: [/bin/echo, hi]\n  schedule:\n    cron: \"0 9 * * *\"\n"+
+		"    timezone: UTC\n    missedRun:\n      policy: skip\n")
+	e.clock.Advance(61 * time.Minute) // asleep across 09:00, awake at 09:01
+	e.wake.woke(e.clock.Now())
+	e.app.Tick()
+	if runs := e.executions("asleep"); len(runs) != 0 {
+		t.Errorf("executions(asleep) = %+v, want none", runs)
+	}
+	var policies []any
+	for _, ev := range e.published(domain.EventFiringMissed) {
+		if ev.TaskID == "asleep" {
+			policies = append(policies, ev.Payload["policy"])
+		}
+	}
+	if len(policies) != 1 || policies[0] != domain.MissedRunSkip {
+		t.Errorf("firing.missed policies of asleep = %v, want [%s]", policies, domain.MissedRunSkip)
+	}
+	got := e.lastFiring("asleep")
+	if !got.ScheduledFor.Equal(time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)) || got.Policy != domain.MissedRunSkip ||
+		got.Outcome != "skipped" || got.ExecutionID != "" || got.ReasonKey != "firings_missed_skipped" {
+		t.Errorf("asleep's firing record = %+v, want the 09:00 firing skipped by its policy", got)
 	}
 }
 
@@ -4165,6 +4372,88 @@ func TestRetentionDeletesOnlyExpiredLogs(t *testing.T) {
 	}
 }
 
+// A script execution's events replay from its first one. With logRetentionDays at 7, retention deletes the log, the raw
+// capture, and the execution directory, the inline script's file included, of one whose log is 8 days old, and keeps
+// every file of one whose log is 6 days old. The expired execution's record, the program's included, is still listed
+// and read, also after a restart; only its log reads as expired.
+func TestScriptRetentionDeletesOnlyExpiredLogs(t *testing.T) {
+	const day = 24 * time.Hour
+	e := newEnv(t)
+	week := 7
+	if _, err := e.app.UpdateSettings(SettingsPatch{LogRetentionDays: &week}); err != nil {
+		t.Fatal(err)
+	}
+	e.createScript("aged", "  script:\n    inline:\n      interpreter: [/bin/sh]\n      source: echo kept\n")
+	old := e.endedRun("aged", domain.StatusCompleted)
+	recent := e.endedRun("aged", domain.StatusCompleted)
+
+	events, expired, err := e.app.ExecutionEvents(old.ID, 0, 0)
+	if err != nil || expired || len(events) < 2 {
+		t.Fatalf("ExecutionEvents(%s, 0, 0) = %d events, expired %v, %v; want the whole log", old.ID, len(events), expired, err)
+	}
+	if events[0].Type != domain.EventExecutionCreated {
+		t.Errorf("the replay starts with %s, want %s", events[0].Type, domain.EventExecutionCreated)
+	}
+	if !slices.ContainsFunc(events, func(ev domain.Event) bool { return ev.Type == domain.EventExecutionCompleted }) {
+		t.Errorf("the replay lacks %s: %+v", domain.EventExecutionCompleted, events)
+	}
+	if !slices.ContainsFunc(events, func(ev domain.Event) bool {
+		return ev.Type == domain.EventScriptOutput && ev.Message == "kept"
+	}) {
+		t.Errorf("the replay lacks the program's output: %+v", events)
+	}
+	if rest, _, _ := e.app.ExecutionEvents(old.ID, events[0].ID, 0); len(rest) != len(events)-1 || rest[0].ID != events[1].ID {
+		t.Errorf("ExecutionEvents(%s, %d, 0) = %d events, want the %d after the first", old.ID, events[0].ID, len(rest),
+			len(events)-1)
+	}
+
+	if _, err := os.Stat(filepath.Join(e.app.Paths().Runs, old.ID, "script.sh")); err != nil {
+		t.Fatalf("before retention, the inline script's file: %v", err)
+	}
+	oldFiles, recentFiles := e.retentionFiles(old.ID), e.retentionFiles(recent.ID)
+	e.backdateLog(old.ID, 8*day)
+	e.backdateLog(recent.ID, 6*day)
+	e.app.ApplyRetention()
+	if left := presentFiles(oldFiles); len(left) != 0 {
+		t.Errorf("retention left files of the execution whose log is 8 days old: %v", left)
+	}
+	if left := presentFiles(recentFiles); len(left) != len(recentFiles) {
+		t.Errorf("retention deleted files of the execution whose log is 6 days old: %d of %d left, %v", len(left),
+			len(recentFiles), left)
+	}
+
+	kept := func(when string, e *env) {
+		t.Helper()
+		// The fake clock gives both executions one creation time, so the list's order between them is not the test's.
+		runs := e.executions("aged")
+		if len(runs) != 2 || !slices.ContainsFunc(runs, func(s ExecutionSummary) bool {
+			return s.ID == old.ID && s.Status == domain.StatusCompleted
+		}) {
+			t.Errorf("%s, executions(aged) = %+v, want the expired one listed as completed", when, runs)
+		}
+		x, err := e.app.GetExecution(old.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !x.LogExpired || x.Status != domain.StatusCompleted || len(x.Attempts) != 1 || x.Script == nil ||
+			x.Script.Source != "echo kept" || x.Script.ExitCode == nil || *x.Script.ExitCode != 0 {
+			t.Errorf("%s, the expired record: log expired %v, status %s, attempts %+v, script %+v", when, x.LogExpired,
+				x.Status, x.Attempts, x.Script)
+		}
+		if events, expired, err := e.app.ExecutionEvents(old.ID, 0, 0); err != nil || !expired || len(events) != 0 {
+			t.Errorf("%s, the expired execution's events: %d, expired %v, %v", when, len(events), expired, err)
+		}
+		if out, err := e.app.ExecutionOutput(old.ID, 0); err != nil || !out.LogExpired {
+			t.Errorf("%s, the expired execution's output: logExpired %v, %v", when, out.LogExpired, err)
+		}
+	}
+	kept("after retention", e)
+	if x, _ := e.app.GetExecution(recent.ID); x.LogExpired {
+		t.Error("the execution whose log is 6 days old reads as expired")
+	}
+	kept("after a restart", e.restart(t))
+}
+
 // logRetentionDays is 30 on a fresh install, so a 29-day-old log is kept and a 31-day-old one deleted; it accepts 1 to
 // 3650 and rejects 0 and 3651; and a saved value is still in force after a restart.
 func TestLogRetentionSetting(t *testing.T) {
@@ -4422,6 +4711,42 @@ func TestWaitingFiringAcrossRestart(t *testing.T) {
 				t.Errorf("the queue still lists %d waiting firings", len(q.Waiting))
 			}
 		})
+	}
+}
+
+// A script task's firing that was waiting when the daemon stopped starts after the restart, and the execution that was
+// running reads interrupted, as for any task. The program sleeps until its flag file exists, so only the first run
+// waits.
+func TestScriptWaitingFiringAcrossRestart(t *testing.T) {
+	e := newEnv(t)
+	dir := t.TempDir()
+	e.createScript("waits", fmt.Sprintf("  script:\n    command: [/bin/sh, -c, \"[ -e %[1]s/go ] && exit 0; echo $$ > %[1]s/pid; "+
+		"sleep 600\"]\n  execution:\n    cancelGraceSeconds: 1\n", dir))
+	first, err := e.app.RunTask("waits")
+	if err != nil || first.Outcome != "started" {
+		t.Fatalf("RunTask(waits) = %+v, %v, want started", first, err)
+	}
+	waitForPid(t, filepath.Join(dir, "pid"))
+	second, _ := e.app.RunTask("waits")
+	if second.Outcome != "queued" {
+		t.Fatalf("RunTask(waits) while its program runs = %+v, want queued", second)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e = e.restart(t)
+	if x, _ := e.app.GetExecution(first.ExecutionID); x.Status != domain.StatusInterrupted {
+		t.Errorf("the running execution is %s, want interrupted", x.Status)
+	}
+	x := e.wait(second.ExecutionID, domain.StatusCompleted)
+	e.idle("waits")
+	if x.Trigger != domain.TriggerManual || len(x.Attempts) != 1 || x.Script == nil || x.Script.ExitCode == nil ||
+		*x.Script.ExitCode != 0 {
+		t.Errorf("the waiting execution: trigger %s, attempts %+v, script %+v; want the manual run's program to exit 0",
+			x.Trigger, x.Attempts, x.Script)
+	}
+	if q := e.app.Queue(); len(q.Waiting) != 0 {
+		t.Errorf("the queue still lists %d waiting firings", len(q.Waiting))
 	}
 }
 
@@ -6068,6 +6393,31 @@ func TestNotificationLevels(t *testing.T) {
 	}
 }
 
+// The global notification level applies to a script task's notices as to any task's: at failures_and_attention a
+// program that exits with code 0 gives no notice, and one that fails still gives one.
+func TestScriptNotificationLevels(t *testing.T) {
+	e := newEnv(t)
+	e.createScript("noisy", "  script:\n    command: [/bin/echo, hi]\n")
+	e.createScript("broken", "  script:\n    command: [/bin/sh, -c, \"exit 1\"]\n")
+	x := e.runScript("noisy", domain.StatusCompleted)
+	if n := e.app.Notifications(true); len(n) != 1 || n[0].ExecutionID != x.ID || n[0].EventType != domain.EventExecutionCompleted {
+		t.Fatalf("Notifications(true) = %+v, want the completion of %s", n, x.ID)
+	}
+	e.app.MarkNotificationsRead(nil)
+	level := "failures_and_attention"
+	if _, err := e.app.UpdateSettings(SettingsPatch{NotificationLevel: &level}); err != nil {
+		t.Fatal(err)
+	}
+	e.runScript("noisy", domain.StatusCompleted)
+	if n := e.app.Notifications(true); len(n) != 0 {
+		t.Errorf("Notifications(true) after a success at the failures level = %+v, want none", n)
+	}
+	x = e.runScript("broken", domain.StatusFailed)
+	if n := e.app.Notifications(true); len(n) != 1 || n[0].ExecutionID != x.ID || n[0].EventType != domain.EventExecutionFailed {
+		t.Errorf("Notifications(true) after a failure at the failures level = %+v, want the failure of %s", n, x.ID)
+	}
+}
+
 // Whether a running execution notifies is decided by the definition it started with, its task's name included; an
 // edit to the task's notifications applies from the next execution.
 func TestNoticesFollowTheStartingDefinition(t *testing.T) {
@@ -6138,6 +6488,25 @@ func (e *env) completedNotices(executionID string) []Notification {
 		}
 	}
 	return out
+}
+
+// A script task's own choice of notifiable events applies: one that notifies on completion gets a notice when its
+// program exits with code 0, and one that does not notify on failure gets none when its program fails.
+func TestScriptNoticesFollowTheTasksEvents(t *testing.T) {
+	e := newEnv(t)
+	completedOnly := "  notifications:\n    native:\n      events: [execution.completed]\n"
+	e.createScript("succeeds", "  script:\n    command: [/bin/echo, hi]\n"+completedOnly)
+	e.createScript("fails", "  script:\n    command: [/bin/sh, -c, \"exit 1\"]\n"+completedOnly)
+	ok := e.runScript("succeeds", domain.StatusCompleted)
+	failed := e.runScript("fails", domain.StatusFailed)
+	if got := e.completedNotices(ok.ID); len(got) != 1 {
+		t.Errorf("completedNotices(%s) = %+v, want one", ok.ID, got)
+	}
+	for _, n := range e.app.Notifications(false) {
+		if n.ExecutionID == failed.ID {
+			t.Errorf("a notice for the failed program, whose task does not notify on failure: %+v", n)
+		}
+	}
 }
 
 // Past the cap the oldest read notices go first, and an unread notice is never dropped.

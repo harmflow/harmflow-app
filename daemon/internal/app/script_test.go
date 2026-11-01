@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -599,6 +600,63 @@ func TestScriptTaskSharesTheScheduler(t *testing.T) {
 	_ = e.app.CancelExecution(first.ExecutionID)
 	e.wait(first.ExecutionID, domain.StatusCancelled)
 	e.idle("busy")
+}
+
+// A script task's waiting firing is listed in the queue, and its ended executions in the task's history and in the
+// recent history, newest first, with their status and trigger. The program sleeps until its flag file exists, so only
+// the first run waits.
+func TestScriptTaskInTheQueueAndTheHistory(t *testing.T) {
+	e := newEnv(t)
+	dir := t.TempDir()
+	e.createScript("listed", fmt.Sprintf("  script:\n    command: [/bin/sh, -c, \"[ -e %[1]s/go ] && exit 0; echo $$ > %[1]s/pid; "+
+		"sleep 600\"]\n  schedule:\n    interval: 1h\n  execution:\n    cancelGraceSeconds: 1\n", dir))
+	first, err := e.app.RunTask("listed")
+	if err != nil || first.Outcome != "started" {
+		t.Fatalf("RunTask(listed) = %+v, %v, want started", first, err)
+	}
+	waitForPid(t, filepath.Join(dir, "pid"))
+	second, _ := e.app.RunTask("listed")
+	if second.Outcome != "queued" {
+		t.Fatalf("RunTask(listed) while its program runs = %+v, want queued", second)
+	}
+	if q := e.app.Queue().Waiting; len(q) != 1 || q[0].ID != second.ExecutionID || q[0].TaskID != "listed" ||
+		q[0].Status != domain.StatusQueued || q[0].Trigger != domain.TriggerManual {
+		t.Errorf("Queue().Waiting = %+v, want the manual run %s of listed", q, second.ExecutionID)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.app.CancelExecution(first.ExecutionID); err != nil {
+		t.Fatal(err)
+	}
+	e.wait(first.ExecutionID, domain.StatusCancelled)
+	e.wait(second.ExecutionID, domain.StatusCompleted)
+	e.idle("listed")
+	e.clock.Advance(61 * time.Minute) // the interval's firing comes due
+	e.app.Tick()
+	var runs []ExecutionSummary
+	e.poll(10*time.Second, func() bool { runs = e.executions("listed"); return len(runs) == 3 && runs[0].Status.IsTerminal() })
+	e.idle("listed")
+
+	describe := func(list []ExecutionSummary) []string {
+		var out []string
+		for _, s := range list {
+			out = append(out, fmt.Sprintf("%s %s %s", s.TaskID, s.Status, s.Trigger))
+		}
+		return out
+	}
+	want := []string{"listed completed schedule", "listed completed manual", "listed cancelled manual"}
+	if got := describe(e.executions("listed")); !slices.Equal(got, want) {
+		t.Errorf("the task's history = %q, want %q", got, want)
+	}
+	recent := e.app.ListExecutions(ExecutionFilter{Limit: 10})
+	if got := describe(recent); !slices.Equal(got, want) {
+		t.Errorf("the recent history = %q, want %q", got, want)
+	}
+	if len(recent) == 3 && (recent[1].ID != second.ExecutionID || recent[2].ID != first.ExecutionID) {
+		t.Errorf("the recent history lists %s and %s, want %s and %s", recent[1].ID, recent[2].ID, second.ExecutionID,
+			first.ExecutionID)
+	}
 }
 
 // A script task goes through every use case a task has, none of which may assume a harness.
