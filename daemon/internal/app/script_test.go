@@ -130,6 +130,74 @@ func TestScriptTaskValidates(t *testing.T) {
 	}
 }
 
+// A script task takes no harness, with or without a model, an effort, or a fallback chain, and no agents or skills:
+// each is rejected with an error naming its field, and the same task without it validates. The form's document, sent as
+// JSON, is held to the same rule.
+func TestScriptTaskRejectsHarnessAgentsAndSkills(t *testing.T) {
+	e := newEnv(t)
+	const program = "  script:\n    command: [/bin/echo, hi]\n"
+	if r := e.app.Validate(t.Context(), TaskInput{YAML: scriptYAML("plain", program)}); !r.Valid {
+		t.Fatalf("Validate(script task with an argument list) errors = %+v, want valid", r.Errors)
+	}
+	for _, tc := range []struct {
+		name, field, path string
+	}{
+		{"harness", "  harness:\n    preferred:\n      provider: claude-code\n", "/spec/harness"},
+		{"harness with a model and an effort",
+			"  harness:\n    preferred:\n      provider: claude-code\n      model: default\n      effort: high\n", "/spec/harness"},
+		{"harness with a fallback chain",
+			"  harness:\n    preferred:\n      provider: claude-code\n" + codexFallback, "/spec/harness"},
+		{"agents", "  agents: [user-agent]\n", "/spec/agents"},
+		{"skills", "  skills: [user-skill]\n", "/spec/skills"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := e.app.Validate(t.Context(), TaskInput{YAML: scriptYAML("extra", program+tc.field)})
+			if is := issueAt(r.Errors, tc.path); r.Valid || is == nil || is.Key != "schema_false" {
+				t.Errorf("Validate(script task with %s) = valid %v, errors %+v; want schema_false at %s", tc.name, r.Valid,
+					r.Errors, tc.path)
+			}
+		})
+	}
+
+	// The form sends its document as JSON, through the same entry point the local API uses.
+	const head = `{"apiVersion":"harmflow/v1alpha1","kind":"Task","metadata":{"id":"formed","name":"Formed"},` +
+		`"spec":{"type":"script","script":{"command":["/bin/echo","hi"]}`
+	if r := e.app.Validate(t.Context(), TaskInput{Document: []byte(head + `}}`)}); !r.Valid {
+		t.Fatalf("Validate(the form's script document) errors = %+v, want valid", r.Errors)
+	}
+	doc := head + `,"harness":{"preferred":{"provider":"claude-code","model":"default","effort":"high"}}}}`
+	r := e.app.Validate(t.Context(), TaskInput{Document: []byte(doc)})
+	if is := issueAt(r.Errors, "/spec/harness"); r.Valid || is == nil || is.Key != "schema_false" {
+		t.Errorf("Validate(the form's script document with a harness) = valid %v, errors %+v; want schema_false at "+
+			"/spec/harness", r.Valid, r.Errors)
+	}
+}
+
+// A script task's execution reads no harness's quota, though the harnesses report one, and carries no quota warning
+// or event.
+func TestScriptTaskReadsNoQuota(t *testing.T) {
+	e := newEnv(t)
+	e.claude.setQuota(sessionFull)
+	e.createScript("unmetered", "  script:\n    command: [/bin/echo, hi]\n")
+	claude, codex := e.claude.reads(), e.codex.reads()
+	x := e.runScript("unmetered", domain.StatusCompleted)
+	if n := e.claude.reads() - claude + e.codex.reads() - codex; n != 0 {
+		t.Errorf("%d quota reads for a script execution, want 0", n)
+	}
+	for _, w := range x.Warnings {
+		if strings.Contains(w.Key, "quota") {
+			t.Errorf("execution warning %+v, want no quota warning", w)
+		}
+	}
+	e.output(x.ID) // waits for the execution's last event
+	events, _, _ := e.app.ExecutionEvents(x.ID, 0, 0)
+	for _, ev := range events {
+		if strings.Contains(ev.Type, "quota") || strings.Contains(ev.MessageKey, "quota") {
+			t.Errorf("event %s (%s), want no quota event", ev.Type, ev.MessageKey)
+		}
+	}
+}
+
 // An argument list runs with no shell, the exit status decides the result, and an execution has one attempt and no
 // harness.
 func TestScriptRunsAndTheExitStatusDecides(t *testing.T) {
