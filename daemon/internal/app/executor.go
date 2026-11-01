@@ -1185,6 +1185,14 @@ func (r *run) onProgress(p domain.ProgressLine) {
 			a.mu.Unlock()
 		}
 	case domain.EventWorkItemSelected:
+		if !githubItemKey.MatchString(p.WorkItem) {
+			// A key that names no issue would stay in the record and the ledger as an item no report closes. The line
+			// changes neither, and is logged under no work item, so that recovery counts nothing against its key.
+			r.emit(domain.Event{Type: p.Type, Severity: domain.SeverityWarning}.Says(domain.T("work_item_key_invalid",
+				`work item "{{workItem}}" is not a key of the form owner/repo#<number>; its selection was ignored`,
+				"workItem", trimTo(p.WorkItem, 200))))
+			return
+		}
 		a.mu.Lock()
 		r.x.WorkItem = p.WorkItem
 		if p.Repository != "" {
