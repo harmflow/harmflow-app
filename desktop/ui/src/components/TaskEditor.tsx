@@ -56,7 +56,8 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
   const catalog = useStore((s) => s.catalog);
   const harnesses = useStore((s) => s.harnesses);
   const externalChange = useStore((s) => (task ? s.externalChanges[task.id] : undefined));
-  const openedAtEvent = useRef(externalChange ?? 0);
+  // The event ID of the last outside change the editor opened, saved, or was answered past: only a later one warns.
+  const [answeredEvent, setAnsweredEvent] = useState(externalChange ?? 0);
 
   const [tab, setTab] = useState<EditorTab>("form");
   const [doc, setDoc] = useState<Doc>(() => (task?.document as Doc) ?? initial ?? {});
@@ -70,12 +71,12 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState(false);
-  const [externalSeen, setExternalSeen] = useState(false);
   // Set on a save's entry, before `saving` renders: two ⌘S presses in one moment send one request.
   const inFlight = useRef(false);
   const { tipped, tooltip } = useTooltip(tipBelow);
 
-  const showExternal = !!task && externalChange !== undefined && externalChange > openedAtEvent.current && !externalSeen;
+  const showExternal = !!task && externalChange !== undefined && externalChange > answeredEvent;
+  const answerExternal = () => setAnsweredEvent((seen) => externalChange ?? seen);
 
   // A harness that finds the user's skills per workspace, as Codex and Claude Code do, offers the ones it has in the
   // task's workspace: the catalog is asked for it, and the one already loaded stands in until it answers. The task's ID
@@ -161,7 +162,7 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
       setYaml(saved.yaml);
       stored.current = { doc: saved.document as Doc, yaml: saved.yaml };
       setValidation(saved.validation ?? null);
-      openedAtEvent.current = getState().externalChanges[saved.id] ?? openedAtEvent.current;
+      setAnsweredEvent((seen) => getState().externalChanges[saved.id] ?? seen);
       void actions.refreshTasks();
       onSaved(saved);
     } catch (err) {
@@ -206,8 +207,7 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
     setValidation(fresh.validation ?? null);
     setDirty(false);
     setConflict(false);
-    setExternalSeen(true);
-    openedAtEvent.current = externalChange ?? openedAtEvent.current;
+    answerExternal();
   };
 
   const errors = validation?.errors ?? [];
@@ -284,7 +284,7 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
               <Button size="sm" onClick={() => void reloadFromDisk()}>
                 {t("tasks.editor.reloadFromDisk")}
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => setExternalSeen(true)}>
+              <Button size="sm" variant="ghost" onClick={answerExternal}>
                 {t("tasks.editor.keepEditing")}
               </Button>
             </>
