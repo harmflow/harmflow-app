@@ -130,9 +130,9 @@ func newWorkFixtures(t *testing.T) (excluded, managed, eligible int) {
 func newWorkIssue(t *testing.T, run string, which int, labels []string) int {
 	t.Helper()
 	file := fmt.Sprintf("%s/%s-%d.txt", newWorkDir, run, which)
-	args := []string{"repos/" + queueRepo + "/issues", "-f", fmt.Sprintf("title=New work test %s: add %s", run, file),
-		"-f", fmt.Sprintf("body=A fixture of HarmFlow's new work test, which closes it when it ends.\n\n"+
-			"Add the file `%s` with the single line `%s`, and change nothing else. The repository has no tests.\n", file, run),
+	args := []string{"repos/" + queueRepo + "/issues", "-f", "title=Add the reminder " + file,
+		"-f", fmt.Sprintf("body=Add the file `%s` with the single line `%s`, and change nothing else. The repository has "+
+			"no tests.\n", file, run),
 		"--jq", ".number"}
 	for _, l := range labels {
 		args = append(args, "-f", "labels[]="+l)
@@ -159,9 +159,8 @@ func newWorkDraft(t *testing.T, run string, issue int) int {
 		"-f", "content="+base64.StdEncoding.EncodeToString([]byte(run+"\n")))
 	var number string
 	if err == nil {
-		body := fmt.Sprintf("A fixture of HarmFlow's new work test, which closes it when it ends.\n\nCloses #%d\n\n"+
-			"Managed by HarmFlow task queue.\n", issue)
-		number, err = newWorkGh("repos/"+queueRepo+"/pulls", "-f", "title=New work test "+run+": add "+file,
+		body := fmt.Sprintf("Adds `%s`.\n\nCloses #%d\n\nManaged by HarmFlow task queue.\n", file, issue)
+		number, err = newWorkGh("repos/"+queueRepo+"/pulls", "-f", "title=Add the note "+file,
 			"-f", "head="+branch, "-f", "base="+base, "-F", "draft=true", "-f", "body="+body, "--jq", ".number")
 	}
 	if err != nil {

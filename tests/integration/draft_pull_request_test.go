@@ -37,9 +37,9 @@ func TestEligibleIssueBecomesALinkedDraftPullRequest(t *testing.T) {
 	}
 	run := runSuffix()
 	file := draftPRDir + "/" + run + ".txt"
-	issue := labelledFixture(t, draftPRLabel, draftPRDir, base, "Draft pull request test "+run+": add "+file,
-		fmt.Sprintf("A fixture of HarmFlow's draft pull request test, which closes it when it ends.\n\n"+
-			"Add the file `%s` with the single line `%s`, and change nothing else. The repository has no tests.\n", file, run))
+	issue := labelledFixture(t, draftPRLabel, draftPRDir, base, "Add the release note "+file,
+		fmt.Sprintf("Add the file `%s` with the single line `%s`, and change nothing else. The repository has no tests.\n",
+			file, run))
 	before := branchHead(t, base)
 	parent, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {

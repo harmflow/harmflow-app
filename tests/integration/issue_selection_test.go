@@ -86,10 +86,10 @@ func selectionFixtures(t *testing.T) (older, newer int) {
 	t.Cleanup(func() { closeSelectionFixtures(t, opened...) })
 	for _, which := range []string{"older", "newer"} {
 		file := fmt.Sprintf("%s/%s-%s.txt", selectionLabel, run, which)
-		body := fmt.Sprintf("A fixture of HarmFlow's issue selection test, which closes it when it ends.\n\n"+
-			"Add the file `%s` with the single line `%s`, and change nothing else. The repository has no tests.\n", file, run)
+		body := fmt.Sprintf("Add the file `%s` with the single line `%s`, and change nothing else. The repository has "+
+			"no tests.\n", file, run)
 		out, err := exec.Command("gh", "issue", "create", "--repo", queueRepo, "--label", selectionLabel,
-			"--title", "Issue selection test "+run+": add "+file, "--body", body).Output()
+			"--title", "Add the greeting "+file, "--body", body).Output()
 		if err != nil {
 			t.Fatalf("gh issue create: %v", err)
 		}
