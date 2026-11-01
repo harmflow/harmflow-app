@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,6 +25,9 @@ const restartLabel = "restart-test"
 // pull request is opened, and once the draft pull request is opened; then the task's next firing runs to its end. Each
 // time, the fixture issue ends with exactly one branch and one draft pull request. After the kill once the draft pull
 // request is opened, the next execution also found that pull request and updated it, as checkUpdatedPullRequest reads.
+// The next session also reconciled the worktree the killed one left in the clone: the clone ends with one worktree for
+// the issue, on the branch the first execution pushed, and no other local branch; after the kill once the push
+// completed, the pull request's head descends from the commit the first execution pushed.
 func TestRestartDuplicatesNoBranchOrPullRequest(t *testing.T) {
 	claude := realClaude(t)
 	for _, label := range []string{restartLabel, "harmflow"} {
@@ -41,6 +45,7 @@ func TestRestartDuplicatesNoBranchOrPullRequest(t *testing.T) {
 		t.Run(point.name, func(t *testing.T) {
 			issue, file := restartFixture(t)
 			clone := pushableClone(t)
+			base := git(t, clone, "symbolic-ref", "--short", "HEAD")
 			home := t.TempDir()
 			d := startDaemon(t, home)
 			useClaude(d, claude, clone)
@@ -68,7 +73,17 @@ func TestRestartDuplicatesNoBranchOrPullRequest(t *testing.T) {
 				t.Fatalf("a pull request was open for #%d when the daemon was killed after the push: %+v\nthe session ran:\n%s",
 					issue, prs, commandsOf(d, first))
 			}
+			left := cloneWorktrees(t, clone)
+			var killed cloneWorktree
+			if at := slices.IndexFunc(left, func(w cloneWorktree) bool { return w.Branch == pushed[0] }); at >= 0 {
+				killed = left[at]
+			} else {
+				t.Errorf("at the kill, the clone holds no worktree on %s, the branch the first execution pushed\n%s\n%s",
+					pushed[0], cloneState(t, clone), runFiles(dir))
+			}
+			var pushedCommit string
 			if point.afterPush {
+				pushedCommit = branchHead(t, pushed[0])
 				d.call("PUT", "/tasks/restart", map[string]any{"yaml": restartTask(d, clone, issue, true),
 					"baseRevision": created["revision"]}, 200)
 			}
@@ -101,6 +116,15 @@ func TestRestartDuplicatesNoBranchOrPullRequest(t *testing.T) {
 			}
 			if !point.afterPush && pr.URL != opened {
 				t.Errorf("the pull request for #%d is %s, want %s, the one the first execution opened", issue, pr.URL, opened)
+			}
+			checkReconciledWorktree(t, clone, base, pushed[0], killed, nextDir)
+			if point.afterPush {
+				// GitHub's status is ahead or identical when the pushed commit is an ancestor of the head.
+				if status, _ := compareCommits(t, pushedCommit, pr.HeadOID); status != "ahead" && status != "identical" {
+					t.Errorf("GitHub compares %s, the commit the first execution pushed, with %s, the head of %s: %q, want "+
+						"ahead or identical, a head built on the pushed work\n%s\n%s", pushedCommit, pr.HeadOID, pr.URL, status,
+						cloneState(t, clone), runFiles(nextDir))
+				}
 			}
 			if !point.afterPush {
 				checkUpdatedPullRequest(t, d, next, nextDir, issue, pr)
@@ -163,6 +187,69 @@ func checkUpdatedPullRequest(t *testing.T, d *daemon, id, dir string, issue int,
 		t.Errorf("GitHub records the last edit of the body of %s at %v, want it within execution %s, from %v to %v",
 			pr.URL, edited, id, started, ended)
 	}
+}
+
+// checkReconciledWorktree checks that the next session reconciled the worktree the killed one left in the clone, as
+// hf-github-worktree's "Create or reuse the worktree" says: the clone holds exactly one worktree besides its own
+// checkout, on the branch the first execution pushed, and no local branch but that one and base. The worktree is the
+// one the killed session left, reused, or that one is gone from the disk too, replaced by it.
+func checkReconciledWorktree(t *testing.T, clone, base, branch string, killed cloneWorktree, dir string) {
+	t.Helper()
+	kept := cloneWorktrees(t, clone)
+	if len(kept) != 1 || kept[0].Branch != branch {
+		t.Errorf("after the next firing, the clone holds the worktrees %+v, want one on %s, the branch the first "+
+			"execution pushed\n%s\n%s", kept, branch, cloneState(t, clone), runFiles(dir))
+	} else if killed.Path != "" && kept[0].Path != killed.Path {
+		if _, err := os.Stat(killed.Path); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("after the next firing, %s, the worktree the killed session left, is still on the disk beside %s "+
+				"(stat: %v), want it reused or gone\n%s\n%s", killed.Path, kept[0].Path, err, cloneState(t, clone),
+				runFiles(dir))
+		}
+	}
+	var others []string
+	for _, b := range strings.Fields(git(t, clone, "for-each-ref", "--format=%(refname:short)", "refs/heads")) {
+		if b != base && b != branch {
+			others = append(others, b)
+		}
+	}
+	if len(others) != 0 {
+		t.Errorf("after the next firing, the clone holds the local branches %v besides %s and %s, want none\n%s\n%s",
+			others, base, branch, cloneState(t, clone), runFiles(dir))
+	}
+}
+
+// cloneWorktree is a worktree of a clone, as git worktree list --porcelain prints it: its path, and its branch, ""
+// when its HEAD is detached.
+type cloneWorktree struct {
+	Path   string
+	Branch string
+}
+
+// cloneWorktrees lists the clone's worktrees besides its own checkout, which git lists first. A worktree whose folder
+// is gone, which git marks prunable, is listed too: it is still registered in the clone.
+func cloneWorktrees(t *testing.T, clone string) []cloneWorktree {
+	t.Helper()
+	var list []cloneWorktree
+	for _, block := range strings.Split(git(t, clone, "worktree", "list", "--porcelain"), "\n\n") {
+		var w cloneWorktree
+		for _, line := range strings.Split(block, "\n") {
+			if path, ok := strings.CutPrefix(line, "worktree "); ok {
+				w.Path = path
+			} else if ref, ok := strings.CutPrefix(line, "branch "); ok {
+				w.Branch = strings.TrimPrefix(ref, "refs/heads/")
+			}
+		}
+		list = append(list, w)
+	}
+	return list[1:]
+}
+
+// cloneState is the clone's worktree list and local branches, for a failure message.
+func cloneState(t *testing.T, clone string) string {
+	t.Helper()
+	return fmt.Sprintf("the clone's git worktree list --porcelain:\n%s\nits local branches:\n%s\n",
+		git(t, clone, "worktree", "list", "--porcelain"),
+		git(t, clone, "for-each-ref", "--format=%(refname:short) %(objectname)", "refs/heads"))
 }
 
 // reportedKind is the kind the execution's report.json gives the issue's work item, new or resume: "" when the report
@@ -472,11 +559,12 @@ func issueWork(t *testing.T, issue int, file string) ([]string, []restartPR) {
 }
 
 type restartPR struct {
-	Number int    `json:"number"`
-	URL    string `json:"url"`
-	Head   string `json:"headRefName"`
-	State  string `json:"state"`
-	Draft  bool   `json:"isDraft"`
+	Number  int    `json:"number"`
+	URL     string `json:"url"`
+	Head    string `json:"headRefName"`
+	HeadOID string `json:"headRefOid"`
+	State   string `json:"state"`
+	Draft   bool   `json:"isDraft"`
 }
 
 type issueRef struct {
@@ -487,7 +575,7 @@ type issueRef struct {
 // branches.
 func issuePullRequests(issue int, branches []string) ([]restartPR, error) {
 	out, err := exec.Command("gh", "pr", "list", "--repo", queueRepo, "--state", "all", "--limit", "100", "--json",
-		"number,url,headRefName,state,isDraft,closingIssuesReferences").Output()
+		"number,url,headRefName,headRefOid,state,isDraft,closingIssuesReferences").Output()
 	if err != nil {
 		return nil, fmt.Errorf("gh pr list: %w", err)
 	}
