@@ -805,6 +805,99 @@ func TestEndStoredTreeAfterTheHarnessExitedEndsWhatCarriesTheID(t *testing.T) {
 	}
 }
 
+// beforeTheBoot is a start time one second before the system's boot, as bootTime reads it for EndStoredTree's guard.
+func beforeTheBoot(t *testing.T) time.Time {
+	t.Helper()
+	boot, err := bootTime(t.Context())
+	if err != nil {
+		t.Fatalf("bootTime: %v", err)
+	}
+	booted, err := strconv.ParseInt(boot, 10, 64)
+	if err != nil {
+		t.Fatalf("ParseInt(%q): %v", boot, err)
+	}
+	return time.Unix(booted-1, 0)
+}
+
+// After a reboot, a stored tree's pid and group can name processes that are not the harness's. A record whose harness
+// started before the boot ends nothing, though its group now holds a live process that carries its execution's id,
+// which both the group and the scan would find; the same record with a start time within the boot ends that process,
+// as for a harness that exited, so the boot time is what spares it. The test binary stands in for the process, as its
+// environment can be read.
+func TestEndStoredTreeFromBeforeTheBootEndsNothing(t *testing.T) {
+	needProcessTable(t)
+	before := beforeTheBoot(t)
+	id := executionID(t)
+	pidFile := t.TempDir() + "/left.pid"
+	env := testEnv(executionIDVariable+"="+id, helperVariable+"=daemon")
+	p := startShell(t, `"$1" >/dev/null 2>&1 & echo $! > "$2"; echo done`, env, id, nil, os.Args[0], pidFile)
+	tree := p.Tree()
+	<-p.Done()
+	left := waitForPid(t, nil, pidFile)
+	want := []byte(executionIDVariable + "=" + id)
+	waitFor(t, "the process left in the harness's group to carry the execution's id", func() bool {
+		info, ok := processInfo(left.pid)
+		return ok && info.start == left.start && info.pgid == tree.Group && carries(left.pid, want)
+	})
+
+	stale := tree
+	stale.Start = before
+	ended, err := EndStoredTree(t.Context(), stale, 300*time.Millisecond)
+	if err != nil || len(ended) != 0 {
+		t.Errorf("EndStoredTree(%+v) = %+v, %v; want nothing ended", stale, ended, err)
+	}
+	if !running(left) {
+		t.Fatalf("a tree from before the boot ended the process %d in its group", left.pid)
+	}
+
+	ended, err = EndStoredTree(t.Context(), tree, 300*time.Millisecond)
+	if err != nil {
+		t.Fatalf("EndStoredTree(%+v): %v", tree, err)
+	}
+	if running(left) {
+		t.Errorf("the process %d left in the harness's group survived a tree from within the boot", left.pid)
+	}
+	if e, ok := endedOne(ended, left.pid); !ok || e.OutsideGroup {
+		t.Errorf("EndStoredTree(%+v) = %+v, want pid %d, in the group", tree, ended, left.pid)
+	}
+}
+
+// A stored tree from before the boot whose pid and group name a live process, as they can once a reboot handed them
+// out again, ends nothing, even when that process carries the execution's id, which the scan would find.
+func TestEndStoredTreeFromBeforeTheBootSparesTheProcessItNames(t *testing.T) {
+	needProcessTable(t)
+	before := beforeTheBoot(t)
+	id := executionID(t)
+	cmd := exec.Command(os.Args[0])
+	cmd.Env = testEnv(executionIDVariable+"="+id, helperVariable+"=daemon")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	// Reaped even when an assertion fails, so no run leaves a process behind for the next test's scan.
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	pid := cmd.Process.Pid
+	info, ok := processInfo(pid)
+	if !ok {
+		t.Fatalf("processInfo(%d) found no process", pid)
+	}
+	live := ident{pid, info.start}
+	want := []byte(executionIDVariable + "=" + id)
+	waitFor(t, "the process to carry the execution's id", func() bool { return carries(pid, want) })
+
+	stale := Tree{Pid: pid, Group: pid, Start: before, ExecutionID: id}
+	ended, err := EndStoredTree(t.Context(), stale, 300*time.Millisecond)
+	if err != nil || len(ended) != 0 {
+		t.Errorf("EndStoredTree(%+v) = %+v, %v; want nothing ended", stale, ended, err)
+	}
+	if !running(live) {
+		t.Errorf("a tree from before the boot ended the process %d it names", pid)
+	}
+}
+
 // A harness that ignores SIGTERM and waits for its child ends with SIGKILL's exit once the grace period is over, never
 // with the exit of the command it runs next: it gets SIGKILL before the child does. Killed after the child, a shell ran
 // its next command and exited 0 in about one stop in three, so ten stops catch that nearly always.
