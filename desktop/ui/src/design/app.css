@@ -2890,6 +2890,15 @@ button.queue-item:hover,
   align-items: end;
 }
 
+/* A harness that can keep its session adds the ephemeral toggle beside Model and Effort. */
+.grid-profile--session {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto 32px;
+}
+
+.grid-profile__note {
+  grid-column: 1 / -1;
+}
+
 .grid-var {
   display: grid;
   grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr) 32px;

@@ -51,7 +51,8 @@ func TestSchemaDefaultsAreTheDaemons(t *testing.T) {
 		"/spec/concurrency/overlappingRuns", "/spec/schedule/missedRun/policy", "/spec/harness/fallback/on",
 		"/spec/notifications/native/events", "/spec/github/repositories/*/baseBranch",
 		"/spec/harness/preferred/model", "/spec/harness/preferred/effort", "/spec/harness/fallback/candidates/*/model",
-		"/spec/harness/fallback/candidates/*/effort",
+		"/spec/harness/fallback/candidates/*/effort", "/spec/harness/preferred/ephemeral",
+		"/spec/harness/fallback/candidates/*/ephemeral",
 	} {
 		if !slices.ContainsFunc(defaults, func(d schemaDefault) bool { return d.pointer() == p }) {
 			t.Errorf("the walk of task.schema.json missed the default at %s", p)

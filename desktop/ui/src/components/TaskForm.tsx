@@ -760,9 +760,12 @@ function HarnessProfile({
   const efforts = modelInfo?.efforts?.length ? modelInfo.efforts : harness?.efforts ?? [];
   const update = (key: string, v: string) => onChange(cleanRow({ ...value, provider, [key]: v }));
   const modelListId = `models-${provider}`;
+  // Only Codex can keep its session. On, the default, removes the key, so the YAML writes it only when it is off.
+  const keepsSessions = provider === "codex";
+  const ephemeral = value.ephemeral !== false;
 
   return (
-    <div className="grid-profile">
+    <div className={cx("grid-profile", keepsSessions && "grid-profile--session")}>
       <Field label={t("tasks.fields.provider")}>
         <Select value={provider} onChange={(e) => onChange(cleanRow({ provider: e.target.value }))}>
           {HARNESS_PROVIDERS.map((p) => {
@@ -801,7 +804,21 @@ function HarnessProfile({
           {value.effort && !efforts.includes(value.effort as string) ? <option value={value.effort as string}>{value.effort as string}</option> : null}
         </Select>
       </Field>
+      {keepsSessions ? (
+        <div className="field field--toggle">
+          <Toggle
+            checked={ephemeral}
+            onChange={(on) => onChange(cleanRow({ ...value, provider, ephemeral: on ? undefined : false }))}
+            label={t("tasks.fields.ephemeral")}
+          />
+        </div>
+      ) : null}
       {onRemove ? <IconButton icon="trash" label={t("common.remove")} onClick={onRemove} className="grid-profile__remove" /> : <span />}
+      {keepsSessions && !ephemeral ? (
+        <span className="field__hint grid-profile__note">
+          {daemonText({ message: "", messageKey: "session_kept_note", params: { harness: t("harness.names.codex") } })}
+        </span>
+      ) : null}
     </div>
   );
 }

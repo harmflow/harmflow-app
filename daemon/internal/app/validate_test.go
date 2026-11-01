@@ -150,6 +150,63 @@ func TestUncheckedCodexProfileSavesWithAWarning(t *testing.T) {
 	}
 }
 
+// harmflow-app#473: ephemeral false saves on a Codex profile, preferred or fallback, with the warning that says what
+// the kept session holds and where it stays; on a profile whose harness cannot keep a session, Claude Code's here, it
+// is refused at that profile's ephemeral, naming the profile. A profile that leaves it out, or sets true, gets neither.
+func TestEphemeralFalseNeedsAHarnessThatKeepsSessions(t *testing.T) {
+	a, _ := newCodexApp(t)
+	const keepCodex = "    fallback:\n      candidates:\n        - provider: codex\n          ephemeral: false\n"
+	const keepClaude = "    fallback:\n      candidates:\n        - provider: claude-code\n          ephemeral: false\n"
+	for _, c := range []struct {
+		name, yaml, path string
+		refused          bool
+	}{
+		{"Codex preferred", codexTaskYAML("codex-preferred", "      ephemeral: false\n"), "/spec/harness/preferred/ephemeral", false},
+		{"Codex fallback", taskYAML("codex-fallback", keepCodex), "/spec/harness/fallback/candidates/0/ephemeral", false},
+		{"Claude Code preferred", taskYAML("claude-preferred", "      ephemeral: false\n"), "/spec/harness/preferred/ephemeral", true},
+		{"Claude Code fallback", codexTaskYAML("claude-fallback", keepClaude),
+			"/spec/harness/fallback/candidates/0/ephemeral", true},
+		{"Codex left out", codexTaskYAML("codex-default", ""), "", false},
+		{"Codex true", codexTaskYAML("codex-true", "      ephemeral: true\n"), "", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			saved, err := a.CreateTask(t.Context(), TaskInput{YAML: c.yaml})
+			if c.refused {
+				var refused *Error
+				if !errors.As(err, &refused) || refused.Validation == nil {
+					t.Fatalf("CreateTask = %v, want it refused", err)
+				}
+				var found bool
+				for _, is := range refused.Validation.Errors {
+					if is.Key == "harness_session_not_kept" && is.Path == c.path && is.Params["profile"] != "" &&
+						strings.Contains(is.Message, is.Params["profile"]) {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("CreateTask errors = %+v, want harness_session_not_kept at %s naming the profile", refused.Validation.Errors, c.path)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("CreateTask: %v", err)
+			}
+			var notes []domain.Warning
+			for _, w := range saved.Warnings {
+				if w.Key == "session_kept_note" {
+					notes = append(notes, w)
+				}
+			}
+			switch {
+			case c.path == "" && len(notes) > 0:
+				t.Errorf("CreateTask warnings %+v, want no session_kept_note", notes)
+			case c.path != "" && (len(notes) != 1 || notes[0].Subject != c.path || notes[0].Params["harness"] != "Codex"):
+				t.Errorf("CreateTask warnings %+v, want one session_kept_note at %s naming Codex", notes, c.path)
+			}
+		})
+	}
+}
+
 // harmflow-app#427: saving a workspace_write Claude Code task reads the user's editing rules against the task's own
 // folders, resolved as an execution resolves them: its workspace, or HarmFlow's folder for the task when it sets none,
 // and its repositories. A rule within them warns of nothing, and the save creates neither folder. A rule outside them

@@ -543,6 +543,69 @@ func TestPrepareReadOnlyIsNotEnforced(t *testing.T) {
 	}
 }
 
+// harmflow-app#473: a session is ephemeral unless the task keeps it. Kept, Codex runs without --ephemeral and its
+// thread.started names the folder where Codex keeps it, under the CODEX_HOME the attempt runs with. A Codex without
+// --ephemeral keeps every session, which the attempt says in a restriction not enforced instead of failing;
+// validation's policy check, which starts no attempt, leaves it out.
+func TestPrepareEphemeralSession(t *testing.T) {
+	daemonHome := t.TempDir()
+	t.Setenv("CODEX_HOME", daemonHome)
+	a := &Adapter{Home: t.TempDir()}
+	if !a.KeepsSessions() {
+		t.Error("KeepsSessions() = false, want true")
+	}
+	attemptHome := t.TempDir()
+	perm := *domain.TaskDocument{}.Effective().Spec.Permissions
+	for _, c := range []struct {
+		name        string
+		flag        bool // the CLI's help lists --ephemeral
+		keep        bool
+		env         []string
+		policyCheck bool
+		wantFlag    bool
+		wantDir     string
+		wantNotice  bool
+	}{
+		{name: "on", flag: true, wantFlag: true},
+		{name: "off", flag: true, keep: true, wantDir: filepath.Join(daemonHome, "sessions")},
+		{name: "off with the attempt's own CODEX_HOME", flag: true, keep: true, env: []string{"CODEX_HOME=" + attemptHome},
+			wantDir: filepath.Join(attemptHome, "sessions")},
+		{name: "on without the flag", wantDir: filepath.Join(daemonHome, "sessions"), wantNotice: true},
+		{name: "off without the flag", keep: true, wantDir: filepath.Join(daemonHome, "sessions"), wantNotice: true},
+		{name: "policy check without the flag", policyCheck: true, wantDir: filepath.Join(daemonHome, "sessions")},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			info := ports.HarnessInfo{Path: "/bin/codex", Version: "0.100.0", Features: map[string]bool{"--ephemeral": c.flag}}
+			inv, parser, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, Prompt: "do it",
+				KeepSession: c.keep, Env: c.env, PolicyCheck: c.policyCheck})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := slices.Contains(inv.Args, "--ephemeral"); got != c.wantFlag {
+				t.Errorf("Prepare args %q hold --ephemeral: %t, want %t", inv.Args, got, c.wantFlag)
+			}
+			var notice *ports.Restriction
+			for i, r := range inv.Restrictions {
+				if r.Name == "ephemeral" {
+					notice = &inv.Restrictions[i]
+				}
+			}
+			switch {
+			case c.wantNotice && (notice == nil || notice.Enforced || notice.Text.Key != "restriction_codex_ephemeral_missing" ||
+				!strings.Contains(notice.Text.Message, "0.100.0")):
+				t.Errorf("Prepare restriction ephemeral = %+v, want one not enforced naming the version", notice)
+			case !c.wantNotice && notice != nil:
+				t.Errorf("Prepare restriction ephemeral = %+v, want none", notice)
+			}
+			events := parser.Line([]byte(`{"type":"thread.started","thread_id":"thread-1"}`))
+			if len(events) != 1 || events[0].Kind != ports.HarnessStarted || events[0].SessionID != "thread-1" ||
+				events[0].SessionDir != c.wantDir {
+				t.Errorf("thread.started = %+v, want session thread-1 kept in %q", events, c.wantDir)
+			}
+		})
+	}
+}
+
 // A task that sets no model or effort, or sets default, passes Codex no model and no reasoning effort, so those of
 // Codex's own configuration apply. TestPrepareSandbox shows a set model and effort reaching it.
 func TestPrepareLeavesTheDefaultsToCodex(t *testing.T) {

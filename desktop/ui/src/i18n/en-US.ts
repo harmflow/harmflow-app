@@ -345,6 +345,9 @@ export const enUS = {
     codex_app_server_timed_out: "Codex's app server did not answer {{method}} within {{seconds}} seconds",
     codex_app_server_error: "Codex's app server answered {{method}} with an error: {{detail}}",
     fallback_repeats_preferred: "this fallback repeats the preferred harness and model",
+    harness_session_not_kept: "{{harness}} cannot keep its session, so ephemeral cannot be false on {{profile}}",
+    session_kept_note:
+      "the kept session holds everything the session read and printed, command output included, and stays under the {{harness}} home, outside HarmFlow's log retention, until you delete it",
     extra_usage_unenforced:
       "nothing stops {{harness}} once it runs, so the task's ban on extra usage is checked only before each attempt starts",
     path_variable_unterminated: 'unterminated variable reference in "{{path}}"',
@@ -375,6 +378,8 @@ export const enUS = {
     restriction_codex_tool_lists: "Codex has no per-tool allow or deny list; the custom tool lists are not enforced",
     restriction_codex_read_only:
       "Codex's read-only sandbox is not proven to refuse the file changes Codex makes itself; the session may change files in its workspace",
+    restriction_codex_ephemeral_missing:
+      "Codex {{version}} has no --ephemeral, so it keeps every session and the task's ephemeral setting changes nothing",
     harness_version_untested: "{{harness}} {{version}} is newer than the versions HarmFlow was tested with",
     harness_version_unknown: "{{harness}} reported no version number, so HarmFlow cannot tell whether it was tested with it",
     quota_unread: "{{harness}}'s quota could not be read, so the attempt started without that check: {{detail}}",
@@ -426,6 +431,7 @@ export const enUS = {
     context_write_failed: "writing context.json: {{detail}}",
     harness_started: "{{harness}} {{version}} started",
     harness_session: "session {{session}} on model {{model}}",
+    harness_session_kept: "the harness keeps session {{session}} in {{folder}}",
     harness_exited: "{{harness}} ended ($t(attemptOutcome.{{attemptOutcome}}))",
     harness_exit_code: "{{harness}} exited with code {{code}}",
     harness_start_failed: "starting {{harness}}: {{detail}}",
@@ -988,6 +994,7 @@ export const enUS = {
       provider: "Harness",
       model: "Model",
       effort: "Effort",
+      ephemeral: "Ephemeral session",
       harnessDefault: "Harness default",
       fallbackCandidates: "Fallback chain",
       addFallback: "Add fallback",

@@ -142,6 +142,9 @@ func (f *fakeHarness) ValidateProfile(ports.HarnessInfo, string, string) error {
 // it runs.
 func (f *fakeHarness) ReportsExtraUsage() bool { return f.id == domain.HarnessClaudeCode }
 
+// KeepsSessions says what the real adapter of the same harness says: only Codex can keep a session.
+func (f *fakeHarness) KeepsSessions() bool { return f.id == domain.HarnessCodex }
+
 func (f *fakeHarness) ReadQuota(context.Context, ports.HarnessInfo) (domain.Quota, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -234,13 +237,13 @@ func (f *fakeHarness) holding() bool {
 	return f.held > 0
 }
 
-// fakeParser also reads "USAGE <input tokens>", the usage so far, which is final once the attempt ends well,
-// "CMD <command>", a shell command the session ran to success, "BEGIN <command>", one that starts and succeeds at the
-// next "RAN", "DECLINED <command>", one the harness declined before it ran, and "OVERRIDE <notice>", the harness's
-// notice that its requirements override a setting HarmFlow ran it with. "WAIT network" is a wait for the network, as
-// Codex prints one again and again without exiting: the first of a stretch is an event, and a timeout that ends a wait
-// is a network failure. Any other line is the agent's message, and the last one is what a quota end reports as its
-// final text, as the real adapters do.
+// fakeParser also reads "KEPT <session> <folder>", a session started that the harness keeps in folder,
+// "USAGE <input tokens>", the usage so far, which is final once the attempt ends well, "CMD <command>", a shell command
+// the session ran to success, "BEGIN <command>", one that starts and succeeds at the next "RAN", "DECLINED <command>",
+// one the harness declined before it ran, and "OVERRIDE <notice>", the harness's notice that its requirements override
+// a setting HarmFlow ran it with. "WAIT network" is a wait for the network, as Codex prints one again and again without
+// exiting: the first of a stretch is an event, and a timeout that ends a wait is a network failure. Any other line is
+// the agent's message, and the last one is what a quota end reports as its final text, as the real adapters do.
 type fakeParser struct {
 	last     string
 	text     string
@@ -266,6 +269,10 @@ func (p *fakeParser) Line(b []byte) []ports.HarnessEvent {
 	if rest, ok := strings.CutPrefix(s, "STARTED "); ok {
 		model, effort, _ := strings.Cut(rest, " ")
 		return []ports.HarnessEvent{{Kind: ports.HarnessStarted, Model: model, Effort: effort}}
+	}
+	if rest, ok := strings.CutPrefix(s, "KEPT "); ok {
+		session, dir, _ := strings.Cut(rest, " ")
+		return []ports.HarnessEvent{{Kind: ports.HarnessStarted, SessionID: session, SessionDir: dir}}
 	}
 	if s == "EXTRA usage" {
 		// A plan window used up and the session going on with extra usage, as Claude Code reports it.
@@ -1729,6 +1736,48 @@ func (e *env) eventCounts(executionID string) (map[string]int, map[string]domain
 }
 
 const codexFallback = "    fallback:\n      candidates:\n        - provider: codex\n"
+
+// harmflow-app#473: each profile's ephemeral setting reaches its own attempt. Claude Code, whose profile leaves it out,
+// runs ephemeral; the Codex fallback whose profile sets ephemeral false is asked to keep its session. The session Codex
+// keeps is an event of the execution's log, at info, with its id and folder.
+func TestKeptSessionReachesTheAttemptAndTheLog(t *testing.T) {
+	e := newEnv(t)
+	e.create("kept", codexFallback+"          ephemeral: false\n")
+	var q requests
+	e.claude.setScript(func(req ports.RunRequest) string { q.add(req); return "echo 'END quota'" })
+	e.codex.setScript(func(req ports.RunRequest) string {
+		q.add(req)
+		if req.KeepSession {
+			return "echo 'KEPT thread-1 /codex/sessions'; echo 'END ok'"
+		}
+		return "echo 'END ok'"
+	})
+	r, _ := e.app.RunTask("kept")
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	sent := q.all()
+	if len(sent) != 2 || len(x.Attempts) != 2 || x.Attempts[1].Harness != domain.HarnessCodex {
+		t.Fatalf("%d requests, attempts %+v; want 2, the second on Codex", len(sent), x.Attempts)
+	}
+	if sent[0].KeepSession || !sent[1].KeepSession {
+		t.Errorf("KeepSession of the attempts = %t, %t; want false for Claude Code, true for Codex",
+			sent[0].KeepSession, sent[1].KeepSession)
+	}
+	events, _, err := e.app.ExecutionEvents(r.ExecutionID, 0, 0)
+	if err != nil {
+		t.Fatalf("ExecutionEvents(%s): %v", r.ExecutionID, err)
+	}
+	var kept []domain.Event
+	for _, ev := range events {
+		if ev.MessageKey == "harness_session_kept" {
+			kept = append(kept, ev)
+		}
+	}
+	if len(kept) != 1 || kept[0].Type != domain.EventHarnessOutput || kept[0].Severity != domain.SeverityInfo ||
+		kept[0].Payload["sessionId"] != "thread-1" || kept[0].Payload["sessionDir"] != "/codex/sessions" ||
+		kept[0].Params["folder"] != "/codex/sessions" {
+		t.Errorf("harness_session_kept events = %+v, want one at info naming thread-1 and /codex/sessions", kept)
+	}
+}
 
 // harmflow-app#215: Claude Code exhausts its quota and Codex, its only fallback, is not ready. The execution fails,
 // never completes, says that no alternative was available and why, and notifies the user natively. The executor checks

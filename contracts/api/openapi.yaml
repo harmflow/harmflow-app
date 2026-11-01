@@ -878,6 +878,8 @@ components:
         - claude_skill_list_unrecognized
         - claude_skill_list_timed_out
         - fallback_repeats_preferred
+        - harness_session_not_kept
+        - session_kept_note
         - extra_usage_unenforced
         - path_variable_unterminated
         - path_variable_undefined
@@ -899,6 +901,7 @@ components:
         - restriction_claude_edit_rules
         - restriction_codex_tool_lists
         - restriction_codex_read_only
+        - restriction_codex_ephemeral_missing
         - restriction_script_unenforced
         - script_leftovers_ended
         - harness_version_untested
@@ -950,6 +953,7 @@ components:
         - context_write_failed
         - harness_started
         - harness_session
+        - harness_session_kept
         - harness_exited
         - harness_exit_code
         - harness_start_failed

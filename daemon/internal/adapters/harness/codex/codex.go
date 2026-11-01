@@ -67,6 +67,7 @@ var (
 	_ ports.HarnessCloser     = (*Adapter)(nil)
 	_ ports.WorkspaceLister   = (*Adapter)(nil)
 	_ ports.QuotaReader       = (*Adapter)(nil)
+	_ ports.SessionKeeper     = (*Adapter)(nil)
 )
 
 // ID implements ports.HarnessAdapter: the harness's identifier.
@@ -449,13 +450,38 @@ func (a *Adapter) UserItems(ctx context.Context, info ports.HarnessInfo, kind, w
 	return a.skills(ctx, info, workspace)
 }
 
+// KeepsSessions implements ports.SessionKeeper: run without --ephemeral, Codex keeps the session under its home's
+// sessions folder.
+func (a *Adapter) KeepsSessions() bool { return true }
+
+// sessionsDir is the folder where Codex keeps its sessions: under the CODEX_HOME the attempt's environment sets, or the
+// adapter's own Codex home.
+func (a *Adapter) sessionsDir(env []string) string {
+	home := a.codexHome()
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, "CODEX_HOME="); ok && v != "" {
+			home = v
+		}
+	}
+	return filepath.Join(home, "sessions")
+}
+
 // Prepare implements ports.HarnessAdapter: a `codex exec --json` invocation with the model and effort asked for and the
 // permission profile translated to a sandbox, with the restrictions it enforces and those it cannot. Its stdin is the
-// instructions, which name the built-ins as copied into the execution's directory.
+// instructions, which name the built-ins as copied into the execution's directory. The session is ephemeral unless the
+// request keeps it; a Codex without --ephemeral keeps every session, which a restriction not enforced says.
 func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.Invocation, ports.OutputParser, error) {
 	args := []string{"exec", "--json", "--skip-git-repo-check", "--cd", req.WorkDir}
-	if info.HasFeature("--ephemeral") {
+	var restrictions []ports.Restriction
+	ephemeral := info.HasFeature("--ephemeral")
+	if ephemeral && !req.KeepSession {
 		args = append(args, "--ephemeral")
+	}
+	if !ephemeral && !req.PolicyCheck {
+		restrictions = append(restrictions, ports.Restriction{Name: "ephemeral", Enforced: false,
+			Text: domain.T("restriction_codex_ephemeral_missing",
+				"Codex {{version}} has no --ephemeral, so it keeps every session and the task's ephemeral setting changes nothing",
+				"version", info.Version)})
 	}
 	if info.HasFeature("--color") {
 		args = append(args, "--color", "never")
@@ -470,7 +496,6 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 
 	perm := req.Permissions
 	network := perm.Network != domain.NetworkDeny
-	var restrictions []ports.Restriction
 	dirs := append([]string{}, req.AdditionalDirs...)
 	switch perm.Profile {
 	case domain.ProfileReadOnly:
@@ -521,6 +546,9 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 	inv := ports.Invocation{Path: info.Path, Args: args, Env: req.Env, Dir: req.WorkDir, Stdin: instructions(req),
 		Restrictions: restrictions}
 	p := &parser{model: req.Model, modelSource: domain.ModelFromTask}
+	if !ephemeral || req.KeepSession {
+		p.sessionDir = a.sessionsDir(req.Env)
+	}
 	if req.Model == "" || req.Model == domain.DefaultModel {
 		// Codex's output never names its model: a task left at the default runs the one its configuration sets.
 		p.model, p.modelSource = a.configModel(), domain.ModelFromConfig
@@ -615,6 +643,7 @@ func instructions(req ports.RunRequest) string {
 
 type parser struct {
 	sessionID   string
+	sessionDir  string // where Codex keeps the session, empty when it runs ephemeral
 	completed   bool
 	failure     string
 	lastText    string
@@ -683,7 +712,7 @@ func (p *parser) Line(raw []byte) []ports.HarnessEvent {
 	switch l.Type {
 	case "thread.started":
 		p.sessionID = l.ThreadID
-		return []ports.HarnessEvent{{Kind: ports.HarnessStarted, SessionID: l.ThreadID}}
+		return []ports.HarnessEvent{{Kind: ports.HarnessStarted, SessionID: l.ThreadID, SessionDir: p.sessionDir}}
 	case "turn.completed":
 		p.completed = true
 		// One turn per `codex exec`: its usage arrives once, at the end of the attempt.

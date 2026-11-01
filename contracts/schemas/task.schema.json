@@ -324,6 +324,11 @@
           "type": "string",
           "minLength": 1,
           "default": "default"
+        },
+        "ephemeral": {
+          "description": "Whether the harness runs without keeping its session. false keeps the session where the harness keeps its own, to be read or resumed; only a harness that can keep it accepts false. Translated per adapter.",
+          "type": "boolean",
+          "default": true
         }
       }
     },

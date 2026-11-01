@@ -687,7 +687,7 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 	req := ports.RunRequest{
 		ExecutionID: r.x.ID, TaskID: r.x.TaskID, Attempt: n, Prompt: r.eff.Spec.Prompt,
 		Context: r.harmflowContext(n, prev), Agents: agents, Skills: skills, Model: p.Model, Effort: p.Effort,
-		WorkDir: r.work, AdditionalDirs: r.extra, Permissions: r.permissions(), ExecutionDir: r.dir,
+		KeepSession: p.KeepsSession(), WorkDir: r.work, AdditionalDirs: r.extra, Permissions: r.permissions(), ExecutionDir: r.dir,
 		Env: r.env(),
 	}
 	// Recorded before Prepare, so a running attempt, and one whose harness never started, shows its input.
@@ -1052,6 +1052,13 @@ func (r *run) onHarnessEvent(he ports.HarnessEvent) {
 			r.event(domain.Event{Type: domain.EventHarnessOutput, Severity: domain.SeverityDebug,
 				Payload: map[string]any{"sessionId": he.SessionID, "model": he.Model}}.Says(domain.T("harness_session",
 				"session {{session}} on model {{model}}", "session", he.SessionID, "model", he.Model)))
+		}
+		// A session the harness keeps is the owner's to find: its id and folder are an event of their own.
+		if he.SessionDir != "" {
+			r.event(domain.Event{Type: domain.EventHarnessOutput, Severity: domain.SeverityInfo,
+				Payload: map[string]any{"sessionId": he.SessionID, "sessionDir": he.SessionDir}}.Says(domain.T(
+				"harness_session_kept", "the harness keeps session {{session}} in {{folder}}",
+				"session", he.SessionID, "folder", he.SessionDir)))
 		}
 	case ports.HarnessMessage:
 		r.event(domain.Event{Type: domain.EventHarnessMessage, Message: trimTo(he.Message, 8000)})

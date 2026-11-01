@@ -169,15 +169,18 @@ type TemplateFile struct {
 
 // RunRequest is everything an adapter needs to start one attempt.
 type RunRequest struct {
-	ExecutionID    string
-	TaskID         string
-	Attempt        int
-	Prompt         string
-	Context        string // HarmFlow's orchestration context, delivered as a system prompt where the harness has one
-	Agents         []ResolvedItem
-	Skills         []ResolvedItem
-	Model          string
-	Effort         string
+	ExecutionID string
+	TaskID      string
+	Attempt     int
+	Prompt      string
+	Context     string // HarmFlow's orchestration context, delivered as a system prompt where the harness has one
+	Agents      []ResolvedItem
+	Skills      []ResolvedItem
+	Model       string
+	Effort      string
+	// KeepSession asks a SessionKeeper to keep the session where its harness keeps its own; false, the zero value, runs
+	// it ephemeral where the harness can.
+	KeepSession    bool
 	WorkDir        string
 	AdditionalDirs []string
 	Permissions    domain.Permissions
@@ -251,6 +254,8 @@ type HarnessEvent struct {
 	Declined  bool // on HarnessToolDone: the harness refused the call before it ran, so IsError stays false
 	Output    string
 	SessionID string
+	// SessionDir is the folder where the harness keeps the session, on HarnessStarted; empty when it keeps none.
+	SessionDir string
 	// Model and Effort are what the harness says it runs with, on HarnessStarted; empty when it does not say.
 	Model  string
 	Effort string
@@ -306,6 +311,13 @@ type WorkspaceLister interface {
 // says which kinds.
 type UnverifiedItemsAllower interface {
 	AllowsUnverified(kind string) bool
+}
+
+// SessionKeeper is a HarnessAdapter whose harness can keep a session for the owner to read or resume, which a
+// RunRequest asks with KeepSession. Any other harness runs every session as it always does, and a task cannot ask it to
+// keep one.
+type SessionKeeper interface {
+	KeepsSessions() bool
 }
 
 // HarnessCloser is a HarnessAdapter that keeps a process of its harness running between calls; Close ends it.
