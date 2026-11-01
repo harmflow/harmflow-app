@@ -105,6 +105,7 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, 200, s.App.RefreshHarnesses(r.Context()))
 	})
 	h("PUT /api/v1/harnesses/{harnessId}", s.setHarnessPath)
+	h("POST /api/v1/harnesses/{harnessId}/sign-in", s.signInHarness)
 	h("GET /api/v1/tools", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.App.Tools(r.Context())) })
 	h("GET /api/v1/catalog", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
@@ -294,6 +295,17 @@ func (s *Server) setHarnessPath(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, info)
+}
+
+// signInHarness starts a harness's sign-in, or joins the one that runs; the harness comes back with its sign-in
+// running.
+func (s *Server) signInHarness(w http.ResponseWriter, r *http.Request) {
+	info, err := s.App.SignIn(r.PathValue("harnessId"))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, 202, info)
 }
 
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {

@@ -149,6 +149,7 @@ func run(homeFlag, builtinsFlag string, port int) error {
 		Tools:      &tools.Prober{Home: userHome, PathEnv: pathEnv, Env: harnessEnv},
 		Workspace:  &workspace.Reader{PathEnv: pathEnv, Env: harnessEnv},
 		HarnessEnv: harnessEnv, DaemonExecutable: exe, DaemonArgs: daemonArgs, DaemonEnv: daemonEnv, Logger: logger,
+		SignInTimeout: signInTimeout(logger),
 	})
 	if err != nil {
 		return err
@@ -273,6 +274,24 @@ func acquireLock(path string, flock func(fd, how int) error) (*os.File, error) {
 	_ = f.Truncate(0)
 	_, _ = fmt.Fprintf(f, "%d\n", os.Getpid())
 	return f, nil
+}
+
+// signInTimeoutVariable shortens how long a harness's sign-in waits for the browser, as the tests that let one time out
+// need; a duration Go reads, such as 5s. Unset, the use cases' default holds.
+const signInTimeoutVariable = "HARMFLOW_SIGN_IN_TIMEOUT"
+
+// signInTimeout reads signInTimeoutVariable; a value that is not a positive duration is logged and leaves the default.
+func signInTimeout(logger *log.Logger) time.Duration {
+	v := os.Getenv(signInTimeoutVariable)
+	if v == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		logger.Printf("%s=%q is not a positive duration; the sign-in waits its default", signInTimeoutVariable, v)
+		return 0
+	}
+	return d
 }
 
 // findBuiltins locates the built-in agents, skills, and task templates: inside the app bundle, next to the binary, or

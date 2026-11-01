@@ -57,6 +57,10 @@ func notifiable(e domain.Event) string {
 // the next execution; any other event reads the current one. The global level is a setting, not part of the
 // task, and applies at once.
 func (a *App) notifyFor(e domain.Event, started *domain.TaskDocument) {
+	if signInEvents[e.Type] {
+		a.notifySignIn(e)
+		return
+	}
 	kind := notifiable(e)
 	if kind == "" || e.TaskID == "" {
 		return
@@ -86,9 +90,7 @@ func (a *App) notifyFor(e domain.Event, started *domain.TaskDocument) {
 	if !*native.Enabled || !containsString(native.Events, kind) {
 		return
 	}
-	var b [6]byte
-	_, _ = rand.Read(b[:])
-	n := Notification{ID: "ntf-" + hex.EncodeToString(b[:]), CreatedAt: a.now(), EventType: kind, TaskID: e.TaskID,
+	n := Notification{ID: newNoticeID(), CreatedAt: a.now(), EventType: kind, TaskID: e.TaskID,
 		ExecutionID: e.ExecutionID, Severity: "info", Params: map[string]string{"taskName": doc.Metadata.Name}}
 	if e.ExecutionID != "" {
 		n.Params["executionId"] = e.ExecutionID
@@ -121,13 +123,59 @@ func (a *App) notifyFor(e domain.Event, started *domain.TaskDocument) {
 			n.Severity = "warning"
 		}
 	}
+	a.keepNotice(n)
+}
+
+// signInAttention are the sign-in events that pass the "failures and attention only" level: a sign-in that waits for
+// the user, and one that ended without signing the harness in.
+var signInAttention = map[string]bool{
+	domain.EventHarnessSignInStarted: true, domain.EventHarnessSignInTimedOut: true, domain.EventHarnessSignInFailed: true,
+}
+
+// notifySignIn creates the notice of a sign-in's event when the global level lets it through. A sign-in concerns a
+// harness, not a task, so no task's choice of events applies.
+func (a *App) notifySignIn(e domain.Event) {
+	a.mu.Lock()
+	level := a.settings.NotificationLevel
+	a.mu.Unlock()
+	if level == "none" || (level == "failures_and_attention" && !signInAttention[e.Type]) {
+		return
+	}
+	name := e.Harness
+	if ad, ok := a.adapters[e.Harness]; ok {
+		name = ad.Name()
+	}
+	n := Notification{ID: newNoticeID(), CreatedAt: a.now(), EventType: e.Type, Severity: "info",
+		Params: map[string]string{"harness": e.Harness, "harnessName": name}}
+	if e.Type != domain.EventHarnessSignInCompleted {
+		n.Params = domain.Text{Params: n.Params}.Nest("reason", domain.Text{Message: trimTo(e.Message, 300),
+			Key: e.MessageKey, Params: e.Params}).Params
+	}
+	switch e.Type {
+	case domain.EventHarnessSignInStarted:
+		n.Severity = "warning"
+	case domain.EventHarnessSignInTimedOut, domain.EventHarnessSignInFailed:
+		n.Severity = "error"
+	}
+	n.Title, n.Body = englishNotice(e.Type, "", n.Params)
+	a.keepNotice(n)
+}
+
+// keepNotice records a notice, newest first, and announces it.
+func (a *App) keepNotice(n Notification) {
 	a.mu.Lock()
 	a.notifications = trimNotifications(append([]Notification{n}, a.notifications...))
 	a.mu.Unlock()
 	a.saveNotifications()
 	payload, _ := toMap(n).(map[string]any)
-	a.d.Events.Append(domain.Event{Type: domain.EventNotificationCreated, TaskID: e.TaskID, ExecutionID: e.ExecutionID,
+	a.d.Events.Append(domain.Event{Type: domain.EventNotificationCreated, TaskID: n.TaskID, ExecutionID: n.ExecutionID,
 		Timestamp: n.CreatedAt, Message: n.Title, Payload: payload})
+}
+
+func newNoticeID() string {
+	var b [6]byte
+	_, _ = rand.Read(b[:])
+	return "ntf-" + hex.EncodeToString(b[:])
 }
 
 // trimNotifications drops the oldest read notices of a newest-first list until it is back within maxNotifications. It
@@ -152,7 +200,8 @@ func trimNotifications(list []Notification) []Notification {
 	return out
 }
 
-// englishNotice is the en-US fallback; the desktop translates from eventType and params.
+// englishNotice is the en-US fallback; the desktop translates from eventType and params. A sign-in's notice names its
+// harness, by harnessName, and no task.
 func englishNotice(kind, task string, p map[string]string) (string, string) {
 	switch kind {
 	case domain.EventExecutionStarted:
@@ -175,6 +224,14 @@ func englishNotice(kind, task string, p map[string]string) (string, string) {
 		return "Harness unavailable", task + ": " + p["reason"]
 	case domain.EventHarnessNoAlternative:
 		return "No harness available", task + ": " + p["reason"]
+	case domain.EventHarnessSignInStarted:
+		return "Sign in to " + p["harnessName"], p["harnessName"] + " is signed out. Approve the sign-in HarmFlow opened in your browser."
+	case domain.EventHarnessSignInCompleted:
+		return "Signed in again", p["harnessName"] + " is signed in again."
+	case domain.EventHarnessSignInTimedOut:
+		return "Sign-in not completed", p["reason"]
+	case domain.EventHarnessSignInFailed:
+		return "Sign-in stopped", p["reason"]
 	}
 	return kind, task
 }
