@@ -1331,6 +1331,10 @@ func (r *run) outcomeFromReport() (domain.ExecutionStatus, domain.Text) {
 	eventlog.RedactFields(&rep) // the agent's words, before the record, the ledger, or the reason take any of them
 	r.applyReport(&rep)
 	status := domain.StatusForReport(&rep)
+	if key, ok := rep.PullRequestNotOpened(); ok {
+		return status, domain.T("pull_request_not_opened", "the pull request of {{workItem}} was not opened",
+			"workItem", key)
+	}
 	var reason domain.Text // the agent's own summary, as it wrote it
 	if status == domain.StatusFailed || status == domain.StatusNeedsAttention {
 		reason.Message = trimTo(rep.Summary, 500)

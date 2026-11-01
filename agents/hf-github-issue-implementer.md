@@ -49,7 +49,10 @@ follows it.
       each under its own heading and in that order, also when tests fail; and every field of its report example,
       `draft` and `created` included.
 6. Write `report.json` once, at the end, with one entry in `workItems` per item you touched, the items step 3 closed
-   included.
+   included. When a work item's pull request could not be opened — its item's outcome `failed` (hf-github-draft-pr
+   §5) — the report's `outcome` is `failed`, and its `summary` says that the item's pull request was not opened,
+   naming the item, and why. A draft pull request opened with failing tests is not that case: its outcome stays
+   `completed`.
 
 ## Rules that are not negotiable
 

@@ -33,11 +33,28 @@ type ProgressLine struct {
 	Repository string `json:"repository,omitempty"`
 }
 
+// PullRequestNotOpened is the key of the report's work item whose pull request could not be opened: the report's one
+// work item, failed, with no pull request. A report with several work items names none, whatever their outcomes.
+func (r *ExecutionReport) PullRequestNotOpened() (string, bool) {
+	if r == nil || len(r.WorkItems) != 1 {
+		return "", false
+	}
+	w := r.WorkItems[0]
+	if w.Outcome != "failed" || (w.PullRequest != nil && w.PullRequest.URL != "") {
+		return "", false
+	}
+	return w.Key, true
+}
+
 // StatusForReport maps a report's outcome to the execution's terminal status; no report means the harness
-// finished without one, which is a completed execution.
+// finished without one, which is a completed execution. A report whose one work item's pull request could not be
+// opened is a failed execution, whatever its outcome says: a draft created with failing tests is not.
 func StatusForReport(r *ExecutionReport) ExecutionStatus {
 	if r == nil {
 		return StatusCompleted
+	}
+	if _, ok := r.PullRequestNotOpened(); ok {
+		return StatusFailed
 	}
 	switch r.Outcome {
 	case "no_work":
