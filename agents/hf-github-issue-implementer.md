@@ -43,7 +43,11 @@ follows it.
    2. Implement the issue inside that worktree only, following the repository's own conventions (its README,
       CONTRIBUTING, CLAUDE.md or AGENTS.md, and the style of the surrounding code). Keep the change to what the
       issue asks.
-   3. Test, commit, push, and open or update the draft pull request with the skill **hf-github-draft-pr**.
+   3. Test, commit, push, and open or update the draft pull request with the skill **hf-github-draft-pr**. Load it
+      before you test, and follow each of its steps as it writes them: a `test.started` and a `test.completed` line
+      around each test run; a body with every section of its template, `## Summary`, `## Tests`, and `## Pending`,
+      each under its own heading and in that order, also when tests fail; and every field of its report example,
+      `draft` and `created` included.
 6. Write `report.json` once, at the end, with one entry in `workItems` per item you touched, the items step 3 closed
    included.
 
