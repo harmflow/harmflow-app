@@ -1342,16 +1342,15 @@ func (r *run) applyReport(rep *domain.ExecutionReport) {
 		if w.Repository != "" && r.x.Repository == "" {
 			r.x.Repository = w.Repository
 		}
-		if w.PullRequest != nil && w.PullRequest.URL != "" {
-			r.x.PullRequestURL = w.PullRequest.URL
-		}
 		for _, f := range w.ChangedFiles {
 			r.x.AddChangedFile(f)
 		}
 	}
 	// The record names the report's first work item, whichever item the session selected last, with that item's own
-	// tests status, or none when the report gives that item none: another item's status would pair the record's item
-	// with tests it did not run. A report with no work item leaves the record as the session's progress lines left it.
+	// tests status and pull request, or none when the report gives that item none: another item's status would pair
+	// the record's item with tests it did not run, and another item's pull request, perhaps in another repository,
+	// would name work it did not do. A report with no work item leaves the record as the session's progress lines
+	// left it.
 	if len(rep.WorkItems) > 0 {
 		first := rep.WorkItems[0]
 		r.x.WorkItem = first.Key
@@ -1359,6 +1358,7 @@ func (r *run) applyReport(rep *domain.ExecutionReport) {
 		if first.Tests != nil {
 			r.x.TestsStatus = first.Tests.Status
 		}
+		r.x.PullRequestURL = prURL(first)
 	}
 	a.mu.Unlock()
 	for _, w := range rep.Warnings {
