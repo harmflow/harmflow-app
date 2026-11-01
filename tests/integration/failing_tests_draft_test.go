@@ -26,7 +26,8 @@ const (
 )
 
 // A session whose tests fail still delivers its work: it pushes its branch and opens a draft pull request whose body
-// names the test that failed, and the execution ends completed, with its tests failed. The real Claude Code runs the
+// documents it as the template of hf-github-draft-pr gives, naming the test that failed, and the execution ends
+// completed, with its tests failed. The real Claude Code runs the
 // built-in agent's copy and the built-in skills of this checkout against queueRepo, from a clone that may push, on a
 // fixture issue whose change breaks a test of the suite its base branch holds. The task allows no test repair, so the
 // result does not depend on how a session repairs tests. The base branch on GitHub is where it was: nothing was pushed
@@ -108,10 +109,7 @@ func TestFailingTestsStillOpenADraftPullRequest(t *testing.T) {
 	if pr.Base != base || pr.Head == base {
 		t.Errorf("%s goes from %s into %s, want a work branch into %s", pr.URL, pr.Head, pr.Base, base)
 	}
-	if tests := markdownSection(pr.Body, "## Tests"); !strings.Contains(tests, failingTestName) {
-		t.Errorf("the ## Tests section of %s does not name the test %q that failed:\n%s\n\nthe body:\n%s", pr.URL,
-			failingTestName, tests, pr.Body)
-	}
+	checkDraftBody(t, pr.Body, issue, failingTestName)
 	if after := branchHead(t, base); after != before {
 		t.Errorf("the head of %s moved from %s to %s during the run, want it unchanged", base, before, after)
 	}
@@ -316,6 +314,68 @@ func markdownSection(body, heading string) string {
 		}
 	}
 	return strings.Join(section, "\n")
+}
+
+// draftHeadings are the sections of a draft pull request's body, in the order the template of hf-github-draft-pr gives.
+var draftHeadings = []string{"## Summary", "## Tests", "## Pending"}
+
+// checkDraftBody checks that body, the body of the draft pull request a session opened for the issue, documents the
+// work as the template of hf-github-draft-pr gives: the line Closes #<issue>; a Summary that is not empty; a Tests
+// section that names the test command the session ran, npm test or the node --test it runs, its result, and the test
+// that failed; a Pending section that is not empty; and the three headings once each, in that order. It reports every
+// part that is missing rather than stopping at the first, so that one real run, which spends usage, names every gap.
+func checkDraftBody(t *testing.T, body string, issue int, failedTest string) {
+	t.Helper()
+	ok := true
+	report := func(format string, args ...any) {
+		t.Helper()
+		t.Errorf(format, args...)
+		ok = false
+	}
+	lines := strings.Split(body, "\n")
+
+	closes := fmt.Sprintf("Closes #%d", issue)
+	if !slices.ContainsFunc(lines, func(line string) bool { return strings.TrimSpace(line) == closes }) {
+		report("the draft's body has no line %q", closes)
+	}
+	if strings.TrimSpace(markdownSection(body, "## Summary")) == "" {
+		report("the draft's body has no ## Summary section, or an empty one")
+	}
+	tests := markdownSection(body, "## Tests")
+	if !strings.Contains(tests, "npm test") && !strings.Contains(tests, "node --test") {
+		report("the ## Tests section of the draft's body names neither npm test nor node --test, the command the "+
+			"session ran:\n%s", tests)
+	}
+	if !strings.Contains(strings.ToLower(tests), "fail") {
+		report("the ## Tests section of the draft's body does not say the tests failed:\n%s", tests)
+	}
+	if !strings.Contains(tests, failedTest) {
+		report("the ## Tests section of the draft's body does not name the test %q that failed:\n%s", failedTest, tests)
+	}
+	if strings.TrimSpace(markdownSection(body, "## Pending")) == "" {
+		report("the draft's body has no ## Pending section, or an empty one")
+	}
+
+	last, previous := -1, ""
+	for _, heading := range draftHeadings {
+		var at []int
+		for i, line := range lines {
+			if strings.TrimSpace(line) == heading {
+				at = append(at, i)
+			}
+		}
+		if len(at) != 1 {
+			report("the draft's body has the heading %q on %d lines, want 1", heading, len(at))
+			continue
+		}
+		if at[0] < last {
+			report("the draft's body has %q before %q, want the order %q", heading, previous, draftHeadings)
+		}
+		last, previous = at[0], heading
+	}
+	if !ok {
+		t.Logf("the draft's body:\n%s", body)
+	}
 }
 
 // reportedResult is the outcome and the tests' status the execution's report.json gives the issue's work item, both
