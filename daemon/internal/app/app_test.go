@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -6401,5 +6402,113 @@ func TestStopEndsAndWaitsForHarnessDetection(t *testing.T) {
 	}
 	if after := slices.Index(types[stopping:], domain.EventHarnessChecked); after >= 0 {
 		t.Errorf("events = %v, want no %s after %s", types, domain.EventHarnessChecked, domain.EventDaemonStopping)
+	}
+}
+
+// runSlow starts an execution of the task on a script that runs for 30 s, and returns its ID once the harness runs it.
+func (e *env) runSlow(task string) string {
+	e.t.Helper()
+	e.create(task, "")
+	e.claude.setScript(func(ports.RunRequest) string { return slow })
+	r, err := e.app.RunTask(task)
+	if err != nil {
+		e.t.Fatalf("RunTask(%q): %v", task, err)
+	}
+	e.wait(r.ExecutionID, domain.StatusRunning)
+	e.prepared(e.claude)
+	return r.ExecutionID
+}
+
+// shutdownRequested reports whether ShutdownRequested is closed, which asks main to stop the daemon.
+func (e *env) shutdownRequested() bool {
+	select {
+	case <-e.app.ShutdownRequested:
+		return true
+	default:
+		return false
+	}
+}
+
+// cancelMarked reports whether the task's running execution is marked for cancellation; a task with none fails the
+// test.
+func (e *env) cancelMarked(task string) bool {
+	e.t.Helper()
+	e.app.mu.Lock()
+	h := e.app.running[task]
+	marked := h != nil && h.cancelRequested
+	e.app.mu.Unlock()
+	if h == nil {
+		e.t.Fatalf("task %s has no running execution", task)
+	}
+	return marked
+}
+
+// harmflow-app#628: with an execution active, a stop without force is refused with the count of active executions, and
+// changes nothing: the daemon is not asked to stop, still accepts work, and leaves the running harness alone.
+func TestUnforcedStopIsRefusedWhileAnExecutionIsActive(t *testing.T) {
+	e := newEnv(t)
+	id := e.runSlow("busy")
+
+	err := e.app.RequestShutdown(false)
+	var ae *Error
+	if !errors.As(err, &ae) {
+		t.Fatalf("RequestShutdown(false) = %v, want an *Error", err)
+	}
+	if ae.Code != CodeExecutionsRunning || ae.Key != "executions_running" || ae.Params["count"] != "1" {
+		t.Errorf("RequestShutdown(false) = code %q, key %q, params %v; want %q, %q, count 1", ae.Code, ae.Key, ae.Params,
+			CodeExecutionsRunning, "executions_running")
+	}
+	if e.shutdownRequested() {
+		t.Error("ShutdownRequested is closed after a refused stop, want it open")
+	}
+	if !e.app.AcceptingFirings() {
+		t.Error("AcceptingFirings() = false after a refused stop, want true")
+	}
+	if e.cancelMarked("busy") {
+		t.Error("the running execution is marked for cancellation after a refused stop")
+	}
+	if x, _ := e.app.GetExecution(id); x.Status != domain.StatusRunning {
+		t.Errorf("execution %s is %s after a refused stop, want %s", id, x.Status, domain.StatusRunning)
+	}
+}
+
+// harmflow-app#628: with an execution active, a forced stop is accepted: it marks the running harness for cancellation,
+// stops accepting work, and asks the daemon to stop. A second stop returns as the first did.
+func TestForcedStopIsAcceptedWhileAnExecutionIsActive(t *testing.T) {
+	e := newEnv(t)
+	e.runSlow("busy")
+
+	if err := e.app.RequestShutdown(true); err != nil {
+		t.Fatalf("RequestShutdown(true) = %v, want nil", err)
+	}
+	if !e.shutdownRequested() {
+		t.Error("ShutdownRequested is open after a forced stop, want it closed")
+	}
+	if e.app.AcceptingFirings() {
+		t.Error("AcceptingFirings() = true after a forced stop, want false")
+	}
+	if !e.cancelMarked("busy") {
+		t.Error("the running execution is not marked for cancellation after a forced stop")
+	}
+	if err := e.app.RequestShutdown(true); err != nil {
+		t.Errorf("a second RequestShutdown(true) = %v, want nil", err)
+	}
+}
+
+// harmflow-app#628: with no execution active, a stop needs no force. A second stop, as a second click sends, returns
+// as the first did.
+func TestUnforcedStopIsAcceptedWithNothingActive(t *testing.T) {
+	e := newEnv(t)
+	if err := e.app.RequestShutdown(false); err != nil {
+		t.Fatalf("RequestShutdown(false) = %v, want nil", err)
+	}
+	if !e.shutdownRequested() {
+		t.Error("ShutdownRequested is open after a stop with nothing active, want it closed")
+	}
+	if e.app.AcceptingFirings() {
+		t.Error("AcceptingFirings() = true after a stop with nothing active, want false")
+	}
+	if err := e.app.RequestShutdown(false); err != nil {
+		t.Errorf("a second RequestShutdown(false) = %v, want nil", err)
 	}
 }
