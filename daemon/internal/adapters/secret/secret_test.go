@@ -65,3 +65,31 @@ func TestKeychainPathChecked(t *testing.T) {
 		}
 	}
 }
+
+// harmflow-app#733: the file store keeps a secret, removes it, and reads none once it is gone; removing none is no
+// error.
+func TestFileStoreDelete(t *testing.T) {
+	f := File{Path: filepath.Join(t.TempDir(), "run", "secret")}
+	if err := f.Set("kept"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := f.Get(); got != "kept" || err != nil {
+		t.Fatalf("Get() = %q, %v; want kept", got, err)
+	}
+	for _, run := range []string{"first", "again"} {
+		if err := f.Delete(); err != nil {
+			t.Errorf("Delete() %s = %v, want nil", run, err)
+		}
+	}
+	if _, err := f.Get(); !errors.Is(err, ErrNoToken) {
+		t.Errorf("Get() after Delete = %v, want ErrNoToken", err)
+	}
+}
+
+// harmflow-app#733: a removal from a keychain file that is missing fails before security runs, as a write does.
+func TestKeychainDeleteChecksItsPath(t *testing.T) {
+	k := Keychain{Service: KeychainService, Account: KeychainAccount, Path: filepath.Join(t.TempDir(), "missing.keychain-db")}
+	if err := k.Delete(); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Delete() from a missing keychain file = %v, want os.ErrNotExist", err)
+	}
+}

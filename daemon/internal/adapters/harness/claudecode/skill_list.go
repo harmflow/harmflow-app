@@ -154,7 +154,8 @@ func (a *Adapter) listSkills(ctx context.Context, info ports.HarnessInfo, dir st
 	}
 	init := make(chan []byte, 1) // the first init line, which ends the wait
 	sent := false
-	inv := ports.Invocation{Path: info.Path, Args: args, Env: ports.SessionEnv(a.Env), Dir: dir, Stdin: skillListPrompt}
+	inv := ports.Invocation{Path: info.Path, Args: args, Env: a.withToken(ports.SessionEnv(a.Env)), Dir: dir,
+		Stdin: skillListPrompt}
 	p, err := procutil.StartLines(inv, io.Discard, func(line []byte) {
 		var h streamHead
 		if !sent && json.Unmarshal(line, &h) == nil && h.Type == "system" && h.Subtype == "init" {

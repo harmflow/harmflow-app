@@ -125,6 +125,24 @@ func (k Keychain) Set(token string) error {
 	return nil
 }
 
+// Delete implements ports.SecretStore: it removes the item through security; an item already gone is no error.
+func (k Keychain) Delete() error {
+	args := []string{"delete-generic-password", "-s", k.Service, "-a", k.Account}
+	if k.Path != "" {
+		if err := k.checkPath(); err != nil {
+			return err
+		}
+		args = append(args, k.Path)
+	}
+	// Output, not Run, so a failure carries security's stderr.
+	if _, err := exec.Command("/usr/bin/security", args...).Output(); err != nil {
+		if err := keychainError(err); !errors.Is(err, ErrNoToken) {
+			return err
+		}
+	}
+	return nil
+}
+
 // File keeps the token in the file at Path, which only the user can read.
 type File struct {
 	Path string
@@ -153,4 +171,12 @@ func (f File) Set(token string) error {
 		return err
 	}
 	return fsstore.WriteAtomic(f.Path, []byte(token+"\n"), 0o600)
+}
+
+// Delete implements ports.SecretStore: it removes the file; a file already gone is no error.
+func (f File) Delete() error {
+	if err := os.Remove(f.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }

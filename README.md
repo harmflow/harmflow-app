@@ -106,8 +106,8 @@
 | `rsvg-convert` (`brew install librsvg`) | any | `make icons` only — the rendered icons are committed |
 | `cargo-llvm-cov`, with Rust's `llvm-tools-preview`, and `jq` | any | `make coverage` only |
 
-HarmFlow never installs or updates any of them, and signs Claude Code in again only through its own `/login`, which
-you approve in the browser. With those in place:
+HarmFlow never installs or updates any of them. It signs Claude Code in again only through its own `/login`, which you
+approve in the browser, or with a long-lived token you save in Settings. With those in place:
 
 ```bash
 make deps          # once: the desktop's JavaScript dependencies
