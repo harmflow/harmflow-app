@@ -1,12 +1,16 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -254,6 +258,161 @@ func TestScriptStartedComesBeforeItsOutput(t *testing.T) {
 					run, id, started, exited)
 			}
 		}
+	}
+}
+
+// floodLines is how many lines the flood task writes to each stream: more than its pipe and the recorder's queue of 64
+// lines hold, so a program whose output is never released stalls on a write until its timeout ends it.
+const floodLines = 5000
+
+// floodScript is a task that writes floodLines numbered lines to stdout and as many to stderr, and exits with code 0.
+var floodScript = fmt.Sprintf(`  script:
+    command: [/bin/sh, -c, "i=1; while [ $i -le %d ]; do echo \"out $i of the lines no pipe holds\"; echo \"err $i of the lines no pipe holds\" >&2; i=$((i+1)); done"]
+  execution:
+    timeoutMinutes: 1
+`, floodLines)
+
+// floodLinesOf is the output floodScript writes to stream, as output returns it, in order.
+func floodLinesOf(stream, word string) []string {
+	lines := make([]string, floodLines)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("%s: %s %d of the lines no pipe holds", stream, word, i+1)
+	}
+	return lines
+}
+
+// runFlood runs the flood task, which must complete with script.started before each of its output lines, every line
+// recorded once, each stream in its own order. It returns the types of the execution's other events, in order.
+func (e *env) runFlood(task string) []string {
+	e.t.Helper()
+	x := e.runScript(task, domain.StatusCompleted)
+	lines := e.output(x.ID)
+	var stdout, stderr []string
+	for _, l := range lines {
+		if strings.HasPrefix(l, "stderr: ") {
+			stderr = append(stderr, l)
+		} else {
+			stdout = append(stdout, l)
+		}
+	}
+	if !slices.Equal(stdout, floodLinesOf("stdout", "out")) || !slices.Equal(stderr, floodLinesOf("stderr", "err")) {
+		e.t.Errorf("the flood recorded %d stdout and %d stderr lines, want each of the %d lines of each stream once, in order",
+			len(stdout), len(stderr), floodLines)
+	}
+	events, _, _ := e.app.ExecutionEvents(x.ID, 0, 0)
+	var others []string
+	var started int64
+	for _, ev := range events {
+		switch ev.Type {
+		case domain.EventScriptOutput:
+			if started == 0 || ev.ID < started {
+				e.t.Fatalf("script.output %d comes before script.started %d", ev.ID, started)
+			}
+			continue
+		case domain.EventScriptStarted:
+			started = ev.ID
+		}
+		others = append(others, ev.Type)
+	}
+	return others
+}
+
+// scriptSaves stands in for the execution repository. It notes the process identity of each save of a script
+// execution's record made before its script.started event, and fails those saves while failing is set.
+type scriptSaves struct {
+	ports.ExecutionRepository
+	failing atomic.Bool
+	mu      sync.Mutex
+	started map[string]bool           // the executions whose script.started was logged
+	early   []*domain.ProcessIdentity // the identity each save before script.started held
+	failed  int                       // the saves it failed
+}
+
+// wrap puts the double in front of the env's execution repository and watches its event log for script.started.
+func (s *scriptSaves) wrap(e *env) {
+	s.ExecutionRepository, e.records = e.records, s
+	s.started = map[string]bool{}
+	e.events.setHook(func(ev domain.Event) {
+		if ev.Type == domain.EventScriptStarted {
+			s.mu.Lock()
+			s.started[ev.ExecutionID] = true
+			s.mu.Unlock()
+		}
+	})
+}
+
+func (s *scriptSaves) Save(x *domain.Execution) error {
+	if x.Script == nil || x.Status.IsTerminal() {
+		return s.ExecutionRepository.Save(x)
+	}
+	s.mu.Lock()
+	early := !s.started[x.ID]
+	if early {
+		s.early = append(s.early, x.Script.Process)
+	}
+	fail := early && s.failing.Load()
+	if fail {
+		s.failed++
+	}
+	s.mu.Unlock()
+	if fail {
+		return errors.New("no space left on device")
+	}
+	return s.ExecutionRepository.Save(x)
+}
+
+// takeEarly returns the identities the saves before script.started held since the last call, and how many it failed.
+func (s *scriptSaves) takeEarly() ([]*domain.ProcessIdentity, int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	early, failed := s.early, s.failed
+	s.early, s.failed = nil, 0
+	return early, failed
+}
+
+// When reading the program's process identity fails, the held output is still released: a program that writes more
+// than its pipes hold is not stalled, every line comes after script.started, and the record holds no identity.
+func TestHeldOutputIsReleasedWhenTheIdentityReadFails(t *testing.T) {
+	saves := &scriptSaves{}
+	e := newEnv(t, saves.wrap)
+	e.createScript("flood", floodScript)
+	want := e.runFlood("flood")
+	_, _ = saves.takeEarly()
+
+	read := identify
+	t.Cleanup(func() { identify = read })
+	identify = func(context.Context, int) (procutil.Identity, error) {
+		return procutil.Identity{}, errors.New("ps: exit status 1")
+	}
+	if got := e.runFlood("flood"); !slices.Equal(got, want) {
+		t.Errorf("events with the identity read failing = %v, want %v as when it succeeds", got, want)
+	}
+	early, _ := saves.takeEarly()
+	if len(early) == 0 {
+		t.Fatal("the record was not saved before script.started")
+	}
+	for i, id := range early {
+		if id != nil {
+			t.Errorf("save %d before script.started holds the process identity %+v, want none", i+1, *id)
+		}
+	}
+}
+
+// When saving the execution's record before script.started fails, the held output is still released: a program that
+// writes more than its pipes hold is not stalled, and every line comes after script.started.
+func TestHeldOutputIsReleasedWhenTheRecordSaveFails(t *testing.T) {
+	saves := &scriptSaves{}
+	e := newEnv(t, saves.wrap)
+	e.createScript("flood", floodScript)
+	want := e.runFlood("flood")
+	_, _ = saves.takeEarly()
+
+	saves.failing.Store(true)
+	if got := e.runFlood("flood"); !slices.Equal(got, want) {
+		t.Errorf("events with the save failing = %v, want %v as when it succeeds", got, want)
+	}
+	if _, failed := saves.takeEarly(); failed == 0 {
+		t.Error("no save of the record before script.started failed")
 	}
 }
 
