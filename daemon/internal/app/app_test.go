@@ -5742,6 +5742,52 @@ func TestNotificationLevels(t *testing.T) {
 	}
 }
 
+// harmflow-app#524: the global level applies on top of the events a task chooses. At failures_and_attention a failure
+// still notifies while a success does not, so the level filters rather than silences; at all both notify, and at none
+// neither does.
+func TestNotificationLevelFiltersTheTasksEvents(t *testing.T) {
+	for _, c := range []struct {
+		level             string
+		completed, failed bool // whether the completed and the failed execution notify
+	}{
+		{"all", true, true},
+		{"failures_and_attention", false, true},
+		{"none", false, false},
+	} {
+		t.Run(c.level, func(t *testing.T) {
+			e := newEnv(t)
+			// The task chooses both events itself, not through the default list.
+			e.create("chosen", "  notifications:\n    native:\n      events: [execution.completed, execution.failed]\n")
+			if _, err := e.app.UpdateSettings(SettingsPatch{NotificationLevel: &c.level}); err != nil {
+				t.Fatalf("UpdateSettings(%s): %v", c.level, err)
+			}
+			completed, _ := e.app.RunTask("chosen")
+			e.wait(completed.ExecutionID, domain.StatusCompleted)
+			e.idle("chosen") // the notice is decided once the execution has returned
+			e.claude.setScript(func(ports.RunRequest) string { return "echo 'END error'" })
+			failed, _ := e.app.RunTask("chosen")
+			e.wait(failed.ExecutionID, domain.StatusFailed)
+			e.idle("chosen")
+
+			var want []string
+			if c.completed {
+				want = append(want, domain.EventExecutionCompleted+" "+completed.ExecutionID)
+			}
+			if c.failed {
+				want = append(want, domain.EventExecutionFailed+" "+failed.ExecutionID)
+			}
+			var got []string
+			notices := e.app.Notifications(false)
+			for i := len(notices) - 1; i >= 0; i-- { // the list is newest first
+				got = append(got, notices[i].EventType+" "+notices[i].ExecutionID)
+			}
+			if !slices.Equal(got, want) {
+				t.Errorf("Notifications() at %s = %v, want %v", c.level, got, want)
+			}
+		})
+	}
+}
+
 // Whether a running execution notifies is decided by the definition it started with, its task's name included; an
 // edit to the task's notifications applies from the next execution.
 func TestNoticesFollowTheStartingDefinition(t *testing.T) {
