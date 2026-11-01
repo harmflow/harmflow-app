@@ -116,7 +116,10 @@ type HarnessInfo struct {
 	Diagnostic          string            `json:"diagnostic,omitempty"`
 	DiagnosticKey       string            `json:"diagnosticKey,omitempty"`
 	DiagnosticParams    map[string]string `json:"diagnosticParams,omitempty"`
-	Features            map[string]bool   `json:"-"`
+	// SignIn is the state of the sign-in the daemon can run for the harness, SignInAvailable or SignInRunning; empty
+	// for a harness that has none. The use cases set it, not detection.
+	SignIn   string          `json:"signIn,omitempty"`
+	Features map[string]bool `json:"-"`
 	// FeaturesUnknown is true when the help that lists the CLI's flags could not be read within its check's limit, so
 	// Features cannot tell a flag the CLI lacks from one the help did not get to.
 	FeaturesUnknown bool `json:"-"`
@@ -329,6 +332,40 @@ type HarnessCloser interface {
 // output names it.
 type HarnessIdentifier interface {
 	Identify(ctx context.Context, path string) error
+}
+
+// The states of HarnessInfo.SignIn: the daemon can start a sign-in for the harness, or one runs.
+const (
+	SignInAvailable = "available"
+	SignInRunning   = "running"
+)
+
+// SignInDriver is a HarnessAdapter that signs its harness in again the way an interactive session of it does: it starts
+// the session in dir, runs the harness's own sign-in, which opens the browser for the user to approve, and ends the
+// session once the harness says the sign-in succeeded. It returns then, or when the session shows a screen the adapter
+// does not recognize, or ends, or when ctx ends, which ends the session.
+type SignInDriver interface {
+	SignIn(ctx context.Context, info HarnessInfo, dir string) SignInResult
+}
+
+// SignInOutcome is how a SignIn ended.
+type SignInOutcome string
+
+// The outcomes of a SignIn: the harness said the sign-in succeeded; the session showed a screen the adapter does not
+// recognize; the session ended, or could not start, before the sign-in finished; ctx ended first.
+const (
+	SignInSucceeded     SignInOutcome = "succeeded"
+	SignInUnknownScreen SignInOutcome = "unknown_screen"
+	SignInEnded         SignInOutcome = "ended"
+	SignInStopped       SignInOutcome = "stopped"
+)
+
+// SignInResult is what a SignIn found. Screen is the text of the session's last screen, its secrets masked, for a
+// screen the adapter does not recognize; Err says why the session could not start.
+type SignInResult struct {
+	Outcome SignInOutcome
+	Screen  string
+	Err     error
 }
 
 // ProfileWarner is a HarnessAdapter whose capabilities cannot always check a model and effort: ProfileWarning says so,

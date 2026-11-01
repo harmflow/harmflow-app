@@ -389,7 +389,7 @@ type TFn = ReturnType<typeof useTranslation>["t"];
  */
 export function noticeText(t: TFn, n: Notification): { title: string; body: string } {
   const values = translateNested(n.params);
-  const params: Record<string, string> = { taskName: "", harness: "", summary: "", error: "", reason: "", url: "", ...values };
+  const params: Record<string, string> = { taskName: "", harness: "", harnessName: "", summary: "", error: "", reason: "", url: "", ...values };
   const key = `notify.${n.eventType}`;
   // The key is built at run time, so the typed overloads, which walk every key of the resources, are left out: past
   // a size, checking them exceeds TypeScript's instantiation depth.

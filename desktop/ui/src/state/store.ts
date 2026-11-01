@@ -332,8 +332,9 @@ function handleEvent(e: HarmflowEvent) {
   if (family === "task" || (family === "execution" && e.type !== "execution.status_changed")) {
     debounce("tasks", () => void actions.refreshTasks(), 400);
   }
-  // A check ended: read the inventory again, without detecting again, which would announce another check.
-  if (e.type === "harness.checked") {
+  // A check ended, or a sign-in started or ended: read the inventory again, without detecting again, which would
+  // announce another check.
+  if (e.type === "harness.checked" || e.type.startsWith("harness.sign_in_")) {
     debounce("harnesses", () => void actions.refreshHarnesses());
   }
   // Output lines change nothing in the record, and a program can print many of them.

@@ -12,11 +12,13 @@ import { formatRelative } from "../lib/format";
 import { patchStateForTests, useStore } from "../state/store";
 import { HarnessInventory, HarnessRow, readinessTone } from "./Harnesses";
 
-// The daemon as the client sees it: Codex's installations, and every request it received. A path PUT is in use and
-// offered with the ones found; a null one returns to the first found, as the daemon does.
+// The daemon as the client sees it: Codex's installations, Claude Code's sign-in, and every request it received. A path
+// PUT is in use and offered with the ones found; a null one returns to the first found, as the daemon does. A sign-in
+// POST leaves Claude Code's sign-in running.
 const daemon = vi.hoisted(() => ({
   found: [] as string[],
   codex: undefined as unknown as Harness,
+  claude: undefined as Harness | undefined,
   requests: [] as Array<{ method: string; path: string; body?: unknown }>,
 }));
 vi.mock("../api/transport", () => ({
@@ -38,7 +40,11 @@ vi.mock("../api/transport", () => ({
         };
         return { status: 200, body: daemon.codex };
       }
-      if (method === "GET" && path === "/harnesses") return { status: 200, body: [daemon.codex] };
+      if (method === "POST" && path === "/harnesses/claude-code/sign-in" && daemon.claude) {
+        daemon.claude = { ...daemon.claude, signIn: "running" };
+        return { status: 202, body: daemon.claude };
+      }
+      if (method === "GET" && path === "/harnesses") return { status: 200, body: [daemon.claude ?? daemon.codex] };
       if (method === "GET" && path === "/tools") return { status: 200, body: [] };
       return { status: 404, body: null };
     },
@@ -291,5 +297,54 @@ describe("choosing an installation", () => {
       [onPath, i18n.t("harness.inUse")],
       [inApp, i18n.t("harness.use")],
     ]);
+  });
+});
+
+describe("signing in again", () => {
+  let root: Root | undefined;
+  let host: HTMLElement | undefined;
+
+  beforeAll(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    host?.remove();
+    root = host = undefined;
+    daemon.claude = undefined;
+    daemon.requests.length = 0;
+  });
+
+  function Inventory() {
+    const claude = useStore((s) => s.harnesses.find((h) => h.id === "claude-code"));
+    return claude ? <HarnessInventory harness={claude} locale="en-US" /> : null;
+  }
+
+  async function open(harness: Harness) {
+    daemon.claude = harness;
+    patchStateForTests({ harnesses: [harness] });
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(<Inventory />));
+  }
+
+  const buttons = () => [...host!.querySelectorAll<HTMLButtonElement>("button")];
+
+  // harmflow-app#543: the button starts the daemon's sign-in, and waits, disabled, while it runs.
+  it("starts the sign-in of a signed-out harness, then shows it waiting for the browser", async () => {
+    await open({ ...ready, authentication: "invalid", readiness: "not_ready", signIn: "available" });
+    const start = buttons().find((b) => b.textContent === i18n.t("harness.signIn"));
+    expect(start).toBeDefined();
+    await act(async () => start!.click());
+    await act(() => new Promise<void>((resolve) => setImmediate(resolve)));
+    expect(daemon.requests.filter((r) => r.method === "POST").map((r) => r.path)).toEqual(["/harnesses/claude-code/sign-in"]);
+    const waiting = buttons().find((b) => b.textContent === i18n.t("harness.signingIn"));
+    expect(waiting?.disabled).toBe(true);
+  });
+
+  it("offers no sign-in for a harness the daemon cannot sign in", async () => {
+    await open(ready);
+    expect(buttons().map((b) => b.textContent)).not.toContain(i18n.t("harness.signIn"));
   });
 });

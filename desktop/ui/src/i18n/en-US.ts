@@ -205,6 +205,10 @@ export const enUS = {
       no_alternative: "No alternative harness available",
       version_untested: "Harness version not tested",
       checked: "Harness checked",
+      sign_in_started: "Sign-in waiting in the browser",
+      sign_in_completed: "Signed in again",
+      sign_in_timed_out: "Sign-in not completed",
+      sign_in_failed: "Sign-in stopped",
     },
     script: { started: "Program started", output: "Program output", exited: "Program exited" },
     tool: { started: "Tool started", completed: "Tool finished" },
@@ -479,6 +483,18 @@ export const enUS = {
     authentication_unverified: "authentication could not be verified",
     codex_requirements_disallow:
       "Codex's managed requirements do not allow {{settings}}, which HarmFlow runs it with, so Codex falls back to what they allow: {{allowed}}",
+    harness_sign_in_unsupported: "HarmFlow cannot sign {{harness}} in; sign it in from a terminal",
+    harness_sign_in_not_completed:
+      "{{harness}} is not signed in: the browser sign-in HarmFlow started was not completed; press Sign in again",
+    harness_sign_in_started: "{{harness}} is signed out: approve the sign-in HarmFlow started in your browser",
+    harness_sign_in_completed: "{{harness}} is signed in again",
+    harness_sign_in_timed_out:
+      "the browser sign-in for {{harness}} was not completed within {{minutes}} minutes; press Sign in again to try again",
+    harness_sign_in_unknown_screen:
+      "{{harness}} showed a screen HarmFlow does not recognize, so the sign-in stopped; sign it in from a terminal",
+    harness_sign_in_unconfirmed: "{{harness}} said the sign-in succeeded, but its check does not read it signed in",
+    harness_sign_in_start_failed: "the {{harness}} session could not start: {{detail}}",
+    harness_sign_in_ended: "the {{harness}} session ended before the sign-in finished",
   },
   cronFields: {
     minute: "minute",
@@ -575,6 +591,13 @@ export const enUS = {
         title: "No harness for {{taskName}}",
         body: "{{harness}} cannot continue and no alternative is available.",
       },
+      sign_in_started: {
+        title: "Sign in to {{harnessName}}",
+        body: "{{harnessName}} is signed out. Approve the sign-in HarmFlow opened in your browser.",
+      },
+      sign_in_completed: { title: "{{harnessName}} signed in again", body: "Tasks on {{harnessName}} can run again." },
+      sign_in_timed_out: { title: "{{harnessName}} sign-in not completed", body: "{{reason}}" },
+      sign_in_failed: { title: "{{harnessName}} sign-in stopped", body: "{{reason}}" },
     },
     fallback: { title: "HarmFlow", body: "{{eventType}}" },
   },
@@ -849,6 +872,9 @@ export const enUS = {
     autoDetect: "Detect automatically",
     pathPlaceholder: "/absolute/path/to/cli",
     noCredentials: "Credentials are never shown.",
+    signIn: "Sign in again",
+    signingIn: "Waiting for the browser sign-in…",
+    signInFailed: "Could not start the sign-in: {{message}}",
   },
   tools: {
     git: "Git",
@@ -1195,7 +1221,7 @@ export const enUS = {
     scope: {
       title: "Everything runs on this computer",
       body:
-        "HarmFlow schedules, runs, and monitors automations carried out by the AI tools you already installed — Claude Code and Codex. It never installs, updates, or signs in to them.",
+        "HarmFlow schedules, runs, and monitors automations carried out by the AI tools you already installed — Claude Code and Codex. It never installs or updates them, and when Claude Code is signed out it starts Claude Code's own sign-in, which you approve in the browser.",
       points: {
         local: "Tasks, state, and logs stay on this machine.",
         permissions: "Each task declares what its session may touch; HarmFlow applies it through the harness's own controls and warns when a restriction can't be enforced.",

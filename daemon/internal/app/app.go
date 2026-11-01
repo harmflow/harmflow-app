@@ -113,6 +113,9 @@ type Deps struct {
 	// MisfireAfter is how late a firing may be before it counts as missed though no unavailability was seen: the clock
 	// jumped, or the daemon could not run.
 	MisfireAfter time.Duration
+	// SignInTimeout is how long a harness's sign-in waits for the user to approve it in the browser; ten minutes when
+	// zero.
+	SignInTimeout time.Duration
 	// DaemonExecutable and DaemonArgs are what autostart launches.
 	DaemonExecutable string
 	DaemonArgs       []string
@@ -168,6 +171,8 @@ type App struct {
 	// quotas holds each harness's last quota reading, by harness id, and quotaReads runs one read of a harness at a time.
 	quotas     map[string]quotaReading
 	quotaReads map[string]*sync.Mutex
+	// signIns holds each harness's sign-in, by harness id; a.wg counts the ones that run.
+	signIns map[string]*signInState
 	// unavailableUntil is when the daemon last became available again, at its start or when the machine woke: a firing
 	// scheduled before it and still due came due while the daemon or the machine was down, and is a misfire however
 	// late it is.
@@ -247,7 +252,7 @@ func New(d Deps) (*App, error) {
 		firings: map[string][]firingRecord{}, ledger: map[string]map[string]*domain.WorkItem{},
 		applied: map[string][]string{}, accepting: true,
 		adapters: map[string]ports.HarnessAdapter{}, quotas: map[string]quotaReading{}, quotaReads: map[string]*sync.Mutex{},
-		records: map[string]*recordLock{}, ShutdownRequested: make(chan struct{}),
+		signIns: map[string]*signInState{}, records: map[string]*recordLock{}, ShutdownRequested: make(chan struct{}),
 	}
 	for _, h := range d.Harnesses {
 		a.adapters[h.ID()] = h
@@ -305,14 +310,15 @@ func (a *App) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop ends the loops and the harness detection Start launched, and interrupts running executions: a stopped daemon
-// never continues them. The detection ends before the daemon announces that it stops, so no harness check is
-// recorded after that.
+// Stop ends the loops, the harness detection Start launched, and the sign-ins that run, and interrupts running
+// executions: a stopped daemon never continues them. The detection ends before the daemon announces that it stops, so
+// no harness check is recorded after that.
 func (a *App) Stop(reason domain.Text) {
 	a.stopOnce.Do(func() {
 		a.mu.Lock()
 		a.accepting = false
 		a.stopping = true
+		a.stopSignInsLocked()
 		stopLoops, stopDetection := a.stopLoops, a.stopDetection
 		var cancels []context.CancelFunc
 		var dones []chan struct{}
