@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/xml"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,13 +15,17 @@ import (
 )
 
 // Autostart is off until Enable writes the user agent, which starts this daemon, with its data directory, at login.
-// Each value the agent holds is escaped: the executable, an argument, the environment, and the log path.
+// Each value the agent holds is escaped: the executable, an argument, the environment, and the log path. The agent is
+// the user's own, in the given home's Library/LaunchAgents, and holds no key beyond the ones below: a UserName,
+// GroupName, or InitGroups key would have launchd run the daemon as another user.
 func TestEnableWritesTheUserAgent(t *testing.T) {
 	var calls [][]string
-	dir := t.TempDir()
-	a := &Agent{PlistPath: filepath.Join(dir, "LaunchAgents", Label+".plist"),
-		LogPath:   filepath.Join(dir, "logs <1>", "daemon.log"),
-		Launchctl: func(args ...string) error { calls = append(calls, args); return nil }}
+	home := t.TempDir()
+	a := NewAgent(home, filepath.Join(home, "logs <1>", "daemon.log"))
+	a.Launchctl = func(args ...string) error { calls = append(calls, args); return nil }
+	if want := filepath.Join(home, "Library", "LaunchAgents", Label+".plist"); a.PlistPath != want {
+		t.Fatalf("NewAgent(%q, …).PlistPath = %q, want %q", home, a.PlistPath, want)
+	}
 	if a.Enabled() {
 		t.Fatal("enabled before Enable")
 	}
@@ -56,12 +61,18 @@ func TestEnableWritesTheUserAgent(t *testing.T) {
 		"EnvironmentVariables": map[string]any{"PATH": env["PATH"], "HARMFLOW_TOKEN_STORE": env["HARMFLOW_TOKEN_STORE"]},
 		"RunAtLoad":            true,
 		"KeepAlive":            map[string]any{"SuccessfulExit": false},
+		"ProcessType":          "Background",
 		"StandardOutPath":      a.LogPath,
 		"StandardErrorPath":    a.LogPath,
 	}
 	for key, v := range want {
 		if got := plist[key]; !reflect.DeepEqual(got, v) {
 			t.Errorf("%s: %#v, want %#v", key, got, v)
+		}
+	}
+	for _, key := range slices.Sorted(maps.Keys(plist)) {
+		if _, ok := want[key]; !ok {
+			t.Errorf("the user agent holds the key %s = %#v, which it should not:\n%s", key, plist[key], data)
 		}
 	}
 	if !a.Enabled() {

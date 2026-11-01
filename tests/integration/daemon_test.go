@@ -1010,6 +1010,51 @@ func TestHandStartedDaemonFiresWithAutostartOff(t *testing.T) {
 	autostartOff("after the run")
 }
 
+// The daemon runs in the user's context, without elevated privileges. A daemon started by hand, as the desktop starts
+// it while autostart is off, keeps the real, effective, and saved user IDs and the real and effective group IDs of the
+// user who started it, and its binary has neither set-ID bit, which would run it as the file's owner instead.
+func TestDaemonRunsAsTheUser(t *testing.T) {
+	t.Parallel()
+	uid, gid := os.Getuid(), os.Getgid()
+	if uid == 0 {
+		t.Fatal("the test process runs as root, so a daemon that keeps its user still runs with elevated privileges: " +
+			"run the tests as a user that is not root")
+	}
+	info, err := os.Stat(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := info.Mode(); mode&(os.ModeSetuid|os.ModeSetgid) != 0 {
+		t.Errorf("%s has the mode %v, want neither the set-user-ID nor the set-group-ID bit", binary, mode)
+	}
+
+	d := startDaemon(t, t.TempDir())
+	pid, ok := d.call("GET", "/health", nil, 200)["pid"].(float64)
+	if !ok || pid <= 0 {
+		t.Fatalf("GET /health names the pid %v", pid)
+	}
+	ps := exec.Command("ps", "-o", "ruid=,uid=,svuid=,rgid=,gid=", "-p", strconv.Itoa(int(pid)))
+	out, err := ps.Output()
+	if err != nil {
+		t.Fatalf("%s: %v", ps, err)
+	}
+	ids := strings.Fields(string(out))
+	if len(ids) != 5 {
+		t.Fatalf("%s printed %q, want five IDs", ps, out)
+	}
+	for i, id := range []struct {
+		name string
+		want int
+	}{
+		{"real user ID", uid}, {"effective user ID", uid}, {"saved user ID", uid},
+		{"real group ID", gid}, {"effective group ID", gid},
+	} {
+		if got, err := strconv.Atoi(ids[i]); err != nil || got != id.want {
+			t.Errorf("the daemon's %s is %s, want %d, the test's own", id.name, ids[i], id.want)
+		}
+	}
+}
+
 // The daemon is the only writer; form and YAML go through one validation; files and dashboard converge; conflicts are
 // reported.
 func TestTaskLifecycle(t *testing.T) {
