@@ -479,6 +479,8 @@ type env struct {
 	signer ports.HarnessAdapter
 	// signInTimeout is how long a sign-in waits for the browser, when a test sets it; the default otherwise.
 	signInTimeout time.Duration
+	// harnessTokens is where the harnesses' long-lived tokens are kept, when a test sets it; none otherwise.
+	harnessTokens func(string) ports.SecretStore
 }
 
 // newEnv starts an App on fake harnesses; configure sets up the env, its fakes included, before the App starts.
@@ -525,7 +527,7 @@ func (e *env) start(t *testing.T, configure ...func(*env)) {
 	a, err := New(Deps{Paths: e.paths, Version: "test", Clock: e.clock, Wake: e.wake, Location: time.UTC, Tasks: tasks,
 		State: state, Executions: e.records, Events: e.events, Validator: v, Harnesses: harnesses,
 		Service: e.service, Workspace: &workspace.Reader{}, TickInterval: time.Hour, TimeoutUnit: e.timeoutUnit,
-		SignInTimeout: e.signInTimeout, Logger: log.New(io.Discard, "", 0)})
+		SignInTimeout: e.signInTimeout, HarnessTokens: e.harnessTokens, Logger: log.New(io.Discard, "", 0)})
 	if err != nil {
 		t.Fatal(err)
 	}

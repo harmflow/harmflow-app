@@ -209,6 +209,8 @@ export const esES: Resources = {
       sign_in_completed: "Sesión iniciada de nuevo",
       sign_in_timed_out: "Inicio de sesión no completado",
       sign_in_failed: "Inicio de sesión detenido",
+      token_rejected: "Token guardado rechazado",
+      token_expiring: "Token guardado a punto de vencer",
     },
     script: { started: "Programa iniciado", output: "Salida del programa", exited: "Programa terminado" },
     tool: { started: "Herramienta iniciada", completed: "Herramienta finalizada" },
@@ -509,6 +511,17 @@ export const esES: Resources = {
       "{{harness}} dijo que el inicio de sesión fue correcto, pero su comprobación no lo muestra con la sesión iniciada",
     harness_sign_in_start_failed: "la sesión de {{harness}} no pudo iniciarse: {{detail}}",
     harness_sign_in_ended: "la sesión de {{harness}} terminó antes de que el inicio de sesión acabara",
+    harness_token_unsupported: "{{harness}} no acepta un token de larga duración",
+    harness_token_store_unavailable:
+      "este daemon guarda sus secretos en un archivo, no en el almacén de credenciales del sistema operativo, así que no guarda ningún token",
+    harness_token_empty: "el token está vacío",
+    harness_token_invalid: "el token tiene un carácter que ningún token tiene, como un espacio o una comilla",
+    harness_token_store_failed: "el almacén de credenciales no pudo guardar el token; consulta el registro del daemon",
+    harness_token_remove_failed: "el almacén de credenciales no pudo eliminar el token; consulta el registro del daemon",
+    harness_token_rejected:
+      "{{harness}} rechazó el token guardado, que puede haber vencido o haber sido revocado; HarmFlow deja de usarlo, y {{harness}} vuelve a su propio inicio de sesión",
+    harness_token_expiring:
+      "el token guardado de {{harness}} vence hacia el {{date}}, en {{days}} días; genera uno nuevo y guárdalo en Ajustes",
   },
   cronFields: {
     minute: "minuto",
@@ -621,6 +634,8 @@ export const esES: Resources = {
       },
       sign_in_timed_out: { title: "Inicio de sesión en {{harnessName}} no completado", body: "{{reason}}" },
       sign_in_failed: { title: "Inicio de sesión en {{harnessName}} detenido", body: "{{reason}}" },
+      token_rejected: { title: "Token de {{harnessName}} rechazado", body: "{{reason}}" },
+      token_expiring: { title: "Token de {{harnessName}} a punto de vencer", body: "{{reason}}" },
     },
     fallback: { title: "HarmFlow", body: "{{eventType}}" },
   },
@@ -898,6 +913,13 @@ export const esES: Resources = {
     signIn: "Iniciar sesión de nuevo",
     signingIn: "Esperando el inicio de sesión en el navegador…",
     signInFailed: "No se pudo empezar el inicio de sesión: {{message}}",
+    token: "Token de larga duración",
+    tokenPlaceholder: "Pega el token que imprimió claude setup-token",
+    tokenSave: "Guardar token",
+    tokenSaved: "Guardado el {{saved}} · vence hacia el {{expires}}",
+    tokenRejected: "Rechazado",
+    tokenRemove: "Eliminar",
+    tokenFailed: "No se pudo cambiar el token: {{message}}",
   },
   tools: {
     git: "Git",
@@ -1247,7 +1269,7 @@ export const esES: Resources = {
     scope: {
       title: "Todo se ejecuta en este ordenador",
       body:
-        "HarmFlow programa, ejecuta y supervisa automatizaciones realizadas por las herramientas de IA que ya instalaste — Claude Code y Codex. Nunca las instala ni actualiza, y cuando Claude Code cerró la sesión inicia el inicio de sesión del propio Claude Code, que apruebas en el navegador.",
+        "HarmFlow programa, ejecuta y supervisa automatizaciones realizadas por las herramientas de IA que ya instalaste — Claude Code y Codex. Nunca las instala ni actualiza, y cuando Claude Code cerró la sesión inicia el inicio de sesión del propio Claude Code, que apruebas en el navegador, o usa un token de larga duración que guardas en Ajustes.",
       points: {
         local: "Las tareas, el estado y los logs se quedan en esta máquina.",
         permissions:

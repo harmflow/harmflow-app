@@ -150,6 +150,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/harnesses/{harnessId}/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                harnessId: components["parameters"]["HarnessId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save a long-lived token the harness's checks and sessions run with
+         * @description Keeps the token, the one `claude setup-token` prints for Claude Code, in the operating system's credential store, never in HarmFlow's files, and replaces a token saved before. No response carries it back: the harness's token says only when it was saved, when it expires by the count of its year, and whether the harness rejected it.
+         */
+        put: operations["setHarnessToken"];
+        post?: never;
+        /**
+         * Remove the harness's long-lived token
+         * @description The harness's checks and sessions go back to its own sign-in.
+         */
+        delete: operations["deleteHarnessToken"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tools": {
         parameters: {
             query?: never;
@@ -670,7 +696,7 @@ export interface components {
          * @description Names a text the daemon writes for the user. The desktop shows it in the interface's language, filling it with its params; the message beside it is the same text in en-US, shown for a key the desktop does not know. The agent's text, tool output, and a tool's own error get no key and stay as they are. A text is a message with messageKey and params, or a field such as errorMessage with errorKey and errorParams.
          * @enum {string}
          */
-        MessageKey: "host_forbidden" | "origin_forbidden" | "token_required" | "route_not_found" | "body_not_json" | "task_not_found" | "execution_not_found" | "harness_not_found" | "task_exists" | "task_file_exists" | "base_revision_required" | "task_changed_on_disk" | "task_invalid" | "task_disabled" | "task_being_deleted" | "daemon_stopping" | "execution_ended" | "executions_running" | "harness_path_not_absolute" | "harness_path_not_executable" | "settings_language_invalid" | "settings_notification_level_invalid" | "settings_log_retention_invalid" | "settings_path_variable_invalid" | "settings_allowed_folder_invalid" | "settings_change_breaks_task" | "harness_not_identified" | "template_not_found" | "template_read_only" | "template_invalid" | "template_language_invalid" | "yaml_syntax" | "document_empty" | "document_not_json" | "document_not_representable" | "task_input_missing" | "schema_type" | "schema_const" | "schema_enum" | "schema_required" | "schema_additional_properties" | "schema_pattern" | "schema_min_length" | "schema_max_length" | "schema_minimum" | "schema_maximum" | "schema_min_items" | "schema_unique_items" | "schema_not" | "schema_false" | "id_immutable" | "type_immutable" | "id_file_mismatch" | "task_file_invalid" | "task_file_error" | "template_id_not_builtin" | "template_type_unknown" | "schedule_missing" | "schedule_empty" | "schedule_cron_and_interval" | "timezone_unknown" | "interval_invalid" | "interval_unit_invalid" | "cron_seconds" | "cron_field_count" | "cron_step_invalid" | "cron_value_invalid" | "cron_value_out_of_range" | "harness_unknown" | "claude_model_unknown" | "claude_effort_unsupported" | "claude_effort_invalid" | "codex_model_unknown" | "codex_effort_invalid" | "codex_profile_unchecked" | "harness_not_detected" | "harness_not_ready" | "agent_not_found" | "skill_not_found" | "agent_missing" | "skill_missing" | "fallback_agent_missing" | "fallback_skill_missing" | "skill_list_unreadable" | "skill_list_unverified" | "fallback_skill_list_unreadable" | "codex_app_server_missing" | "codex_app_server_start_failed" | "codex_app_server_exited" | "codex_app_server_timed_out" | "codex_app_server_error" | "claude_skill_list_unrecognized" | "claude_skill_list_timed_out" | "fallback_repeats_preferred" | "harness_session_not_kept" | "session_kept_note" | "extra_usage_unenforced" | "path_variable_unterminated" | "path_variable_undefined" | "path_not_absolute" | "path_forbidden_home" | "path_forbidden_place" | "path_outside_allowed_area" | "script_program_relative" | "script_working_directory_relative" | "local_path_missing" | "script_system_not_declared" | "script_program_not_found" | "script_working_directory_missing" | "script_imported_disabled" | "restriction_claude_shell_workspace" | "restriction_claude_shell_network" | "restriction_claude_allow_rules" | "restriction_claude_edit_rules" | "restriction_codex_tool_lists" | "restriction_codex_read_only" | "restriction_codex_ephemeral_missing" | "restriction_script_unenforced" | "script_leftovers_ended" | "harness_version_untested" | "harness_version_unknown" | "quota_unread" | "repository_unprotected" | "report_not_json" | "report_schema_invalid" | "report_not_decodable" | "work_item_key_invalid" | "step_checking_harness" | "step_preparing_workspace" | "step_starting_harness" | "step_switching_harness" | "step_waiting_rate_limit" | "step_preparing_program" | "step_running_program" | "attempt_first" | "attempt_rate_limit_retry" | "attempt_failover" | "daemon_started" | "daemon_signal" | "daemon_stop_requested" | "local_api_stopped" | "task_delete_pending" | "task_changed_externally" | "task_changed_externally_invalid" | "task_removed_externally" | "task_was_disabled" | "task_was_deleted" | "task_file_removed" | "task_gone" | "firing_queued" | "firing_coalesced" | "firing_skipped" | "firings_missed_catch_up" | "firings_missed_skipped" | "cancel_requested" | "cancelled_before_start" | "execution_cancelled" | "execution_timed_out" | "execution_status" | "daemon_stopped_execution" | "execution_dir_failed" | "workspace_create_failed" | "repository_path_missing" | "context_write_failed" | "harness_started" | "harness_session" | "harness_session_kept" | "harness_exited" | "harness_exit_code" | "harness_start_failed" | "harness_ended_with_error" | "harness_unavailable" | "harness_unavailable_readiness" | "harness_rate_limited" | "harness_quota_exhausted" | "quota_exhausted" | "quota_exhausted_until" | "extra_usage_stopped" | "harness_switched" | "no_alternative_harness" | "no_alternative_harness_detail" | "skill_delivery_failed" | "agent_delivery_failed" | "tool_succeeded" | "tool_failed" | "tool_declined" | "tests_failed" | "script_started" | "script_exit_code" | "script_signaled" | "script_start_failed" | "script_write_failed" | "process_ended" | "process_left_ended" | "process_interrupted_ended" | "task_path_refused" | "detection_running" | "harness_manual_path_invalid" | "claude_not_found" | "codex_not_found" | "git_not_found" | "gh_not_found" | "command_failed" | "harness_feature_missing" | "harness_help_timed_out" | "harness_version_below_minimum" | "claude_not_signed_in" | "quota_report_unrecognized" | "not_signed_in" | "authentication_unverified" | "codex_requirements_disallow" | "harness_sign_in_unsupported" | "harness_sign_in_not_completed" | "harness_sign_in_started" | "harness_sign_in_completed" | "harness_sign_in_timed_out" | "harness_sign_in_unknown_screen" | "harness_sign_in_unconfirmed" | "harness_sign_in_start_failed" | "harness_sign_in_ended";
+        MessageKey: "host_forbidden" | "origin_forbidden" | "token_required" | "route_not_found" | "body_not_json" | "task_not_found" | "execution_not_found" | "harness_not_found" | "task_exists" | "task_file_exists" | "base_revision_required" | "task_changed_on_disk" | "task_invalid" | "task_disabled" | "task_being_deleted" | "daemon_stopping" | "execution_ended" | "executions_running" | "harness_path_not_absolute" | "harness_path_not_executable" | "settings_language_invalid" | "settings_notification_level_invalid" | "settings_log_retention_invalid" | "settings_path_variable_invalid" | "settings_allowed_folder_invalid" | "settings_change_breaks_task" | "harness_not_identified" | "template_not_found" | "template_read_only" | "template_invalid" | "template_language_invalid" | "yaml_syntax" | "document_empty" | "document_not_json" | "document_not_representable" | "task_input_missing" | "schema_type" | "schema_const" | "schema_enum" | "schema_required" | "schema_additional_properties" | "schema_pattern" | "schema_min_length" | "schema_max_length" | "schema_minimum" | "schema_maximum" | "schema_min_items" | "schema_unique_items" | "schema_not" | "schema_false" | "id_immutable" | "type_immutable" | "id_file_mismatch" | "task_file_invalid" | "task_file_error" | "template_id_not_builtin" | "template_type_unknown" | "schedule_missing" | "schedule_empty" | "schedule_cron_and_interval" | "timezone_unknown" | "interval_invalid" | "interval_unit_invalid" | "cron_seconds" | "cron_field_count" | "cron_step_invalid" | "cron_value_invalid" | "cron_value_out_of_range" | "harness_unknown" | "claude_model_unknown" | "claude_effort_unsupported" | "claude_effort_invalid" | "codex_model_unknown" | "codex_effort_invalid" | "codex_profile_unchecked" | "harness_not_detected" | "harness_not_ready" | "agent_not_found" | "skill_not_found" | "agent_missing" | "skill_missing" | "fallback_agent_missing" | "fallback_skill_missing" | "skill_list_unreadable" | "skill_list_unverified" | "fallback_skill_list_unreadable" | "codex_app_server_missing" | "codex_app_server_start_failed" | "codex_app_server_exited" | "codex_app_server_timed_out" | "codex_app_server_error" | "claude_skill_list_unrecognized" | "claude_skill_list_timed_out" | "fallback_repeats_preferred" | "harness_session_not_kept" | "session_kept_note" | "extra_usage_unenforced" | "path_variable_unterminated" | "path_variable_undefined" | "path_not_absolute" | "path_forbidden_home" | "path_forbidden_place" | "path_outside_allowed_area" | "script_program_relative" | "script_working_directory_relative" | "local_path_missing" | "script_system_not_declared" | "script_program_not_found" | "script_working_directory_missing" | "script_imported_disabled" | "restriction_claude_shell_workspace" | "restriction_claude_shell_network" | "restriction_claude_allow_rules" | "restriction_claude_edit_rules" | "restriction_codex_tool_lists" | "restriction_codex_read_only" | "restriction_codex_ephemeral_missing" | "restriction_script_unenforced" | "script_leftovers_ended" | "harness_version_untested" | "harness_version_unknown" | "quota_unread" | "repository_unprotected" | "report_not_json" | "report_schema_invalid" | "report_not_decodable" | "work_item_key_invalid" | "step_checking_harness" | "step_preparing_workspace" | "step_starting_harness" | "step_switching_harness" | "step_waiting_rate_limit" | "step_preparing_program" | "step_running_program" | "attempt_first" | "attempt_rate_limit_retry" | "attempt_failover" | "daemon_started" | "daemon_signal" | "daemon_stop_requested" | "local_api_stopped" | "task_delete_pending" | "task_changed_externally" | "task_changed_externally_invalid" | "task_removed_externally" | "task_was_disabled" | "task_was_deleted" | "task_file_removed" | "task_gone" | "firing_queued" | "firing_coalesced" | "firing_skipped" | "firings_missed_catch_up" | "firings_missed_skipped" | "cancel_requested" | "cancelled_before_start" | "execution_cancelled" | "execution_timed_out" | "execution_status" | "daemon_stopped_execution" | "execution_dir_failed" | "workspace_create_failed" | "repository_path_missing" | "context_write_failed" | "harness_started" | "harness_session" | "harness_session_kept" | "harness_exited" | "harness_exit_code" | "harness_start_failed" | "harness_ended_with_error" | "harness_unavailable" | "harness_unavailable_readiness" | "harness_rate_limited" | "harness_quota_exhausted" | "quota_exhausted" | "quota_exhausted_until" | "extra_usage_stopped" | "harness_switched" | "no_alternative_harness" | "no_alternative_harness_detail" | "skill_delivery_failed" | "agent_delivery_failed" | "tool_succeeded" | "tool_failed" | "tool_declined" | "tests_failed" | "script_started" | "script_exit_code" | "script_signaled" | "script_start_failed" | "script_write_failed" | "process_ended" | "process_left_ended" | "process_interrupted_ended" | "task_path_refused" | "detection_running" | "harness_manual_path_invalid" | "claude_not_found" | "codex_not_found" | "git_not_found" | "gh_not_found" | "command_failed" | "harness_feature_missing" | "harness_help_timed_out" | "harness_version_below_minimum" | "claude_not_signed_in" | "quota_report_unrecognized" | "not_signed_in" | "authentication_unverified" | "codex_requirements_disallow" | "harness_sign_in_unsupported" | "harness_sign_in_not_completed" | "harness_sign_in_started" | "harness_sign_in_completed" | "harness_sign_in_timed_out" | "harness_sign_in_unknown_screen" | "harness_sign_in_unconfirmed" | "harness_sign_in_start_failed" | "harness_sign_in_ended" | "harness_token_unsupported" | "harness_token_store_unavailable" | "harness_token_empty" | "harness_token_invalid" | "harness_token_store_failed" | "harness_token_remove_failed" | "harness_token_rejected" | "harness_token_expiring";
         /** @description Values the desktop interpolates into the translated text of a messageKey; a count param picks its plural form. A param that quotes another text the daemon wrote has a param named after it with Key appended, its key, and params prefixed with its name and a dot, its params, so it is translated in place too. */
         MessageParams: {
             [key: string]: string;
@@ -790,6 +816,16 @@ export interface components {
              * @enum {string}
              */
             signIn?: "available" | "running";
+            /** @description The daemon can keep a long-lived token for the harness, which setHarnessToken saves. */
+            takesToken?: boolean;
+            /** @description The long-lived token the user saved for the harness, never its value; absent when none is saved. expiresAt is a year from savedAt, since the token does not say when it expires. A rejected token is no longer used. */
+            token?: {
+                /** Format: date-time */
+                savedAt: string;
+                /** Format: date-time */
+                expiresAt: string;
+                rejected: boolean;
+            };
         };
         Tool: {
             /** @enum {string} */
@@ -1358,7 +1394,7 @@ export interface components {
             /** @enum {string} */
             severity: "info" | "warning" | "error";
             read: boolean;
-            /** @description Values the desktop interpolates into its translated text for eventType; title and body are the en-US fallback. The event's message is in the param the text names, error or reason, nested as in MessageParams when the daemon wrote it; a completed execution's summary is in summary. A harness's sign-in (harness.sign_in_started, harness.sign_in_completed, harness.sign_in_timed_out, harness.sign_in_failed) concerns no task: its notice names the harness in harness and harnessName. */
+            /** @description Values the desktop interpolates into its translated text for eventType; title and body are the en-US fallback. The event's message is in the param the text names, error or reason, nested as in MessageParams when the daemon wrote it; a completed execution's summary is in summary. A harness's sign-in (harness.sign_in_started, harness.sign_in_completed, harness.sign_in_timed_out, harness.sign_in_failed) and its long-lived token (harness.token_rejected, harness.token_expiring) concern no task: their notices name the harness in harness and harnessName. */
             params?: {
                 [key: string]: string;
             };
@@ -1596,6 +1632,78 @@ export interface operations {
             };
             404: components["responses"]["NotFound"];
             /** @description The harness has no sign-in HarmFlow can run, or the daemon is stopping. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    setHarnessToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                harnessId: components["parameters"]["HarnessId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The token */
+                    token: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The harness, checked again with the token. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Harness"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            /** @description The harness takes no token, the daemon keeps its secrets in no credential store, or the store could not keep the token. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["Invalid"];
+        };
+    };
+    deleteHarnessToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                harnessId: components["parameters"]["HarnessId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The harness, checked again on its own sign-in. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Harness"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            /** @description The harness takes no token, or the credential store could not remove it. */
             409: {
                 headers: {
                     [name: string]: unknown;

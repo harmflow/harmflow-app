@@ -209,6 +209,8 @@ export const enUS = {
       sign_in_completed: "Signed in again",
       sign_in_timed_out: "Sign-in not completed",
       sign_in_failed: "Sign-in stopped",
+      token_rejected: "Saved token rejected",
+      token_expiring: "Saved token expiring",
     },
     script: { started: "Program started", output: "Program output", exited: "Program exited" },
     tool: { started: "Tool started", completed: "Tool finished" },
@@ -495,6 +497,17 @@ export const enUS = {
     harness_sign_in_unconfirmed: "{{harness}} said the sign-in succeeded, but its check does not read it signed in",
     harness_sign_in_start_failed: "the {{harness}} session could not start: {{detail}}",
     harness_sign_in_ended: "the {{harness}} session ended before the sign-in finished",
+    harness_token_unsupported: "{{harness}} takes no long-lived token",
+    harness_token_store_unavailable:
+      "this daemon keeps its secrets in a file, not in the operating system's credential store, so it keeps no token",
+    harness_token_empty: "the token is empty",
+    harness_token_invalid: "the token holds a character no token has, such as a space or a quote",
+    harness_token_store_failed: "the credential store could not keep the token; see the daemon's log",
+    harness_token_remove_failed: "the credential store could not remove the token; see the daemon's log",
+    harness_token_rejected:
+      "{{harness}} rejected the saved token, which may have expired or been revoked; HarmFlow no longer uses it, and {{harness}} goes back to its own sign-in",
+    harness_token_expiring:
+      "the saved {{harness}} token expires around {{date}}, in {{days}} days; make a new one and save it in Settings",
   },
   cronFields: {
     minute: "minute",
@@ -598,6 +611,8 @@ export const enUS = {
       sign_in_completed: { title: "{{harnessName}} signed in again", body: "Tasks on {{harnessName}} can run again." },
       sign_in_timed_out: { title: "{{harnessName}} sign-in not completed", body: "{{reason}}" },
       sign_in_failed: { title: "{{harnessName}} sign-in stopped", body: "{{reason}}" },
+      token_rejected: { title: "{{harnessName}} token rejected", body: "{{reason}}" },
+      token_expiring: { title: "{{harnessName}} token expiring", body: "{{reason}}" },
     },
     fallback: { title: "HarmFlow", body: "{{eventType}}" },
   },
@@ -875,6 +890,13 @@ export const enUS = {
     signIn: "Sign in again",
     signingIn: "Waiting for the browser sign-in…",
     signInFailed: "Could not start the sign-in: {{message}}",
+    token: "Long-lived token",
+    tokenPlaceholder: "Paste the token claude setup-token printed",
+    tokenSave: "Save token",
+    tokenSaved: "Saved {{saved}} · expires around {{expires}}",
+    tokenRejected: "Rejected",
+    tokenRemove: "Remove",
+    tokenFailed: "The token could not be changed: {{message}}",
   },
   tools: {
     git: "Git",
@@ -1221,7 +1243,7 @@ export const enUS = {
     scope: {
       title: "Everything runs on this computer",
       body:
-        "HarmFlow schedules, runs, and monitors automations carried out by the AI tools you already installed — Claude Code and Codex. It never installs or updates them, and when Claude Code is signed out it starts Claude Code's own sign-in, which you approve in the browser.",
+        "HarmFlow schedules, runs, and monitors automations carried out by the AI tools you already installed — Claude Code and Codex. It never installs or updates them, and when Claude Code is signed out it starts Claude Code's own sign-in, which you approve in the browser, or uses a long-lived token you save in Settings.",
       points: {
         local: "Tasks, state, and logs stay on this machine.",
         permissions: "Each task declares what its session may touch; HarmFlow applies it through the harness's own controls and warns when a restriction can't be enforced.",

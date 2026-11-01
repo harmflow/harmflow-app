@@ -28,7 +28,8 @@ type fakeRead struct {
 	err   error
 }
 
-func (f *fakeKeychain) Kind() string { return "keychain" }
+func (f *fakeKeychain) Kind() string  { return "keychain" }
+func (f *fakeKeychain) Delete() error { return nil }
 
 func (f *fakeKeychain) Get() (string, error) {
 	r := f.reads[min(f.gets, len(f.reads)-1)]

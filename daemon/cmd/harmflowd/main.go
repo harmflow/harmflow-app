@@ -150,6 +150,7 @@ func run(homeFlag, builtinsFlag string, port int) error {
 		Workspace:  &workspace.Reader{PathEnv: pathEnv, Env: harnessEnv},
 		HarnessEnv: harnessEnv, DaemonExecutable: exe, DaemonArgs: daemonArgs, DaemonEnv: daemonEnv, Logger: logger,
 		SignInTimeout: signInTimeout(logger),
+		HarnessTokens: harnessTokens(),
 	})
 	if err != nil {
 		return err
@@ -275,6 +276,22 @@ func acquireLock(path string, flock func(fd, how int) error) (*os.File, error) {
 	_, _ = fmt.Fprintf(f, "%d\n", os.Getpid())
 	return f, nil
 }
+
+// harnessTokens is where a harness's long-lived token is kept: an item of the Keychain the local API token's is in,
+// under harnessTokenService and the harness's id. A daemon whose token store is a file keeps none, since the token
+// belongs in the operating system's credential store alone.
+func harnessTokens() func(string) ports.SecretStore {
+	if os.Getenv("HARMFLOW_TOKEN_STORE") == "file" {
+		return nil
+	}
+	keychain := os.Getenv("HARMFLOW_KEYCHAIN")
+	return func(harness string) ports.SecretStore {
+		return secret.Keychain{Service: harnessTokenService, Account: harness, Path: keychain}
+	}
+}
+
+// harnessTokenService names the Keychain items of the harnesses' long-lived tokens.
+const harnessTokenService = "com.harmflow.harness-token"
 
 // signInTimeoutVariable shortens how long a harness's sign-in waits for the browser, as the tests that let one time out
 // need; a duration Go reads, such as 5s. Unset, the use cases' default holds.

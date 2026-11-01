@@ -171,6 +171,59 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /harnesses/{harnessId}/token:
+    parameters:
+      - $ref: "#/components/parameters/HarnessId"
+    put:
+      tags: [harnesses]
+      operationId: setHarnessToken
+      summary: Save a long-lived token the harness's checks and sessions run with
+      description: >-
+        Keeps the token, the one `claude setup-token` prints for Claude Code, in the operating system's credential store,
+        never in HarmFlow's files, and replaces a token saved before. No response carries it back: the harness's token
+        says only when it was saved, when it expires by the count of its year, and whether the harness rejected it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string, description: The token, without spaces, quotes, or line breaks. }
+      responses:
+        "200":
+          description: The harness, checked again with the token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Harness" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: >-
+            The harness takes no token, the daemon keeps its secrets in no credential store, or the store could not keep
+            the token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422": { $ref: "#/components/responses/Invalid" }
+    delete:
+      tags: [harnesses]
+      operationId: deleteHarnessToken
+      summary: Remove the harness's long-lived token
+      description: The harness's checks and sessions go back to its own sign-in.
+      responses:
+        "200":
+          description: The harness, checked again on its own sign-in.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Harness" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The harness takes no token, or the credential store could not remove it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /tools:
     get:
       tags: [harnesses]
@@ -1034,6 +1087,15 @@ components:
         - harness_sign_in_unconfirmed
         - harness_sign_in_start_failed
         - harness_sign_in_ended
+        # A harness's long-lived token
+        - harness_token_unsupported
+        - harness_token_store_unavailable
+        - harness_token_empty
+        - harness_token_invalid
+        - harness_token_store_failed
+        - harness_token_remove_failed
+        - harness_token_rejected
+        - harness_token_expiring
 
     MessageParams:
       description: >-
@@ -1178,6 +1240,19 @@ components:
             the user to approve it in the browser. Absent for a harness that has none.
           type: string
           enum: [available, running]
+        takesToken:
+          description: The daemon can keep a long-lived token for the harness, which setHarnessToken saves.
+          type: boolean
+        token:
+          description: >-
+            The long-lived token the user saved for the harness, never its value; absent when none is saved. expiresAt
+            is a year from savedAt, since the token does not say when it expires. A rejected token is no longer used.
+          type: object
+          required: [savedAt, expiresAt, rejected]
+          properties:
+            savedAt: { type: string, format: date-time }
+            expiresAt: { type: string, format: date-time }
+            rejected: { type: boolean }
 
     Tool:
       type: object
@@ -1863,7 +1938,8 @@ components:
             Values the desktop interpolates into its translated text for eventType; title and body are the en-US
             fallback. The event's message is in the param the text names, error or reason, nested as in MessageParams
             when the daemon wrote it; a completed execution's summary is in summary. A harness's sign-in
-            (harness.sign_in_started, harness.sign_in_completed, harness.sign_in_timed_out, harness.sign_in_failed)
-            concerns no task: its notice names the harness in harness and harnessName.
+            (harness.sign_in_started, harness.sign_in_completed, harness.sign_in_timed_out, harness.sign_in_failed) and
+            its long-lived token (harness.token_rejected, harness.token_expiring) concern no task: their notices name the
+            harness in harness and harnessName.
           type: object
           additionalProperties: { type: string }

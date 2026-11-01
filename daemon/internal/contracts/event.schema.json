@@ -36,7 +36,7 @@
       "additionalProperties": { "type": "string" }
     },
     "payload": {
-      "description": "An error in the payload is a text too: error in en-US, with errorKey and errorParams beside it. A harness.checked event, sent when a harness's check ends, carries the readiness found in payload.readiness, and no message. A harness.sign_in_failed event carries how the sign-in ended in payload.outcome: unknown_screen, ended, or succeeded when the harness still does not read signed in.",
+      "description": "An error in the payload is a text too: error in en-US, with errorKey and errorParams beside it. A harness.checked event, sent when a harness's check ends, carries the readiness found in payload.readiness, and no message. A harness.sign_in_failed event carries how the sign-in ended in payload.outcome: unknown_screen, ended, or succeeded when the harness still does not read signed in. A harness.token_expiring event carries when the token expires, by the count of its year, in payload.expiresAt.",
       "type": "object"
     }
   },
@@ -81,6 +81,8 @@
         "harness.sign_in_completed",
         "harness.sign_in_timed_out",
         "harness.sign_in_failed",
+        "harness.token_rejected",
+        "harness.token_expiring",
         "script.started",
         "script.output",
         "script.exited",

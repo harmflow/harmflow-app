@@ -44,6 +44,14 @@ vi.mock("../api/transport", () => ({
         daemon.claude = { ...daemon.claude, signIn: "running" };
         return { status: 202, body: daemon.claude };
       }
+      if (method === "PUT" && path === "/harnesses/claude-code/token" && daemon.claude) {
+        daemon.claude = { ...daemon.claude, token: { savedAt: "2026-11-01T21:00:00Z", expiresAt: "2027-11-01T21:00:00Z", rejected: false } };
+        return { status: 200, body: daemon.claude };
+      }
+      if (method === "DELETE" && path === "/harnesses/claude-code/token" && daemon.claude) {
+        daemon.claude = { ...daemon.claude, token: undefined };
+        return { status: 200, body: daemon.claude };
+      }
       if (method === "GET" && path === "/harnesses") return { status: 200, body: [daemon.claude ?? daemon.codex] };
       if (method === "GET" && path === "/tools") return { status: 200, body: [] };
       return { status: 404, body: null };
@@ -346,5 +354,74 @@ describe("signing in again", () => {
   it("offers no sign-in for a harness the daemon cannot sign in", async () => {
     await open(ready);
     expect(buttons().map((b) => b.textContent)).not.toContain(i18n.t("harness.signIn"));
+  });
+});
+
+describe("a long-lived token", () => {
+  let root: Root | undefined;
+  let host: HTMLElement | undefined;
+
+  beforeAll(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    host?.remove();
+    root = host = undefined;
+    daemon.claude = undefined;
+    daemon.requests.length = 0;
+  });
+
+  function Inventory() {
+    const claude = useStore((s) => s.harnesses.find((h) => h.id === "claude-code"));
+    return claude ? <HarnessInventory harness={claude} locale="en-US" /> : null;
+  }
+
+  async function open(harness: Harness) {
+    daemon.claude = harness;
+    patchStateForTests({ harnesses: [harness] });
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(<Inventory />));
+  }
+
+  const settle = () => act(() => new Promise<void>((resolve) => setImmediate(resolve)));
+  const button = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === label);
+
+  // harmflow-app#733: the token is typed in a field that hides it, saved, and never shown again; then it can be removed.
+  it("saves a token from a hidden field, shows when it was saved, and removes it", async () => {
+    await open({ ...ready, takesToken: true });
+    const field = host!.querySelector<HTMLInputElement>(`input[aria-label="${i18n.t("harness.token")}"]`)!;
+    expect(field.type).toBe("password");
+    expect(button(i18n.t("harness.tokenSave"))?.disabled).toBe(true);
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => {
+      setValue.call(field, " sk-ant-oat01-typed ");
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => button(i18n.t("harness.tokenSave"))!.click());
+    await settle();
+    expect(daemon.requests.filter((r) => r.method === "PUT")).toEqual([
+      { method: "PUT", path: "/harnesses/claude-code/token", body: { token: "sk-ant-oat01-typed" } },
+    ]);
+    expect(host!.textContent).not.toContain("sk-ant-oat01-typed");
+    expect(host!.querySelector(`input[aria-label="${i18n.t("harness.token")}"]`)).toBeNull();
+    expect(host!.textContent).toContain(i18n.t("harness.tokenRemove"));
+
+    await act(async () => button(i18n.t("harness.tokenRemove"))!.click());
+    await settle();
+    expect(daemon.requests.filter((r) => r.method === "DELETE").map((r) => r.path)).toEqual(["/harnesses/claude-code/token"]);
+    expect(host!.querySelector(`input[aria-label="${i18n.t("harness.token")}"]`)).not.toBeNull();
+  });
+
+  it("marks a token the harness rejected", async () => {
+    await open({ ...ready, takesToken: true, token: { savedAt: "2026-11-01T21:00:00Z", expiresAt: "2027-11-01T21:00:00Z", rejected: true } });
+    expect(host!.textContent).toContain(i18n.t("harness.tokenRejected"));
+  });
+
+  it("has no token row for a harness the daemon keeps no token for", async () => {
+    await open(ready);
+    expect(host!.textContent).not.toContain(i18n.t("harness.token"));
   });
 });

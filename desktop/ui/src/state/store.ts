@@ -332,9 +332,9 @@ function handleEvent(e: HarmflowEvent) {
   if (family === "task" || (family === "execution" && e.type !== "execution.status_changed")) {
     debounce("tasks", () => void actions.refreshTasks(), 400);
   }
-  // A check ended, or a sign-in started or ended: read the inventory again, without detecting again, which would
-  // announce another check.
-  if (e.type === "harness.checked" || e.type.startsWith("harness.sign_in_")) {
+  // A check ended, a sign-in started or ended, or a token was rejected or expires soon: read the inventory again,
+  // without detecting again, which would announce another check.
+  if (e.type === "harness.checked" || e.type.startsWith("harness.sign_in_") || e.type.startsWith("harness.token_")) {
     debounce("harnesses", () => void actions.refreshHarnesses());
   }
   // Output lines change nothing in the record, and a program can print many of them.
