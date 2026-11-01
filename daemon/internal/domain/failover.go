@@ -30,6 +30,9 @@ type AttemptEnd struct {
 	SessionID  string
 	FinalText  string // the agent's last message, carried into the next attempt's summary
 	Usage      *Usage // the attempt's token use, priced at the adapter's table; nil when no process ran
+	// SignedOut is set on an attempt of ClassHarnessUnavailable whose harness said, in its own words, that it is signed
+	// out, which a sign-in can mend.
+	SignedOut bool
 }
 
 // Action is what the executor does after an attempt.

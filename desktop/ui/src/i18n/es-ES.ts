@@ -205,6 +205,10 @@ export const esES: Resources = {
       no_alternative: "Ningún harness alternativo disponible",
       version_untested: "Versión del harness no probada",
       checked: "Harness comprobado",
+      sign_in_started: "Inicio de sesión esperando en el navegador",
+      sign_in_completed: "Sesión iniciada de nuevo",
+      sign_in_timed_out: "Inicio de sesión no completado",
+      sign_in_failed: "Inicio de sesión detenido",
     },
     script: { started: "Programa iniciado", output: "Salida del programa", exited: "Programa terminado" },
     tool: { started: "Herramienta iniciada", completed: "Herramienta finalizada" },
@@ -492,6 +496,19 @@ export const esES: Resources = {
     authentication_unverified: "no se pudo verificar la autenticación",
     codex_requirements_disallow:
       "los requisitos gestionados de Codex no permiten {{settings}}, con lo que HarmFlow lo ejecuta, así que Codex pasa a usar lo que permiten: {{allowed}}",
+    harness_sign_in_unsupported: "HarmFlow no puede iniciar la sesión de {{harness}}; iníciala desde una terminal",
+    harness_sign_in_not_completed:
+      "{{harness}} no tiene la sesión iniciada: el inicio de sesión en el navegador que HarmFlow empezó no se completó; pulsa Iniciar sesión de nuevo",
+    harness_sign_in_started: "{{harness}} cerró la sesión: aprueba en tu navegador el inicio de sesión que HarmFlow empezó",
+    harness_sign_in_completed: "{{harness}} tiene la sesión iniciada de nuevo",
+    harness_sign_in_timed_out:
+      "el inicio de sesión en el navegador de {{harness}} no se completó en {{minutes}} minutos; pulsa Iniciar sesión de nuevo para volver a intentarlo",
+    harness_sign_in_unknown_screen:
+      "{{harness}} mostró una pantalla que HarmFlow no reconoce, así que el inicio de sesión se detuvo; inicia la sesión desde una terminal",
+    harness_sign_in_unconfirmed:
+      "{{harness}} dijo que el inicio de sesión fue correcto, pero su comprobación no lo muestra con la sesión iniciada",
+    harness_sign_in_start_failed: "la sesión de {{harness}} no pudo iniciarse: {{detail}}",
+    harness_sign_in_ended: "la sesión de {{harness}} terminó antes de que el inicio de sesión acabara",
   },
   cronFields: {
     minute: "minuto",
@@ -594,6 +611,16 @@ export const esES: Resources = {
         title: "Ningún harness para {{taskName}}",
         body: "{{harness}} no puede continuar y no hay alternativa disponible.",
       },
+      sign_in_started: {
+        title: "Inicia sesión en {{harnessName}}",
+        body: "{{harnessName}} cerró la sesión. Aprueba en tu navegador el inicio de sesión que HarmFlow abrió.",
+      },
+      sign_in_completed: {
+        title: "{{harnessName}} con la sesión iniciada de nuevo",
+        body: "Las tareas en {{harnessName}} pueden ejecutarse de nuevo.",
+      },
+      sign_in_timed_out: { title: "Inicio de sesión en {{harnessName}} no completado", body: "{{reason}}" },
+      sign_in_failed: { title: "Inicio de sesión en {{harnessName}} detenido", body: "{{reason}}" },
     },
     fallback: { title: "HarmFlow", body: "{{eventType}}" },
   },
@@ -868,6 +895,9 @@ export const esES: Resources = {
     autoDetect: "Detectar automáticamente",
     pathPlaceholder: "/ruta/absoluta/de/la/cli",
     noCredentials: "Las credenciales nunca se muestran.",
+    signIn: "Iniciar sesión de nuevo",
+    signingIn: "Esperando el inicio de sesión en el navegador…",
+    signInFailed: "No se pudo empezar el inicio de sesión: {{message}}",
   },
   tools: {
     git: "Git",
@@ -1217,7 +1247,7 @@ export const esES: Resources = {
     scope: {
       title: "Todo se ejecuta en este ordenador",
       body:
-        "HarmFlow programa, ejecuta y supervisa automatizaciones realizadas por las herramientas de IA que ya instalaste — Claude Code y Codex. Nunca las instala, actualiza ni inicia sesión en ellas.",
+        "HarmFlow programa, ejecuta y supervisa automatizaciones realizadas por las herramientas de IA que ya instalaste — Claude Code y Codex. Nunca las instala ni actualiza, y cuando Claude Code cerró la sesión inicia el inicio de sesión del propio Claude Code, que apruebas en el navegador.",
       points: {
         local: "Las tareas, el estado y los logs se quedan en esta máquina.",
         permissions:

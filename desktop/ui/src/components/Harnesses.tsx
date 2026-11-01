@@ -100,6 +100,19 @@ export function HarnessInventory({ harness, locale, onDraft }: { harness: Harnes
   const [busy, setBusy] = useState(false);
   useDraft(onDraft, `harness:${harness.id}`, editing && path !== (harness.path ?? ""));
 
+  // The daemon runs the harness's own sign-in, which the user approves in the browser; the row follows its events.
+  const signIn = async () => {
+    setBusy(true);
+    try {
+      await api.signInHarness(harness.id);
+      await actions.refreshHarnesses();
+    } catch (err) {
+      toast(t("harness.signInFailed", { message: (err as Error).message }), "danger");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const save = async (value: string | null) => {
     setBusy(true);
     try {
@@ -227,6 +240,11 @@ export function HarnessInventory({ harness, locale, onDraft }: { harness: Harnes
           {harness.pathSource === "manual" ? (
             <Button size="sm" variant="ghost" icon="refresh" disabled={busy} onClick={() => void save(null)}>
               {t("harness.autoDetect")}
+            </Button>
+          ) : null}
+          {harness.signIn ? (
+            <Button size="sm" variant="ghost" icon="key" disabled={busy || harness.signIn === "running"} onClick={() => void signIn()}>
+              {harness.signIn === "running" ? t("harness.signingIn") : t("harness.signIn")}
             </Button>
           ) : null}
         </div>

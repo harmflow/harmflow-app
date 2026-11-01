@@ -146,6 +146,31 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/Invalid" }
 
+  /harnesses/{harnessId}/sign-in:
+    parameters:
+      - $ref: "#/components/parameters/HarnessId"
+    post:
+      tags: [harnesses]
+      operationId: signInHarness
+      summary: Sign the harness in again through its own sign-in and the browser
+      description: >-
+        Starts the sign-in the harness's interactive session offers, which the user approves in the browser it opens,
+        even after one that did not sign the harness in. A sign-in already running is the one the request joins, never
+        a second. The events harness.sign_in_started, then harness.sign_in_completed, harness.sign_in_timed_out, or
+        harness.sign_in_failed, say how it goes.
+      responses:
+        "202":
+          description: The harness, its sign-in running.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Harness" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The harness has no sign-in HarmFlow can run, or the daemon is stopping.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /tools:
     get:
       tags: [harnesses]
@@ -999,6 +1024,16 @@ components:
         - not_signed_in
         - authentication_unverified
         - codex_requirements_disallow
+        # A harness's sign-in
+        - harness_sign_in_unsupported
+        - harness_sign_in_not_completed
+        - harness_sign_in_started
+        - harness_sign_in_completed
+        - harness_sign_in_timed_out
+        - harness_sign_in_unknown_screen
+        - harness_sign_in_unconfirmed
+        - harness_sign_in_start_failed
+        - harness_sign_in_ended
 
     MessageParams:
       description: >-
@@ -1137,6 +1172,12 @@ components:
         diagnostic: { type: string, description: "What is wrong with the harness, in en-US." }
         diagnosticKey: { $ref: "#/components/schemas/MessageKey" }
         diagnosticParams: { $ref: "#/components/schemas/MessageParams" }
+        signIn:
+          description: >-
+            The sign-in HarmFlow can run for the harness, which signIn starts: available, or running while one waits for
+            the user to approve it in the browser. Absent for a harness that has none.
+          type: string
+          enum: [available, running]
 
     Tool:
       type: object
@@ -1821,6 +1862,8 @@ components:
           description: >-
             Values the desktop interpolates into its translated text for eventType; title and body are the en-US
             fallback. The event's message is in the param the text names, error or reason, nested as in MessageParams
-            when the daemon wrote it; a completed execution's summary is in summary.
+            when the daemon wrote it; a completed execution's summary is in summary. A harness's sign-in
+            (harness.sign_in_started, harness.sign_in_completed, harness.sign_in_timed_out, harness.sign_in_failed)
+            concerns no task: its notice names the harness in harness and harnessName.
           type: object
           additionalProperties: { type: string }

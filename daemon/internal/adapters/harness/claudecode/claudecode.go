@@ -58,6 +58,7 @@ type Adapter struct {
 	skills           map[string][]ports.ResolvedItem // by CLI path, workspace, and added folders, kept until ReloadUserItems
 	helpTimeout      time.Duration                   // the --help check; zero is defaultHelpTimeout
 	skillListTimeout time.Duration                   // the skill list's session; zero is defaultSkillListTimeout
+	signInStep       time.Duration                   // the wait for each screen of the sign-in; zero is defaultSignInStep
 }
 
 // defaultHelpTimeout bounds the --help check; help it could not read by then leaves the flags unknown.
@@ -1008,12 +1009,18 @@ func resultText(raw json.RawMessage) string {
 	return string(raw)
 }
 
+// signedOutTexts are the CLI's own words that it is signed out, which its /login mends. The other texts of Unavailable
+// are not: a sign-in fixes neither an invalid API key from the environment nor managed settings that could not load.
+const signedOutTexts = `please run /login|\bnot logged in\b|authentication_error|oauth token (has )?expired|api error:? 401|claude auth login|re-authenticate`
+
+var signedOut = regexp.MustCompile(`(?i)(` + signedOutTexts + `)`)
+
 // patterns match the CLI's own texts, not words a task's error can hold too: a bare quota or "limit reached", or the
 // "not logged into" of another tool, ends the attempt as a task error (harmflow-app#213).
 var patterns = classify.Patterns{
 	Quota:       regexp.MustCompile(`(?i)(usage limit|you(’|')ve hit your ([\w’']+ ){0,3}limit|out of (extra )?usage|credit balance (is )?too low|(weekly|session|5-hour|opus|sonnet)( weekly)? limit (has been )?reached)`),
 	RateLimit:   regexp.MustCompile(`(?i)(rate[ _-]?limit|too many requests|overloaded_error|api error:? (429|529))`),
-	Unavailable: regexp.MustCompile(`(?i)(invalid api key|please run /login|\bnot logged in\b|authentication_error|oauth token (has )?expired|api error:? 401|claude auth login|re-authenticate|managed settings .*could not be loaded)`),
+	Unavailable: regexp.MustCompile(`(?i)(invalid api key|` + signedOutTexts + `|managed settings .*could not be loaded)`),
 	Network:     regexp.MustCompile(`(?i)(ECONNREFUSED|ENOTFOUND|ETIMEDOUT|ECONNRESET|network error|getaddrinfo|fetch failed|connection error)`),
 }
 
@@ -1063,6 +1070,7 @@ func (p *parser) Finish(exitCode int, stderrTail string, timedOut, cancelled boo
 			end.RetryAfter = d
 		}
 	}
+	end.SignedOut = end.Class == domain.ClassHarnessUnavailable && signedOut.MatchString(text)
 	return end
 }
 

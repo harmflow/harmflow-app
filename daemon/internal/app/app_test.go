@@ -352,7 +352,8 @@ func (p *fakeParser) Finish(exit int, _ string, timedOut, cancelled bool) domain
 	case "network":
 		return domain.AttemptEnd{Class: domain.ClassNetwork, Error: domain.Text{Message: "connect ECONNREFUSED 127.0.0.1:443"}}
 	case "unavailable":
-		return domain.AttemptEnd{Class: domain.ClassHarnessUnavailable, Error: domain.Text{Message: "Not logged in"}}
+		return domain.AttemptEnd{Class: domain.ClassHarnessUnavailable, Error: domain.Text{Message: "Not logged in"},
+			SignedOut: true}
 	}
 	return domain.AttemptEnd{Class: domain.ClassTaskError, Error: domain.Text{Message: fmt.Sprintf("exit %d", exit)}}
 }
@@ -474,6 +475,10 @@ type env struct {
 	timeoutUnit time.Duration
 	// records is the execution repository the App starts on, which a configure may wrap.
 	records ports.ExecutionRepository
+	// signer stands in for Claude Code in place of claude, when a test sets one: a harness the daemon can sign in.
+	signer ports.HarnessAdapter
+	// signInTimeout is how long a sign-in waits for the browser, when a test sets it; the default otherwise.
+	signInTimeout time.Duration
 }
 
 // newEnv starts an App on fake harnesses; configure sets up the env, its fakes included, before the App starts.
@@ -513,10 +518,14 @@ func (e *env) start(t *testing.T, configure ...func(*env)) {
 	for _, c := range configure {
 		c(e)
 	}
+	harnesses := []ports.HarnessAdapter{e.claude, e.codex}
+	if e.signer != nil {
+		harnesses[0] = e.signer
+	}
 	a, err := New(Deps{Paths: e.paths, Version: "test", Clock: e.clock, Wake: e.wake, Location: time.UTC, Tasks: tasks,
-		State: state, Executions: e.records, Events: e.events, Validator: v, Harnesses: []ports.HarnessAdapter{e.claude, e.codex},
+		State: state, Executions: e.records, Events: e.events, Validator: v, Harnesses: harnesses,
 		Service: e.service, Workspace: &workspace.Reader{}, TickInterval: time.Hour, TimeoutUnit: e.timeoutUnit,
-		Logger: log.New(io.Discard, "", 0)})
+		SignInTimeout: e.signInTimeout, Logger: log.New(io.Discard, "", 0)})
 	if err != nil {
 		t.Fatal(err)
 	}

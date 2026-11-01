@@ -205,6 +205,10 @@ export const ptBR: Resources = {
       no_alternative: "Nenhum harness alternativo disponível",
       version_untested: "Versão do harness não testada",
       checked: "Harness verificado",
+      sign_in_started: "Entrada aguardando no navegador",
+      sign_in_completed: "Conectado novamente",
+      sign_in_timed_out: "Entrada não concluída",
+      sign_in_failed: "Entrada interrompida",
     },
     script: { started: "Programa iniciado", output: "Saída do programa", exited: "Programa encerrado" },
     tool: { started: "Ferramenta iniciada", completed: "Ferramenta concluída" },
@@ -490,6 +494,18 @@ export const ptBR: Resources = {
     authentication_unverified: "não foi possível verificar a autenticação",
     codex_requirements_disallow:
       "os requisitos gerenciados do Codex não permitem {{settings}}, com que o HarmFlow o executa, então o Codex passa a usar o que eles permitem: {{allowed}}",
+    harness_sign_in_unsupported: "o HarmFlow não consegue conectar o {{harness}}; entre na conta por um terminal",
+    harness_sign_in_not_completed:
+      "o {{harness}} não está conectado: a entrada no navegador que o HarmFlow iniciou não foi concluída; clique em Entrar novamente",
+    harness_sign_in_started: "o {{harness}} está desconectado: aprove no navegador a entrada que o HarmFlow iniciou",
+    harness_sign_in_completed: "o {{harness}} está conectado novamente",
+    harness_sign_in_timed_out:
+      "a entrada no navegador para o {{harness}} não foi concluída em {{minutes}} minutos; clique em Entrar novamente para tentar outra vez",
+    harness_sign_in_unknown_screen:
+      "o {{harness}} mostrou uma tela que o HarmFlow não reconhece, então a entrada parou; entre na conta por um terminal",
+    harness_sign_in_unconfirmed: "o {{harness}} disse que a entrada deu certo, mas a verificação dele não o mostra conectado",
+    harness_sign_in_start_failed: "a sessão do {{harness}} não pôde iniciar: {{detail}}",
+    harness_sign_in_ended: "a sessão do {{harness}} terminou antes de a entrada ser concluída",
   },
   cronFields: {
     minute: "minuto",
@@ -600,6 +616,13 @@ export const ptBR: Resources = {
         title: "Nenhum harness para {{taskName}}",
         body: "O {{harness}} não pode continuar e não há alternativa disponível.",
       },
+      sign_in_started: {
+        title: "Entre no {{harnessName}}",
+        body: "O {{harnessName}} está desconectado. Aprove no navegador a entrada que o HarmFlow abriu.",
+      },
+      sign_in_completed: { title: "{{harnessName}} conectado novamente", body: "As tarefas no {{harnessName}} podem rodar de novo." },
+      sign_in_timed_out: { title: "Entrada no {{harnessName}} não concluída", body: "{{reason}}" },
+      sign_in_failed: { title: "Entrada no {{harnessName}} interrompida", body: "{{reason}}" },
     },
     fallback: { title: "HarmFlow", body: "{{eventType}}" },
   },
@@ -874,6 +897,9 @@ export const ptBR: Resources = {
     autoDetect: "Detectar automaticamente",
     pathPlaceholder: "/caminho/absoluto/da/cli",
     noCredentials: "Credenciais nunca são exibidas.",
+    signIn: "Entrar novamente",
+    signingIn: "Aguardando a entrada no navegador…",
+    signInFailed: "Não foi possível iniciar a entrada: {{message}}",
   },
   tools: {
     git: "Git",
@@ -1221,7 +1247,7 @@ export const ptBR: Resources = {
     scope: {
       title: "Tudo roda neste computador",
       body:
-        "O HarmFlow agenda, executa e monitora automações realizadas pelas ferramentas de IA que você já instalou — Claude Code e Codex. Ele nunca as instala, atualiza ou faz login nelas.",
+        "O HarmFlow agenda, executa e monitora automações realizadas pelas ferramentas de IA que você já instalou — Claude Code e Codex. Ele nunca as instala nem atualiza, e quando o Claude Code está desconectado inicia a entrada do próprio Claude Code, que você aprova no navegador.",
       points: {
         local: "Tarefas, estado e logs ficam nesta máquina.",
         permissions:

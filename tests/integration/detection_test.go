@@ -78,10 +78,13 @@ func (c cli) only(t *testing.T, allowed ...string) map[string]int {
 }
 
 // The probes detection runs, and how a run invokes each CLI. Claude Code's probes include the quota read before an
-// attempt, `claude -p /usage`, which runs no turn and makes no model call.
+// attempt, `claude -p /usage`, which runs no turn and makes no model call. claudeSignIn is the sign-in the daemon
+// starts on a Claude Code that says it is signed out: the CLI with no arguments, its interactive session, which a
+// stand-in's log records as an empty line.
 var (
 	claudeProbes = []string{"--version", "--help", "auth status", claudeQuota}
 	claudeQuota  = "-p /usage"
+	claudeSignIn = ""
 	codexProbes  = []string{"--version", "exec --help", "--help", "login status"}
 	claudeRun    = "-p --output-format"
 	codexRun     = "exec --json"
@@ -125,9 +128,9 @@ func neverStarted(t *testing.T, x map[string]any, name string) {
 	}
 }
 
-// harmflow-app#68: the daemon never installs, updates, or signs in a harness. Detecting a signed-out Claude Code and a
-// Codex below the minimum, and running a task on each, invokes only the probes; each execution fails without starting,
-// and the inventory says why.
+// harmflow-app#68: the daemon never installs or updates a harness. Detecting a signed-out Claude Code and a Codex below
+// the minimum, and running a task on each, invokes only the probes, and Claude Code's sign-in session, which the user
+// approves in the browser (harmflow-app#543); each execution fails without starting, and the inventory says why.
 func TestDetectionOnlyProbes(t *testing.T) {
 	t.Parallel()
 	d := startDaemon(t, t.TempDir())
@@ -149,7 +152,7 @@ func TestDetectionOnlyProbes(t *testing.T) {
 	for _, c := range []struct {
 		cli    cli
 		probes []string
-	}{{claude, claudeProbes}, {codex, codexProbes}} {
+	}{{claude, append(claudeProbes, claudeSignIn)}, {codex, codexProbes}} {
 		t.Run(filepath.Base(c.cli.path), func(t *testing.T) {
 
 			if counts := c.cli.only(t, c.probes...); len(counts) == 0 {
@@ -256,9 +259,12 @@ func TestSignedOutHarnessIsNotReady(t *testing.T) {
 
 // harmflow-app#327: the real Claude Code, signed out in a configuration directory of the test's own, reads installed at
 // the version it prints, with an invalid sign-in, and not ready; a task on it fails without starting, and the daemon
-// invoked it for its probes alone. The stand-ins above print what the adapter reads; this test shows the real CLI does.
+// invoked it for its probes alone, and for the sign-in session it starts on a signed-out Claude Code
+// (harmflow-app#543), which ends before it types a key. The stand-ins above print what the adapter reads; this test
+// shows the real CLI does.
 func TestSignedOutRealClaudeCodeOnlyProbes(t *testing.T) {
-	signedOutOnlyProbes(t, realClaude(t), "claude-code", "Claude Code", "claude_not_signed_in", claudeProbes)
+	signedOutOnlyProbes(t, realClaude(t), "claude-code", "Claude Code", "claude_not_signed_in",
+		append(claudeProbes, claudeSignIn))
 }
 
 // harmflow-app#327: the same as TestSignedOutRealClaudeCodeOnlyProbes with the real Codex, signed out in the test
@@ -280,7 +286,9 @@ func signedOutOnlyProbes(t *testing.T, installed, id, name, key string, probes [
 	if err := os.MkdirAll(codexHome, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	env := signedOutEnv(t.TempDir())
+	// The sign-in the daemon starts on a signed-out Claude Code ends within a second, before its first key: it waits for
+	// each screen to settle first, so it never reaches the browser's sign-in, and never signs in.
+	env := append(signedOutEnv(t.TempDir()), "HARMFLOW_SIGN_IN_TIMEOUT=1s")
 	// The test's own probes run with the environment the daemon runs with, so they read the same state.
 	probeEnv := append(append(os.Environ(), "CODEX_HOME="+codexHome), env...)
 	file, version := resolved(t, installed), versionOf(t, probeEnv, installed)

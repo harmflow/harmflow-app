@@ -23,13 +23,13 @@ func (a *App) Harnesses() []ports.HarnessInfo {
 	out := []ports.HarnessInfo{}
 	for _, id := range a.adapterIDs() {
 		if info, ok := a.inventory[id]; ok {
-			out = append(out, info)
+			out = append(out, a.withSignInLocked(id, info))
 		} else {
 			ad := a.adapters[id]
 			info := ports.HarnessInfo{ID: id, Name: ad.Name(), Authentication: "unknown", Readiness: "checking",
 				Installations: []string{}, Models: []ports.ModelInfo{}, Efforts: []string{}, EnforceableControls: []string{}}
 			info.SetDiagnostic(domain.T("detection_running", "detection is running"))
-			out = append(out, info)
+			out = append(out, a.withSignInLocked(id, info))
 		}
 	}
 	return out
@@ -63,7 +63,8 @@ func (a *App) refreshHarnessesAsync(ctx context.Context) {
 
 // detect revalidates one harness and stores what it found, including the resolved path, then announces it, so the
 // dashboard reads the inventory again. A detection whose ctx ended, or that ends once the daemon is stopping, is
-// neither stored nor announced: it was cut short, and the inventory keeps what it had.
+// neither stored nor announced: it was cut short, and the inventory keeps what it had. A harness that says it is
+// signed out starts its sign-in, unless one runs or one that failed holds it back.
 func (a *App) detect(ctx context.Context, id string) ports.HarnessInfo {
 	ad := a.adapters[id]
 	a.mu.Lock()
@@ -79,10 +80,15 @@ func (a *App) detect(ctx context.Context, id string) ports.HarnessInfo {
 		a.mu.Unlock()
 		return info
 	}
+	a.signInDiagnosticLocked(id, &info)
 	a.inventory[id] = info
+	info = a.withSignInLocked(id, info)
 	a.mu.Unlock()
 	a.emit(domain.Event{Type: domain.EventHarnessChecked, Harness: id, Severity: domain.SeverityInfo,
 		Payload: map[string]any{"readiness": info.Readiness}})
+	if info.Authentication == "invalid" {
+		a.signInWhenSignedOut(id)
+	}
 	return info
 }
 
