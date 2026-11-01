@@ -6179,6 +6179,58 @@ func TestNoticesFollowTheStartingDefinition(t *testing.T) {
 	}
 }
 
+// A task's own notification choices decide its notices, with the global level letting every event through: the event
+// it chose notifies and the one it did not choose does not, and its switch turned off silences it, whatever events it
+// lists. Each case runs one execution that completes and one that fails, on a task of its own.
+func TestTaskNotificationChoicesDecideItsNotices(t *testing.T) {
+	e := newEnv(t)
+	level := "all"
+	if _, err := e.app.UpdateSettings(SettingsPatch{NotificationLevel: &level}); err != nil {
+		t.Fatalf("UpdateSettings(notificationLevel %q): %v", level, err)
+	}
+	for _, c := range []struct {
+		id, native string
+		notified   bool // whether the failed execution notifies; the completed one never does
+	}{
+		{"failure-only", "      events: [execution.failed]\n", true},
+		{"switched-off", "      enabled: false\n      events: [execution.completed, execution.failed]\n", false},
+	} {
+		t.Run(c.id, func(t *testing.T) {
+			e := e.in(t)
+			e.create(c.id, "  notifications:\n    native:\n"+c.native)
+
+			e.claude.setScript(func(ports.RunRequest) string { return "echo 'END ok'" })
+			r, _ := e.app.RunTask(c.id)
+			completed := e.wait(r.ExecutionID, domain.StatusCompleted)
+			e.idle(c.id) // the notice is decided once the execution has returned
+			e.claude.setScript(func(ports.RunRequest) string { return "echo 'END error'" })
+			r, _ = e.app.RunTask(c.id)
+			failed := e.wait(r.ExecutionID, domain.StatusFailed)
+			e.idle(c.id)
+
+			var got []Notification
+			for _, n := range e.app.Notifications(false) {
+				if n.TaskID == c.id {
+					got = append(got, n)
+				}
+			}
+			if !c.notified {
+				if len(got) != 0 {
+					t.Errorf("Notifications(task %s) = %+v, want none", c.id, got)
+				}
+				return
+			}
+			if len(got) != 1 {
+				t.Fatalf("Notifications(task %s) = %+v, want one, for the failed execution %s", c.id, got, failed.ID)
+			}
+			if got[0].ExecutionID != failed.ID || got[0].EventType != domain.EventExecutionFailed {
+				t.Errorf("notice = %s for %s, want %s for the failed execution %s (the completed one is %s)",
+					got[0].EventType, got[0].ExecutionID, domain.EventExecutionFailed, failed.ID, completed.ID)
+			}
+		})
+	}
+}
+
 // completedNotices returns the execution.completed notices of one execution.
 func (e *env) completedNotices(executionID string) []Notification {
 	var out []Notification
