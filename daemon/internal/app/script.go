@@ -218,7 +218,7 @@ func (r *run) runScript(ctx context.Context, deadline time.Time) (domain.Executi
 				"detail", err.Error())
 		}
 		argv = append(append([]string{}, spec.Inline.Interpreter...), script)
-		rec.Interpreter, rec.Source, rec.ScriptPath = spec.Inline.Interpreter, eventlog.Redact(spec.Inline.Source), script
+		rec.Interpreter, rec.Source, rec.ScriptPath = redactedSlice(spec.Inline.Interpreter), eventlog.Redact(spec.Inline.Source), script
 	} else {
 		rec.Command = redactedSlice(spec.Command)
 	}
