@@ -3399,6 +3399,127 @@ func TestHeldBackFiringsRecorded(t *testing.T) {
 	}
 }
 
+// savedSchedule is the task's schedule state as the state store holds it on disk, or nil.
+func (e *env) savedSchedule(id string) *scheduleState {
+	e.t.Helper()
+	var f scheduleFile
+	if ok, err := e.app.d.State.Load("scheduler", &f); err != nil || !ok {
+		e.t.Fatalf("load the scheduler state: %v %v", ok, err)
+	}
+	return f.Tasks[id]
+}
+
+// A task file that fails validation when the daemon starts keeps the schedule state the previous run saved: the
+// firings due while it stays invalid are recorded as skipped, by the saved rule, and once it is fixed the next firing
+// follows that rule, not the time of the fix. A task with no saved state gets none, and one whose valid file drops its
+// schedule, or whose file is gone, drops its state as before.
+func TestInvalidAtStartKeepsItsSchedule(t *testing.T) {
+	e := newEnv(t)
+	e.create("daily", "  schedule:\n    cron: \"0 9 * * *\"\n    timezone: UTC\n    missedRun:\n      policy: run_on_resume\n")
+	e.create("every-day", "  schedule:\n    interval: 1d\n")
+	e.create("unscheduled", "  schedule:\n    cron: \"0 9 * * *\"\n    timezone: UTC\n")
+	e.create("deleted", "  schedule:\n    cron: \"0 9 * * *\"\n    timezone: UTC\n")
+	valid := map[string]string{}
+	for _, id := range []string{"daily", "every-day"} {
+		view, _ := e.app.GetTask(id)
+		valid[id] = view.YAML
+	}
+	write := func(id, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(e.paths.Tasks, id+".yaml"), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// While the daemon is down for three days, from 08:00: two files fail validation and keep their schedules, one
+	// drops its schedule, one is deleted, and an invalid file appears that never had a schedule state.
+	e.app.Stop(domain.Text{Message: "test restart"})
+	for id, content := range valid {
+		write(id, strings.Replace(content, "type: general", "type: nope", 1))
+	}
+	write("unscheduled", taskYAML("unscheduled", ""))
+	if err := os.Remove(filepath.Join(e.paths.Tasks, "deleted.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	write("new-broken", strings.Replace(taskYAML("new-broken", "  schedule:\n    cron: \"0 9 * * *\"\n"),
+		"type: general", "type: nope", 1))
+	e.clock.Advance(3 * 24 * time.Hour) // 2026-10-23 08:00
+	e = e.restart(t)
+	e.app.Tick()
+
+	day := func(d, hour int) time.Time { return time.Date(2026, 10, d, hour, 0, 0, 0, time.UTC) }
+	for _, tc := range []struct {
+		id       string
+		rule, tz string
+		next     time.Time
+		first    time.Time // the first misfire, which the catch-up record carries
+		misfires int
+	}{
+		{"daily", "0 9 * * *", "UTC", day(23, 9), day(20, 9), 3},
+		{"every-day", "1d", "", day(24, 8), day(21, 8), 3},
+	} {
+		s := e.savedSchedule(tc.id)
+		if s == nil || s.Rule != tc.rule || s.Timezone != tc.tz || s.NextFireAt == nil || !s.NextFireAt.Equal(tc.next) {
+			t.Errorf("%s's saved schedule after the restart: %+v, want rule %q in %q, next %v", tc.id, s, tc.rule, tc.tz, tc.next)
+		}
+		got := e.lastFiring(tc.id)
+		if got.Outcome != "skipped" || got.ReasonKey != "task_file_invalid" || got.ReasonParams["file"] != tc.id+".yaml" ||
+			got.Trigger != domain.TriggerCatchUp || got.Missed != tc.misfires || !got.ScheduledFor.Equal(tc.first) ||
+			got.ExecutionID != "" {
+			t.Errorf("%s's record after the restart: %+v", tc.id, got)
+		}
+	}
+	for _, id := range []string{"unscheduled", "deleted", "new-broken"} {
+		if s := e.savedSchedule(id); s != nil {
+			t.Errorf("%s keeps a schedule state: %+v", id, s)
+		}
+	}
+
+	// A firing that comes due while the file stays invalid is recorded as skipped too, on time.
+	e.clock.Advance(time.Hour + 30*time.Second) // 09:00:30
+	e.app.Tick()
+	if got := e.lastFiring("daily"); got.Outcome != "skipped" || got.ReasonKey != "task_file_invalid" ||
+		got.Trigger != domain.TriggerSchedule || !got.ScheduledFor.Equal(day(23, 9)) {
+		t.Errorf("daily's record of the firing due while invalid: %+v", got)
+	}
+
+	// Fixed at 10:17, the next firings are the saved ones: an interval counted from now would fire at 10:17 tomorrow.
+	e.clock.Advance(76*time.Minute + 30*time.Second)
+	for id, content := range valid {
+		write(id, content)
+	}
+	e.app.scanTaskFiles(t.Context())
+	for id, want := range map[string]time.Time{"daily": day(24, 9), "every-day": day(24, 8)} {
+		if view, _ := e.app.GetTask(id); view.Invalid || view.NextFireAt == nil || !view.NextFireAt.Equal(want) {
+			t.Errorf("%s once fixed: invalid %v, next firing %v, want %v", id, view.Invalid, view.NextFireAt, want)
+		}
+	}
+	e.app.Tick()
+	for _, id := range []string{"daily", "every-day"} {
+		if runs := e.executions(id); len(runs) != 0 {
+			t.Errorf("a firing recorded as skipped ran %s once fixed: %+v", id, runs)
+		}
+	}
+
+	// Each fixed task fires at its saved next firing, on time.
+	for _, tc := range []struct {
+		id string
+		at time.Time
+	}{{"every-day", day(24, 8)}, {"daily", day(24, 9)}} {
+		e.clock.Advance(tc.at.Sub(e.clock.Now()) + 30*time.Second)
+		e.app.Tick()
+		runs := e.executions(tc.id)
+		if len(runs) != 1 {
+			t.Fatalf("%s at %v: %d executions, want 1: %+v", tc.id, tc.at, len(runs), runs)
+		}
+		x := e.wait(runs[0].ID, domain.StatusCompleted)
+		if x.Trigger != domain.TriggerSchedule || x.ScheduledFor == nil || !x.ScheduledFor.Equal(tc.at) {
+			t.Errorf("%s ran with trigger %s, scheduled for %v; want schedule at %v", tc.id, x.Trigger, x.ScheduledFor, tc.at)
+		}
+		e.idle(tc.id)
+	}
+}
+
 // A firing due while the machine slept is a misfire however soon the machine wakes, here 60 seconds after it; a sleep
 // that ended before a firing's time changes nothing.
 func TestMisfireDuringSleep(t *testing.T) {

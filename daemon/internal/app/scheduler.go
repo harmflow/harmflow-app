@@ -55,8 +55,16 @@ func (a *App) loadSchedule() {
 	} else if ok {
 		a.mu.Lock()
 		for id, s := range f.Tasks {
-			if _, exists := a.tasks[id]; exists {
-				a.sched[id] = s
+			e, exists := a.tasks[id]
+			if !exists {
+				continue
+			}
+			a.sched[id] = s
+			if e.invalid != nil && e.doc.Spec.Schedule == nil {
+				// The file has failed validation since the daemon started, so it has no valid definition of its own: it
+				// keeps the schedule the previous run saved, as a file that becomes invalid while the daemon runs keeps
+				// its last valid one, and its firings come due by it and are recorded as skipped.
+				e.doc.Spec.Schedule = savedSchedule(s)
 			}
 		}
 		for id, h := range f.Firings {
@@ -70,6 +78,18 @@ func (a *App) loadSchedule() {
 	for _, id := range ids {
 		a.rescheduleTask(id)
 	}
+}
+
+// savedSchedule is the schedule a saved state was computed from: its rule is an interval or a cron expression, as the
+// rule's String wrote it, in the saved time zone.
+func savedSchedule(s *scheduleState) *domain.Schedule {
+	sch := &domain.Schedule{Timezone: s.Timezone}
+	if _, err := domain.ParseInterval(s.Rule); err == nil {
+		sch.Interval = s.Rule
+	} else {
+		sch.Cron = s.Rule
+	}
+	return sch
 }
 
 // saveSchedule writes the schedules and the firing records. Saves run one at a time, each from its snapshot to the end
@@ -94,7 +114,8 @@ func (a *App) saveSchedule() {
 
 // rescheduleTask recomputes the next firing when the schedule changed, at once. An unchanged
 // schedule keeps its pending firing, so a restart still sees the misfire. A file that fails validation keeps the
-// schedule of its last valid definition, so its firings come due and are recorded as skipped.
+// schedule of its last valid definition, or the one the previous run saved when it has failed since the daemon started,
+// so its firings come due and are recorded as skipped.
 func (a *App) rescheduleTask(id string) {
 	a.mu.Lock()
 	e := a.tasks[id]
