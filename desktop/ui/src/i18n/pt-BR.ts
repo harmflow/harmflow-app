@@ -396,6 +396,7 @@ export const ptBR: Resources = {
     report_not_decodable: "report.json não pode ser decodificado ({{detail}}); foi ignorado",
     work_item_key_invalid:
       'o item de trabalho "{{workItem}}" não é uma chave da forma owner/repo#<número>; a sua seleção foi ignorada',
+    pull_request_not_opened: "o pull request de {{workItem}} não foi aberto",
     step_checking_harness: "Verificando o harness",
     step_preparing_workspace: "Preparando o workspace",
     step_starting_harness: "Iniciando {{harness}}",

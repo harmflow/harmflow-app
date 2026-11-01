@@ -397,6 +397,7 @@ export const esES: Resources = {
     report_not_decodable: "report.json no se puede decodificar ({{detail}}); se ignoró",
     work_item_key_invalid:
       'el elemento de trabajo "{{workItem}}" no es una clave de la forma owner/repo#<número>; su selección se ignoró',
+    pull_request_not_opened: "el pull request de {{workItem}} no se abrió",
     step_checking_harness: "Comprobando el harness",
     step_preparing_workspace: "Preparando el espacio de trabajo",
     step_starting_harness: "Iniciando {{harness}}",
