@@ -383,7 +383,11 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 		if network {
 			tools = append(tools, webTools...)
 		}
-		args = append(args, "--permission-mode", "dontAsk", "--tools", strings.Join(tools, ","))
+		// --tools limits the session's built-in tools, but a session given them still called Write (harmflow-app#603).
+		// A deny rule removes the writing and shell tools from the whole session, its subagents included, so none of them
+		// is available, as the restriction says.
+		args = append(args, "--permission-mode", "dontAsk", "--tools", strings.Join(tools, ","),
+			"--disallowedTools", strings.Join(writeTools, ","))
 		restrictions = append(restrictions, ports.Restriction{Name: "read_only", Enforced: true,
 			Text: domain.Text{Message: "no write or shell tool is available to the session"}})
 		if !network {

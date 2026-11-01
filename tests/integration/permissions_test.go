@@ -43,16 +43,19 @@ func TestWorkspaceWriteRealCodexWritesOnlyItsWorkspace(t *testing.T) {
 }
 
 // A read_only task on the real Claude Code asks the session to write one file inside its workspace and one outside it.
-// The session has no tool that writes, so it calls none, and after the execution neither file exists. The execution
-// carries no warning that the profile is not enforced.
+// The session is given no tool that writes, so every call it makes to one fails, and after the execution neither file
+// exists. A call to a tool the session was not given is the model's, not the profile's, and fails no case: the adapter
+// controls which tools the session gets, not which ones the model tries. The execution carries no warning that the
+// profile is not enforced.
 func TestReadOnlyRealClaudeCodeWritesNothing(t *testing.T) {
 	h := claudeForPermissions(t)
 	w := newWriteTargets(t)
 	r := runWithProfile(t, h, "read_only", w, w.prompt("the Write tool"))
 
 	for _, c := range r.calls {
-		if slices.Contains(writingTools, c.tool) {
-			t.Errorf("a read_only Claude Code session called %s (%s%s), want no tool that writes", c.tool, c.path, c.command)
+		if slices.Contains(writingTools, c.tool) && c.status != "failed" && c.status != "declined" {
+			t.Errorf("a read_only Claude Code session's %s call (%s%s) ended %q, want every call to a tool that writes to "+
+				"fail", c.tool, c.path, c.command, c.status)
 		}
 	}
 	wantAbsent(t, w.inside)
