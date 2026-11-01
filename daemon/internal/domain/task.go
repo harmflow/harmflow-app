@@ -166,12 +166,17 @@ type Concurrency struct {
 }
 
 // HarnessProfile is one harness a task may run with: its provider, and the model and effort to ask it for, where
-// DefaultModel and DefaultEffort leave the harness's own.
+// DefaultModel and DefaultEffort leave the harness's own. Ephemeral false asks the harness to keep its session where it
+// keeps its own, for the owner to read or resume; unset or true, the default, it keeps none.
 type HarnessProfile struct {
-	Provider string `yaml:"provider" json:"provider"`
-	Model    string `yaml:"model,omitempty" json:"model,omitempty"`
-	Effort   string `yaml:"effort,omitempty" json:"effort,omitempty"`
+	Provider  string `yaml:"provider" json:"provider"`
+	Model     string `yaml:"model,omitempty" json:"model,omitempty"`
+	Effort    string `yaml:"effort,omitempty" json:"effort,omitempty"`
+	Ephemeral *bool  `yaml:"ephemeral,omitempty" json:"ephemeral,omitempty"`
 }
+
+// KeepsSession reports whether the profile asks the harness to keep its session: Ephemeral set to false.
+func (p HarnessProfile) KeepsSession() bool { return p.Ephemeral != nil && !*p.Ephemeral }
 
 // HarnessSelection is the harness profile a task prefers and the policy for failing over from it.
 type HarnessSelection struct {
@@ -434,6 +439,9 @@ func (p HarnessProfile) withDefaults() HarnessProfile {
 	}
 	if p.Effort == "" {
 		p.Effort = DefaultEffort
+	}
+	if p.Ephemeral == nil {
+		p.Ephemeral = ptr(true)
 	}
 	return p
 }

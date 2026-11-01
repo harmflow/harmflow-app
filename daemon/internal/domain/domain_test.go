@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -71,21 +72,27 @@ func TestEffectiveWorkspaceFollowsTheType(t *testing.T) {
 	}
 }
 
-// A preferred or fallback profile that sets no model or effort reads default for both, which leaves each harness its
-// own; a value a profile sets is kept.
+// A preferred or fallback profile that sets no model, effort, or ephemeral reads default for the first two, which
+// leaves each harness its own, and an ephemeral session; a value a profile sets is kept.
 func TestProfilesReadDefaults(t *testing.T) {
 	d := minimalTask()
 	d.Spec.Harness.Fallback = &FallbackPolicy{Candidates: []HarnessProfile{{Provider: HarnessCodex},
-		{Provider: HarnessCodex, Model: "gpt-x"}}}
+		{Provider: HarnessCodex, Model: "gpt-x", Ephemeral: ptr(false)}}}
 	want := []HarnessProfile{
-		{Provider: HarnessClaudeCode, Model: DefaultModel, Effort: DefaultEffort},
-		{Provider: HarnessCodex, Model: DefaultModel, Effort: DefaultEffort},
-		{Provider: HarnessCodex, Model: "gpt-x", Effort: DefaultEffort},
+		{Provider: HarnessClaudeCode, Model: DefaultModel, Effort: DefaultEffort, Ephemeral: ptr(true)},
+		{Provider: HarnessCodex, Model: DefaultModel, Effort: DefaultEffort, Ephemeral: ptr(true)},
+		{Provider: HarnessCodex, Model: "gpt-x", Effort: DefaultEffort, Ephemeral: ptr(false)},
 	}
-	if got := d.Profiles(); !slices.Equal(got, want) {
+	if got := d.Profiles(); !reflect.DeepEqual(got, want) {
 		t.Errorf("profiles %+v, want %+v", got, want)
 	}
-	if d.Spec.Harness.Preferred.Model != "" || d.Spec.Harness.Fallback.Candidates[0].Effort != "" {
+	for i, keeps := range []bool{false, false, true} {
+		if got := d.Profiles()[i].KeepsSession(); got != keeps {
+			t.Errorf("Profiles()[%d].KeepsSession() = %t, want %t", i, got, keeps)
+		}
+	}
+	if d.Spec.Harness.Preferred.Model != "" || d.Spec.Harness.Fallback.Candidates[0].Effort != "" ||
+		d.Spec.Harness.Preferred.Ephemeral != nil {
 		t.Error("Profiles mutated the document")
 	}
 }

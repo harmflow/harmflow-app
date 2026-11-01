@@ -196,6 +196,15 @@ func (a *App) semanticChecks(ctx context.Context, r *ValidationResult, doc domai
 				r.addWarning(path, domain.WarningOther, text)
 			}
 		}
+		if p.KeepsSession() {
+			if keepsSessions(ad) {
+				r.addWarning(path+"/ephemeral", domain.WarningOther, sessionKeptNote(ad.Name()))
+			} else {
+				r.addError(path+"/ephemeral", domain.T("harness_session_not_kept",
+					"{{harness}} cannot keep its session, so ephemeral cannot be false on {{profile}}",
+					"harness", ad.Name(), "profile", path))
+			}
+		}
 		if !doc.AllowsExtraUsage() && !reportsExtraUsage(ad) {
 			r.addWarning(path+"/provider", domain.WarningPolicyUnenforced, extraUsageUnenforced(ad.Name()))
 		}
@@ -412,6 +421,20 @@ func (a *App) policyWarnings(ctx context.Context, doc domain.TaskDocument) []dom
 func reportsExtraUsage(ad ports.HarnessAdapter) bool {
 	r, ok := ad.(ports.ExtraUsageReporter)
 	return ok && r.ReportsExtraUsage()
+}
+
+// keepsSessions reports whether the harness can keep a session for the owner, as a profile with ephemeral false asks.
+func keepsSessions(ad ports.HarnessAdapter) bool {
+	k, ok := ad.(ports.SessionKeeper)
+	return ok && k.KeepsSessions()
+}
+
+// sessionKeptNote says what a session the harness keeps holds, and where it stays: the note the task form shows under
+// the ephemeral toggle while it is off, and the warning a task saved with ephemeral false gets.
+func sessionKeptNote(harness string) domain.Text {
+	return domain.T("session_kept_note",
+		"the kept session holds everything the session read and printed, command output included, and stays under the {{harness}} home, outside HarmFlow's log retention, until you delete it",
+		"harness", harness)
 }
 
 // extraUsageUnenforced says a task that allows no extra usage can be held to it on a harness only before each attempt

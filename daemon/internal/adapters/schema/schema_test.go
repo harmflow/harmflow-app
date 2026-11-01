@@ -139,6 +139,56 @@ func TestTypeParametersAndLocation(t *testing.T) {
 	}
 }
 
+// harmflow-app#473: ephemeral is a boolean of each harness profile, preferred and fallback alike; a task that leaves it
+// out reads it as true, and a task written from a document writes it only when it differs from that default.
+func TestHarnessProfileEphemeral(t *testing.T) {
+	v, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	withFallback := valid + "    fallback:\n      candidates:\n        - provider: codex\n          ephemeral: false\n"
+	for _, c := range []struct {
+		name, text, wantPath string
+	}{
+		{"false on the preferred profile", strings.Replace(valid, "provider: claude-code",
+			"provider: codex\n      ephemeral: false", 1), ""},
+		{"true on the preferred profile", strings.Replace(valid, "provider: claude-code",
+			"provider: codex\n      ephemeral: true", 1), ""},
+		{"false on a fallback candidate", withFallback, ""},
+		{"not a boolean", strings.Replace(valid, "provider: claude-code", "provider: codex\n      ephemeral: \"no\"", 1),
+			"/spec/harness/preferred/ephemeral"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			doc, node, issues := ParseYAML([]byte(c.text))
+			if len(issues) == 0 {
+				issues = v.ValidateTask(doc, node)
+			}
+			switch {
+			case c.wantPath == "" && len(issues) > 0:
+				t.Errorf("ValidateTask = %+v, want no issue", issues)
+			case c.wantPath != "" && (len(issues) == 0 || issues[0].Path != c.wantPath):
+				t.Errorf("ValidateTask = %+v, want an issue at %s", issues, c.wantPath)
+			}
+		})
+	}
+
+	var task domain.TaskDocument
+	if err := yaml.Unmarshal([]byte(withFallback), &task); err != nil {
+		t.Fatal(err)
+	}
+	profiles := task.Profiles()
+	if len(profiles) != 2 || profiles[0].KeepsSession() || !profiles[1].KeepsSession() {
+		t.Errorf("Profiles() = %+v, want the preferred ephemeral and the candidate keeping its session", profiles)
+	}
+	out, err := yaml.Marshal(task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(out), "ephemeral:"); n != 1 || !strings.Contains(string(out), "ephemeral: false") {
+		t.Errorf("yaml.Marshal wrote ephemeral %d times, want only the candidate's false:\n%s", n, out)
+	}
+}
+
 // legacyGitHub is a GitHub task under the type's legacy names, its block's localPath on line 15.
 const legacyGitHub = `apiVersion: harmflow/v1alpha1
 kind: Task

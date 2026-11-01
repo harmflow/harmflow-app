@@ -1008,3 +1008,93 @@ describe("task form extra usage", () => {
     }
   });
 });
+
+// A Codex profile, preferred or fallback, shows an Ephemeral session toggle beside Model and Effort, on unless its
+// document sets ephemeral: false. Off writes false and shows the note of what the kept session holds, the text the
+// daemon's validation warning gives; on removes the key, so the YAML writes it only when it differs from the default. A
+// Claude Code profile, which cannot keep its session, shows no toggle (harmflow-app#473). What the daemon does with the
+// setting is codex › TestPrepareEphemeralSession's and app › TestEphemeralFalseNeedsAHarnessThatKeepsSessions's.
+describe("task form ephemeral session", () => {
+  let current: Doc = {};
+
+  function Form({ doc }: { doc: Doc }) {
+    const [value, setValue] = useState(doc);
+    current = value;
+    return <TaskForm doc={value} onChange={(d) => setValue((current = d))} mode="edit" harnesses={[]} errorPaths={new Set()} />;
+  }
+
+  async function openForm(doc: Doc) {
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(<Form doc={doc} />));
+    await settle();
+  }
+
+  const NOTE =
+    "the kept session holds everything the session read and printed, command output included, and stays under the Codex home, outside HarmFlow's log retention, until you delete it";
+  /** A task whose preferred profile and fallback candidates are the ones given. */
+  const withProfiles = (preferred: Doc, ...candidates: Doc[]): Doc => {
+    const doc = task({});
+    return { ...doc, spec: { ...(doc.spec as Doc), harness: { preferred, ...(candidates.length ? { fallback: { candidates } } : {}) } } };
+  };
+  const harness = () => (current.spec as Doc).harness as { preferred: Doc; fallback?: { candidates: Doc[] } };
+  const profiles = () => [...host!.querySelectorAll("#section-harness .grid-profile")];
+  const toggle = (i: number) => profiles()[i]!.querySelector<HTMLInputElement>("label.toggle input");
+  const label = (i: number) => profiles()[i]!.querySelector("label.toggle")?.textContent;
+  const note = (i: number) => profiles()[i]!.querySelector(".grid-profile__note")?.textContent;
+  async function click(el: HTMLElement) {
+    await act(async () => el.click());
+  }
+
+  it("shows a Codex profile's toggle on beside Model and Effort, and writes no key", async () => {
+    await openForm(withProfiles({ provider: "codex" }));
+    expect(label(0)).toBe("Ephemeral session");
+    expect(toggle(0)!.checked).toBe(true);
+    const effort = [...profiles()[0]!.querySelectorAll(".field")].find((f) => f.querySelector(".field__label")?.textContent === "Effort")!;
+    expect(effort.compareDocumentPosition(toggle(0)!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(note(0)).toBeUndefined();
+    expect(harness().preferred).toStrictEqual({ provider: "codex" });
+  });
+
+  it("writes false and shows the note when turned off, and removes the key when turned on", async () => {
+    await openForm(withProfiles({ provider: "codex", model: "gpt-x" }));
+    await click(toggle(0)!);
+    expect(toggle(0)!.checked).toBe(false);
+    expect(harness().preferred).toStrictEqual({ provider: "codex", model: "gpt-x", ephemeral: false });
+    expect(note(0)).toBe(NOTE);
+
+    await click(toggle(0)!);
+    expect(toggle(0)!.checked).toBe(true);
+    expect(harness().preferred).toStrictEqual({ provider: "codex", model: "gpt-x" });
+    expect(note(0)).toBeUndefined();
+  });
+
+  it("opens a fallback whose file sets ephemeral: false off, with the note, and turns it on without the key", async () => {
+    await openForm(withProfiles({ provider: "claude-code" }, { provider: "codex", ephemeral: false }));
+    expect(toggle(0)).toBeNull();
+    expect(toggle(1)!.checked).toBe(false);
+    expect(note(1)).toBe(NOTE);
+    await click(toggle(1)!);
+    expect(harness().fallback!.candidates).toStrictEqual([{ provider: "codex" }]);
+  });
+
+  it("shows a Claude Code profile no toggle", async () => {
+    await openForm(withProfiles({ provider: "claude-code" }));
+    expect(toggle(0)).toBeNull();
+    expect(profiles()[0]!.textContent).not.toContain("Ephemeral session");
+  });
+
+  it.each([
+    ["pt-BR", "Sessão efêmera", "a sessão mantida guarda tudo"],
+    ["es-ES", "Sesión efímera", "la sesión conservada guarda todo"],
+  ])("labels the toggle and its note in %s", async (language, text, noteStart) => {
+    await i18n.changeLanguage(language);
+    try {
+      await openForm(withProfiles({ provider: "codex", ephemeral: false }));
+      expect(label(0)).toBe(text);
+      expect(note(0)?.startsWith(noteStart)).toBe(true);
+    } finally {
+      await i18n.changeLanguage("en-US");
+    }
+  });
+});

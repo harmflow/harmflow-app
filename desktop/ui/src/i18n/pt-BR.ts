@@ -351,6 +351,9 @@ export const ptBR: Resources = {
     codex_app_server_timed_out: "o app server do Codex não respondeu a {{method}} em {{seconds}} segundos",
     codex_app_server_error: "o app server do Codex respondeu a {{method}} com um erro: {{detail}}",
     fallback_repeats_preferred: "este fallback repete o harness e o modelo preferidos",
+    harness_session_not_kept: "o {{harness}} não consegue manter a sessão, então ephemeral não pode ser false em {{profile}}",
+    session_kept_note:
+      "a sessão mantida guarda tudo o que a sessão leu e imprimiu, incluindo a saída dos comandos, e fica na pasta do {{harness}}, fora da retenção de logs do HarmFlow, até você apagá-la",
     extra_usage_unenforced:
       "nada interrompe o {{harness}} depois que ele começa, então a proibição de uso extra da tarefa só é verificada antes de cada tentativa",
     path_variable_unterminated: 'referência a variável não terminada em "{{path}}"',
@@ -382,6 +385,8 @@ export const ptBR: Resources = {
       "o Codex não tem lista de ferramentas permitidas ou negadas; as listas personalizadas não são aplicadas",
     restriction_codex_read_only:
       "não está provado que o sandbox somente leitura do Codex recuse as alterações de arquivo que o próprio Codex faz; a sessão pode alterar arquivos do seu workspace",
+    restriction_codex_ephemeral_missing:
+      "o Codex {{version}} não tem --ephemeral, então mantém todas as sessões e a opção ephemeral da tarefa não muda nada",
     harness_version_untested: "{{harness}} {{version}} é mais novo que as versões com que o HarmFlow foi testado",
     harness_version_unknown: "{{harness}} não informou um número de versão, então o HarmFlow não sabe se foi testado com ela",
     quota_unread: "não foi possível ler a cota do {{harness}}, então a tentativa começou sem essa verificação: {{detail}}",
@@ -435,6 +440,7 @@ export const ptBR: Resources = {
     context_write_failed: "ao gravar context.json: {{detail}}",
     harness_started: "{{harness}} {{version}} iniciado",
     harness_session: "sessão {{session}} no modelo {{model}}",
+    harness_session_kept: "o harness mantém a sessão {{session}} em {{folder}}",
     harness_exited: "{{harness}} terminou ($t(attemptOutcome.{{attemptOutcome}}))",
     harness_exit_code: "{{harness}} saiu com o código {{code}}",
     harness_start_failed: "ao iniciar {{harness}}: {{detail}}",
@@ -1013,6 +1019,7 @@ export const ptBR: Resources = {
       provider: "Harness",
       model: "Modelo",
       effort: "Esforço",
+      ephemeral: "Sessão efêmera",
       harnessDefault: "Padrão do harness",
       fallbackCandidates: "Cadeia de fallback",
       addFallback: "Adicionar fallback",
