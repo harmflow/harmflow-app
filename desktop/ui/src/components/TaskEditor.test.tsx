@@ -10,23 +10,30 @@
 // (harmflow-app#230). A save shows the warnings the daemon gives, such as a fallback that cannot load the task's skill
 // (harmflow-app#216) or its agent (harmflow-app#347). The catalog is asked for with the task's ID, so a task with no
 // workspace path is offered the skills of the folder it runs in, which validation reads (harmflow-app#283).
+// An editor open on a task warns when the stream delivers a change of its file made outside HarmFlow, and a save from it
+// afterwards reports the conflict and overwrites nothing; each banner's actions load the file or keep the edit
+// (harmflow-app#593). What the daemon does with the changed file is itest › TestTaskLifecycle's and app ›
+// TestExternalEdits'.
 import { EditorView } from "@codemirror/view";
 import { isDeepStrictEqual } from "node:util";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi, type Mock } from "vitest";
-import type { Task, TaskInput, ValidationIssue, ValidationResult } from "../api/types";
+import type { StreamHandlers } from "../api/transport";
+import type { HarmflowEvent, Task, TaskInput, ValidationIssue, ValidationResult } from "../api/types";
 import i18n from "../i18n";
 import type { Doc } from "../lib/taskForm";
+import { patchStateForTests, startSync } from "../state/store";
 import { TaskEditor } from "./TaskEditor";
 import { Toasts } from "./toast";
 
-// The daemon as the client sees it: an answer per route, which may come later, and every request it received with its
-// body as sent.
+// The daemon as the client sees it: an answer per route, which may come later, every request it received with its
+// body as sent, and the stream it feeds.
 type Answer = { status: number; body: unknown };
 const daemon = vi.hoisted(() => ({
   routes: new Map<string, (body: unknown) => Answer | Promise<Answer>>(),
   requests: [] as { method: string; path: string; body: unknown }[],
+  stream: undefined as StreamHandlers | undefined,
 }));
 vi.mock("../api/transport", () => ({
   isTauri: () => false,
@@ -41,7 +48,10 @@ vi.mock("../api/transport", () => ({
       return route ? route(sent) : { status: 404, body: null };
     },
     requestText: async () => ({ status: 404, text: "" }),
-    stream: () => () => {},
+    stream: (handlers: StreamHandlers) => {
+      daemon.stream = handlers;
+      return () => {};
+    },
   },
 }));
 
@@ -637,5 +647,141 @@ describe("task editor ⌘S", () => {
     } finally {
       await act(async () => void i18n.changeLanguage("en-US"));
     }
+  });
+});
+
+describe("task editor after an outside change", () => {
+  const WARNING = "This task's file was changed outside HarmFlow while you were editing.";
+  const LOAD = "Load the file's version";
+  const KEEP = "Keep my edits";
+
+  /** The event the daemon's watcher emits once it loaded a task's file changed outside HarmFlow. */
+  const changed = (id: number, taskId = "standup"): HarmflowEvent => ({
+    id,
+    schemaVersion: "1",
+    timestamp: "2026-10-30T09:00:00Z",
+    taskId,
+    type: "task.changed_externally",
+    severity: "info",
+    message: "the task file was changed outside HarmFlow",
+    messageKey: "task_changed_externally",
+    payload: { revision: "r2" },
+  });
+
+  /** The daemon's refusal of a save whose base revision is no longer the file's. */
+  const refuse = () => ({
+    status: 409,
+    body: { error: { code: "revision_conflict", message: "the task changed since it was read", currentRevision: "r2" } },
+  });
+
+  /** The task as its file reads after the outside change, at r2. */
+  const changedTask = storedTask(taskDoc("Standup digest"), "r2");
+
+  // The store takes the stream's events as the app does: its sync starts once per module, and its periodic refreshes,
+  // started on a fake clock, never run.
+  beforeAll(() => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    startSync();
+    vi.useRealTimers();
+  });
+
+  afterEach(() => patchStateForTests({ externalChanges: {} }));
+
+  /** Delivers an event as the stream does, through the store's event handling. */
+  async function deliver(event: HarmflowEvent) {
+    act(() => daemon.stream!.onEvent(event));
+    await settle();
+  }
+
+  const banner = (tone: "warning" | "danger") => host!.querySelector<HTMLElement>(`.banner--${tone}`);
+  const bannerText = (tone: "warning" | "danger") => banner(tone)?.querySelector(".banner__text")?.textContent ?? null;
+  const bannerActions = (tone: "warning" | "danger") => [...banner(tone)!.querySelectorAll<HTMLButtonElement>("button")].map((b) => b.textContent);
+  const bannerButton = (tone: "warning" | "danger", label: string) =>
+    [...banner(tone)!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === label)!;
+  const name = () => nameField().querySelector("input")!;
+  /** The success notices showing; an earlier test's may still be, so a test compares their nodes, one per notice. */
+  const successNotices = () => [...host!.querySelectorAll(".toast--success")];
+
+  it("warns when its task's file changes outside HarmFlow, and not for another task's", async () => {
+    await open("edit");
+    await deliver(changed(41, "release"));
+    expect(banner("warning")).toBeNull();
+
+    await deliver(changed(42));
+    expect(bannerText("warning")).toBe(WARNING);
+    expect(bannerActions("warning")).toEqual([LOAD, KEEP]);
+    expect(banner("danger")).toBeNull();
+  });
+
+  it("does not warn about a change made before it was opened, only about a later one", async () => {
+    await deliver(changed(41));
+    await open("edit");
+    expect(banner("warning")).toBeNull();
+
+    await deliver(changed(42));
+    expect(bannerText("warning")).toBe(WARNING);
+  });
+
+  it("sends a save after the warning on the revision it opened at, and shows the conflict instead of saving", async () => {
+    await open("edit");
+    await type(name(), "Standup summary");
+    await deliver(changed(41));
+    expect(bannerText("warning")).toBe(WARNING);
+
+    daemon.routes.set("PUT /tasks/standup", refuse);
+    const notices = new Set(successNotices());
+    await save();
+    expect(sent("PUT", "/tasks/standup")).toEqual([{ document: taskDoc("Standup summary"), baseRevision: "r1" }]);
+    expect(bannerText("danger")).toContain("The file changed on disk");
+    expect(bannerActions("danger")).toEqual([LOAD, KEEP]);
+    expect(banner("warning")).toBeNull();
+    expect(name().value).toBe("Standup summary");
+    expect(unsaved()).toBe("Unsaved changes");
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(successNotices().filter((n) => !notices.has(n))).toEqual([]);
+  });
+
+  it.each([
+    ["the warning", "warning"],
+    ["the conflict banner", "danger"],
+  ] as const)("loads the file's version from %s, and the next save builds on its revision", async (_, tone) => {
+    await open("edit");
+    const put = daemon.routes.get("PUT /tasks/standup")!;
+    await type(name(), "Standup summary");
+    await deliver(changed(41));
+    if (tone === "danger") {
+      daemon.routes.set("PUT /tasks/standup", refuse);
+      await save();
+      daemon.routes.set("PUT /tasks/standup", put);
+    }
+    expect(banner(tone)).not.toBeNull();
+
+    daemon.routes.set("GET /tasks/standup", () => ({ status: 200, body: changedTask }));
+    await click(bannerButton(tone, LOAD));
+    expect(sent("GET", "/tasks/standup")).toEqual([undefined]);
+    expect(name().value).toBe("Standup digest");
+    expect(banner("warning")).toBeNull();
+    expect(banner("danger")).toBeNull();
+    expect(unsaved()).toBeNull();
+
+    await click(tab("YAML"));
+    expect(yamlText()).toBe(changedTask.yaml);
+    await click(tab("Form"));
+    await save();
+    expect(sent("PUT", "/tasks/standup").at(-1)).toEqual({ document: taskDoc("Standup digest"), baseRevision: "r2" });
+  });
+
+  it("keeps the edit when told to, and the same event does not bring the warning back", async () => {
+    await open("edit");
+    await type(name(), "Standup summary");
+    await deliver(changed(41));
+    await click(bannerButton("warning", KEEP));
+    expect(banner("warning")).toBeNull();
+    expect(name().value).toBe("Standup summary");
+    expect(unsaved()).toBe("Unsaved changes");
+    expect(sent("GET", "/tasks/standup")).toEqual([]);
+
+    await deliver(changed(41));
+    expect(banner("warning")).toBeNull();
   });
 });
