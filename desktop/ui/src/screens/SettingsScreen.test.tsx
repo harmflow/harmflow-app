@@ -2,6 +2,8 @@
 // Drives the Storage section's log retention field against a stand-in for the daemon's local API: the field reads the
 // saved period, Apply sends the one typed, and a period the daemon rejects stays an unsaved change. What the daemon does
 // with the setting — its bounds, its default, and its persistence across a restart — is app › TestLogRetentionSetting's.
+// Drives the same section's Clean workspaces control too: one clean-up request, no second click while it runs, and
+// what the daemon removed and kept, or its error. Which worktrees the daemon removes is app › CleanWorkspaces' tests'.
 // Then shows what AI tools, Security, and Storage read from the harnesses, the tools, and the diagnostics in the store:
 // each harness's readiness and path, the command-line tools, the token store, the disk used, and the directories with
 // their Show in Finder buttons, which ask the desktop's bridge to open the row's path.
@@ -16,11 +18,13 @@ import i18n from "../i18n";
 import { patchStateForTests } from "../state/store";
 import { SettingsScreen, type SettingsSection } from "./SettingsScreen";
 
-// The daemon as the client sees it: the settings it serves, every request it received with its body, and a settings
-// update applied as the daemon applies it, a period outside 1 to 3650 refused with the daemon's own error.
+// The daemon as the client sees it: the settings it serves, every request it received with its body, a settings
+// update applied as the daemon applies it, a period outside 1 to 3650 refused with the daemon's own error, and the
+// answer each test gives a workspace clean-up.
 const daemon = vi.hoisted(() => ({
   settings: undefined as unknown as Settings,
   requests: [] as { method: string; path: string; body: unknown }[],
+  clean: undefined as undefined | (() => Promise<{ status: number; body: unknown }>),
 }));
 vi.mock("../api/transport", () => ({
   isTauri: () => false,
@@ -47,6 +51,7 @@ vi.mock("../api/transport", () => ({
         daemon.settings = { ...daemon.settings, ...(body as Partial<Settings>) };
         return { status: 200, body: daemon.settings };
       }
+      if (method === "POST" && path === "/workspaces/clean" && daemon.clean) return daemon.clean();
       return { status: 404, body: null };
     },
     requestText: async () => ({ status: 404, text: "" }),
@@ -93,6 +98,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   daemon.requests.length = 0;
+  daemon.clean = undefined;
   patchStateForTests({ settings: undefined, diagnostics: undefined, harnesses: [], tools: [] });
 });
 
@@ -196,6 +202,75 @@ describe("the Storage section's log retention field", () => {
     expect(confirm.mock.calls).toEqual([
       ["Leaving this section discards the changes that were not saved or applied.", "Discard unsaved changes?", "Discard", "Cancel"],
     ]);
+  });
+});
+
+describe("the Storage section's Clean workspaces control", () => {
+  const workspace = "/Users/me/Library/Application Support/HarmFlow/workspace/fix-issues";
+  /** The worktree of an item whose pull request was merged, which the daemon removes. */
+  const merged = `${workspace}/harmflow-app-12`;
+  /** The worktree of a draft still in progress, which the daemon keeps. */
+  const draft = `${workspace}/harmflow-app-15`;
+
+  const cleanButton = () =>
+    [...host!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Clean workspaces")!;
+  /** Every request that could change something: anything but a read. */
+  const changes = () => daemon.requests.filter((r) => r.method !== "GET");
+  const result = () => host!.querySelector(".banner--success");
+
+  it("sends one clean-up request, and takes no second click until the daemon answers", async () => {
+    let answer!: (res: { status: number; body: unknown }) => void;
+    daemon.clean = () => new Promise((resolve) => (answer = resolve));
+    await open();
+    daemon.requests.length = 0;
+    expect(cleanButton().disabled).toBe(false);
+
+    await click(cleanButton());
+    expect(changes()).toStrictEqual([{ method: "POST", path: "/workspaces/clean", body: undefined }]);
+    expect(cleanButton().disabled).toBe(true);
+    await click(cleanButton());
+    expect(changes()).toHaveLength(1);
+
+    await act(async () => answer({ status: 200, body: { removed: [], kept: [] } }));
+    await settle();
+    expect(cleanButton().disabled).toBe(false);
+    expect(changes()).toHaveLength(1);
+  });
+
+  it("shows what the daemon removed and what it kept, with the reason", async () => {
+    daemon.clean = async () => ({
+      status: 200,
+      body: { removed: [merged], kept: [{ path: draft, reason: "its draft pull request is still in progress" }] },
+    });
+    await open();
+    daemon.requests.length = 0;
+
+    await click(cleanButton());
+    expect(changes()).toStrictEqual([{ method: "POST", path: "/workspaces/clean", body: undefined }]);
+    expect(result()!.textContent).toContain("1 removed, 1 kept.");
+    expect([...result()!.querySelectorAll(".clean-list li")].map((li) => li.textContent)).toStrictEqual([
+      `− ${merged}`,
+      `= ${draft} — Kept: its draft pull request is still in progress`,
+    ]);
+    expect(toasts()).toEqual([]);
+    expect(cleanButton().disabled).toBe(false);
+  });
+
+  it("shows the daemon's error in a danger toast, and no result", async () => {
+    // The error the daemon answers on this route: its token check runs before the clean-up does.
+    daemon.clean = async () => ({
+      status: 401,
+      body: { error: { code: "unauthorized", message: "a valid token is required", messageKey: "token_required" } },
+    });
+    await open();
+    daemon.requests.length = 0;
+
+    await click(cleanButton());
+    expect(changes()).toStrictEqual([{ method: "POST", path: "/workspaces/clean", body: undefined }]);
+    expect(toasts()).toEqual([{ tone: "danger", text: "a valid token is required" }]);
+    expect(result()).toBeNull();
+    expect(host!.querySelector(".clean-list")).toBeNull();
+    expect(cleanButton().disabled).toBe(false);
   });
 });
 
