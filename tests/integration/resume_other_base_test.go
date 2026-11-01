@@ -3,8 +3,12 @@ package integration
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -105,8 +109,10 @@ func TestDraftIntoAnotherBaseBranchIsResumedAsItsIssues(t *testing.T) {
 		t.Errorf("progress.jsonl selects %v, want %s alone\n%s", selected, key, runFiles(dir))
 	}
 	checkUpdatedPullRequest(t, d, next, dir, issue, draft)
-	if item := queuedItem(d, key); item == nil || item["resumes"] != 1.0 {
-		t.Errorf("after execution %s, GET /queue gives %s as %v, want it resumed once", next, key, item)
+	// GET /queue lists only the items in play, and a resumed item whose draft was updated is completed, so the ledger
+	// is read from its files.
+	if item := heldWorkItem(t, home, resumeDraftTask, key); item == nil || item["resumes"] != 1.0 {
+		t.Errorf("after execution %s, the ledger holds %s as %v, want it resumed once", next, key, item)
 	}
 
 	prs, err := otherBasePullRequests([]string{base}, []int{issue})
@@ -253,6 +259,35 @@ func deleteSandboxBranch(t *testing.T, branch string) {
 	if _, err := newWorkGh("repos/"+queueRepo+"/git/refs/heads/"+branch, "-X", "DELETE"); err != nil {
 		t.Errorf("cleanup: deleting the branch %s: %v", branch, err)
 	}
+}
+
+// heldWorkItem is the task's work item under key as the daemon's ledger in home holds it, nil when it holds none. The
+// ledger is read from its files, the archive of closed items first, then the items still in play, which hold an item's
+// later copy, as resumeLimitHeld reads the queue task's.
+func heldWorkItem(t *testing.T, home, task, key string) map[string]any {
+	t.Helper()
+	var held map[string]any
+	for _, name := range []string{"workitems-archive.json", "workitems.json"} {
+		data, err := os.ReadFile(filepath.Join(home, "state", name))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		var f struct {
+			Tasks map[string]map[string]map[string]any `json:"tasks"`
+		}
+		if err := json.Unmarshal(data, &f); err != nil {
+			t.Fatal(err)
+		}
+		for k, item := range f.Tasks[task] {
+			if strings.EqualFold(k, key) {
+				held = item
+			}
+		}
+	}
+	return held
 }
 
 // otherBasePullRequests lists the pull requests of queueRepo, in any state, into one of the base branches or whose body
