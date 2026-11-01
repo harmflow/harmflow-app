@@ -49,6 +49,10 @@ type run struct {
 	items          []attemptWorkItem // the work items the current attempt works, guarded by a.mu
 	finalText      string            // the agent's last message, the summary when the session leaves no report
 	hasContext     bool              // context.json holds parameters or history the session can use, not only the task's identity
+	// lineOperation is set while the last operation is a pull request a progress line recorded, and lineCommands is how
+	// many commands had started when that line was read; both are guarded by the App's mutex.
+	lineOperation bool
+	lineCommands  int
 	// ownEnd is set while the outcome is the end of an attempt whose harness exited on its own: a daemon that began
 	// stopping while what it left running was ended does not make that outcome interrupted.
 	ownEnd bool
@@ -1094,9 +1098,13 @@ func (r *run) onHarnessEvent(he ports.HarnessEvent) {
 			}
 			c.ExitCode = he.ExitCode
 			r.x.Changed()
-			if status == "succeeded" {
+			// A command that was running when a progress line recorded a pull request, and that names the progress file,
+			// is the one that wrote the line: it ending later leaves the pull request as the last operation.
+			wroteLine := r.lineOperation && i < r.lineCommands && strings.Contains(c.Command, "progress.jsonl")
+			if status == "succeeded" && !wroteLine {
 				r.lastOperation = trimTo(c.Command, 300)
 				r.x.LastOperation = r.lastOperation
+				r.lineOperation = false
 				recorded = true
 			}
 		}
@@ -1247,6 +1255,7 @@ func (r *run) onProgress(p domain.ProgressLine) {
 		}
 		r.lastOperation = p.Type + " " + p.URL
 		r.x.LastOperation = r.lastOperation
+		r.lineOperation, r.lineCommands = true, len(r.x.Commands)
 		r.x.Changed()
 		a.mu.Unlock()
 		r.save(true) // setStatus saves only the move to publishing, not a later pull request
@@ -1264,6 +1273,7 @@ func (r *run) onProgress(p domain.ProgressLine) {
 			a.mu.Lock()
 			r.lastOperation = msg
 			r.x.LastOperation = msg
+			r.lineOperation = false
 			r.x.Changed()
 			if it := r.attemptItem(firstNonEmpty(p.WorkItem, r.x.WorkItem), p.Repository); it != nil {
 				it.Branch = p.Branch
