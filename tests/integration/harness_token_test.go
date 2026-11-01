@@ -163,7 +163,8 @@ func TestHarnessTokenThroughTheKeychain(t *testing.T) {
 	noLeakInHome(t, homeFiles(t, home), map[string]string{"the token": token})
 }
 
-// harmflow-app#733: a daemon that keeps its secrets in a file keeps no token, and says so.
+// harmflow-app#733: a daemon that keeps its secrets in a file keeps no token, and says so; a body whose token is no
+// string is refused.
 func TestHarnessTokenNeedsACredentialStore(t *testing.T) {
 	t.Parallel()
 	d := startDaemon(t, t.TempDir())
@@ -174,6 +175,13 @@ func TestHarnessTokenNeedsACredentialStore(t *testing.T) {
 	if status != 409 || !strings.Contains(string(body), "harness_token_store_unavailable") {
 		t.Errorf("PUT /harnesses/claude-code/token with the file store = %d %s, want 409 harness_token_store_unavailable",
 			status, body)
+	}
+	if status, body := d.request("DELETE", "/harnesses/claude-code/token", nil, nil); status != 409 ||
+		!strings.Contains(string(body), "harness_token_store_unavailable") {
+		t.Errorf("DELETE /harnesses/claude-code/token with the file store = %d %s, want 409", status, body)
+	}
+	if status, _ := d.request("PUT", "/harnesses/codex/token", map[string]any{"token": 7}, nil); status != 400 {
+		t.Errorf("PUT /harnesses/codex/token with a token that is no string = %d, want 400", status)
 	}
 }
 
