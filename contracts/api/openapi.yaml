@@ -898,6 +898,7 @@ components:
         - restriction_claude_allow_rules
         - restriction_claude_edit_rules
         - restriction_codex_tool_lists
+        - restriction_codex_read_only
         - restriction_script_unenforced
         - script_leftovers_ended
         - harness_version_untested
