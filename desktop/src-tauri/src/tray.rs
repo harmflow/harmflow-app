@@ -12,6 +12,7 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
+use crate::daemon::ApiResponse;
 use crate::state::{ActiveExecution, AppState};
 
 const TRAY_ID: &str = "main";
@@ -199,8 +200,13 @@ fn stop_request(count: usize, confirmed: bool) -> Option<Request> {
 pub fn confirm_stop<R: Runtime>(app: &AppHandle<R>) {
     let state = app.state::<Arc<AppState>>().inner().clone();
     let count = state.tray_running.lock().map(|r| r.len()).unwrap_or(0);
+    ask_stop(app, state, count);
+}
+
+/// Asks to stop the daemon with the dialog for `count` running executions, and sends the stop once the user confirms.
+fn ask_stop<R: Runtime>(app: &AppHandle<R>, state: Arc<AppState>, count: usize) {
     let dialog = stop_dialog(count, |key, fallback| state.label(key, fallback));
-    let app = app.clone();
+    let handle = app.clone();
     app.dialog()
         .message(dialog.message)
         .title(dialog.title)
@@ -208,11 +214,63 @@ pub fn confirm_stop<R: Runtime>(app: &AppHandle<R>) {
         .buttons(MessageDialogButtons::OkCancelCustom(dialog.ok, dialog.cancel))
         .show(move |confirmed| {
             let Some(request) = stop_request(count, confirmed) else { return };
-            let state = state.clone();
-            tauri::async_runtime::spawn(async move {
-                let _ = state.daemon.request(request.method, request.path, Some(request.body)).await;
-            });
+            tauri::async_runtime::spawn(stop(handle, state, request));
         });
+}
+
+/// Sends the stop and follows the daemon's answer: a refusal is never dropped (harmflow-app#630).
+async fn stop<R: Runtime>(app: AppHandle<R>, state: Arc<AppState>, request: Request) {
+    let forced = request.body.get("force").and_then(Value::as_bool).unwrap_or(false);
+    let res = state.daemon.request(request.method, request.path, Some(request.body)).await;
+    match after_stop(&res, forced) {
+        AfterStop::Stopping => {}
+        AfterStop::ConfirmRunning(count) => ask_stop(&app, state, count),
+        AfterStop::Failed(message) => {
+            let ok = state.label("stopFailedOk", "OK");
+            app.dialog()
+                .message(message)
+                .title(state.label("stopFailedTitle", "The daemon did not stop"))
+                .kind(MessageDialogKind::Warning)
+                .buttons(MessageDialogButtons::OkCustom(ok))
+                .show(|_| {});
+        }
+    }
+}
+
+/// What the tray does after the daemon answers a stop.
+#[derive(Debug, PartialEq)]
+enum AfterStop {
+    /// The daemon accepted the stop.
+    Stopping,
+    /// The daemon refused an unforced stop while executions run: ask again with its count, then force the stop.
+    ConfirmRunning(usize),
+    /// Any other answer, or no answer: show the daemon's message, or the request's error.
+    Failed(String),
+}
+
+fn after_stop(res: &ApiResponse, forced: bool) -> AfterStop {
+    if (200..300).contains(&res.status) {
+        return AfterStop::Stopping;
+    }
+    let error = res.body.get("error");
+    let code = error.and_then(|e| e.get("code")).and_then(Value::as_str);
+    let count = error
+        .and_then(|e| e.get("params"))
+        .and_then(|p| p.get("count"))
+        .and_then(Value::as_str)
+        .and_then(|count| count.parse::<usize>().ok())
+        .filter(|count| *count > 0);
+    if let (false, Some("executions_running"), Some(count)) = (forced, code, count) {
+        return AfterStop::ConfirmRunning(count);
+    }
+    let message = match error.and_then(|e| e.get("message")).and_then(Value::as_str) {
+        Some(message) if !message.is_empty() => message.to_string(),
+        _ => match &res.body {
+            Value::String(text) if !text.is_empty() => text.clone(),
+            _ => format!("The daemon answered HTTP {}.", res.status),
+        },
+    };
+    AfterStop::Failed(message)
 }
 
 #[cfg(test)]
@@ -238,6 +296,22 @@ mod tests {
 
     fn running(n: usize) -> Vec<ActiveExecution> {
         (1..=n).map(|i| ActiveExecution { id: format!("exec-{i}"), label: format!("Task {i}") }).collect()
+    }
+
+    fn answer(status: u16, body: Value) -> ApiResponse {
+        ApiResponse { status, body }
+    }
+
+    fn refused_running(count: &str) -> ApiResponse {
+        answer(
+            409,
+            json!({ "error": {
+                "code": "executions_running",
+                "message": format!("{count} executions are running; confirm to stop the daemon and cancel them"),
+                "messageKey": "executions_running",
+                "params": { "count": count },
+            } }),
+        )
     }
 
     #[test]
@@ -325,5 +399,54 @@ mod tests {
         };
         assert_eq!(items(&menu_entries(&running(3), label))[0].1, "3 em execução");
         assert_eq!(stop_dialog(3, label).message, "3 execuções em andamento.");
+    }
+
+    #[test]
+    fn an_accepted_stop_shows_nothing() {
+        assert_eq!(after_stop(&answer(202, Value::Null), false), AfterStop::Stopping);
+        assert_eq!(after_stop(&answer(202, Value::Null), true), AfterStop::Stopping);
+    }
+
+    #[test]
+    fn a_stop_refused_for_running_executions_asks_again_with_the_daemons_count() {
+        // The tray's own list read no execution, so it sent no force; the daemon counted two.
+        assert_eq!(after_stop(&refused_running("2"), false), AfterStop::ConfirmRunning(2));
+        // The dialog asked again names the daemon's count and, confirmed, forces the stop.
+        assert_eq!(
+            stop_dialog(2, defaults).message,
+            "2 executions are running. Stopping the daemon now interrupts them."
+        );
+        assert_eq!(stop_request(2, true).map(|r| r.body), Some(json!({ "force": true })));
+    }
+
+    #[test]
+    fn a_forced_stop_that_is_still_refused_shows_the_daemons_message() {
+        // A confirmed stop is never asked again in a loop.
+        assert_eq!(
+            after_stop(&refused_running("1"), true),
+            AfterStop::Failed("1 executions are running; confirm to stop the daemon and cancel them".into())
+        );
+    }
+
+    #[test]
+    fn a_refusal_for_another_reason_shows_the_daemons_message() {
+        let res = answer(500, json!({ "error": { "code": "internal", "message": "the event log is full" } }));
+        assert_eq!(after_stop(&res, false), AfterStop::Failed("the event log is full".into()));
+    }
+
+    #[test]
+    fn a_daemon_that_cannot_be_reached_shows_the_requests_error() {
+        // DaemonClient::request answers status 0 with the request's error when nothing answers.
+        let res = answer(0, json!({ "error": { "code": "internal", "message": "error sending request" } }));
+        assert_eq!(after_stop(&res, false), AfterStop::Failed("error sending request".into()));
+    }
+
+    #[test]
+    fn an_answer_with_no_message_still_says_what_happened() {
+        assert_eq!(after_stop(&answer(502, json!("Bad Gateway")), false), AfterStop::Failed("Bad Gateway".into()));
+        assert_eq!(
+            after_stop(&answer(409, json!({ "error": { "code": "executions_running" } })), false),
+            AfterStop::Failed("The daemon answered HTTP 409.".into())
+        );
     }
 }

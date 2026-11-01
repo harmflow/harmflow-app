@@ -113,6 +113,8 @@ export function App() {
       stopConfirm: t("settings.stopConfirm"),
       stopConfirmRunning: t("settings.stopConfirmRunning", { count: "{{count}}" as unknown as number }),
       stopOk: t("settings.stopDaemon"),
+      stopFailedTitle: t("settings.stopFailedTitle"),
+      stopFailedOk: t("settings.stopFailedOk"),
       cancel: t("common.cancel"),
       settings: t("menu.settings"),
     });
