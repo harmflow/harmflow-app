@@ -77,12 +77,17 @@ func (w *fakeWake) woke(at time.Time) {
 type fakeHarness struct {
 	id          string
 	mu          sync.Mutex
-	unavailable bool
-	script      func(req ports.RunRequest) string
-	prompts     []string
-	live        int           // attempts prepared to run whose parser has not finished
-	gate        chan struct{} // Detect waits for it to close, when set
-	held        int           // Detect calls waiting for the gate
+	unavailable bool // signed out
+	// notInstalled makes Detect find no CLI, with the diagnostic the real adapter gives.
+	notInstalled bool
+	// missing, when set, is the path Prepare runs instead of /bin/sh: a file that does not exist, as a CLI removed
+	// after its check, so the attempt cannot start.
+	missing string
+	script  func(req ports.RunRequest) string
+	prompts []string
+	live    int           // attempts prepared to run whose parser has not finished
+	gate    chan struct{} // Detect waits for it to close, when set
+	held    int           // Detect calls waiting for the gate
 	// cutLag is how long a held Detect takes to return once its context ends, as a CLI takes time to exit.
 	cutLag time.Duration
 	// quota answers ReadQuota when set; otherwise every read finds a quota with nothing used. quotaReads counts them.
@@ -114,7 +119,17 @@ func (f *fakeHarness) Detect(ctx context.Context, _ string) ports.HarnessInfo {
 	defer f.mu.Unlock()
 	info := ports.HarnessInfo{ID: f.id, Name: f.id, Detected: true, Path: "/bin/sh", Version: "1.0.0",
 		Authentication: "valid", Readiness: "ready", Models: []ports.ModelInfo{{ID: "default"}}, Efforts: []string{"default"}}
-	if f.unavailable {
+	switch {
+	case f.notInstalled:
+		info = ports.HarnessInfo{ID: f.id, Name: f.id, Authentication: "unknown", Readiness: "not_installed",
+			Models: []ports.ModelInfo{}, Efforts: []string{}}
+		if f.id == domain.HarnessCodex {
+			info.SetDiagnostic(domain.T("codex_not_found",
+				"codex was not found on PATH, in Codex.app, or in the usual install locations"))
+		} else {
+			info.SetDiagnostic(domain.T("claude_not_found", "claude was not found on PATH or in the usual install locations"))
+		}
+	case f.unavailable:
 		info.Readiness, info.Authentication = "not_ready", "invalid"
 		info.SetDiagnostic(domain.T("not_signed_in", "{{name}} is not signed in; run `{{command}}` in a terminal",
 			"name", f.id, "command", "login"))
@@ -163,8 +178,15 @@ func (f *fakeHarness) UserItems(context.Context, ports.HarnessInfo, string, stri
 func (f *fakeHarness) Prepare(_ ports.HarnessInfo, req ports.RunRequest) (ports.Invocation, ports.OutputParser, error) {
 	f.mu.Lock()
 	parser := &fakeParser{}
+	path := "/bin/sh"
+	if f.missing != "" {
+		path = f.missing
+	}
 	if req.Prompt != "" { // validation's policy check prepares with no prompt
 		f.prompts = append(f.prompts, req.Prompt)
+	}
+	// An attempt whose program cannot start never reaches its parser's Finish, so it never counts as live.
+	if req.Prompt != "" && path == "/bin/sh" {
 		f.live++
 		parser.finished = func() {
 			f.mu.Lock()
@@ -178,7 +200,7 @@ func (f *fakeHarness) Prepare(_ ports.HarnessInfo, req ports.RunRequest) (ports.
 	}
 	restrictions := slices.Clone(f.restrictions)
 	f.mu.Unlock()
-	return ports.Invocation{Path: "/bin/sh", Args: []string{"-c", script}, Env: req.Env, Dir: req.WorkDir,
+	return ports.Invocation{Path: path, Args: []string{"-c", script}, Env: req.Env, Dir: req.WorkDir,
 		Restrictions: restrictions}, parser, nil
 }
 
@@ -2909,6 +2931,111 @@ func TestUnavailableWithoutFallbackNeverStarts(t *testing.T) {
 	}
 	if types[domain.EventExecutionStarted] {
 		t.Error("execution.started was emitted for an execution that never started")
+	}
+}
+
+// harmflow-app#608: a harness whose CLI is not installed when the task fires is skipped for the fallback, as a
+// signed-out one is, and its one event says the CLI was not found.
+func TestNotInstalledStartsOnFallback(t *testing.T) {
+	e := newEnv(t)
+	e.create("not-installed", codexFallback)
+	e.claude.mu.Lock()
+	e.claude.notInstalled = true
+	e.claude.mu.Unlock()
+	r, _ := e.app.RunTask("not-installed")
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	if len(x.Attempts) != 1 || x.Attempts[0].Harness != domain.HarnessCodex || x.Attempts[0].Outcome != domain.AttemptSucceeded {
+		t.Fatalf("attempts %+v, want one Codex attempt succeeding", x.Attempts)
+	}
+	counts, last := e.eventCounts(r.ExecutionID)
+	unavailable := last[domain.EventHarnessUnavailable]
+	if counts[domain.EventHarnessUnavailable] != 1 || unavailable.Harness != domain.HarnessClaudeCode ||
+		unavailable.Payload["readiness"] != "not_installed" {
+		t.Errorf("%d %s events, the last %+v; want one naming Claude Code not installed",
+			counts[domain.EventHarnessUnavailable], domain.EventHarnessUnavailable, unavailable)
+	}
+	if !strings.Contains(unavailable.Message, "claude was not found") || strings.Contains(unavailable.Message, "signed in") {
+		t.Errorf("%s says %q, want the not-found diagnostic", domain.EventHarnessUnavailable, unavailable.Message)
+	}
+	e.onlyUnavailable(r.ExecutionID, x)
+}
+
+// harmflow-app#608: with no fallback, a harness whose CLI is not installed fails the execution without starting it, and
+// the error names the harness and says its CLI was not found.
+func TestNotInstalledWithoutFallbackNeverStarts(t *testing.T) {
+	e := newEnv(t)
+	e.create("not-installed", "")
+	e.claude.mu.Lock()
+	e.claude.notInstalled = true
+	e.claude.mu.Unlock()
+	r, _ := e.app.RunTask("not-installed")
+	x := e.wait(r.ExecutionID, domain.StatusFailed)
+	if x.StartedAt != nil || len(x.Attempts) != 0 {
+		t.Errorf("the execution started: startedAt %v, attempts %+v", x.StartedAt, x.Attempts)
+	}
+	if !strings.Contains(x.ErrorMessage, domain.HarnessClaudeCode) || !strings.Contains(x.ErrorMessage, "claude was not found") {
+		t.Errorf("error %q does not name the harness and say its CLI was not found", x.ErrorMessage)
+	}
+	if n := e.claude.promptCount(); n != 0 {
+		t.Errorf("Claude Code got %d prompts, want 0", n)
+	}
+	e.onlyUnavailable(r.ExecutionID, x)
+}
+
+// harmflow-app#608: a harness found ready whose executable is gone when the daemon starts it ends its attempt as an
+// unavailable harness, which fails over to Codex.
+func TestStartFailureFailsOver(t *testing.T) {
+	e := newEnv(t)
+	e.create("start-failure", codexFallback)
+	e.claude.mu.Lock()
+	e.claude.missing = filepath.Join(t.TempDir(), "claude")
+	e.claude.mu.Unlock()
+	r, _ := e.app.RunTask("start-failure")
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	if len(x.Attempts) != 2 || x.HarnessSwitches != 1 ||
+		x.Attempts[0].Harness != domain.HarnessClaudeCode || x.Attempts[0].Outcome != domain.AttemptHarnessUnavailable ||
+		x.Attempts[1].Harness != domain.HarnessCodex || x.Attempts[1].Outcome != domain.AttemptSucceeded {
+		t.Fatalf("attempts %+v, %d switches; want Claude Code unavailable, then Codex succeeding", x.Attempts,
+			x.HarnessSwitches)
+	}
+	if first := x.Attempts[0]; first.ErrorKey != "harness_start_failed" ||
+		!strings.HasPrefix(first.ErrorMessage, "starting "+domain.HarnessClaudeCode+": ") {
+		t.Errorf("the first attempt's error is %q (%q), want starting Claude Code failed (harness_start_failed)",
+			first.ErrorMessage, first.ErrorKey)
+	}
+	counts, last := e.eventCounts(r.ExecutionID)
+	switched := last[domain.EventHarnessSwitched]
+	if counts[domain.EventHarnessSwitched] != 1 || switched.Payload["from"] != domain.HarnessClaudeCode ||
+		switched.Payload["to"] != domain.HarnessCodex || switched.Payload["reason"] != string(domain.ClassHarnessUnavailable) {
+		t.Errorf("%d %s events, the last %+v; want one from Claude Code to Codex for harness_unavailable",
+			counts[domain.EventHarnessSwitched], domain.EventHarnessSwitched, switched)
+	}
+	e.onlyUnavailable(r.ExecutionID, x)
+}
+
+// onlyUnavailable fails when an attempt or the execution reads as an exhausted quota, a rate limit, a network failure,
+// a timeout, or a task error, or when a quota, rate-limit, or network event was logged: a harness that cannot run is
+// unavailable, and nothing else.
+func (e *env) onlyUnavailable(executionID string, x ExecutionView) {
+	e.t.Helper()
+	for _, at := range x.Attempts {
+		switch at.Outcome {
+		case domain.AttemptQuotaExhausted, domain.AttemptRateLimited, domain.AttemptNetworkFailed, domain.AttemptTimedOut,
+			domain.AttemptFailed:
+			e.t.Errorf("attempt %d on %s is %s, want no quota, rate limit, network failure, timeout, or task error",
+				at.Number, at.Harness, at.Outcome)
+		}
+	}
+	if x.ErrorKey != "" && x.ErrorParams["errorClass"] != string(domain.ClassHarnessUnavailable) {
+		e.t.Errorf("the execution's error is %q (%q, %v), want an unavailable harness or none", x.ErrorMessage, x.ErrorKey,
+			x.ErrorParams)
+	}
+	counts, _ := e.eventCounts(executionID)
+	for _, typ := range []string{domain.EventHarnessQuotaExhausted, domain.EventHarnessRateLimited,
+		domain.EventHarnessNetworkWaiting} {
+		if counts[typ] != 0 {
+			e.t.Errorf("%d %s events, want 0", counts[typ], typ)
+		}
 	}
 }
 
