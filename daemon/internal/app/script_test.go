@@ -1,10 +1,13 @@
 package app
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -220,6 +223,70 @@ func TestScriptOutputIsMarkedAndRedacted(t *testing.T) {
 	if err != nil || len(out.Attempts) != 1 || strings.Contains(out.Attempts[0].Text, token) ||
 		!strings.Contains(out.Attempts[0].Text, "out\n") {
 		t.Errorf("raw capture %+v %v", out, err)
+	}
+}
+
+// The record keeps the program redacted like its raw output: a command's arguments, an inline script's interpreter
+// arguments and source, and the values of the task's variables, as the daemon returns it and as a restarted daemon
+// reads it back. A variable's name and the parts of an argument that hold no credential are kept as written.
+func TestScriptRecordIsRedacted(t *testing.T) {
+	e := newEnv(t)
+	token := "ghp_" + strings.Repeat("a", 36)
+	e.createScript("command", fmt.Sprintf(
+		"  script:\n    command: [/bin/echo, --token=%s]\n    environment:\n      API_KEY: %s\n", token, token))
+	e.createScript("inline", fmt.Sprintf(`  script:
+    inline:
+      interpreter: [/usr/bin/env, GH_TOKEN=%s, /bin/sh]
+      source: echo %s
+    environment:
+      API_KEY: %s
+`, token, token, token))
+	command := e.runScript("command", domain.StatusCompleted).ID
+	inline := e.runScript("inline", domain.StatusCompleted).ID
+	vars := map[string]string{"API_KEY": "[REDACTED]"}
+
+	check := func(e *env, when string) {
+		t.Helper()
+		x, err := e.app.GetExecution(command)
+		if err != nil {
+			t.Fatalf("GetExecution(%s) %s: %v", command, when, err)
+		}
+		if want := []string{"/bin/echo", "--token=[REDACTED]"}; !slices.Equal(x.Script.Command, want) {
+			t.Errorf("GetExecution(%s).Script.Command %s = %q, want %q", command, when, x.Script.Command, want)
+		}
+		if !maps.Equal(x.Script.Environment, vars) {
+			t.Errorf("GetExecution(%s).Script.Environment %s = %q, want %q", command, when, x.Script.Environment, vars)
+		}
+		noToken(t, x.Script, command, when, token)
+
+		x, err = e.app.GetExecution(inline)
+		if err != nil {
+			t.Fatalf("GetExecution(%s) %s: %v", inline, when, err)
+		}
+		if want := []string{"/usr/bin/env", "GH_TOKEN=[REDACTED]", "/bin/sh"}; !slices.Equal(x.Script.Interpreter, want) {
+			t.Errorf("GetExecution(%s).Script.Interpreter %s = %q, want %q", inline, when, x.Script.Interpreter, want)
+		}
+		if want := "echo [REDACTED]"; x.Script.Source != want {
+			t.Errorf("GetExecution(%s).Script.Source %s = %q, want %q", inline, when, x.Script.Source, want)
+		}
+		if !maps.Equal(x.Script.Environment, vars) {
+			t.Errorf("GetExecution(%s).Script.Environment %s = %q, want %q", inline, when, x.Script.Environment, vars)
+		}
+		noToken(t, x.Script, inline, when, token)
+	}
+	check(e, "after the run")
+	check(e.restart(t), "after a restart")
+}
+
+// noToken fails t when the script record holds token anywhere.
+func noToken(t *testing.T, rec *domain.ScriptRun, id, when, token string) {
+	t.Helper()
+	data, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("json.Marshal(record of %s): %v", id, err)
+	}
+	if strings.Contains(string(data), token) {
+		t.Errorf("the record of %s %s holds the token: %s", id, when, data)
 	}
 }
 
