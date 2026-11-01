@@ -209,6 +209,36 @@ func TestInlineScriptEnvironmentAndWorkingDirectory(t *testing.T) {
 	}
 }
 
+// A task's variable replaces one of the same name from the environment the daemon gives its processes: the program
+// sees the task's value, under the name once, and a variable the task does not set reaches it unchanged. The app tests
+// leave HarnessEnv unset, so that environment is the test process's own.
+func TestScriptVariableReplacesAnInheritedOne(t *testing.T) {
+	t.Setenv("GREETING", "inherited")
+	t.Setenv("PARTING", "inherited too")
+	e := newEnv(t)
+	// env, by its absolute path, prints the whole environment, so no lookup depends on the variable.
+	e.createScript("replace", "  script:\n    command: [/usr/bin/env]\n    environment:\n      GREETING: hello\n")
+	x := e.runScript("replace", domain.StatusCompleted)
+	var greetings, partings []string
+	for _, l := range e.output(x.ID) {
+		if v, ok := strings.CutPrefix(l, "stdout: GREETING="); ok {
+			greetings = append(greetings, v)
+		}
+		if v, ok := strings.CutPrefix(l, "stdout: PARTING="); ok {
+			partings = append(partings, v)
+		}
+	}
+	if len(greetings) != 1 || greetings[0] != "hello" {
+		t.Errorf("GREETING in the program's environment = %q, want once, \"hello\"", greetings)
+	}
+	if len(partings) != 1 || partings[0] != "inherited too" {
+		t.Errorf("PARTING in the program's environment = %q, want once, \"inherited too\"", partings)
+	}
+	if got := x.Script.Environment["GREETING"]; got != "hello" {
+		t.Errorf("the record's GREETING = %q, want \"hello\"", got)
+	}
+}
+
 // Standard output and error reach the events, each line with its stream, and are kept redacted.
 func TestScriptOutputIsMarkedAndRedacted(t *testing.T) {
 	e := newEnv(t)
