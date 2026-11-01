@@ -181,6 +181,10 @@ type App struct {
 	// written in the order its snapshots are taken. It is taken before mu, which stays free during the write; no caller
 	// of saveLedger holds mu.
 	ledgerMu sync.Mutex
+	// schedMu orders the scheduler state's saves as ledgerMu orders the ledger's: a save holds it from its snapshot to
+	// the end of its write, so the state is written in the order its snapshots are taken. It is taken before mu, which
+	// stays free during the write; no caller of saveSchedule holds mu.
+	schedMu sync.Mutex
 	// records orders the saves of each execution record, by execution id, so the last copy taken of a record is the last
 	// written; a save waits only for the saves of its own record. Guarded by mu, it holds a record while a save holds or
 	// waits for it.
