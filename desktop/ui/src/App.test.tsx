@@ -7,6 +7,7 @@
 // place a task is created offers the daemon's templates, and a pick has the daemon draft the task (harmflow-app#177).
 // ⌘+, ⌘−, and ⌘0 zoom the dashboard everywhere, and the level outlives a restart (harmflow-app#55).
 // A render error never leaves the window empty, and the interface tells the shell when it has painted (harmflow-app#96).
+// A first launch opens in the system's language when it is official, and in en-US otherwise (harmflow-app#633).
 import { EditorView } from "@codemirror/view";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -1330,5 +1331,61 @@ describe("startup", () => {
     await launch();
     expect(host.querySelector(".boot")).toBeNull();
     expect(host.querySelector(".app")).not.toBeNull();
+  });
+});
+
+// A first launch: nothing stored, and a daemon with nothing saved, whose settings are its defaults.
+describe("first launch", () => {
+  // What GET /settings answers before anything is saved: the language follows the system's, onboarding is not done.
+  const defaults: Settings = { ...settings, language: "system", onboardingCompleted: false };
+  const stubs: MockInstance[] = [];
+  let lang: string;
+
+  beforeEach(async () => {
+    lang = document.documentElement.lang;
+    patchStateForTests({ settings: undefined });
+    daemon.answers.set("/settings", defaults);
+    // An official language neither case expects, so each reads the language its startup applied, not one left before.
+    await i18n.changeLanguage("pt-BR");
+    document.documentElement.lang = "pt-BR";
+  });
+
+  afterEach(async () => {
+    for (const stub of stubs.splice(0)) stub.mockRestore();
+    await act(async () => void i18n.changeLanguage("en-US"));
+    document.documentElement.lang = lang;
+  });
+
+  /** Has the system report its languages as tags alone. */
+  function systemLanguages(...tags: string[]) {
+    stubs.push(vi.spyOn(navigator, "languages", "get").mockReturnValue(tags), vi.spyOn(navigator, "language", "get").mockReturnValue(tags[0]));
+  }
+
+  /** Mounts the interface, then answers its first read of the settings, which startSync makes at startup. */
+  async function firstLaunch() {
+    await launch();
+    await act(async () => void (await actions.refreshSettings()));
+  }
+
+  const welcome = () => host!.querySelector(".onboarding h1")?.textContent;
+
+  it("opens in the system's language when it is official", async () => {
+    systemLanguages("es-ES");
+    expect(localStorage.getItem("harmflow.language")).toBeNull();
+    await firstLaunch();
+    expect(getState().settings?.language).toBe("system");
+    expect(welcome()).toBe("Te damos la bienvenida a HarmFlow");
+    expect(i18n.language).toBe("es-ES");
+    expect(document.documentElement.lang).toBe("es-ES");
+  });
+
+  it("opens in en-US when the system's language is not official", async () => {
+    systemLanguages("fr-FR");
+    expect(localStorage.getItem("harmflow.language")).toBeNull();
+    await firstLaunch();
+    expect(getState().settings?.language).toBe("system");
+    expect(welcome()).toBe("Welcome to HarmFlow");
+    expect(i18n.language).toBe("en-US");
+    expect(document.documentElement.lang).toBe("en-US");
   });
 });
