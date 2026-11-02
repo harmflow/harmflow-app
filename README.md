@@ -253,4 +253,9 @@ HarmFlow itself implements no task behavior: the harness, its agents, and its sk
 - **Contribute** — pull requests are open to authorized collaborators only for now; see the
   [contribution guide](https://github.com/harmflow/.github/blob/main/CONTRIBUTING.md).
 
+## License
+
+The code is licensed under the PolyForm Noncommercial License 1.0.0: see [`LICENSE`](LICENSE). The license covers the
+code, not the HarmFlow name, logo, or app icon: see [`TRADEMARKS.md`](TRADEMARKS.md).
+
 <p align="center"><sub>Automate the repetitive. Amplify what matters.</sub></p>
