@@ -332,6 +332,38 @@ func TestOutputOfAProbeThatLeavesAChild(t *testing.T) {
 	}
 }
 
+// harmflow-app#751: a probe that reaches its timeout is ended with the processes it started, as a wrapper's child,
+// so none keeps running once the call returns.
+func TestOutputInEndsTheChildrenOfAProbeAtItsTimeout(t *testing.T) {
+	pidFile := t.TempDir() + "/child.pid"
+	var child int
+	t.Cleanup(func() {
+		if child > 0 {
+			_ = syscall.Kill(child, syscall.SIGKILL)
+		}
+	})
+	script := `sleep 60 & echo $! > ` + pidFile + `; wait`
+	// A loaded host can take seconds to run a shell, so the timeout grows until the child is up when it ends.
+	for timeout := 500 * time.Millisecond; child == 0; timeout *= 2 {
+		if _, _, err := OutputIn(context.Background(), timeout, nil, t.TempDir(), "/bin/sh", "-c", script); err == nil {
+			t.Fatalf("OutputIn(%q) with a %v timeout = nil error, want the timeout's", script, timeout)
+		}
+		if data, err := os.ReadFile(pidFile); err == nil {
+			child, _ = strconv.Atoi(strings.TrimSpace(string(data)))
+		}
+		if child == 0 && timeout > time.Minute {
+			t.Fatal("the shell never started the child")
+		}
+	}
+	// The killed child is gone once it has been reaped, which a loaded host can take a while to do.
+	for deadline := time.Now().Add(10 * time.Second); syscall.Kill(child, 0) == nil && time.Now().Before(deadline); {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err := syscall.Kill(child, 0); err == nil {
+		t.Errorf("child %d still runs after OutputIn returned at its timeout", child)
+	}
+}
+
 // harmflow-app#329: a help probe that still runs at its timeout was not read, so a flag missing from what it printed
 // may still be there; one that ended by itself was read in full, even when it failed.
 func TestHelpSaysWhetherTheProbeEndedBeforeItsTimeout(t *testing.T) {

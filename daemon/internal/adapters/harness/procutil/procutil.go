@@ -474,7 +474,9 @@ func filepathSplitList(p string) []string {
 const probeWaitDelay = time.Second
 
 // Output runs a short probe command with a timeout. The probe's own exit status decides: a child that keeps its output
-// open is cut off after probeWaitDelay, and what was read by then is returned.
+// open is cut off after probeWaitDelay, and what was read by then is returned. The probe runs in a process group of its
+// own, and one that reaches its timeout, or whose context ends, is killed with every process in that group, so none of
+// them outlives the call; a probe that exits by itself leaves what it started as it is.
 func Output(ctx context.Context, timeout time.Duration, env []string, name string, args ...string) (string, string, error) {
 	return OutputIn(ctx, timeout, env, "", name, args...)
 }
@@ -492,6 +494,15 @@ func OutputIn(ctx context.Context, timeout time.Duration, env []string, dir, nam
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
 	cmd.Stdin = nil
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// os/exec cancels only while the probe has not been reaped, so its pid still names its group.
+	cmd.Cancel = func() error {
+		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		if errors.Is(err, syscall.ESRCH) {
+			return os.ErrProcessDone
+		}
+		return err
+	}
 	cmd.WaitDelay = probeWaitDelay
 	err := cmd.Run()
 	if errors.Is(err, exec.ErrWaitDelay) {
