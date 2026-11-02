@@ -168,15 +168,16 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 	// The app server lists the user's skills. Codex 0.163.0 marks the command experimental, though skills/list is in its
 	// stable schema; the help lists it either way. The top-level help reads a timeout as the flags' help does: help read
 	// in full that does not list the command reads as a Codex without it, and help the check could not read within its
-	// limit leaves it unknown, so the first call to the app server proves it.
+	// limit leaves it unknown, so the first call to the app server proves it. That help lists commands, not flags, so its
+	// diagnostic names the app server, never the flags exec --help gave.
 	top, topRead := procutil.Help(ctx, helpTimeout, a.Env, info.Path, "--help")
 	info.Features["app-server"] = strings.Contains(top, "app-server")
 	if !topRead && !info.Features["app-server"] {
 		info.UnknownFeatures = map[string]bool{"app-server": true}
 		if !info.FeaturesUnknown {
-			info.SetDiagnostic(domain.T("harness_help_timed_out",
-				"the {{harness}} {{command}} check timed out, so the flags it has are unknown; the first attempt proves them",
-				"harness", Name, "command", "--help"))
+			info.SetDiagnostic(domain.T("codex_app_server_help_timed_out",
+				"the {{harness}} --help check timed out, so whether it has an app server is unknown; the first call to the app server proves it",
+				"harness", Name))
 		}
 	}
 	helpTimedOut := info.FeaturesUnknown || info.UnknownFeatures["app-server"]

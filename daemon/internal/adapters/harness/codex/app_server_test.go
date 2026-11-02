@@ -354,7 +354,11 @@ func slowTopHelp(t *testing.T, path string) string {
 // diagnostic saying the check timed out, which the dashboard shows as a warning. A call that needs the app server is
 // tried: it lists the skills of a Codex that has one, and fails with its own error on a Codex that has none, never with
 // codex_app_server_missing. Help read in full that does not list the app server still reads as a Codex without it.
+// harmflow-app#643: that help lists commands, not flags, so the diagnostic has a key of its own, which says the app
+// server is unknown and never that the flags are; the exec --help timeout keeps harness_help_timed_out.
 func TestDetectReadsATopLevelHelpCheckThatTimesOutAsAppServerUnknown(t *testing.T) {
+	const wantText = "the Codex --help check timed out, so whether it has an app server is unknown; the first call to the " +
+		"app server proves it"
 	t.Setenv("CODEX_HOME", t.TempDir())
 	withServer := func(t *testing.T) string {
 		path, _ := appServerStandIn(t, answer(`{"data":[]}`))
@@ -369,9 +373,9 @@ func TestDetectReadsATopLevelHelpCheckThatTimesOutAsAppServerUnknown(t *testing.
 		wantListKey string // the error of the skill list; empty is none
 	}{
 		{"timed out, with an app server", func(t *testing.T) string { return slowTopHelp(t, withServer(t)) }, true,
-			"harness_help_timed_out", ""},
+			"codex_app_server_help_timed_out", ""},
 		{"timed out, without an app server", func(t *testing.T) string { return slowTopHelp(t, without(t)) }, true,
-			"harness_help_timed_out", "codex_app_server_exited"},
+			"codex_app_server_help_timed_out", "codex_app_server_exited"},
 		{"read in full, without an app server", without, false, "", "codex_app_server_missing"},
 	}
 	for _, c := range cases {
@@ -385,9 +389,10 @@ func TestDetectReadsATopLevelHelpCheckThatTimesOutAsAppServerUnknown(t *testing.
 					"want ready, false, false, %v, %q", info.Readiness, info.FeaturesUnknown, info.Features["app-server"],
 					info.UnknownFeatures["app-server"], info.DiagnosticKey, info.Diagnostic, c.wantUnknown, c.wantKey)
 			}
-			if c.wantKey != "" && (info.DiagnosticParams["harness"] != Name || info.DiagnosticParams["command"] != "--help") {
-				t.Errorf("Detect: diagnostic params %v, want the harness %q and the command --help", info.DiagnosticParams,
-					Name)
+			if c.wantKey != "" && (info.Diagnostic != wantText || len(info.DiagnosticParams) != 1 ||
+				info.DiagnosticParams["harness"] != Name) {
+				t.Errorf("Detect: diagnostic %q, params %v; want %q, the harness %q alone", info.Diagnostic,
+					info.DiagnosticParams, wantText, Name)
 			}
 			_, _, err := a.UserItems(context.Background(), info, "skill", "/w", nil)
 			var got string

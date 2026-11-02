@@ -484,6 +484,8 @@ export const ptBR: Resources = {
     harness_feature_missing: "esta versão do {{harness}} não tem {{feature}}, de que o HarmFlow precisa",
     harness_help_timed_out:
       "a verificação de {{command}} do {{harness}} esgotou o tempo, então as flags que ele tem são desconhecidas; a primeira tentativa as comprova",
+    codex_app_server_help_timed_out:
+      "a verificação de --help do {{harness}} esgotou o tempo, então não se sabe se ele tem um app server; a primeira chamada ao app server o comprova",
     harness_version_below_minimum: "o {{harness}} {{version}} é anterior à {{minimum}}, a linha de versões mais antiga que o HarmFlow suporta",
     claude_not_signed_in: "o Claude Code não está conectado; execute `claude` em um terminal e entre na conta",
     quota_report_unrecognized: "o relatório de uso do {{harness}} não traz nenhuma janela do plano que o HarmFlow consiga ler",
