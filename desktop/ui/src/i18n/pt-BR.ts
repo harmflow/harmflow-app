@@ -804,6 +804,9 @@ export const ptBR: Resources = {
       anyTask: "Qualquer tarefa",
       anyTrigger: "Qualquer disparo",
       searchPlaceholder: "Buscar tarefa, repositório, item de trabalho…",
+      from: "De",
+      to: "Até",
+      invalidPeriod: "A data final é anterior à data inicial. Escolha um período válido.",
     },
     columns: {
       status: "Estado",

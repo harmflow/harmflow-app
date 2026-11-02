@@ -2,11 +2,11 @@
 // events, or says its log expired.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { api } from "../api/client";
+import { api, type ExecutionQuery } from "../api/client";
 import type { ExecutionStatus, ExecutionSummary, Trigger } from "../api/types";
 import { ExecutionDetail } from "../components/ExecutionDetail";
 import { HarnessLabel } from "../components/Shell";
-import { Button, Chip, EmptyState, IconButton, Select, StatusChip, TextInput } from "../components/ui";
+import { Banner, Button, Chip, EmptyState, IconButton, Select, StatusChip, TextInput } from "../components/ui";
 import { formatDateTime, formatElapsed } from "../lib/format";
 import { useDebounced } from "../lib/hooks";
 import { useStore } from "../state/store";
@@ -28,6 +28,24 @@ const STATUSES: ExecutionStatus[] = [
 const TRIGGERS: Trigger[] = ["manual", "schedule", "catch_up"];
 const PAGE = 50;
 
+/** 00:00 of a date input's day (`YYYY-MM-DD`), days after it, in the user's time zone. */
+function midnight(day: string, after = 0): Date {
+  const [y, m, d] = day.split("-").map(Number);
+  return new Date(y, m - 1, d + after);
+}
+
+/**
+ * The period of the start and end dates as the instants the daemon compares: from 00:00 of the start date, inclusive,
+ * to 00:00 of the day after the end date, exclusive. Either date may be empty; an end before the start is no period.
+ */
+function period(from: string, to: string): Pick<ExecutionQuery, "createdFrom" | "createdUntil"> | null {
+  if (from && to && to < from) return null;
+  return {
+    createdFrom: from ? midnight(from).toISOString() : undefined,
+    createdUntil: to ? midnight(to, 1).toISOString() : undefined,
+  };
+}
+
 export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpen: (id: string | null) => void }) {
   const { t, i18n } = useTranslation();
   const tasks = useStore((s) => s.tasks);
@@ -36,16 +54,21 @@ export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpe
   const [taskId, setTaskId] = useState("");
   const [trigger, setTrigger] = useState("");
   const [search, setSearch] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [rows, setRows] = useState<ExecutionSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [exhausted, setExhausted] = useState(false);
   const refreshKey = useDebounced(lastEventId, 1500);
+  const bounds = useMemo(() => period(from, to), [from, to]);
 
   const load = useCallback(
     async (before?: string) => {
+      // An invalid period is not sent: the screen says so and keeps what is shown.
+      if (!bounds) return;
       setLoading(true);
       try {
-        const page = await api.executions({ status: status || undefined, taskId: taskId || undefined, limit: PAGE, before });
+        const page = await api.executions({ status: status || undefined, taskId: taskId || undefined, limit: PAGE, before, ...bounds });
         setRows((prev) => (before ? [...prev, ...page.filter((p) => !prev.some((r) => r.id === p.id))] : page));
         setExhausted(page.length < PAGE);
       } catch {
@@ -54,7 +77,7 @@ export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpe
         setLoading(false);
       }
     },
-    [status, taskId],
+    [status, taskId, bounds],
   );
 
   useEffect(() => {
@@ -106,8 +129,11 @@ export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpe
             </option>
           ))}
         </Select>
+        <TextInput type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} aria-label={t("history.filters.from")} />
+        <TextInput type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} aria-label={t("history.filters.to")} />
         <IconButton icon="refresh" label={t("common.refresh")} className="icon-btn--framed" onClick={() => void load()} />
       </div>
+      {bounds ? null : <Banner tone="warning">{t("history.filters.invalidPeriod")}</Banner>}
 
       <div className="panel panel--table">
         {visible.length === 0 && !loading ? (
@@ -164,7 +190,7 @@ export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpe
           {exhausted ? (
             <span className="muted">{rows.length ? t("history.noMore") : null}</span>
           ) : (
-            <Button disabled={loading} onClick={() => void load(rows[rows.length - 1]?.createdAt)}>
+            <Button disabled={loading || !bounds} onClick={() => void load(rows[rows.length - 1]?.createdAt)}>
               {loading ? t("common.loading") : t("history.loadMore")}
             </Button>
           )}

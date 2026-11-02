@@ -6,6 +6,8 @@ import (
 	"io"
 	"log"
 	"net/http/httptest"
+	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -126,5 +128,64 @@ func TestUnforcedStopRequestIsRefusedWhileAnExecutionIsActive(t *testing.T) {
 	}
 	if x, _ := a.GetExecution(res.ExecutionID); x.Status != domain.StatusRunning {
 		t.Errorf("execution %s is %s after a refused stop, want %s", res.ExecutionID, x.Status, domain.StatusRunning)
+	}
+}
+
+// GET /api/v1/executions reads the period from createdFrom, inclusive, and createdUntil, exclusive, RFC 3339 instants
+// apart from the before cursor; a malformed one bounds nothing.
+func TestListExecutionsReadsThePeriod(t *testing.T) {
+	a := startedApp(t)
+	if _, err := a.CreateTask(t.Context(), app.TaskInput{YAML: busyTask}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	res, err := a.RunTask("busy")
+	if err != nil {
+		t.Fatalf("RunTask(%q): %v", "busy", err)
+	}
+	x, err := a.GetExecution(res.ExecutionID)
+	if err != nil {
+		t.Fatalf("GetExecution(%q): %v", res.ExecutionID, err)
+	}
+	// at is the instant d after the execution's creation, as the query writes it.
+	at := func(d time.Duration) string { return x.CreatedAt.Add(d).UTC().Format(time.RFC3339Nano) }
+	s := &Server{App: a}
+	s.SetToken(validToken)
+	for _, c := range []struct {
+		name  string
+		query url.Values
+		want  []string
+	}{
+		{"a period from its creation", url.Values{"createdFrom": {at(0)}}, []string{x.ID}},
+		{"a period from after it", url.Values{"createdFrom": {at(time.Nanosecond)}}, nil},
+		{"a period until after it", url.Values{"createdUntil": {at(time.Hour)}}, []string{x.ID}},
+		{"a period until its creation", url.Values{"createdUntil": {at(0)}}, nil},
+		{"a period around it", url.Values{"createdFrom": {at(-time.Hour)}, "createdUntil": {at(time.Hour)}},
+			[]string{x.ID}},
+		{"a period around it, the cursor at its creation", url.Values{"createdFrom": {at(-time.Hour)},
+			"createdUntil": {at(time.Hour)}, "before": {at(0)}}, nil},
+		{"a malformed bound", url.Values{"createdFrom": {"tomorrow"}}, []string{x.ID}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			path := "/api/v1/executions?" + c.query.Encode()
+			r := httptest.NewRequest("GET", path, nil)
+			r.Host = "127.0.0.1:7000"
+			r.Header.Set("Authorization", "Bearer "+validToken)
+			w := httptest.NewRecorder()
+			s.Handler().ServeHTTP(w, r)
+			if w.Code != 200 {
+				t.Fatalf("GET %s: status %d, want 200", path, w.Code)
+			}
+			var rows []app.ExecutionSummary
+			if err := json.Unmarshal(w.Body.Bytes(), &rows); err != nil {
+				t.Fatalf("GET %s: body %q: %v", path, w.Body.String(), err)
+			}
+			var got []string
+			for _, row := range rows {
+				got = append(got, row.ID)
+			}
+			if !slices.Equal(got, c.want) {
+				t.Errorf("GET %s = %v, want %v", path, got, c.want)
+			}
+		})
 	}
 }

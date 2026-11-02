@@ -2019,8 +2019,12 @@ export interface operations {
                 status?: string;
                 active?: boolean;
                 limit?: number;
-                /** @description Only executions created before this time. */
+                /** @description Only executions created before this time; the paging cursor. */
                 before?: string;
+                /** @description Only executions created at or after this instant, the start of a period. */
+                createdFrom?: string;
+                /** @description Only executions created before this instant, the end of a period, which it excludes. */
+                createdUntil?: string;
             };
             header?: never;
             path?: never;

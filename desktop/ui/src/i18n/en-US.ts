@@ -779,6 +779,9 @@ export const enUS = {
       anyTask: "Any task",
       anyTrigger: "Any trigger",
       searchPlaceholder: "Search task, repository, work item…",
+      from: "From",
+      to: "To",
+      invalidPeriod: "The end date is before the start date. Choose a valid period.",
     },
     columns: {
       status: "Status",
