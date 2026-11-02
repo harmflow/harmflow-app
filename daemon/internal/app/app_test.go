@@ -916,6 +916,48 @@ printf '%%s' '%[2]s' > %[1]s/report.json; echo 'END ok'`, req.ExecutionDir, repo
 	}
 }
 
+// An execution's record holds its report's first work item with that item's own tests status, or with none when the
+// report gives that item none, never another item's, whichever item the session selected last.
+func TestRecordPairsItsWorkItemWithItsOwnTestsStatus(t *testing.T) {
+	item := func(key, status string) string {
+		if status == "" {
+			return `{"key":"` + key + `","outcome":"completed"}`
+		}
+		return `{"key":"` + key + `","outcome":"completed","tests":{"status":"` + status + `"}}`
+	}
+	// The session selects both items through progress.jsonl, the report's second one last, and reports once the
+	// daemon has logged that selection in the log under {{logs}}.
+	const selectBoth = `P="$HARMFLOW_EXECUTION_DIR/progress.jsonl"; L="{{logs}}/$HARMFLOW_EXECUTION_ID.jsonl"
+printf '%s\n' '{"type":"work_item.selected","workItem":"acme/docs#337","message":"Select the docs"}' \
+	'{"type":"work_item.selected","workItem":"acme/app#605","message":"Select the app"}' >> "$P"
+until grep -qF 'Select the app' "$L"; do sleep 0.05; done
+`
+	for _, tc := range []struct {
+		name, progress, first, second, wantStatus string
+	}{
+		{name: "each item with its own tests status", first: item("acme/docs#337", "passed"),
+			second: item("acme/app#605", "failed"), wantStatus: "passed"},
+		{name: "the first item without one", first: item("acme/docs#337", ""), second: item("acme/app#605", "failed")},
+		{name: "the second item selected last", progress: selectBoth, first: item("acme/docs#337", "passed"),
+			second: item("acme/app#605", "failed"), wantStatus: "passed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.create("pairing", "")
+			script := strings.ReplaceAll(tc.progress, "{{logs}}", e.app.d.Paths.Logs) +
+				withReport(`{"outcome":"completed","summary":"two items","workItems":[`+tc.first+`,`+tc.second+`]}`)
+			x := runTask(e, "pairing", domain.StatusCompleted, script)
+			if x.WorkItem != "acme/docs#337" || x.TestsStatus != tc.wantStatus {
+				t.Errorf("record = work item %q, tests status %q, want %q, %q", x.WorkItem, x.TestsStatus,
+					"acme/docs#337", tc.wantStatus)
+			}
+			if len(x.WorkItems) != 2 {
+				t.Errorf("record lists %d work items, want the report's 2: %+v", len(x.WorkItems), x.WorkItems)
+			}
+		})
+	}
+}
+
 // A conflict the agent met keeps its code in the record, and its log holds it as a warning that a replay returns; the
 // execution continues.
 func TestConflictingActivityIsLogged(t *testing.T) {
@@ -1009,8 +1051,8 @@ printf '%%s' '%[3]s' > %[1]s/report.json; echo 'END ok'`, req.ExecutionDir, stri
 				t.Fatalf("RunTask(conflict): %v", err)
 			}
 			x := e.wait(r.ExecutionID, domain.StatusCompleted)
-			if last := tc.selected[len(tc.selected)-1]; x.WorkItem != last {
-				t.Errorf("GetExecution(%s).WorkItem = %q, want %q, the item selected last", x.ID, x.WorkItem, last)
+			if first := tc.selected[0]; x.WorkItem != first {
+				t.Errorf("GetExecution(%s).WorkItem = %q, want %q, the report's first", x.ID, x.WorkItem, first)
 			}
 			if len(x.Warnings) != 1 || x.Warnings[0].Code != domain.WarningConflictingActivity ||
 				x.Warnings[0].Subject != "o/r" || x.Warnings[0].Message != said || x.Warnings[0].WorkItem != tc.want {
