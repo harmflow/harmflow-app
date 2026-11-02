@@ -150,8 +150,8 @@ function TaskList({ onView, onOpenExecution }: { onView: (v: TaskView) => void; 
   }, [tasks, search, filter]);
 
   // The arrangement, held to the daemon's list once the list is loaded — never against the empty one before it, which
-  // would drop every task from it. Moving is off while a search or a filter hides tasks: a drop among hidden tasks has
-  // no clear place.
+  // would drop every task from it. With no group the list looks as it did before groups, with no heading and no
+  // handle. Moving is off while a search or a filter hides tasks: a drop among hidden tasks has no clear place.
   const ids = useMemo(() => tasks.map((task) => task.id), [tasks]);
   const [layout, setLayout] = useState<TaskLayout | null>(storedLayout);
   const keep = (next: TaskLayout) => {
@@ -532,7 +532,7 @@ function TaskList({ onView, onOpenExecution }: { onView: (v: TaskView) => void; 
                 drop?.kind === "task" && drop.task === task.id && `task-row--drop-${drop.edge}`,
               )}
             >
-              {filtering ? null : handle(`task:${task.id}`, t("tasks.groups.moveTask", { name: task.name }), taskChoices(task.id), (e) => startDrag("task", task.id, e))}
+              {!grouped || filtering ? null : handle(`task:${task.id}`, t("tasks.groups.moveTask", { name: task.name }), taskChoices(task.id), (e) => startDrag("task", task.id, e))}
               <div className="task-row__main" onClick={() => onView({ kind: "edit", id: task.id })}>
                 <div className="task-row__title">
                   <span className={cx("task-row__glyph", toneClass(typeGlyph(task.type).tone))}>
