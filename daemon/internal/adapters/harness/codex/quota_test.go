@@ -58,6 +58,31 @@ func TestReadQuota(t *testing.T) {
 	}
 }
 
+// An app server that does not answer account/rateLimits/read in time ends the read at the call's bound, as it ends a
+// skill list: the read says the server timed out, long before the stand-in would answer.
+func TestReadQuotaThatTimesOut(t *testing.T) {
+	path, received := appServerStandIn(t, `sleep 10`)
+	a := appServerAdapter(t)
+	// Long enough for initialize, short of the stand-in's sleep.
+	a.listTimeout = 2 * time.Second
+	began := time.Now()
+	_, err := a.ReadQuota(t.Context(), appServerInfo(path))
+	took := time.Since(began)
+	if got := domain.TextOf(err); err == nil || got.Key != "codex_app_server_timed_out" ||
+		got.Params["method"] != "account/rateLimits/read" {
+		t.Errorf("ReadQuota of a server that does not answer = %v (%s %v), want codex_app_server_timed_out on "+
+			"account/rateLimits/read", err, got.Key, got.Params)
+	}
+	// The server's start and initialize have a bound of their own, which the stand-in answers well within.
+	if limit := 2*a.listTimeout + 2*time.Second; took < a.listTimeout || took > limit {
+		t.Errorf("ReadQuota of a server that does not answer took %v, want between its bound %v and %v", took,
+			a.listTimeout, limit)
+	}
+	if got := requests(t, received)["account/rateLimits/read"]; len(got) != 1 {
+		t.Errorf("the app server got %d account/rateLimits/read requests, want 1", len(got))
+	}
+}
+
 func sameQuota(a, b domain.Quota) bool {
 	if len(a.Windows) != len(b.Windows) || a.SpendControlReached != b.SpendControlReached ||
 		a.UsingExtraUsage != b.UsingExtraUsage || (a.Limit == nil) != (b.Limit == nil) {

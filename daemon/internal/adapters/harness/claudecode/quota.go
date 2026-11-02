@@ -14,8 +14,8 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
-// quotaTimeout bounds `claude -p "/usage"`, which answered in about 3.6 seconds.
-const quotaTimeout = 20 * time.Second
+// defaultQuotaTimeout bounds `claude -p "/usage"`, which answered in about 3.6 seconds.
+const defaultQuotaTimeout = 20 * time.Second
 
 // usageLineRe reads one plan window of the usage report, as "Current session: 4% used · resets Oct 27 at 1:39pm
 // (America/Sao_Paulo)" or "Current week (all models): 20% used".
@@ -24,7 +24,11 @@ var usageLineRe = regexp.MustCompile(`(?m)^[ \t]*(Current [^:\n]+):[ \t]*(\d+(?:
 // ReadQuota implements ports.QuotaReader with `claude -p "/usage"`, which runs no turn and makes no model call: the
 // plan windows it prints, each reset in the CLI's own words.
 func (a *Adapter) ReadQuota(ctx context.Context, info ports.HarnessInfo) (domain.Quota, error) {
-	out, _, err := procutil.Output(ctx, quotaTimeout, a.Env, info.Path, "-p", "/usage")
+	timeout := a.quotaTimeout
+	if timeout == 0 {
+		timeout = defaultQuotaTimeout
+	}
+	out, _, err := procutil.Output(ctx, timeout, a.Env, info.Path, "-p", "/usage")
 	if err != nil {
 		return domain.Quota{}, domain.TextErr("command_failed", "{{command}} failed: {{detail}}",
 			"command", `claude -p "/usage"`, "detail", err.Error())

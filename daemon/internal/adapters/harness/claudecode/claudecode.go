@@ -58,6 +58,7 @@ type Adapter struct {
 	skills           map[string][]ports.ResolvedItem // by CLI path, workspace, and added folders, kept until ReloadUserItems
 	helpTimeout      time.Duration                   // the --help check; zero is defaultHelpTimeout
 	skillListTimeout time.Duration                   // the skill list's session; zero is defaultSkillListTimeout
+	quotaTimeout     time.Duration                   // `claude -p "/usage"`; zero is defaultQuotaTimeout
 }
 
 // defaultHelpTimeout bounds the --help check; help it could not read by then leaves the flags unknown.
