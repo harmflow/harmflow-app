@@ -3369,6 +3369,115 @@ button.queue-item:hover,
   min-width: 110px;
 }
 
+/* The user's groups on the Tasks screen. A drag shows where the item lands with a line on the row's or the group's
+   edge; nothing animates. */
+.task-list--dragging {
+  user-select: none;
+}
+
+.task-row--dragging,
+.task-group--dragging {
+  opacity: 0.5;
+}
+
+.task-row--drop-before {
+  box-shadow: 0 -3px 0 rgba(var(--hf-rgb-cyan), 0.8);
+}
+
+.task-row--drop-after {
+  box-shadow: 0 3px 0 rgba(var(--hf-rgb-cyan), 0.8);
+}
+
+.drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: var(--hf-radius-sm);
+  background: none;
+  color: var(--hf-color-text-muted);
+  cursor: grab;
+  touch-action: none;
+}
+
+.drag-handle:hover {
+  background: var(--hf-color-surface-hover);
+}
+
+.drag-handle__anchor {
+  flex: none;
+}
+
+.popover--start {
+  right: auto;
+  left: 0;
+}
+
+.task-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--hf-space-2);
+  padding: var(--hf-space-2);
+  border: 1px solid transparent;
+  border-radius: var(--hf-radius-lg);
+}
+
+.task-group--drop {
+  border-color: rgba(var(--hf-rgb-cyan), 0.6);
+}
+
+.task-group--drop-before {
+  box-shadow: 0 -3px 0 rgba(var(--hf-rgb-cyan), 0.8);
+}
+
+.task-group--drop-after {
+  box-shadow: 0 3px 0 rgba(var(--hf-rgb-cyan), 0.8);
+}
+
+.task-group__head {
+  display: flex;
+  align-items: center;
+  gap: var(--hf-space-2);
+}
+
+.task-group__name {
+  font-size: var(--hf-font-size-sm);
+  font-weight: 600;
+}
+
+.task-group__count {
+  color: var(--hf-color-text-muted);
+  font-size: var(--hf-font-size-xs);
+}
+
+.task-group__rename {
+  max-width: 260px;
+}
+
+.task-group__actions {
+  display: flex;
+  gap: var(--hf-space-1);
+  margin-left: auto;
+}
+
+.task-group__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--hf-space-3);
+}
+
+.task-group__drop {
+  padding: var(--hf-space-3);
+  border: 1px dashed var(--hf-color-border);
+  border-radius: var(--hf-radius-lg);
+  color: var(--hf-color-text-muted);
+  font-size: var(--hf-font-size-sm);
+  text-align: center;
+}
+
 .templates {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

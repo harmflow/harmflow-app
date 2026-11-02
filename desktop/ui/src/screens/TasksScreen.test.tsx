@@ -8,6 +8,7 @@
 // and app › TestExternalEdits'. Each row shows its task type's glyph and tone (harmflow-app#471). A script task that
 // declares only other systems shows the daemon's warning on its row, in the interface's language, and Run now shows
 // the daemon's refusal (harmflow-app#559): that the daemon warns and refuses is app › TestScriptDoesNotRunOnAnUndeclaredSystem's.
+// The user's groups and order (harmflow-app#346) are the desktop's own, kept in localStorage: no request carries them.
 import { EditorView } from "@codemirror/view";
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -78,6 +79,7 @@ beforeAll(async () => {
 // test, so that none shows in the next.
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  localStorage.clear();
 });
 
 afterEach(() => {
@@ -369,6 +371,289 @@ describe("the Tasks screen's commands on two tasks", () => {
     ]);
     expect(rows().map((r) => r.querySelector(".task-row__title .mono")?.textContent)).toEqual(["standup-copy"]);
     expect(toggleLabel("standup-copy")).toBe("Disabled");
+  });
+});
+
+describe("the Tasks screen's groups", () => {
+  // The user's arrangement is visual only: the desktop keeps it, and no request reaches the daemon for it.
+  const task = (id: string): TaskSummary => ({ ...standup, id, name: `Task ${id}` });
+  const [a, b, c, d] = ["a", "b", "c", "d"].map(task);
+  /** Reports holds a and b, Chores holds c, and d is in no group, as a past session left them. */
+  const kept = { groups: [{ id: "g1", name: "Reports", collapsed: false, tasks: ["a", "b"] }, { id: "g2", name: "Chores", collapsed: false, tasks: ["c"] }], ungrouped: ["d"] };
+  const keep = (layout: unknown) => localStorage.setItem("harmflow.taskLayout", JSON.stringify(layout));
+  const stored = () => JSON.parse(localStorage.getItem("harmflow.taskLayout")!);
+
+  const idOf = (r: Element) => r.querySelector(".task-row__title .mono")!.textContent;
+  /** Each group's heading and its rows' task IDs, in the screen's order; one list with no heading when there's no group. */
+  const arrangement = () => {
+    const sections = [...host!.querySelectorAll<HTMLElement>(".task-group")];
+    if (!sections.length) return [[null, ...rows().map(idOf)]];
+    return sections.map((s) => [s.querySelector(".task-group__name")?.textContent ?? null, ...[...s.querySelectorAll("article.task-row")].map(idOf)]);
+  };
+  const section = (name: string) => [...host!.querySelectorAll<HTMLElement>(".task-group")].find((s) => s.querySelector(".task-group__name")?.textContent === name)!;
+  const inSection = (name: string, label: string) => [...section(name).querySelectorAll<HTMLButtonElement>(".task-group__head button")].find((x) => x.getAttribute("aria-label") === label)!;
+  const handle = (id: string) => row(id)!.querySelector<HTMLButtonElement>(".drag-handle")!;
+  const menu = () => [...host!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].map((m) => ({ label: m.textContent, disabled: m.disabled }));
+  const choose = (label: string) => click([...host!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((m) => m.textContent === label)!);
+  const status = () => host!.querySelector('[role="status"]')!.textContent;
+  const screenButton = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>(".filters button")].find((x) => x.textContent === label)!;
+  const key = (target: EventTarget, k: string) => act(async () => void target.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true })));
+  async function type(input: HTMLInputElement, value: string) {
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => {
+      setValue.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+  async function remount(tasks: TaskSummary[]) {
+    act(() => root!.unmount());
+    host!.remove();
+    await open(tasks);
+  }
+
+  it("shows the daemon's list as before, with no heading, when there's no group", async () => {
+    await open([a, b, c]);
+    expect(arrangement()).toEqual([[null, "a", "b", "c"]]);
+    expect(localStorage.getItem("harmflow.taskLayout")).toBeNull();
+  });
+
+  it("creates and names a group, moves a task into it from its handle's menu, announces it, and keeps it across a remount", async () => {
+    await open([a, b, c]);
+    await click(screenButton("New group"));
+    const name = host!.querySelector<HTMLInputElement>('input[aria-label="Group name"]')!;
+    expect(name.value).toBe("New group");
+    expect(document.activeElement).toBe(name);
+    await type(name, "Reports");
+    await key(name, "Enter");
+    expect(arrangement()).toEqual([["Reports"], ["Ungrouped", "a", "b", "c"]]);
+    expect(section("Reports").querySelector(".task-group__count")!.textContent).toBe("0 tasks");
+    expect(section("Reports").textContent).toContain("Drop a task here");
+
+    await click(handle("b"));
+    expect(handle("b").getAttribute("aria-expanded")).toBe("true");
+    expect(menu()).toEqual([
+      { label: "Move up", disabled: false },
+      { label: "Move down", disabled: false },
+      { label: "Move to Reports", disabled: false },
+    ]);
+    await choose("Move to Reports");
+    expect(arrangement()).toEqual([["Reports", "b"], ["Ungrouped", "a", "c"]]);
+    expect(section("Reports").querySelector(".task-group__count")!.textContent).toBe("1 task");
+    expect(status()).toBe("Task b moved to Reports, position 1 of 1.");
+    expect(document.activeElement).toBe(handle("b"));
+    expect(menu()).toEqual([]);
+
+    await remount([a, b, c]);
+    expect(arrangement()).toEqual([["Reports", "b"], ["Ungrouped", "a", "c"]]);
+    expect(daemon.requests).toEqual([]);
+  });
+
+  it("moves a task up and down in its group, and to Ungrouped, and a group among the groups", async () => {
+    keep(kept);
+    await open([a, b, c, d]);
+    expect(arrangement()).toEqual([["Reports", "a", "b"], ["Chores", "c"], ["Ungrouped", "d"]]);
+
+    await click(handle("a"));
+    expect(menu()).toEqual([
+      { label: "Move up", disabled: true },
+      { label: "Move down", disabled: false },
+      { label: "Move to Chores", disabled: false },
+      { label: "Move to Ungrouped", disabled: false },
+    ]);
+    await choose("Move down");
+    expect(arrangement()).toEqual([["Reports", "b", "a"], ["Chores", "c"], ["Ungrouped", "d"]]);
+    expect(status()).toBe("Task a moved to Reports, position 2 of 2.");
+
+    await click(handle("b"));
+    await choose("Move to Ungrouped");
+    expect(arrangement()).toEqual([["Reports", "a"], ["Chores", "c"], ["Ungrouped", "d", "b"]]);
+
+    await click(inSection("Chores", "Move group Chores"));
+    expect(menu()).toEqual([
+      { label: "Move up", disabled: false },
+      { label: "Move down", disabled: true },
+    ]);
+    await choose("Move up");
+    expect(arrangement()).toEqual([["Chores", "c"], ["Reports", "a"], ["Ungrouped", "d", "b"]]);
+    expect(status()).toBe("Group Chores moved to position 1 of 2.");
+    expect(stored().groups.map((g: { name: string }) => g.name)).toEqual(["Chores", "Reports"]);
+  });
+
+  it("closes a handle's menu with Escape, moving nothing, and gives the focus back to the handle", async () => {
+    keep(kept);
+    await open([a, b, c, d]);
+    await click(handle("a"));
+    expect(document.activeElement?.textContent).toBe("Move down");
+    await key(document.activeElement!, "Escape");
+    expect(menu()).toEqual([]);
+    expect(document.activeElement).toBe(handle("a"));
+    expect(arrangement()).toEqual([["Reports", "a", "b"], ["Chores", "c"], ["Ungrouped", "d"]]);
+  });
+
+  it("collapses and expands a group, keeping it collapsed across a remount, and deletes one without deleting a task", async () => {
+    keep(kept);
+    await open([a, b, c, d]);
+    await click(inSection("Reports", "Collapse group"));
+    expect(arrangement()).toEqual([["Reports"], ["Chores", "c"], ["Ungrouped", "d"]]);
+    expect(section("Reports").querySelector(".task-group__count")!.textContent).toBe("2 tasks");
+    await remount([a, b, c, d]);
+    expect(arrangement()).toEqual([["Reports"], ["Chores", "c"], ["Ungrouped", "d"]]);
+    await click(inSection("Reports", "Expand group"));
+    expect(arrangement()).toEqual([["Reports", "a", "b"], ["Chores", "c"], ["Ungrouped", "d"]]);
+
+    const confirm = vi.spyOn(native, "confirm");
+    await click(inSection("Reports", "Delete group"));
+    expect(arrangement()).toEqual([["Chores", "c"], ["Ungrouped", "d", "a", "b"]]);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(daemon.requests).toEqual([]);
+  });
+
+  it("renames a group, and refuses a name another group has, ignoring case", async () => {
+    keep(kept);
+    await open([a, b, c, d]);
+    await click(inSection("Chores", "Rename group"));
+    const name = host!.querySelector<HTMLInputElement>('input[aria-label="Group name"]')!;
+    await type(name, "reports");
+    await key(name, "Enter");
+    expect(toasts()).toEqual([{ tone: "danger", text: "A group named reports already exists." }]);
+    expect(arrangement()).toEqual([["Reports", "a", "b"], ["Chores", "c"], ["Ungrouped", "d"]]);
+
+    await click(inSection("Chores", "Rename group"));
+    await type(host!.querySelector<HTMLInputElement>('input[aria-label="Group name"]')!, "Home");
+    await key(host!.querySelector('input[aria-label="Group name"]')!, "Enter");
+    expect(arrangement()).toEqual([["Reports", "a", "b"], ["Home", "c"], ["Ungrouped", "d"]]);
+  });
+
+  it("keeps the arrangement when the list is read again, drops a task deleted outside, and puts a new task at the end of Ungrouped", async () => {
+    keep(kept);
+    await open([a, b, c, d]);
+    // The daemon's list after another program deleted c's file and added a task whose ID sorts first.
+    await act(async () => patchStateForTests({ tasks: [task("0-new"), a, b, d] }));
+    expect(arrangement()).toEqual([["Reports", "a", "b"], ["Chores"], ["Ungrouped", "d", "0-new"]]);
+    expect(stored()).toEqual({ ...kept, groups: [kept.groups[0], { ...kept.groups[1], tasks: [] }], ungrouped: ["d", "0-new"] });
+  });
+
+  it("drops a task deleted in the dashboard from the arrangement", async () => {
+    keep(kept);
+    answer("DELETE", "/tasks/a", null, 204);
+    answer("GET", "/tasks", [b, c, d]);
+    vi.spyOn(native, "confirm").mockResolvedValue(true);
+    await open([a, b, c, d]);
+    await click(button("a", "Delete"));
+    expect(arrangement()).toEqual([["Reports", "b"], ["Chores", "c"], ["Ungrouped", "d"]]);
+    expect(stored().groups[0].tasks).toEqual(["b"]);
+  });
+
+  it("puts a duplicate right after its original, in the same group", async () => {
+    keep(kept);
+    const copyOfA = task("a-copy");
+    answer("POST", "/tasks/a/duplicate", copyOfA);
+    answer("GET", "/tasks", [a, copyOfA, b, c, d]);
+    await open([a, b, c, d]);
+    await click(button("a", "Duplicate"));
+    expect(arrangement()).toEqual([["Reports", "a", "a-copy", "b"], ["Chores", "c"], ["Ungrouped", "d"]]);
+  });
+
+  it("hides the handles and the groups with no task shown while searching or filtering", async () => {
+    keep(kept);
+    await open([a, b, { ...c, enabled: false }, d]);
+    await type(host!.querySelector<HTMLInputElement>(".filters__search")!, "Task c");
+    expect(arrangement()).toEqual([["Chores", "c"]]);
+    expect(host!.querySelectorAll(".drag-handle")).toHaveLength(0);
+
+    await type(host!.querySelector<HTMLInputElement>(".filters__search")!, "");
+    expect(host!.querySelectorAll(".drag-handle")).toHaveLength(6);
+    const select = host!.querySelector<HTMLSelectElement>(".filters select")!;
+    await act(async () => {
+      select.value = "enabled";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(arrangement()).toEqual([["Reports", "a", "b"], ["Ungrouped", "d"]]);
+    expect(host!.querySelectorAll(".drag-handle")).toHaveLength(0);
+  });
+
+  it("ignores an arrangement it can't read, and shows the daemon's list", async () => {
+    localStorage.setItem("harmflow.taskLayout", "{groups");
+    await open([a, b, c]);
+    expect(arrangement()).toEqual([[null, "a", "b", "c"]]);
+  });
+
+  it("drags a task by its handle to where it is dropped, and opens no editor and no menu", async () => {
+    keep(kept);
+    await open([a, b, c, d]);
+    // The pointer is released over the lower half of c's row: a lands after c.
+    vi.spyOn(document, "elementFromPoint").mockImplementation(() => row("c")!.querySelector(".task-row__main"));
+    const pointer = (type: string, target: EventTarget, y: number) =>
+      act(async () => void target.dispatchEvent(new PointerEvent(type, { bubbles: true, button: 0, clientX: 10, clientY: y })));
+    await pointer("pointerdown", handle("a"), 0);
+    await pointer("pointermove", window, 30);
+    expect(row("c")!.className).toContain("task-row--drop-after");
+    await pointer("pointerup", window, 30);
+    await click(handle("a"));
+    expect(arrangement()).toEqual([["Reports", "b"], ["Chores", "c", "a"], ["Ungrouped", "d"]]);
+    expect(status()).toBe("Task a moved to Chores, position 2 of 2.");
+    expect(menu()).toEqual([]);
+    expect(onView).not.toHaveBeenCalled();
+  });
+
+  it("cancels a drag with Escape", async () => {
+    keep(kept);
+    await open([a, b, c, d]);
+    vi.spyOn(document, "elementFromPoint").mockImplementation(() => row("d")!);
+    const pointer = (type: string, target: EventTarget, y: number) =>
+      act(async () => void target.dispatchEvent(new PointerEvent(type, { bubbles: true, button: 0, clientX: 10, clientY: y })));
+    await pointer("pointerdown", handle("a"), 0);
+    await pointer("pointermove", window, 40);
+    expect(row("d")!.className).toContain("task-row--drop-after");
+    await key(window, "Escape");
+    expect(host!.querySelector(".task-row--drop-after, .task-row--drop-before")).toBeNull();
+    await pointer("pointerup", window, 40);
+    expect(arrangement()).toEqual([["Reports", "a", "b"], ["Chores", "c"], ["Ungrouped", "d"]]);
+    expect(status()).toBe("Move cancelled.");
+  });
+
+  it("leaves a task where it was when it is released over its own row", async () => {
+    keep(kept);
+    await open([a, b, c, d]);
+    // The drag passes over b's row, then the user brings it back over a's own row and releases it there.
+    let under: Element | null = row("b")!;
+    vi.spyOn(document, "elementFromPoint").mockImplementation(() => under);
+    const pointer = (type: string, target: EventTarget, y: number) =>
+      act(async () => void target.dispatchEvent(new PointerEvent(type, { bubbles: true, button: 0, clientX: 10, clientY: y })));
+    await pointer("pointerdown", handle("a"), 0);
+    await pointer("pointermove", window, 30);
+    expect(row("b")!.className).toContain("task-row--drop-after");
+    under = row("a")!.querySelector(".task-row__main");
+    await pointer("pointermove", window, 5);
+    expect(host!.querySelector(".task-row--drop-after, .task-row--drop-before, .task-group--drop")).toBeNull();
+    await pointer("pointerup", window, 5);
+    await click(handle("a"));
+    expect(arrangement()).toEqual([["Reports", "a", "b"], ["Chores", "c"], ["Ungrouped", "d"]]);
+    expect(stored()).toEqual(kept);
+    expect(status()).toBe("");
+    expect(menu()).toEqual([]);
+    expect(onView).not.toHaveBeenCalled();
+  });
+
+  it("drops a task released in the gap between two rows between them", async () => {
+    keep(kept);
+    await open([a, b, c, d]);
+    // happy-dom lays nothing out: here a's row spans 100–140 and b's 152–192, with the group's gap between them.
+    const tops: Record<string, number> = { a: 100, b: 152, c: 260, d: 360 };
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      return new DOMRect(0, tops[this.getAttribute("data-task") ?? ""] ?? 0, 400, 40);
+    });
+    // The pointer is released at 146, in that gap: over Reports' body, not over a row.
+    vi.spyOn(document, "elementFromPoint").mockImplementation(() => section("Reports").querySelector(".task-group__body"));
+    const pointer = (type: string, target: EventTarget, y: number) =>
+      act(async () => void target.dispatchEvent(new PointerEvent(type, { bubbles: true, button: 0, clientX: 10, clientY: y })));
+    await pointer("pointerdown", handle("d"), 0);
+    await pointer("pointermove", window, 146);
+    expect(row("b")!.className).toContain("task-row--drop-before");
+    expect(section("Reports").className).not.toContain("task-group--drop");
+    await pointer("pointerup", window, 146);
+    expect(arrangement()).toEqual([["Reports", "a", "d", "b"], ["Chores", "c"], ["Ungrouped"]]);
+    expect(status()).toBe("Task d moved to Reports, position 2 of 3.");
   });
 });
 
