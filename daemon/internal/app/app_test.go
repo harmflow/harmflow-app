@@ -4913,23 +4913,80 @@ func TestScriptWaitingFiringAcrossRestart(t *testing.T) {
 // A harness the daemon's stop ends is interrupted, even when it exits as one that finished. The stand-in answers the
 // stop's SIGTERM with its success line and code 0, as a shell whose child the signal ended first may go on to do.
 func TestStopInterruptsAHarnessThatExitsAsFinished(t *testing.T) {
-	stopHarness(t, `exec perl -e '$| = 1; $SIG{TERM} = sub { print "END ok\n"; exit 0 }; print "working\n"; sleep 30'`, 0)
+	e := newEnv(t)
+	e.create("stopped", "")
+	stopHarness(t, e, "stopped",
+		`exec perl -e '$| = 1; $SIG{TERM} = sub { print "END ok\n"; exit 0 }; print "working\n"; sleep 30'`, 0)
 }
 
 // A harness the daemon's stop ends with its signal is interrupted by the stop, not failed by its exit code.
 func TestStopInterruptsAHarnessTheSignalEnds(t *testing.T) {
-	stopHarness(t, `exec perl -e '$| = 1; print "working\n"; sleep 30'`, 128+int(syscall.SIGTERM))
-}
-
-// stopHarness runs a task whose harness runs script, and stops the daemon once the harness has printed "working", by
-// then ready for the stop. Before and after a restart, the execution and its one attempt read interrupted, the attempt
-// with the daemon's stop as its error and the exit code it ended with, and so does the attempt's harness.exited event.
-func stopHarness(t *testing.T, script string, exitCode int) {
-	t.Helper()
 	e := newEnv(t)
 	e.create("stopped", "")
+	stopHarness(t, e, "stopped", signalEnds, 128+int(syscall.SIGTERM))
+}
+
+// signalEnds is a harness's script that prints "working" and sleeps until a signal ends it.
+const signalEnds = `exec perl -e '$| = 1; print "working\n"; sleep 30'`
+
+// harmflow-app#743: the daemon's stop counts one operational failure against every item the session selected and left
+// without a result, not only the last one selected, as a crash does.
+func TestStopCountsOneFailurePerSelectedItem(t *testing.T) {
+	e := newEnv(t)
+	e.create("stopped", "")
+	stopHarness(t, e, "stopped", selectTwo(e.app.d.Paths.Logs)+signalEnds, 128+int(syscall.SIGTERM))
+	for _, key := range []string{"o/r#1", "o/r#2"} {
+		if w := ledgerItem(e, "stopped", key); w == nil || w.Status != domain.WorkItemFailed || w.Failures != 1 {
+			t.Errorf("%s, selected by the execution the stop interrupted: %+v; want failed, with one failure", key, w)
+		}
+	}
+}
+
+// harmflow-app#743: a daemon restarted on the home the stop left does not count the stop's interruption again: the
+// stop ended the execution, so recovery finds nothing active to count.
+func TestRestartCountsNoFailureAfterAStop(t *testing.T) {
+	e := newEnv(t)
+	e.create("stopped", "")
+	restarted, id := stopHarness(t, e, "stopped", selectTwo(e.app.d.Paths.Logs)+signalEnds, 128+int(syscall.SIGTERM))
+	for _, key := range []string{"o/r#1", "o/r#2"} {
+		if w := ledgerItem(restarted, "stopped", key); w == nil || w.Status != domain.WorkItemFailed || w.Failures != 1 ||
+			w.LastExecutionID != id {
+			t.Errorf("%s after the restart: %+v; want failed, with one failure, by %s", key, w, id)
+		}
+	}
+}
+
+// harmflow-app#743: each stop counts against the retry limit of the item's own task, here one retry: the second
+// execution the stop interrupts leaves the items it selected again needing attention, with two failures.
+func TestStopCountsTowardTheRetryLimit(t *testing.T) {
+	e := newEnv(t)
+	issues := strings.Replace(taskYAML("issues", fmt.Sprintf("  github:\n    repositories:\n"+
+		"      - name: o/r\n        localPath: %q\n    queue:\n      maxFailedRetries: 1\n",
+		mkdir(t, filepath.Join(e.app.Paths().UserHome, "repo")))),
+		"type: general", "type: github", 1)
+	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: issues}); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []domain.WorkItemStatus{domain.WorkItemFailed, domain.WorkItemNeedsAttention} {
+		restarted, id := stopHarness(t, e, "issues", selectTwo(e.app.d.Paths.Logs)+signalEnds, 128+int(syscall.SIGTERM))
+		for _, key := range []string{"o/r#1", "o/r#2"} {
+			if w := ledgerItem(restarted, "issues", key); w == nil || w.Status != want || w.Failures != i+1 ||
+				w.LastExecutionID != id {
+				t.Errorf("after stop %d, %s: %+v; want %s with %d failures, the last by %s", i+1, key, w, want, i+1, id)
+			}
+		}
+		e = restarted
+	}
+}
+
+// stopHarness runs task, whose harness runs script, and stops the daemon of e once the harness has printed "working",
+// by then ready for the stop. Before and after a restart, the execution and its one attempt read interrupted, the
+// attempt with the daemon's stop as its error and the exit code it ended with, and so does the attempt's harness.exited
+// event. It returns the restarted daemon and the execution's ID.
+func stopHarness(t *testing.T, e *env, task, script string, exitCode int) (*env, string) {
+	t.Helper()
 	e.claude.setScript(func(ports.RunRequest) string { return script })
-	r, _ := e.app.RunTask("stopped")
+	r, _ := e.app.RunTask(task)
 	if !e.poll(10*time.Second, func() bool {
 		events, _, _ := e.app.ExecutionEvents(r.ExecutionID, 0, 0)
 		return slices.ContainsFunc(events, func(ev domain.Event) bool {
@@ -4975,7 +5032,9 @@ func stopHarness(t *testing.T, script string, exitCode int) {
 		}
 	}
 	check("after the stop", e)
-	check("after the restart", e.restart(t))
+	restarted := e.restart(t)
+	check("after the restart", restarted)
+	return restarted, r.ExecutionID
 }
 
 // A harness that exits on its own keeps the outcome its exit gives, though the daemon begins stopping while the process
