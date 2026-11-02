@@ -1070,6 +1070,45 @@ until grep -qF 'Select the app' "$L"; do sleep 0.05; done
 	}
 }
 
+// harmflow-app#742: an execution's record holds its report's first work item with that item's own repository — the one
+// the item gives, else the one the session's selection of it gave, else its key's — or with none when nothing names
+// it, never another item's, whichever item the session selected last.
+func TestRecordPairsItsWorkItemWithItsOwnRepository(t *testing.T) {
+	const app = `{"key":"acme/app#605","repository":"acme/app","outcome":"completed"}`
+	// The session selects both items through progress.jsonl, each with its repository, the report's second one last,
+	// and reports once the daemon has logged that selection in the log under {{logs}}.
+	const selectBoth = `P="$HARMFLOW_EXECUTION_DIR/progress.jsonl"; L="{{logs}}/$HARMFLOW_EXECUTION_ID.jsonl"
+printf '%s\n' '{"type":"work_item.selected","workItem":"acme/docs#337","repository":"acme/docs","message":"Select the docs"}' \
+	'{"type":"work_item.selected","workItem":"acme/app#605","repository":"acme/app","message":"Select the app"}' >> "$P"
+until grep -qF 'Select the app' "$L"; do sleep 0.05; done
+`
+	for _, tc := range []struct {
+		name, progress, first, wantItem, wantRepository string
+	}{
+		{name: "the first item without a repository", first: `{"key":"acme/docs#337","outcome":"completed"}`,
+			wantItem: "acme/docs#337", wantRepository: "acme/docs"},
+		{name: "the second item selected last", progress: selectBoth,
+			first: `{"key":"acme/docs#337","outcome":"completed"}`, wantItem: "acme/docs#337",
+			wantRepository: "acme/docs"},
+		{name: "the first item with its own repository",
+			first:    `{"key":"acme/docs#337","repository":"acme/handbook","outcome":"completed"}`,
+			wantItem: "acme/docs#337", wantRepository: "acme/handbook"},
+		{name: "a first item nothing names", first: `{"key":"docs-337","outcome":"completed"}`, wantItem: "docs-337"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.create("pairing", "")
+			script := strings.ReplaceAll(tc.progress, "{{logs}}", e.app.d.Paths.Logs) +
+				withReport(`{"outcome":"completed","summary":"two items","workItems":[`+tc.first+`,`+app+`]}`)
+			x := runTask(e, "pairing", domain.StatusCompleted, script)
+			if x.WorkItem != tc.wantItem || x.Repository != tc.wantRepository {
+				t.Errorf("record = work item %q, repository %q, want %q, %q", x.WorkItem, x.Repository,
+					tc.wantItem, tc.wantRepository)
+			}
+		})
+	}
+}
+
 // A conflict the agent met keeps its code in the record, and its log holds it as a warning that a replay returns; the
 // execution continues.
 func TestConflictingActivityIsLogged(t *testing.T) {

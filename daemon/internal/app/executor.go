@@ -1225,12 +1225,15 @@ func (r *run) onProgress(p domain.ProgressLine) {
 		// the record names, and against every other one the log's events of this type name.
 		r.save(true)
 		before := a.trackWorkItem(r.x.TaskID, p.WorkItem, msg, p.Repository, r.x.ID)
-		if p.WorkItem != "" && r.selectionOf(p.WorkItem) == nil {
+		a.mu.Lock()
+		if i := slices.IndexFunc(r.selected, func(s selection) bool { return s.key == p.WorkItem }); i < 0 {
 			// A second selection of the item finds it in progress: what it held before is the first one's.
-			a.mu.Lock()
+			before.repository = p.Repository
 			r.selected = append(r.selected, before)
-			a.mu.Unlock()
+		} else if p.Repository != "" {
+			r.selected[i].repository = p.Repository
 		}
+		a.mu.Unlock()
 	case domain.EventTestStarted:
 		r.setStatus(domain.StatusTesting, domain.Text{Message: msg})
 	case domain.EventTestCompleted:
@@ -1339,21 +1342,20 @@ func (r *run) applyReport(rep *domain.ExecutionReport) {
 	}
 	r.x.WorkItems = append([]domain.WorkItemResult{}, rep.WorkItems...)
 	for _, w := range rep.WorkItems {
-		if w.Repository != "" && r.x.Repository == "" {
-			r.x.Repository = w.Repository
-		}
 		for _, f := range w.ChangedFiles {
 			r.x.AddChangedFile(f)
 		}
 	}
 	// The record names the report's first work item, whichever item the session selected last, with that item's own
-	// tests status and pull request, or none when the report gives that item none: another item's status would pair
-	// the record's item with tests it did not run, and another item's pull request, perhaps in another repository,
-	// would name work it did not do. A report with no work item leaves the record as the session's progress lines
-	// left it.
+	// repository, tests status, and pull request, or none when the report gives that item none: another item's status
+	// would pair the record's item with tests it did not run, and another item's repository or pull request would name
+	// work it did not do. A report with no work item leaves the record as the session's progress lines left it.
 	if len(rep.WorkItems) > 0 {
 		first := rep.WorkItems[0]
 		r.x.WorkItem = first.Key
+		if len(r.eff.Repositories()) != 1 {
+			r.x.Repository = r.itemRepository(first)
+		}
 		r.x.TestsStatus = ""
 		if first.Tests != nil {
 			r.x.TestsStatus = first.Tests.Status
@@ -1409,6 +1411,25 @@ func (r *run) applyReport(rep *domain.ExecutionReport) {
 				Payload: map[string]any{"url": prURL(w)}}.Says(text))
 		}
 	}
+}
+
+// itemRepository is the repository of the report's work item w: its own, else the one the session's selection of w
+// named, else the owner/name of a key written owner/name#<n>, else none. A task with one repository keeps that one,
+// which the caller leaves as it is. The caller holds a.mu.
+func (r *run) itemRepository(w domain.WorkItemResult) string {
+	if w.Repository != "" {
+		return w.Repository
+	}
+	for _, s := range r.selected {
+		if s.key == w.Key && s.repository != "" {
+			return s.repository
+		}
+	}
+	if githubItemKey.MatchString(w.Key) {
+		repo, _, _ := strings.Cut(w.Key, "#")
+		return repo
+	}
+	return ""
 }
 
 func prURL(w domain.WorkItemResult) string {

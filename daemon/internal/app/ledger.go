@@ -176,11 +176,13 @@ func (a *App) itemLocked(taskID, key string) *domain.WorkItem {
 }
 
 // selection is a work item a session selected, with what the ledger held for it just before: a skipped result returns
-// the item to that status, and one the ledger did not hold leaves it again.
+// the item to that status, and one the ledger did not hold leaves it again. repository is the one the session's last
+// selection of the item that gave one named, empty when none did.
 type selection struct {
-	key    string
-	held   bool
-	status domain.WorkItemStatus
+	key        string
+	held       bool
+	status     domain.WorkItemStatus
+	repository string
 }
 
 // trackWorkItem records the item a session selected, so an interruption can be counted against it, and returns what
