@@ -214,7 +214,7 @@ func TestSkillListThatClaudeCodeCannotGive(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			path, log := listingClaude(t, c.body)
 			a := &Adapter{Home: t.TempDir(), Env: []string{"PATH=/usr/bin:/bin", "LOG=" + log},
-				skillListTimeout: 3 * time.Second}
+				SkillListTimeout: 3 * time.Second}
 			info := ports.HarnessInfo{Detected: c.detected, Path: path}
 			for i := range 2 {
 				items, _, err := a.UserItems(t.Context(), info, "skill", t.TempDir(), nil)
@@ -250,7 +250,7 @@ esac
 echo '{"type":"system","subtype":"init","skills":["simplify"]}'
 `)
 	a = &Adapter{Home: t.TempDir(), Env: []string{"PATH=/usr/bin:/bin", "LOG=" + log, "HELD=" + resolved(t, held),
-		"RELEASED=" + flag}, skillListTimeout: 30 * time.Second}
+		"RELEASED=" + flag}, SkillListTimeout: 30 * time.Second}
 	release = func() {
 		if err := os.WriteFile(flag, nil, 0o600); err != nil {
 			t.Errorf("os.WriteFile(%s) = %v, want no error", flag, err)

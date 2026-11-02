@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -502,6 +503,50 @@ func TestExecutionRunsWithTheSessionEnvironment(t *testing.T) {
 	}
 }
 
+// A repository's local path is a folder a Claude Code task's session adds, so a skill Claude Code lists only with that
+// folder added counts: the task saves citing it, the task editor's catalog offers it when the path is sent as addDir,
+// and an execution resolves it. The listing adds the repository's folder.
+func TestClaudeCodeSkillOfARepositoryFolder(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "listings.log")
+	a := newClaudeAppOn(t, initClaude(log))
+	ctx := t.Context()
+	home := a.d.Paths.UserHome
+	checkout, other := filepath.Join(home, "checkout"), filepath.Join(home, "other")
+	for _, d := range []string{checkout, other} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	doc := strings.Replace(taskYAML("repo", "  skills: [checkout-skill]\n  workspace:\n    path: ~/other\n"+
+		fmt.Sprintf("  github:\n    repositories:\n      - name: o/r\n        localPath: %q\n", checkout)),
+		"type: general", "type: github", 1)
+
+	if _, err := a.CreateTask(ctx, TaskInput{YAML: doc}); err != nil {
+		t.Fatalf("CreateTask(repo), citing the skill of its repository's folder = %v, want no error", err)
+	}
+	resolved, _ := domain.ResolvePath(checkout)
+	if !slices.ContainsFunc(listings(t, log), func(l string) bool { return strings.Contains(l, "--add-dir "+resolved) }) {
+		t.Errorf("CreateTask(repo) ran listings %q, want one adding the repository's folder %s", listings(t, log), resolved)
+	}
+
+	if got := claudeCodeOffers(ctx, a, "~/other", "repo"); slices.Contains(got, "checkout-skill") {
+		t.Errorf(`Catalog(ctx, "~/other", repo) offers %q on Claude Code, want no checkout-skill without the folder`, got)
+	}
+	if got, want := claudeCodeOffers(ctx, a, "~/other", "repo", checkout), []string{"checkout-skill", "pdf:pdf", "simplify"}; !slices.Equal(got, want) {
+		t.Errorf(`Catalog(ctx, "~/other", repo, %s) offers %q on Claude Code, want %q`, checkout, got, want)
+	}
+
+	res := a.Validate(ctx, TaskInput{YAML: doc})
+	if res.doc == nil {
+		t.Fatalf("Validate(repo) errors = %+v, want none", res.Errors)
+	}
+	r := &run{a: a, def: *res.doc, eff: res.doc.Effective(), work: other, extra: []string{resolved}}
+	if _, skills, err := r.resolve(ctx, a.adapters[domain.HarnessClaudeCode]); err != nil || len(skills) != 1 ||
+		skills[0].Name != "checkout-skill" {
+		t.Errorf("resolve(claude-code) with the repository %s = %+v, %v; want checkout-skill", resolved, skills, err)
+	}
+}
+
 // writeSkill writes a SKILL.md into dir, named for the folder.
 func writeSkill(t *testing.T, dir string) {
 	t.Helper()
@@ -514,24 +559,31 @@ func writeSkill(t *testing.T, dir string) {
 	}
 }
 
-// When Claude Code cannot say which skills it loads — absent, or failing — a Claude Code task that cites a user's
-// skill is not refused: it saves, and validation warns that it could not verify the task's skills, naming why. The
-// catalog says the list could not be read.
-func TestClaudeCodeSkillListUnavailableWarns(t *testing.T) {
-	failing := "#!/bin/bash\ncase \"$1\" in\n  --version) echo \"2.1.309 (Claude Code)\" ;;\n" +
+// claudeListing is a stand-in Claude Code that is signed in and, started with -p, runs the shell commands onList.
+func claudeListing(onList string) string {
+	return "#!/bin/bash\ncase \"$1\" in\n  --version) echo \"2.1.309 (Claude Code)\" ;;\n" +
 		"  --help) echo \"-p, --print  --output-format <format>  --permission-mode <mode>  --allowedTools <tools...>  --append-system-prompt <prompt>\" ;;\n" +
-		"  auth) echo '{\"loggedIn\": true}' ;;\n  -p) echo 'Not logged in' >&2; exit 1 ;;\nesac\n"
+		"  auth) echo '{\"loggedIn\": true}' ;;\n  -p) " + onList + " ;;\nesac\n"
+}
+
+// When Claude Code cannot say which skills it loads — absent, failing, or printing no init line within the listing's
+// timeout — a Claude Code task that cites a user's skill is not refused: it saves, and imports as valid, and validation
+// warns that it could not verify the task's skills, naming why. The catalog says the list could not be read.
+func TestClaudeCodeSkillListUnavailableWarns(t *testing.T) {
 	for _, c := range []struct {
 		name, script, wantDetail string
+		timeout                  time.Duration // the listing's; zero is the adapter's default
 	}{
-		{"absent", "", "harness_not_detected"},
-		{"failing", failing, "command_failed"},
+		{"absent", "", "harness_not_detected", 0},
+		{"failing", claudeListing("echo 'Not logged in' >&2; exit 1"), "command_failed", 0},
+		{"timed out", claudeListing("sleep 30"), "claude_skill_list_timed_out", time.Second},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			a, _ := newClaudeApp(t)
 			if c.script != "" {
 				a = newClaudeAppOn(t, c.script)
 			}
+			a.adapters[domain.HarnessClaudeCode].(*claudecode.Adapter).SkillListTimeout = c.timeout
 			ctx := t.Context()
 			doc := taskYAML("unverified", "  skills: [review-notes]\n")
 			res := a.Validate(ctx, TaskInput{YAML: doc})
@@ -546,6 +598,18 @@ func TestClaudeCodeSkillListUnavailableWarns(t *testing.T) {
 			if _, err := a.CreateTask(ctx, TaskInput{YAML: doc}); err != nil {
 				t.Errorf("CreateTask(unverified) = %v, want no error", err)
 			}
+			imported, err := a.ImportTask(ctx, taskYAML("imported", "  skills: [review-notes]\n"), false)
+			if err != nil {
+				t.Fatalf("ImportTask(imported) = %v, want no error", err)
+			}
+			unverified = slices.ContainsFunc(imported.Warnings, func(w domain.Warning) bool {
+				return w.Key == "skill_list_unverified" && w.Code == domain.WarningMissingSkill &&
+					w.Params["detailKey"] == c.wantDetail
+			})
+			if imported.Invalid || imported.Validation == nil || !imported.Validation.Valid || !unverified {
+				t.Errorf("ImportTask(imported) invalid = %v, warnings %+v; want valid with skill_list_unverified naming %s",
+					imported.Invalid, imported.Warnings, c.wantDetail)
+			}
 			problems := a.Catalog(ctx, "", "unverified").Problems
 			if !slices.ContainsFunc(problems, func(p CatalogProblem) bool { return p.Key == "skill_list_unreadable" }) {
 				t.Errorf(`Catalog(ctx, "", unverified) problems = %+v, want skill_list_unreadable`, problems)
@@ -555,10 +619,10 @@ func TestClaudeCodeSkillListUnavailableWarns(t *testing.T) {
 }
 
 // claudeCodeOffers is the names of the user's skills the catalog offers on Claude Code for a task with this workspace
-// path and ID.
-func claudeCodeOffers(ctx context.Context, a *App, workspace, task string) []string {
+// path and ID, and these added folders.
+func claudeCodeOffers(ctx context.Context, a *App, workspace, task string, added ...string) []string {
 	var names []string
-	for _, e := range a.Catalog(ctx, workspace, task).Skills {
+	for _, e := range a.Catalog(ctx, workspace, task, added...).Skills {
 		if e.Source == "user" && slices.Contains(e.Harnesses, domain.HarnessClaudeCode) {
 			names = append(names, e.Name)
 		}
