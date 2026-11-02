@@ -275,6 +275,9 @@ func TestInlineScriptEnvironmentAndWorkingDirectory(t *testing.T) {
 	if lines := e.output(x.ID); !contains(lines, "stdout: "+home) {
 		t.Errorf("default working directory: %q, want %s", lines, home)
 	}
+	if x.TimeoutAt == nil || x.StartedAt == nil || x.TimeoutAt.Sub(*x.StartedAt) != 60*time.Minute {
+		t.Errorf("home: timeout %v from %v, want 60 minutes after the start", x.TimeoutAt, x.StartedAt)
+	}
 }
 
 // A task's variable replaces one of the same name from the environment the daemon gives its processes: the program
