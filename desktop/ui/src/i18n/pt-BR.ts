@@ -1198,7 +1198,6 @@ export const ptBR: Resources = {
     allowedFolder: "Pasta permitida",
     allowedFolderPlaceholder: "/caminho/absoluto",
     addAllowedFolder: "Adicionar pasta",
-    address: "Endereço",
     tokenStore: "Armazenamento do token",
     tokenStores: { keychain: "Keychain do macOS", file: "Arquivo legível só por você" },
     apiToken: "Token da API",

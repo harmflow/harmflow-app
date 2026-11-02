@@ -1172,7 +1172,6 @@ export const enUS = {
     allowedFolder: "Allowed folder",
     allowedFolderPlaceholder: "/absolute/path",
     addAllowedFolder: "Add folder",
-    address: "Address",
     tokenStore: "Token store",
     tokenStores: { keychain: "macOS Keychain", file: "File readable only by you" },
     apiToken: "API token",
