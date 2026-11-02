@@ -15,8 +15,9 @@ import (
 )
 
 // appServerStandIn writes a stand-in for the codex CLI whose `app-server` answers initialize, answers skills/list and
-// account/rateLimits/read with the shell commands onList, which read the request's id in $id, and reads no managed
-// requirements. Every line the server receives is appended to the file it returns second.
+// account/rateLimits/read with the shell commands onList, which read the request's id in $id, reads no managed
+// requirements, and reads an account signed in with ChatGPT on a personal plan. Every line the server receives is
+// appended to the file it returns second.
 func appServerStandIn(t *testing.T, onList string) (string, string) {
 	t.Helper()
 	return appServerStandInWith(t, onList, answer(`{"requirements":null}`))
@@ -24,6 +25,16 @@ func appServerStandIn(t *testing.T, onList string) (string, string) {
 
 // appServerStandInWith is appServerStandIn whose configRequirements/read runs the shell commands onRequirements.
 func appServerStandInWith(t *testing.T, onList, onRequirements string) (string, string) {
+	t.Helper()
+	return appServerStandInAnswering(t, onList, onRequirements, answer(personalAccount))
+}
+
+// personalAccount is account/read's answer for an account signed in with ChatGPT on the Plus plan.
+const personalAccount = `{"account":{"type":"chatgpt","email":"someone@example.com","planType":"plus"},` +
+	`"requiresOpenaiAuth":true}`
+
+// appServerStandInAnswering is appServerStandInWith whose account/read runs the shell commands onAccount.
+func appServerStandInAnswering(t *testing.T, onList, onRequirements, onAccount string) (string, string) {
 	t.Helper()
 	dir := tempDir(t)
 	received := filepath.Join(dir, "received.jsonl")
@@ -41,6 +52,7 @@ case "$1" in
         *'"method":"initialize"'*) printf '{"id":%s,"result":{"userAgent":"stand-in"}}\n' "$id" ;;
         *'"method":"skills/list"'*|*'"method":"account/rateLimits/read"'*) ` + onList + ` ;;
         *'"method":"configRequirements/read"'*) ` + onRequirements + ` ;;
+        *'"method":"account/read"'*) ` + onAccount + ` ;;
       esac
     done ;;
 esac

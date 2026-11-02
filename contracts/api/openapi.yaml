@@ -1001,6 +1001,8 @@ components:
         - not_signed_in
         - authentication_unverified
         - codex_requirements_disallow
+        - codex_plan_unknown
+        - codex_account_unnamed
 
     MessageParams:
       description: >-
@@ -1139,6 +1141,33 @@ components:
         diagnostic: { type: string, description: "What is wrong with the harness, in en-US." }
         diagnosticKey: { $ref: "#/components/schemas/MessageKey" }
         diagnosticParams: { $ref: "#/components/schemas/MessageParams" }
+        account:
+          description: >-
+            How the account the harness runs under signs in, and its plan, read at the check of a ready harness that
+            says. Never a credential, an account ID, or an e-mail.
+          type: object
+          required: [signInMethod]
+          properties:
+            signInMethod: { type: string, enum: [chatgpt, api_key, unknown] }
+            plan:
+              type: string
+              description: >-
+                The harness's own name of the plan, such as plus or business; unknown, with the reason, when the harness
+                does not know it or could not be asked. Absent for a sign-in that has no plan.
+            planReason: { type: string, description: "Why the plan is unknown, in en-US." }
+            planReasonKey: { $ref: "#/components/schemas/MessageKey" }
+            planReasonParams: { $ref: "#/components/schemas/MessageParams" }
+        managedRequirements:
+          description: >-
+            The settings an administrator allows the harness, read at the check of a ready harness that says; absent
+            when they could not be read. A null list allows any value, an empty one none.
+          type: object
+          required: [managed, approvalPolicies, approvalsReviewers, permissionProfiles]
+          properties:
+            managed: { type: boolean, description: Whether an administrator manages the harness's requirements. }
+            approvalPolicies: { type: [array, "null"], items: { type: string } }
+            approvalsReviewers: { type: [array, "null"], items: { type: string } }
+            permissionProfiles: { type: [array, "null"], items: { type: string } }
 
     Tool:
       type: object

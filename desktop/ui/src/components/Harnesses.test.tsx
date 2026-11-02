@@ -202,6 +202,120 @@ describe("HarnessInventory", () => {
   });
 });
 
+// harmflow-app#571: Codex's card shows how its account signs in and its plan, and whether an administrator manages its
+// requirements, with what they allow; a plan it cannot read shows as unknown with the reason. Credentials stay unshown.
+describe("HarnessInventory of a Codex account", () => {
+  const codex: Harness = { ...ready, id: "codex", name: "Codex", path: "/opt/homebrew/bin/codex", version: "0.163.0" };
+  const unmanaged = { managed: false, approvalPolicies: null, approvalsReviewers: null, permissionProfiles: null };
+
+  it("shows a personal plan, its sign-in, and requirements nobody manages", () => {
+    const shown = rows(
+      renderToString(
+        <HarnessInventory harness={{ ...codex, account: { signInMethod: "chatgpt", plan: "plus" }, managedRequirements: unmanaged }} locale="en-US" />,
+      ),
+    );
+    expect(shown).toMatchObject({
+      [i18n.t("harness.signInMethod")]: "ChatGPT",
+      [i18n.t("harness.plan")]: "plus",
+      [i18n.t("harness.requirements")]: "Not managed",
+    });
+    expect(shown).not.toHaveProperty(i18n.t("harness.allowedApprovalPolicies"));
+  });
+
+  it("shows a workspace plan with the requirements an administrator manages and what they allow", () => {
+    const shown = rows(
+      renderToString(
+        <HarnessInventory
+          harness={{
+            ...codex,
+            account: { signInMethod: "chatgpt", plan: "business" },
+            managedRequirements: { managed: true, approvalPolicies: ["never", "on-request"], approvalsReviewers: [], permissionProfiles: null },
+          }}
+          locale="en-US"
+        />,
+      ),
+    );
+    expect(shown).toMatchObject({
+      [i18n.t("harness.plan")]: "business",
+      [i18n.t("harness.requirements")]: "Managed by an administrator",
+      [i18n.t("harness.allowedApprovalPolicies")]: "never, on-request",
+      [i18n.t("harness.allowedApprovalsReviewers")]: "None",
+      [i18n.t("harness.allowedPermissionProfiles")]: "Any",
+    });
+  });
+
+  it("shows an unknown plan with Codex's reason, and a failing account read with its error", () => {
+    const unknownPlan = rows(
+      renderToString(
+        <HarnessInventory
+          harness={{
+            ...codex,
+            account: { signInMethod: "chatgpt", plan: "unknown", planReason: "Codex reports the account's plan as unknown", planReasonKey: "codex_plan_unknown" },
+            managedRequirements: unmanaged,
+          }}
+          locale="en-US"
+        />,
+      ),
+    );
+    expect(unknownPlan[i18n.t("harness.plan")]).toBe("Unknown · Codex reports the account's plan as unknown");
+
+    const failed = rows(
+      renderToString(
+        <HarnessInventory
+          harness={{
+            ...codex,
+            account: {
+              signInMethod: "unknown",
+              plan: "unknown",
+              planReason: "Codex's app server answered account/read with an error: account unavailable",
+              planReasonKey: "codex_app_server_error",
+              planReasonParams: { method: "account/read", detail: "account unavailable" },
+            },
+          }}
+          locale="en-US"
+        />,
+      ),
+    );
+    expect(failed).toMatchObject({
+      [i18n.t("harness.signInMethod")]: "Unknown",
+      [i18n.t("harness.plan")]: "Unknown · Codex's app server answered account/read with an error: account unavailable",
+      [i18n.t("harness.requirements")]: "Unknown",
+    });
+  });
+
+  it("shows an API key's sign-in with no plan row, and no account rows for a harness that does not say", () => {
+    const apiKey = rows(renderToString(<HarnessInventory harness={{ ...codex, account: { signInMethod: "api_key" }, managedRequirements: unmanaged }} locale="en-US" />));
+    expect(apiKey[i18n.t("harness.signInMethod")]).toBe("API key");
+    expect(apiKey).not.toHaveProperty(i18n.t("harness.plan"));
+    const claude = rows(renderToString(<HarnessInventory harness={ready} locale="en-US" />));
+    expect(claude).not.toHaveProperty(i18n.t("harness.signInMethod"));
+    expect(claude).not.toHaveProperty(i18n.t("harness.requirements"));
+  });
+
+  it("labels the account's rows in pt-BR and es-ES", async () => {
+    try {
+      for (const [lang, plan, managed] of [
+        ["pt-BR", "Plano", "Gerenciados por um administrador"],
+        ["es-ES", "Plan", "Gestionados por un administrador"],
+      ]) {
+        await i18n.changeLanguage(lang);
+        const shown = rows(
+          renderToString(
+            <HarnessInventory
+              harness={{ ...codex, account: { signInMethod: "chatgpt", plan: "team" }, managedRequirements: { ...unmanaged, managed: true } }}
+              locale={lang}
+            />,
+          ),
+        );
+        expect(shown[plan]).toBe("team");
+        expect(shown[i18n.t("harness.requirements")]).toBe(managed);
+      }
+    } finally {
+      await i18n.changeLanguage("en-US");
+    }
+  });
+});
+
 describe("choosing an installation", () => {
   const onPath = "/usr/local/bin/codex";
   const inApp = "/Applications/Codex.app/Contents/Resources/codex-cli/bin/codex";

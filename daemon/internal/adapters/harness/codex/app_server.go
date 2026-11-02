@@ -301,13 +301,35 @@ func (r rateLimitsRead) quota() (domain.Quota, error) {
 }
 
 // configRequirements is the answer to configRequirements/read, as Codex 0.163.0 writes it: the requirements an
-// administrator manages, of which HarmFlow reads the approval policies and the sandbox modes they allow. Null
-// requirements, or a null list, allow any value; an empty list allows none.
+// administrator manages, of which HarmFlow reads the approval policies, the reviewers of approvals, the permission
+// profiles, and the sandbox modes they allow. Null requirements, or a null list, allow any value; an empty list allows
+// none.
 type configRequirements struct {
 	Requirements *struct {
-		AllowedApprovalPolicies []string `json:"allowedApprovalPolicies"`
-		AllowedSandboxModes     []string `json:"allowedSandboxModes"`
+		AllowedApprovalPolicies   []string `json:"allowedApprovalPolicies"`
+		AllowedApprovalsReviewers []string `json:"allowedApprovalsReviewers"`
+		AllowedPermissionProfiles []string `json:"allowedPermissionProfiles"`
+		AllowedSandboxModes       []string `json:"allowedSandboxModes"`
 	} `json:"requirements"`
+}
+
+// accountRead is the answer to account/read, as Codex 0.163.0 writes it, of which HarmFlow decodes only how the
+// account signs in and its plan: never an e-mail, an ID, or the workspace's routing, so none of them can reach the
+// dashboard. A null account is one the app server does not name.
+type accountRead struct {
+	Account *struct {
+		Type     string `json:"type"`
+		PlanType string `json:"planType"`
+	} `json:"account"`
+}
+
+// readAccount asks the app server for the account Codex runs under.
+func (a *Adapter) readAccount(ctx context.Context, info ports.HarnessInfo) (accountRead, error) {
+	var read accountRead
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	err := a.callLocked(ctx, info, "account/read", map[string]any{}, &read)
+	return read, err
 }
 
 // readRequirements asks the app server for Codex's managed requirements.

@@ -22,7 +22,8 @@ import (
 )
 
 // skillListCodex is a stand-in Codex whose app server answers skills/list with the shell commands onList, which read
-// the request's id in $id, reads no managed requirements, and appends every line it receives to received.
+// the request's id in $id, reads no managed requirements and a ChatGPT account, and appends every line it receives to
+// received.
 func skillListCodex(received, onList string) string {
 	return `#!/bin/bash
 case "$1" in
@@ -37,6 +38,7 @@ case "$1" in
       case "$line" in
         *'"method":"initialize"'*) printf '{"id":%s,"result":{}}\n' "$id" ;;
         *'"method":"configRequirements/read"'*) printf '{"id":%s,"result":{"requirements":null}}\n' "$id" ;;
+        *'"method":"account/read"'*) printf '{"id":%s,"result":{"account":{"type":"chatgpt","planType":"plus"}}}\n' "$id" ;;
         *'"method":"skills/list"'*) ` + onList + ` ;;
       esac
     done ;;
