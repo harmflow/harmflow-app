@@ -659,7 +659,15 @@ func TestHelpCheckThatTimesOutLeavesTheHarnessReady(t *testing.T) {
 				c.fallback+"\n"), "provider: claude-code", "provider: "+c.id, 1)
 			d.call("POST", "/tasks", map[string]any{"yaml": doc}, 201)
 			run := d.call("POST", "/tasks/slowhelp/run", nil, 202)
-			x := d.waitStatus(run["executionId"].(string), "completed", "failed")
+			id := run["executionId"].(string)
+			// The check before the attempt logs nothing while it waits out its limit, so its end is awaited under a
+			// fixed bound, not under waitStatus's limit on silence.
+			d.waitLogUntil(id, func(events []map[string]any) bool {
+				return slices.ContainsFunc(events, func(e map[string]any) bool {
+					return e["type"] == "harness.started" || e["type"] == "harness.unavailable"
+				})
+			})
+			x := d.waitStatus(id, "completed", "failed")
 			attempts, _ := x["attempts"].([]any)
 			if x["status"] != "completed" || len(attempts) != 1 {
 				t.Fatalf("POST /tasks/slowhelp/run: status %v, attempts %v, error %v; want completed in one attempt",
@@ -668,7 +676,7 @@ func TestHelpCheckThatTimesOutLeavesTheHarnessReady(t *testing.T) {
 			if a := attempts[0].(map[string]any); a["harness"] != c.id || a["outcome"] != "succeeded" {
 				t.Errorf("the attempt ran on %v with outcome %v, want %s, succeeded", a["harness"], a["outcome"], c.id)
 			}
-			for _, e := range d.events(x["id"].(string)) {
+			for _, e := range d.events(id) {
 				if e["type"] == "harness.unavailable" || e["type"] == "harness.switched" {
 					t.Errorf("the execution's log holds %v, want no harness.unavailable and no harness.switched", e)
 				}
