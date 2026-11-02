@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StreamHandlers } from "../api/transport";
 import type { ExecutionSummary, HarmflowEvent, Harness, Queue } from "../api/types";
-import { actions, getState, startSync } from "./store";
+import { actions, getState, patchStateForTests, startSync } from "./store";
 
 // The daemon as the client sees it: an answer per route, or per path with its query; the routes that never answer;
 // every request it received; and the stream it feeds.
@@ -75,6 +75,62 @@ describe("event stream", () => {
 
     expect(daemon.requests.filter((r) => r.includes("/harnesses"))).toEqual(["GET /harnesses"]);
     expect(getState().harnesses).toEqual([codex]);
+  });
+});
+
+// harmflow-app#669: the daemon answers Detect again at once and announces each harness's result, so the detection reads
+// as running until each harness has announced its check, and a request that fails says so instead of being swallowed.
+describe("Detect again", () => {
+  const claude: Harness = { ...codex, id: "claude-code", name: "Claude Code" };
+  const checkedOf = (id: number, harness: string): HarmflowEvent => ({ ...checked(id), harness });
+
+  beforeEach(() => {
+    startSync();
+    patchStateForTests({ harnesses: [claude, codex], redetecting: null });
+  });
+  afterEach(() => {
+    daemon.answers.clear();
+    daemon.silent.clear();
+    patchStateForTests({ redetecting: null });
+  });
+
+  it("runs from the request until every harness has announced its check", async () => {
+    daemon.answers.set("/harnesses/refresh", [claude, codex]);
+    daemon.requests.length = 0;
+
+    await actions.redetectHarnesses();
+
+    expect(daemon.requests).toContain("POST /harnesses/refresh");
+    expect(getState().redetecting).toEqual(["claude-code", "codex"]);
+    daemon.stream!.onEvent(checkedOf(10, "claude-code"));
+    expect(getState().redetecting).toEqual(["codex"]);
+    daemon.stream!.onEvent(checkedOf(11, "codex"));
+    expect(getState().redetecting).toBeNull();
+  });
+
+  it("asks once while a detection it asked for still runs", async () => {
+    daemon.answers.set("/harnesses/refresh", [claude, codex]);
+    await actions.redetectHarnesses();
+    daemon.requests.length = 0;
+
+    await actions.redetectHarnesses();
+
+    expect(daemon.requests).not.toContain("POST /harnesses/refresh");
+  });
+
+  it("ends when the connection to the daemon is lost", async () => {
+    daemon.answers.set("/harnesses/refresh", [claude, codex]);
+    await actions.redetectHarnesses();
+
+    daemon.stream!.onConnection("disconnected");
+
+    expect(getState().redetecting).toBeNull();
+  });
+
+  it("ends and throws when the request fails", async () => {
+    await expect(actions.redetectHarnesses()).rejects.toThrow();
+
+    expect(getState().redetecting).toBeNull();
   });
 });
 

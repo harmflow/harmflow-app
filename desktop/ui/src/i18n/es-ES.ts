@@ -1308,6 +1308,8 @@ export const esES: Resources = {
     cleanResult: "{{removed}} eliminados, {{kept}} conservados.",
     keptReason: "Conservado: {{reason}}",
     refreshHarnesses: "Detectar de nuevo",
+    refreshingHarnesses: "Detectando…",
+    refreshHarnessesFailed: "No se pudo detectar de nuevo: {{error}}",
     variablesHint: "Valores para ${NOMBRE} en las rutas de las tareas, como PROJECTS_ROOT. Se quedan en esta máquina.",
     variableName: "Nombre",
     variableValue: "Valor",

@@ -103,7 +103,8 @@ func (s *Server) Handler() http.Handler {
 	h("GET /api/v1/system", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.App.System()) })
 	h("GET /api/v1/harnesses", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.App.Harnesses()) })
 	h("POST /api/v1/harnesses/refresh", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, s.App.RefreshHarnesses(r.Context()))
+		s.App.RedetectHarnesses()
+		writeJSON(w, 200, s.App.Harnesses())
 	})
 	h("PUT /api/v1/harnesses/{harnessId}", s.setHarnessPath)
 	h("POST /api/v1/harnesses/{harnessId}/sign-in", s.signInHarness)

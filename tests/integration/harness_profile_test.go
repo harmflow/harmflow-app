@@ -41,9 +41,7 @@ func TestUncheckedCodexModelSavesWithAWarning(t *testing.T) {
 		{"slug":"gpt-test","supported_reasoning_levels":[{"effort":"low"},{"effort":"high"}]}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if status, body := d.request("POST", "/harnesses/refresh", nil, nil); status != 200 {
-		t.Fatalf("refresh: %d %s", status, body)
-	}
+	d.redetect()
 	refused := d.call("PUT", "/tasks/pick", map[string]any{"yaml": unknown, "baseRevision": saved["revision"]}, 422)
 	if e, _ := refused["error"].(map[string]any); e["messageKey"] != "codex_model_unknown" {
 		t.Errorf("with the cache: %v", refused)

@@ -209,8 +209,12 @@ type App struct {
 	stopLoops     context.CancelFunc
 	stopDetection context.CancelFunc
 	wg            sync.WaitGroup
-	// detection counts the harness detections Start launched, which Stop waits for.
+	// detection counts the harness detections Start launched, and the loop that runs Detect again's, which Stop waits
+	// for.
 	detection sync.WaitGroup
+	// redetect holds the pass of detection RedetectHarnesses asked for, which redetectLoop has not started yet: one at
+	// most, so requests made while a pass runs ask for a single pass after it.
+	redetect chan struct{}
 	// announceMu orders harness checks before daemon.stopping: a detection holds it for reading while it decides to
 	// announce and announces, and Stop holds it for writing to announce the stop, so a detection an API request or an
 	// execution started either announces first or sees the daemon stopping and announces nothing.
@@ -264,7 +268,7 @@ func New(d Deps) (*App, error) {
 		applied: map[string][]string{}, accepting: true,
 		adapters: map[string]ports.HarnessAdapter{}, quotas: map[string]quotaReading{}, quotaReads: map[string]*sync.Mutex{},
 		signIns: map[string]*signInState{}, tokens: map[string]*tokenRecord{}, records: map[string]*recordLock{},
-		ShutdownRequested: make(chan struct{}),
+		redetect: make(chan struct{}, 1), ShutdownRequested: make(chan struct{}),
 	}
 	for _, h := range d.Harnesses {
 		a.adapters[h.ID()] = h
@@ -311,6 +315,7 @@ func (a *App) Start(ctx context.Context) error {
 	a.loadHarnessTokens() // before detection, which checks each harness with its token
 	a.refreshHarnessesAsync(detectCtx)
 	a.noticeTokenExpiry()
+	a.detection.Go(func() { a.redetectLoop(detectCtx) })
 	a.emit(domain.Event{Type: domain.EventDaemonStarted, Payload: map[string]any{"version": a.d.Version, "pid": os.Getpid()}}.Says(
 		domain.T("daemon_started", "HarmFlow daemon {{version}} started", "version", a.d.Version)))
 	a.mu.Lock()

@@ -139,6 +139,7 @@ afterEach(() => {
     health: undefined,
     connection: "connecting",
     daemonRunning: null,
+    redetecting: null,
   });
 });
 
@@ -384,6 +385,28 @@ const inventory = (name: string) =>
   [...host!.querySelectorAll(".inventory")].find((c) => text(c.querySelector(".harness-row__text strong")) === name)!;
 
 describe("the AI tools section", () => {
+  // harmflow-app#669: the detection Detect again asks for outlives the request, so the button shows it running.
+  it("shows Detect again busy while the detection it asked for runs", async () => {
+    patchStateForTests({ harnesses: [claudeCode, codex], tools, redetecting: ["codex"] });
+    await open("agents");
+
+    const button = [...host!.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Detecting…");
+    expect(button?.disabled).toBe(true);
+    expect(button?.getAttribute("aria-busy")).toBe("true");
+  });
+
+  it("says so when the request to detect again fails, and offers it again", async () => {
+    patchStateForTests({ harnesses: [claudeCode, codex], tools });
+    await open("agents");
+    const button = () => [...host!.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Detect again");
+
+    await click(button()!);
+
+    expect(daemon.requests).toContainEqual({ method: "POST", path: "/harnesses/refresh", body: undefined });
+    expect(toasts()).toEqual([{ tone: "danger", text: expect.stringMatching(/^Detect again failed: /) }]);
+    expect(button()?.disabled).toBe(false);
+  });
+
   it("shows each harness's readiness, the detected one's version and path, and the tools with theirs", async () => {
     patchStateForTests({ harnesses: [claudeCode, codex], tools });
     await open("agents");

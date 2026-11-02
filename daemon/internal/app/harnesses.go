@@ -53,6 +53,32 @@ func (a *App) RefreshHarnesses(ctx context.Context) []ports.HarnessInfo {
 	return a.Harnesses()
 }
 
+// RedetectHarnesses asks for every harness to be detected again, as RefreshHarnesses does, and returns at once. The
+// detection runs on the loop Start launched, under a context only Stop ends, so the end of the request that asked for
+// it cuts nothing short: harness.checked announces each result. The loop detects the harnesses one at a time, and a
+// request made while it detects asks for one more pass after it, never for one beside it.
+func (a *App) RedetectHarnesses() {
+	select {
+	case a.redetect <- struct{}{}:
+	default: // a pass is already asked for, and covers this request too
+	}
+}
+
+// redetectLoop runs the passes RedetectHarnesses asks for, one after another, until ctx ends.
+func (a *App) redetectLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-a.redetect:
+			if ctx.Err() != nil {
+				return
+			}
+			a.RefreshHarnesses(ctx)
+		}
+	}
+}
+
 // refreshHarnessesAsync detects every harness, each on a goroutine of its own that a.detection counts, and that ends
 // with ctx.
 func (a *App) refreshHarnessesAsync(ctx context.Context) {
