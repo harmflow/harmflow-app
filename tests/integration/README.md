@@ -44,7 +44,10 @@ helper named for the CLI decides:
   is on the `PATH`;
 - `realCodex` (`codex_test.go`) skips the test unless `HARMFLOW_TEST_CODEX` is exactly `1` and `codex` is on the
   `PATH`;
-- `realGh` (`tools_test.go`) skips the test unless `HARMFLOW_TEST_GH` is exactly `1` and `gh` is on the `PATH`.
+- `realGh` (`tools_test.go`) skips the test unless `HARMFLOW_TEST_GH` is exactly `1` and `gh` is on the `PATH`;
+- `realDesktop` (`desktop_test.go`) skips the test unless it runs on macOS, `HARMFLOW_TEST_DESKTOP` is exactly
+  `1`, and `cargo` is on the `PATH`. It starts no harness: it builds the desktop shell's debug build, the only one with
+  the control channel a test drives it through, and opens its real window.
 
 A daemon package cannot import these helpers, so `daemon/internal/app` has its own `realClaude` and `realCodex`, which
 read the same variables the same way. Every test that calls one of them belongs in this table.
@@ -92,6 +95,7 @@ read the same variables the same way. Every test that calls one of them belongs 
 | `TestWaitingFiringSelectsAnIssueOpenedMeanwhile` (`waiting_firing_test.go`) | `HARMFLOW_TEST_CLAUDE_CODE=1` | What `TestFailedIssueIsRetriedUntilItsLimit` needs but its fixtures, and the right to open and close issues in the sandbox repository: the test opens one issue labelled `waiting-firing-test`, creating that label when it is missing, runs the task again while the first session runs, and opens a second issue under the label while that firing waits. It stops each of its two sessions once it has selected its issue, as `TestFailedIssueIsRetriedUntilItsLimit` does. When it ends, failed or not, it closes the issues, found by that label; before it opens its first, it does the same to what an earlier run left open under it. It never reads or changes the other fixture sets |
 | `TestSessionSelectsByAnEditedQueue` (`queue_settings_test.go`) | `HARMFLOW_TEST_CLAUDE_CODE=1` | What `TestFailedIssueIsRetriedUntilItsLimit` needs but its fixtures, and the right to open and close issues in the sandbox repository: the test opens four issues labelled `queue-edit-test`, creating that label when it is missing. It runs its task twice, oldest first with one item a cycle, then, after an edit through the local API, newest first with two; each session is stopped once it has selected its issues, and its clone has no push URL. When it ends, failed or not, it closes the issues, found by that label, with any pull request linking one and its branch; before it opens them, it does the same to what an earlier run left open under that label. It never reads or changes the other fixture sets |
 | `TestToolsProbeReadsARealSignedInGhAsValid` (`tools_test.go`) | `HARMFLOW_TEST_GH=1` | An installed `gh` signed in on the machine: the test fails, saying so, when `gh auth status` fails in its own process. The daemon gets no stand-in `gh` and inherits the `gh` configuration and token variables as they are. The test starts no session and never runs `gh auth login`, `gh auth logout`, or `gh auth refresh`, so the user's sign-in stays as it is |
+| `TestEachWayToQuitFollowsThePreference` (`quit_test.go`) | `HARMFLOW_TEST_DESKTOP=1` | A Mac with a display, in a signed-in user session, `cargo` on the `PATH`, and the desktop's sidecar (`make sidecar`). The test starts its own daemon on a temporary home, with the stand-ins, so it spends no usage, and starts the shell beside it once per way to quit: the app menu's Quit with the menu bar preference off and on, the Dock's Quit, and the tray's Quit interface. It drives the shell through its test control channel, which reads the app menu macOS shows, chooses an item of it or of the tray, and sends the app `terminate:`, the Dock's quit request, so it needs no Accessibility or Automation permission. In CI and on Linux it skips |
 
 Run one of them on its own:
 
@@ -138,4 +142,6 @@ process. Do not set them yourself.
 
 The daemon's unit tests have their own, set the same way: `HARMFLOW_TEST_CRASH_POINT`, `HARMFLOW_TEST_CRASH_DIR`,
 `HARMFLOW_TEST_CRASH_ID`, and `HARMFLOW_TEST_CRASH_CONTENT` (`daemon/internal/adapters/fsstore`), and
-`HARMFLOW_TEST_TASK_FILE_CRASH_DIR` and `HARMFLOW_TEST_TASK_FILE_CRASH_CONTENT` (`daemon/internal/app`).
+`HARMFLOW_TEST_TASK_FILE_CRASH_DIR` and `HARMFLOW_TEST_TASK_FILE_CRASH_CONTENT` (`daemon/internal/app`). The desktop
+shell has its own, `HARMFLOW_TEST_SHELL_CONTROL`, which turns on its debug build's control channel
+(`desktop/src-tauri/src/test_control.rs`) and which `TestEachWayToQuitFollowsThePreference` sets.
