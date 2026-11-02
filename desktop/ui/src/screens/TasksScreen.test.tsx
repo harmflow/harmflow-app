@@ -411,9 +411,10 @@ describe("the Tasks screen's groups", () => {
     await open(tasks);
   }
 
-  it("shows the daemon's list as before, with no heading, when there's no group", async () => {
+  it("shows the daemon's list as before, with no heading and no handle, when there's no group", async () => {
     await open([a, b, c]);
     expect(arrangement()).toEqual([[null, "a", "b", "c"]]);
+    expect(host!.querySelectorAll(".drag-handle")).toHaveLength(0);
     expect(localStorage.getItem("harmflow.taskLayout")).toBeNull();
   });
 
