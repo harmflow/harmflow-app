@@ -401,6 +401,31 @@ describe("the Security section", () => {
   });
 });
 
+describe("the Daemon section's Start daemon", () => {
+  it("shows the bridge's message when the start fails (harmflow-app#725)", async () => {
+    native.available = true;
+    patchStateForTests({ connection: "daemon_stopped", health: undefined });
+    // The shell answers a failed command with its message alone, not an Error.
+    const start = vi
+      .spyOn(native, "startDaemon")
+      .mockRejectedValue("the daemon did not answer within 10 seconds; see logs/daemon.log in the HarmFlow folder");
+    try {
+      await open("daemon");
+      const button = [...host!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Start daemon")!;
+      await click(button);
+
+      expect(start).toHaveBeenCalledTimes(1);
+      expect(toasts()).toEqual([
+        { tone: "danger", text: "the daemon did not answer within 10 seconds; see logs/daemon.log in the HarmFlow folder" },
+      ]);
+      expect(button.disabled).toBe(false);
+    } finally {
+      native.available = false;
+      patchStateForTests({ connection: "connecting" });
+    }
+  });
+});
+
 describe("the Storage section's disk use and directories", () => {
   it("shows the disk HarmFlow uses as diagnostics report it", async () => {
     patchStateForTests({ diagnostics });

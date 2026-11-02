@@ -5,6 +5,7 @@ import { api } from "../api/client";
 import { native } from "../api/native";
 import type { Notification } from "../api/types";
 import { translateNested } from "../lib/daemonText";
+import { errorMessage } from "../lib/errorMessage";
 import { formatBytes, formatNumber, formatRelative, formatTime } from "../lib/format";
 import { useNow } from "../lib/hooks";
 import { actions, useStore } from "../state/store";
@@ -227,7 +228,7 @@ export function Header({
     try {
       await actions.restartDaemon();
     } catch (err) {
-      toast(t("connection.restartFailed", { message: err instanceof Error ? err.message : String(err) }), "danger");
+      toast(t("connection.restartFailed", { message: errorMessage(err) }), "danger");
     }
   };
 

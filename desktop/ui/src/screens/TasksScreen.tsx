@@ -12,6 +12,7 @@ import { TemplatePicker } from "../components/Templates";
 import { toast } from "../components/toast";
 import { Banner, Button, Chip, EmptyState, IconButton, Select, StatusChip, TextInput, Toggle, cx } from "../components/ui";
 import { daemonText } from "../lib/daemonText";
+import { errorMessage } from "../lib/errorMessage";
 import { formatRelative } from "../lib/format";
 import { useNow } from "../lib/hooks";
 import type { Doc } from "../lib/taskForm";
@@ -161,7 +162,7 @@ function TaskList({ onView, onOpenExecution }: { onView: (v: TaskView) => void; 
       const yaml = await api.exportTask(task.id);
       if (await native.saveTextFile(`${task.id}.yaml`, yaml)) toast(t("tasks.exported"));
     } catch (err) {
-      toast((err as Error).message, "danger");
+      toast(errorMessage(err), "danger");
     }
   };
 
