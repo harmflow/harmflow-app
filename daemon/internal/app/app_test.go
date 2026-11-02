@@ -2119,18 +2119,29 @@ func TestNoFailoverOnATimeoutOrATaskError(t *testing.T) {
 	}
 }
 
-// harmflow-app#215: one timeout covers every attempt of an execution. The first attempt exhausts its quota and fails
-// over, and the alternative, which ignores SIGTERM, is stopped when the same timeout elapses, and killed once its grace
-// is over, so its attempt records SIGKILL's exit code, 137. A timeout started afresh for the alternative could not end
-// it before the first attempt's quota plus the timeout plus the grace, so an execution that ends before that bound kept
-// one timeout.
+// harmflow-app#215, harmflow-app#755: one timeout covers every attempt of an execution. The first attempt exhausts its
+// quota and fails over, and the alternative, which outlives SIGTERM, is asked to stop when the same timeout elapses,
+// and killed once its grace is over, so its attempt records SIGKILL's exit code, 137. A timeout started afresh for the
+// alternative would ask it to stop no earlier than the quota plus the timeout, and end the execution no earlier than
+// that plus the grace: the quota's 3 s later than one timeout does on both counts.
 //
 // The first attempt reports its quota once it reads the line the test writes 3 s in, so its shell's start counts
 // within those 3 s, not after them, and no sleep has to start. The rest of the timeout's 8 s is for the alternative's
-// process to start and ignore SIGTERM, or nothing tests its grace. The timeout is no longer so that 50 runs, which show
+// process to start and trap SIGTERM, or nothing tests its grace. The timeout is no longer so that 50 runs, which show
 // the test holds under the load of a full test run, fit within go test's default 10 minutes, about 9 s each.
+//
+// The margins. Between the timeout and SIGTERM, and between SIGKILL and the execution's end, the daemon starts no
+// process: it ends the alternative's tree from the process table it reads in its own process, or by its group where it
+// cannot read one, then records the end, which wait sees within its 20 ms poll. Its delays there are a goroutine's wait
+// for a CPU, which the stress run's two busy processes per core lengthen to tens of milliseconds, not the seconds a
+// loaded host takes to start a process. stopMargin, 1 s, leaves room for many times that past the timeout before
+// SIGTERM; endMargin, 1.5 s, past the timeout and its grace, adds room for the kill, the reap, and the record. Both
+// stay below the quota's 3 s, so a stop or an end that a fresh timeout, or a stop delayed by the quota's offset, would
+// bring fails. stampLag allows for a file's modification time, which Linux takes from a clock that ticks every few
+// milliseconds, reading earlier than the instant Go's clock would.
 func TestOneTimeoutAcrossAFailover(t *testing.T) {
 	const timeout, grace, quotaAfter = 8 * time.Second, time.Second, 3 * time.Second
+	const stopMargin, endMargin, stampLag = time.Second, 1500 * time.Millisecond, 20 * time.Millisecond
 	e := newEnv(t, func(e *env) { e.timeoutUnit = time.Second })
 	e.create("shared", codexFallback+"  execution:\n    timeoutMinutes: 8\n    cancelGraceSeconds: 1\n")
 	dir := t.TempDir()
@@ -2145,8 +2156,12 @@ func TestOneTimeoutAcrossAFailover(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = feed.Close() }) // a reader still waiting then reads the end of the file
 	e.claude.setScript(func(ports.RunRequest) string { return fmt.Sprintf("read quota < %s; echo 'END quota'", fifo) })
+	// Codex's shell traps SIGTERM to record when it came in the file term, and its sleep ignores SIGTERM, so the
+	// attempt lasts until SIGKILL. The sleep runs in the background: a shell runs a trap only once its foreground
+	// command ends, but a trapped signal makes wait return at once, and the loop waits again while the sleep runs.
 	e.codex.setScript(func(ports.RunRequest) string {
-		return fmt.Sprintf("trap '' TERM; echo $$ > %s/codex; echo working; sleep 30; echo 'END ok'", dir)
+		return fmt.Sprintf("trap ': > %[1]s/term' TERM; echo $$ > %[1]s/codex; echo working; "+
+			"(trap '' TERM; exec sleep 30) & while kill -0 $! 2>/dev/null; do wait $!; done; echo 'END ok'", dir)
 	})
 	began := time.Now()
 	r, _ := e.app.RunTask("shared")
@@ -2176,17 +2191,30 @@ func TestOneTimeoutAcrossAFailover(t *testing.T) {
 		}
 		t.Errorf("Codex's attempt recorded exit code %s, want 137, SIGKILL's once its grace was over", got)
 	}
-	// Codex's shell writes its pid once it ignores SIGTERM, so the file is there when the execution ends unless the
+	// Codex's shell writes its pid once it traps SIGTERM, so the file is there when the execution ends unless the
 	// timeout's SIGTERM ended the shell as it started.
-	ignored, err := os.Stat(filepath.Join(dir, "codex"))
+	trapped, err := os.Stat(filepath.Join(dir, "codex"))
 	if err != nil {
-		t.Fatalf("Codex's pid file: %v, the quota %s in; want it written before the timeout, once Codex ignored SIGTERM",
+		t.Fatalf("Codex's pid file: %v, the quota %s in; want it written before the timeout, once Codex trapped SIGTERM",
 			err, quota)
 	}
-	if fresh := quota + timeout + grace; elapsed < timeout+grace || elapsed >= fresh {
-		t.Errorf("the execution ended after %s, the quota %s in and Codex ignoring SIGTERM %s in; want from %s, the "+
-			"timeout and its grace, to before %s, the earliest end of a timeout started afresh", elapsed, quota,
-			ignored.ModTime().Sub(began), timeout+grace, fresh)
+	term, err := os.Stat(filepath.Join(dir, "term"))
+	if err != nil {
+		t.Fatalf("Codex's SIGTERM file: %v, the quota %s in; want it written when the timeout asked Codex to stop", err,
+			quota)
+	}
+	stopped := term.ModTime().Sub(began)
+	t.Logf("the quota %s in, Codex trapping SIGTERM %s in, asked to stop %s in, and the execution ended %s in", quota,
+		trapped.ModTime().Sub(began), stopped, elapsed)
+	if stopped < timeout-stampLag || stopped >= timeout+stopMargin {
+		t.Errorf("Codex was asked to stop %s in, the quota %s in; want from %s, the timeout, to before %s, the "+
+			"timeout and its margin, well before %s, the mark of a timeout started afresh", stopped, quota, timeout,
+			timeout+stopMargin, quota+timeout)
+	}
+	if elapsed < timeout+grace || elapsed >= timeout+grace+endMargin {
+		t.Errorf("the execution ended after %s, the quota %s in; want from %s, the timeout and its grace, to before "+
+			"%s, those and the margin, well before %s, the earliest end of a timeout started afresh", elapsed, quota,
+			timeout+grace, timeout+grace+endMargin, quota+timeout+grace)
 	}
 	if pid := waitForPid(t, filepath.Join(dir, "codex")); alive(pid) {
 		t.Errorf("Codex's process %d outlived the execution", pid)
