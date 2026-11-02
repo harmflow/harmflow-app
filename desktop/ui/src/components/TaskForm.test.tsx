@@ -3,7 +3,8 @@
 // occurrences in the task's time zone and lists them in that zone, not the host's. The
 // daemon's own computation of the occurrences is itest › TestTaskLifecycle's. A new GitHub task with every section
 // filled through its controls saves the document tests/integration/testdata/task-form-document.json holds, which
-// itest › TestFormDocumentIsTheFile writes as a file (harmflow-app#299).
+// itest › TestFormDocumentIsTheFile writes as a file (harmflow-app#299), and a new script task the document
+// script-task-form-document.json holds, which itest › TestScriptFormDocumentIsTheFile writes (harmflow-app#707).
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { act, useState } from "react";
@@ -553,13 +554,55 @@ describe("task form schedule builder", () => {
   });
 });
 
+// The task form on the Tasks screen, reached as the user reaches it: each control by the label it shows, filled through
+// the control itself. The "task form document" tests of a GitHub task and of a script task share these.
+
+/** A document kept in tests/integration/testdata, which an integration test writes as a file. */
+const fixture = (name: string): Doc =>
+  JSON.parse(readFileSync(join(__dirname, "..", "..", "..", "..", "tests", "integration", "testdata", name), "utf8"));
+
+/** Opens the Tasks screen on the view, against the stand-in daemon's answers set before. */
+async function openScreen(view: TaskView) {
+  daemon.answers.set("/schedules/preview", { occurrences: [] } satisfies SchedulePreview);
+  host = document.body.appendChild(document.createElement("div"));
+  root = createRoot(host);
+  await act(async () => root!.render(<TasksScreen view={view} onView={() => {}} onOpenExecution={() => {}} />));
+  await settle();
+}
+
+// A group of checkboxes is a `div.field`; any other field is a `label.field`.
+const field = (label: string) =>
+  [...host!.querySelectorAll<HTMLElement>(".field")].find((f) => f.querySelector(".field__label")?.textContent === label)!;
+const control = <E extends Element = HTMLInputElement>(label: string) => field(label).querySelector<E>("input, select, textarea, output")!;
+const toggle = (label: string) =>
+  [...host!.querySelectorAll("label.toggle")].find((t) => t.querySelector(".toggle__label")?.textContent === label)!.querySelector("input")!;
+const boxes = (fieldLabel: string) => [...field(fieldLabel).querySelectorAll("label.checkbox")];
+const checked = (fieldLabel: string) => boxes(fieldLabel).filter((c) => c.querySelector("input")!.checked).map((c) => c.textContent);
+const button = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === label)!;
+const radio = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((b) => b.textContent === label)!;
+const sent = (method: string, path: string) => daemon.requests.filter((r) => r.method === method && r.path === path).map((r) => r.body);
+
+/** Types into a field or chooses an option, as React sees it. */
+async function enter(el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, value: string) {
+  const proto = el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(el, value);
+    el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }));
+  });
+}
+async function click(el: HTMLElement) {
+  await act(async () => el.click());
+}
+/** Clicks one of a field's checkboxes. */
+async function tick(fieldLabel: string, label: string) {
+  await click(boxes(fieldLabel).find((c) => c.textContent === label)!.querySelector("input")!);
+}
+
 // A new GitHub task, every section filled through its controls, saves the document task-form-document.json holds, which
 // itest › TestFormDocumentIsTheFile writes as an equal file: the two tests cover the way from the form to the file. That
 // document opens back in its controls, and clearing a control removes its key from what is sent, so the default applies.
 describe("task form document", () => {
-  const FORM_DOCUMENT: Doc = JSON.parse(
-    readFileSync(join(__dirname, "..", "..", "..", "..", "tests", "integration", "testdata", "task-form-document.json"), "utf8"),
-  );
+  const FORM_DOCUMENT = fixture("task-form-document.json");
   const entry = (name: string, kind: "agent" | "skill", source: "builtin" | "user") => ({ name, kind, source, harnesses: ["claude-code", "codex"] });
   // The template's draft selects no agent, so it brings no agent, skill, or origin of its own and every list is filled
   // through its control. The catalog's entries let a whole name typed in a picker add the chip.
@@ -599,26 +642,14 @@ describe("task form document", () => {
   beforeAll(() => patchStateForTests({ catalog, harnesses: [harness("claude-code", "Claude Code", "sonnet"), harness("codex", "Codex", "gpt-5.6-terra")] }));
   afterAll(() => patchStateForTests({ catalog: undefined, harnesses: [], tasks: [], tasksLoaded: false }));
 
-  async function openScreen(view: TaskView) {
+  async function openTask(view: TaskView) {
     daemon.answers.set("POST /tasks", stored(FORM_DOCUMENT));
     daemon.answers.set("GET /tasks", []);
     daemon.answers.set("GET /tasks/complete", stored(FORM_DOCUMENT));
     daemon.answers.set("PUT /tasks/complete", stored(FORM_DOCUMENT));
-    daemon.answers.set("/schedules/preview", { occurrences: [] } satisfies SchedulePreview);
-    host = document.body.appendChild(document.createElement("div"));
-    root = createRoot(host);
-    await act(async () => root!.render(<TasksScreen view={view} onView={() => {}} onOpenExecution={() => {}} />));
-    await settle();
+    await openScreen(view);
   }
 
-  // A group of checkboxes is a `div.field`; any other field is a `label.field`.
-  const field = (label: string) =>
-    [...host!.querySelectorAll<HTMLElement>(".field")].find((f) => f.querySelector(".field__label")?.textContent === label)!;
-  const control = <E extends Element = HTMLInputElement>(label: string) => field(label).querySelector<E>("input, select, textarea, output")!;
-  const toggle = (label: string) =>
-    [...host!.querySelectorAll("label.toggle")].find((t) => t.querySelector(".toggle__label")?.textContent === label)!.querySelector("input")!;
-  const boxes = (fieldLabel: string) => [...field(fieldLabel).querySelectorAll("label.checkbox")];
-  const checked = (fieldLabel: string) => boxes(fieldLabel).filter((c) => c.querySelector("input")!.checked).map((c) => c.textContent);
   const chips = (label: string) => [...field(label).querySelectorAll(".name-chip > .mono")].map((c) => c.textContent);
   const repository = () => [...host!.querySelector(".grid-repo:not(.row-list__head)")!.querySelectorAll("input")];
   /** The preferred harness, then each fallback: its harness, model, and effort controls. */
@@ -627,24 +658,6 @@ describe("task form document", () => {
       const [harness, effort] = p.querySelectorAll("select");
       return { harness: harness!, model: p.querySelector("input")!, effort: effort! };
     });
-  const button = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === label)!;
-  const sent = (method: string, path: string) => daemon.requests.filter((r) => r.method === method && r.path === path).map((r) => r.body);
-
-  /** Types into a field or chooses an option, as React sees it. */
-  async function enter(el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, value: string) {
-    const proto = el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(el, value);
-      el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }));
-    });
-  }
-  async function click(el: HTMLElement) {
-    await act(async () => el.click());
-  }
-  /** Clicks one of a field's checkboxes. */
-  async function tick(fieldLabel: string, label: string) {
-    await click(boxes(fieldLabel).find((c) => c.textContent === label)!.querySelector("input")!);
-  }
 
   it("sends, once every section is filled through its controls, the document the daemon writes as a file", async () => {
     // The daemon's draft of a GitHub template that selects no agent: one repository row for the editor to ask for.
@@ -661,7 +674,7 @@ describe("task form document", () => {
         },
       },
     });
-    await openScreen({ kind: "new", template: "hf-github-issues" });
+    await openTask({ kind: "new", template: "hf-github-issues" });
 
     // General. The name writes an identifier of its own until the identifier is typed.
     await enter(control("Name"), "Every section");
@@ -701,7 +714,7 @@ describe("task form document", () => {
     await enter(control("Maximum switches"), "2");
 
     // Schedule: weekdays at 06:30 in São Paulo, skipping missed and overlapping firings.
-    await click([...host!.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((b) => b.textContent === "Cron")!);
+    await click(radio("Cron"));
     await enter(control("Time"), "06:30");
     await enter(control("Time zone"), "America/Sao_Paulo");
     await enter(control<HTMLSelectElement>("Missed runs"), "skip");
@@ -734,7 +747,7 @@ describe("task form document", () => {
   });
 
   it("shows the document in its controls, and sends no key of a cleared control, so its default applies", async () => {
-    await openScreen({ kind: "edit", id: "complete" });
+    await openTask({ kind: "edit", id: "complete" });
     expect(control("Identifier").disabled).toBe(true);
     const values = (...labels: string[]) => labels.map((label) => control(label).value);
     const [preferred, fallback] = profiles().map((p) => [p.harness.value, p.model.value, p.effort.value]);
@@ -809,6 +822,182 @@ describe("task form document", () => {
       delete parent[path.at(-1)!];
     }
     expect(sent("PUT", "/tasks/complete")).toStrictEqual([{ document: expected, baseRevision: "r1" }]);
+  });
+});
+
+// A new script task, every section of its form filled through its controls, saves the document
+// script-task-form-document.json holds, which itest › TestScriptFormDocumentIsTheFile writes as an equal file. The form
+// hides a harness task's Prompt and Harness sections and shows the Script section, so it has a fixture of its own. Its
+// program is a command or an inline program, never both, and the document opens back in its controls.
+describe("script task form document", () => {
+  const SCRIPT_DOCUMENT = fixture("script-task-form-document.json");
+  const COMMAND = "/bin/date\n-u\n+%Y-%m-%d %H:%M";
+  const stored = (document: Doc): Task => ({
+    id: "script-complete",
+    name: "Every script section",
+    type: "script",
+    enabled: false,
+    revision: "r1",
+    harness: "",
+    warnings: [],
+    document,
+    effective: document,
+    yaml: JSON.stringify(document, null, 2) + "\n",
+    path: "script-complete.yaml",
+    validation: { valid: true, errors: [], warnings: [] },
+  });
+  /** The fixture with its command replaced by an inline program. */
+  const inline = (interpreter: string[], source: string): Doc => {
+    const doc = structuredClone(SCRIPT_DOCUMENT);
+    const script = (doc.spec as Doc).script as Doc;
+    delete script.command;
+    script.inline = { interpreter, source };
+    return doc;
+  };
+
+  async function openTask(view: TaskView, document = SCRIPT_DOCUMENT) {
+    daemon.answers.set("POST /tasks", stored(document));
+    daemon.answers.set("GET /tasks", []);
+    daemon.answers.set("GET /tasks/script-complete", stored(document));
+    daemon.answers.set("PUT /tasks/script-complete", stored(document));
+    await openScreen(view);
+  }
+
+  it("sends, once every section is filled through its controls, the document the daemon writes as a file", async () => {
+    // The daemon's draft of the script template: a program for the editor to ask for.
+    daemon.answers.set("POST /templates/hf-script/draft", {
+      document: {
+        apiVersion: "harmflow/v1alpha1",
+        kind: "Task",
+        metadata: { id: "script-task", name: "Script task" },
+        spec: { enabled: true, type: "script", script: {} },
+      },
+    });
+    await openTask({ kind: "new", template: "hf-script" });
+    expect(host!.querySelector("#section-prompt")).toBeNull();
+    expect(host!.querySelector("#section-harness")).toBeNull();
+
+    // General. The name writes an identifier of its own until the identifier is typed.
+    await enter(control("Name"), "Every script section");
+    expect(control("Identifier").value).toBe("every-script-section");
+    await enter(control("Identifier"), "script-complete");
+    await enter(control<HTMLTextAreaElement>("Description"), "Every section of the script form, set.");
+    await click(toggle("Enabled"));
+
+    // Script: a command of three arguments, the last with a space inside it, kept whole.
+    expect(radio("A program").getAttribute("aria-checked")).toBe("true");
+    await enter(control<HTMLTextAreaElement>("Program and arguments"), COMMAND);
+    await enter(control("Working directory"), "${FORM_REPO}");
+    await tick("Runs on", "macOS");
+    await tick("Runs on", "Linux");
+    await enter(control<HTMLTextAreaElement>("Environment variables"), "AUDIT_LABEL=Daily audit\nAUDIT_LEVEL=full");
+
+    // Schedule: weekdays at 06:30 in São Paulo, skipping missed and overlapping firings.
+    await click(radio("Cron"));
+    await enter(control("Time"), "06:30");
+    await enter(control("Time zone"), "America/Sao_Paulo");
+    await enter(control<HTMLSelectElement>("Missed runs"), "skip");
+    await enter(control<HTMLSelectElement>("Overlapping firings"), "skip");
+
+    // Permissions: the custom profile's lists show once it is chosen.
+    await enter(control<HTMLSelectElement>("Profile"), "custom");
+    await enter(control<HTMLSelectElement>("Network"), "deny");
+    await click(toggle("Restrict writes to the workspace"));
+    await enter(control<HTMLTextAreaElement>("Allowed tools"), "Read\nGrep");
+    await enter(control<HTMLTextAreaElement>("Denied tools"), "WebFetch");
+    await enter(control<HTMLTextAreaElement>("Writable paths"), "${FORM_REPO}");
+
+    // Execution: a script task has no rate-limit retries and no extra usage.
+    expect(field("Rate-limit retries")).toBeUndefined();
+    expect([...host!.querySelectorAll(".toggle__label")].map((l) => l.textContent)).not.toContain("Allow extra usage");
+    await enter(control("Timeout (minutes), shared by all attempts"), "45");
+    await enter(control("Grace before a cancellation is forced (seconds)"), "10");
+
+    // Notifications: off, and of the default events only operational failures kept, with cancellations added.
+    await click(toggle("Native notifications"));
+    for (const event of ["Execution completed", "Needs attention", "Draft PR created", "No alternative harness"]) await tick("Notify me about", event);
+    await tick("Notify me about", "Cancellation");
+
+    await click(button("Save"));
+    await settle();
+    // Strictly equal: a number sent as a string, the command split on its space, or a key the form left in, fails.
+    expect(sent("POST", "/tasks")).toStrictEqual([{ document: SCRIPT_DOCUMENT }]);
+  });
+
+  it("sends an inline program and no command once the program is switched to inline", async () => {
+    await openTask({ kind: "edit", id: "script-complete" });
+    await click(radio("An inline script"));
+    expect(field("Program and arguments")).toBeUndefined();
+    await enter(control<HTMLTextAreaElement>("Interpreter"), "/bin/sh\n-e");
+    await enter(control<HTMLTextAreaElement>("Script"), "date -u\necho done\n");
+    await click(button("Save"));
+    await settle();
+    expect(sent("PUT", "/tasks/script-complete")).toStrictEqual([
+      { document: inline(["/bin/sh", "-e"], "date -u\necho done\n"), baseRevision: "r1" },
+    ]);
+  });
+
+  it("sends the command and no inline program once the program is switched back to a command", async () => {
+    await openTask({ kind: "edit", id: "script-complete" }, inline(["/bin/sh"], "date -u\n"));
+    expect(radio("An inline script").getAttribute("aria-checked")).toBe("true");
+    await click(radio("A program"));
+    expect(field("Interpreter")).toBeUndefined();
+    await enter(control<HTMLTextAreaElement>("Program and arguments"), COMMAND);
+    await click(button("Save"));
+    await settle();
+    expect(sent("PUT", "/tasks/script-complete")).toStrictEqual([{ document: SCRIPT_DOCUMENT, baseRevision: "r1" }]);
+  });
+
+  it("shows the document in its controls, and sends no key of a cleared control, so its default applies", async () => {
+    await openTask({ kind: "edit", id: "script-complete" });
+    expect(control("Identifier").disabled).toBe(true);
+    expect(control("Task type").disabled).toBe(true);
+    const values = (...labels: string[]) => labels.map((label) => control(label).value);
+    expect({
+      general: [...values("Name", "Identifier", "Task type", "Description"), toggle("Enabled").checked],
+      script: [
+        radio("A program").getAttribute("aria-checked"),
+        ...values("Program and arguments", "Working directory"),
+        checked("Runs on"),
+        control("Environment variables").value,
+      ],
+      schedule: [...values("Repeats", "Time"), control("Cron expression (5 fields)").textContent, ...values("Time zone", "Missed runs", "Overlapping firings")],
+      permissions: [...values("Profile", "Network"), toggle("Restrict writes to the workspace").checked, ...values("Allowed tools", "Denied tools", "Writable paths")],
+      execution: values("Timeout (minutes), shared by all attempts", "Grace before a cancellation is forced (seconds)"),
+      notifications: [toggle("Native notifications").checked, checked("Notify me about")],
+    }).toEqual({
+      general: ["Every script section", "script-complete", "Script", "Every section of the script form, set.", false],
+      script: ["true", COMMAND, "${FORM_REPO}", ["macOS", "Linux"], "AUDIT_LABEL=Daily audit\nAUDIT_LEVEL=full"],
+      schedule: ["weekdays", "06:30", "30 6 * * 1-5", "America/Sao_Paulo", "skip", "skip"],
+      permissions: ["custom", "deny", false, "Read\nGrep", "WebFetch", "${FORM_REPO}"],
+      execution: ["45", "10"],
+      notifications: [false, ["Operational failure", "Cancellation"]],
+    });
+
+    // One control of each section cleared; the events emptied show their defaults again, as the daemon applies them.
+    await enter(control<HTMLTextAreaElement>("Description"), "");
+    await enter(control("Working directory"), "");
+    await enter(control("Time zone"), "");
+    await enter(control<HTMLSelectElement>("Network"), "");
+    await enter(control("Timeout (minutes), shared by all attempts"), "");
+    for (const event of ["Operational failure", "Cancellation"]) await tick("Notify me about", event);
+    expect(checked("Notify me about")).toEqual(["Execution completed", "Operational failure", "Needs attention", "Draft PR created", "No alternative harness"]);
+    await click(button("Save"));
+    await settle();
+
+    const expected = structuredClone(SCRIPT_DOCUMENT);
+    for (const path of [
+      ["metadata", "description"],
+      ["spec", "script", "workingDirectory"],
+      ["spec", "schedule", "timezone"],
+      ["spec", "permissions", "network"],
+      ["spec", "execution", "timeoutMinutes"],
+      ["spec", "notifications", "native", "events"],
+    ]) {
+      const parent = path.slice(0, -1).reduce((node, key) => node[key] as Doc, expected);
+      delete parent[path.at(-1)!];
+    }
+    expect(sent("PUT", "/tasks/script-complete")).toStrictEqual([{ document: expected, baseRevision: "r1" }]);
   });
 });
 

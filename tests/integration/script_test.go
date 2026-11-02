@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"syscall"
@@ -137,6 +138,45 @@ func TestScriptTaskOverTheAPI(t *testing.T) {
 	}
 	if s, _ := d.request("POST", "/tasks/imported/run", nil, nil); s < 400 {
 		t.Errorf("an imported script task ran before it was enabled: %d", s)
+	}
+}
+
+// The document a new script task's form sends once every section is filled, which the dashboard's
+// TaskForm.test › "script task form document" checks against the same fixture, is written as the file: the file is the
+// yaml the API returned and equals the document, validates, and is listed. The task is not run.
+func TestScriptFormDocumentIsTheFile(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	d := startDaemon(t, home)
+	repo := t.TempDir()
+	// Outside the home folder, so an allowed folder. The document names it by a path variable, which the file keeps as
+	// written: a path variable left undefined would skip the path's check.
+	d.call("PATCH", "/settings", map[string]any{"allowedFolders": []any{repo},
+		"pathVariables": map[string]any{"FORM_REPO": repo}}, 200)
+	doc := formDocument(t, "script-task-form-document.json", "script-complete")
+	created := d.call("POST", "/tasks", map[string]any{"document": doc}, 201)
+	if created["type"] != "script" || created["harness"] != "" {
+		t.Errorf("POST /tasks created type %v, harness %v, want script and none", created["type"], created["harness"])
+	}
+	data, err := os.ReadFile(filepath.Join(home, "tasks", "script-complete.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != created["yaml"] {
+		t.Errorf("the file is not the yaml the API returned:\n%s", data)
+	}
+	if file, sent := yamlAsJSON(t, data), jsonShape(t, doc); !reflect.DeepEqual(file, sent) {
+		t.Errorf("the file is not the document sent:\nfile     %s\ndocument %s", mustJSON(file), mustJSON(sent))
+	}
+	if v := d.call("POST", "/tasks/validate", map[string]any{"yaml": string(data)}, 200); v["valid"] != true {
+		t.Errorf("the file fails validation: %v", v["errors"])
+	}
+	listed := false
+	for _, x := range d.list("/tasks") {
+		listed = listed || x["id"] == "script-complete"
+	}
+	if !listed {
+		t.Errorf("GET /tasks does not list script-complete")
 	}
 }
 
