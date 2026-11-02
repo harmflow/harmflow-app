@@ -187,6 +187,49 @@ describe("execution detail", () => {
     expect(chip?.textContent).not.toContain("Failed");
   });
 
+  it("shows a call a later end corrects to declined as one declined line, with the first end's output", async () => {
+    // Claude Code ends a refused call as failed while the session runs, and says it declined it at the session's end.
+    const refused = "cd /tmp && ls missing 2>&1";
+    const corrected: Execution = { ...completed, id: "exec-corrected" };
+    const on = { executionId: corrected.id };
+    await open(
+      corrected,
+      [
+        event(1, "execution.started", { ...on, message: "Loading configuration" }),
+        event(2, "tool.started", { ...on, message: refused, payload: { toolId: "t9", tool: "Bash", command: refused } }),
+        event(3, "tool.completed", {
+          ...on,
+          severity: "warning",
+          message: "Bash failed",
+          messageKey: "tool_failed",
+          params: { tool: "Bash" },
+          payload: { toolId: "t9", tool: "Bash", status: "failed", output: "This command requires approval" },
+        }),
+        event(4, "tool.completed", {
+          ...on,
+          severity: "warning",
+          message: "Bash was declined",
+          messageKey: "tool_declined",
+          params: { tool: "Bash" },
+          payload: { toolId: "t9", tool: "Bash", status: "declined", output: "" },
+        }),
+      ],
+      capture(),
+    );
+    await choose("Events");
+
+    const rows = [...host!.querySelectorAll<HTMLElement>('[role="option"]')];
+    expect(rows).toHaveLength(2);
+    const call = rows.find((r) => r.textContent?.includes(refused))!;
+    expect(call).toBeDefined();
+    expect(call.querySelector(".tl-item__state .tone-warning")).not.toBeNull();
+    expect(call.querySelector(".tl-item__state .tone-danger")).toBeNull();
+
+    await act(async () => call.click());
+    await settle();
+    expect(host!.querySelector(".event-details .codebox pre")?.textContent).toBe("This command requires approval");
+  });
+
   it("names the model and effort each attempt's harness reported, and the rest as not reported", async () => {
     await open(completed, [], capture());
     await choose("Attempts");
