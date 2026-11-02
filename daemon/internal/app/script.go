@@ -209,7 +209,8 @@ func (r *run) runScript(ctx context.Context, deadline time.Time) (domain.Executi
 		return domain.StatusFailed, workingDirectoryMissing(wd)
 	}
 	r.work = wd
-	rec := &domain.ScriptRun{WorkingDirectory: wd, Environment: redactedMap(spec.Environment)}
+	// The record keeps what ran redacted like the raw output, its paths included; the program runs from the real ones.
+	rec := &domain.ScriptRun{WorkingDirectory: eventlog.Redact(wd), Environment: redactedMap(spec.Environment)}
 	argv := append([]string{}, spec.Command...)
 	if spec.Inline != nil {
 		script := filepath.Join(r.dir, scriptFileName(spec.Inline.Interpreter[0]))
@@ -227,7 +228,7 @@ func (r *run) runScript(ctx context.Context, deadline time.Time) (domain.Executi
 	if err != nil {
 		return domain.StatusFailed, domain.TextOf(err)
 	}
-	rec.Program = program
+	rec.Program = eventlog.Redact(program)
 	now := a.now()
 	a.mu.Lock()
 	r.x.StartedAt = &now
