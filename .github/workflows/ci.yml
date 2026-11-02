@@ -162,6 +162,11 @@ jobs:
         with:
           go-version-file: daemon/go.mod
           cache-dependency-path: daemon/go.sum
+      # The daemon job's two checks again: a change to tests/ alone runs this job and skips that one.
+      - name: Formatting
+        run: test -z "$(gofmt -l daemon tests)" || { gofmt -l daemon tests; exit 1; }
+      - name: Import groups
+        run: make check-imports
       # The integration tests, and the daemon's coverage held against daemon/coverage-floors.txt. This is
       # the only job where the unit and integration data can both exist; the daemon job keeps -race.
       - run: make coverage-daemon
