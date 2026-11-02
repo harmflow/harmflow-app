@@ -63,18 +63,21 @@ func trimParams(p map[string]string, n int) map[string]string {
 	return out
 }
 
-// ExecutionFilter selects executions: of one task, in some statuses, active or not, and created before an instant; a
-// zero field selects all. Limit caps the list, 100 when it is not between 1 and 500.
+// ExecutionFilter selects executions: of one task, in some statuses, active or not, created in a period, and created
+// before an instant, the paging cursor; a zero field selects all. The period runs from CreatedFrom, inclusive, to
+// CreatedUntil, exclusive. Limit caps the list, 100 when it is not between 1 and 500.
 type ExecutionFilter struct {
-	TaskID   string
-	Statuses []string
-	Active   *bool
-	Limit    int
-	Before   *time.Time
+	TaskID       string
+	Statuses     []string
+	Active       *bool
+	Limit        int
+	Before       *time.Time
+	CreatedFrom  *time.Time
+	CreatedUntil *time.Time
 }
 
 // ListExecutions lists the executions the filter selects, newest first: it walks the executions from the newest and
-// stops at the limit.
+// stops at the limit, or at the first one created before the period.
 func (a *App) ListExecutions(f ExecutionFilter) []ExecutionSummary {
 	limit := f.Limit
 	if limit <= 0 || limit > 500 {
@@ -84,6 +87,9 @@ func (a *App) ListExecutions(f ExecutionFilter) []ExecutionSummary {
 	defer a.mu.Unlock()
 	out := []ExecutionSummary{}
 	for i := len(a.byCreated) - 1; i >= 0 && len(out) < limit; i-- {
+		if f.CreatedFrom != nil && a.byCreated[i].at.Before(*f.CreatedFrom) {
+			break
+		}
 		s, ok := a.summaryLocked(a.byCreated[i].id)
 		switch {
 		case !ok:
@@ -91,6 +97,7 @@ func (a *App) ListExecutions(f ExecutionFilter) []ExecutionSummary {
 		case len(f.Statuses) > 0 && !containsString(f.Statuses, string(s.Status)):
 		case f.Active != nil && s.Status.IsActive() != *f.Active:
 		case f.Before != nil && !s.CreatedAt.Before(*f.Before):
+		case f.CreatedUntil != nil && !s.CreatedAt.Before(*f.CreatedUntil):
 		default:
 			out = append(out, row(s))
 		}

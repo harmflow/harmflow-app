@@ -509,7 +509,15 @@ paths:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
         - name: before
           in: query
-          description: Only executions created before this time.
+          description: Only executions created before this time; the paging cursor.
+          schema: { type: string, format: date-time }
+        - name: createdFrom
+          in: query
+          description: Only executions created at or after this instant, the start of a period.
+          schema: { type: string, format: date-time }
+        - name: createdUntil
+          in: query
+          description: Only executions created before this instant, the end of a period, which it excludes.
           schema: { type: string, format: date-time }
       responses:
         "200":

@@ -1006,3 +1006,101 @@ describe("the app's hidden login item", () => {
     expect(loginItem.mock.calls).toEqual([[trayEnabled]]);
   });
 });
+
+// The History screen's period: its start and end dates reach the daemon as the instants of the user's days, from 00:00
+// of the start date to 00:00 of the day after the end date; an end before the start sends nothing.
+describe("the History screen's period", () => {
+  let root: Root | undefined;
+  let host: HTMLElement | undefined;
+
+  beforeAll(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    host?.remove();
+    root = host = undefined;
+    daemon.answers.clear();
+    daemon.requests.length = 0;
+  });
+
+  /** Lets the stand-in daemon's answers arrive and React render them. */
+  const settle = () => act(() => new Promise<void>((resolve) => setImmediate(resolve)));
+
+  async function open() {
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(<HistoryScreen openId={null} onOpen={() => {}} />));
+    await settle();
+  }
+
+  /** Picks a day in the date input of label, as the date picker does; an empty day clears it. */
+  async function pick(label: string, day: string) {
+    const input = host!.querySelector<HTMLInputElement>(`input[type="date"][aria-label="${label}"]`)!;
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => {
+      setValue.call(input, day);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await settle();
+  }
+
+  /** 00:00 of a day in the user's time zone, as the query writes the instant. */
+  const midnight = (year: number, month: number, day: number) => encodeURIComponent(new Date(year, month - 1, day).toISOString());
+  const banner = () => host!.querySelector(".banner")?.textContent ?? null;
+
+  it("sends the chosen period's bounds, nothing for an end before the start, and no bounds once cleared", async () => {
+    daemon.answers.set("/executions", []);
+    await open();
+    expect(daemon.requests).toEqual(["GET /executions?limit=50"]);
+
+    daemon.requests.length = 0;
+    await pick("De", "2026-10-20");
+    expect(daemon.requests).toEqual([`GET /executions?limit=50&createdFrom=${midnight(2026, 10, 20)}`]);
+
+    daemon.requests.length = 0;
+    await pick("Até", "2026-10-22");
+    expect(daemon.requests).toEqual([`GET /executions?limit=50&createdFrom=${midnight(2026, 10, 20)}&createdUntil=${midnight(2026, 10, 23)}`]);
+    expect(banner()).toBeNull();
+
+    // One day: from its 00:00 to the next day's.
+    daemon.requests.length = 0;
+    await pick("Até", "2026-10-20");
+    expect(daemon.requests).toEqual([`GET /executions?limit=50&createdFrom=${midnight(2026, 10, 20)}&createdUntil=${midnight(2026, 10, 21)}`]);
+
+    // An end before the start is not sent, and the screen says the period is invalid.
+    daemon.requests.length = 0;
+    await pick("Até", "2026-10-19");
+    expect(daemon.requests).toEqual([]);
+    expect(banner()).toBe("A data final é anterior à data inicial. Escolha um período válido.");
+
+    // Cleared, each date's bound goes, and with both cleared the list is every execution again.
+    await pick("Até", "");
+    expect(banner()).toBeNull();
+    expect(daemon.requests).toEqual([`GET /executions?limit=50&createdFrom=${midnight(2026, 10, 20)}`]);
+    daemon.requests.length = 0;
+    await pick("De", "");
+    expect(daemon.requests).toEqual(["GET /executions?limit=50"]);
+  });
+
+  it("loads the next page of the same period", async () => {
+    const page: ExecutionSummary[] = Array.from({ length: 50 }, (_, i) => ({
+      ...finished,
+      id: `exec-${i}`,
+      createdAt: new Date(2026, 9, 22, 23, 50 - i).toISOString(),
+    }));
+    daemon.answers.set("/executions", page);
+    await open();
+    await pick("De", "2026-10-20");
+    await pick("Até", "2026-10-22");
+
+    daemon.requests.length = 0;
+    const more = [...host!.querySelectorAll<HTMLButtonElement>(".table__footer button")].find((b) => b.textContent === "Carregar execuções mais antigas")!;
+    await act(async () => more.click());
+    await settle();
+    expect(daemon.requests).toEqual([
+      `GET /executions?limit=50&before=${encodeURIComponent(page[49].createdAt)}&createdFrom=${midnight(2026, 10, 20)}&createdUntil=${midnight(2026, 10, 23)}`,
+    ]);
+  });
+});

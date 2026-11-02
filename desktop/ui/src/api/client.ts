@@ -72,6 +72,9 @@ export interface ExecutionQuery {
   active?: boolean;
   limit?: number;
   before?: string;
+  /** The period, as instants: from createdFrom, inclusive, to createdUntil, exclusive. */
+  createdFrom?: string;
+  createdUntil?: string;
 }
 
 export const api = {

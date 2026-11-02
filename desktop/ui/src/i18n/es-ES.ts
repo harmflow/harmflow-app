@@ -800,6 +800,9 @@ export const esES: Resources = {
       anyTask: "Cualquier tarea",
       anyTrigger: "Cualquier disparo",
       searchPlaceholder: "Buscar tarea, repositorio, elemento de trabajo…",
+      from: "Desde",
+      to: "Hasta",
+      invalidPeriod: "La fecha final es anterior a la fecha inicial. Elige un período válido.",
     },
     columns: {
       status: "Estado",

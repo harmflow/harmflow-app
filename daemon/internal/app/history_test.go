@@ -182,6 +182,61 @@ func TestKeptOrdersMatchAScan(t *testing.T) {
 	}
 }
 
+// ListExecutions selects by the period an execution was created in, from its lower bound, inclusive, to its upper
+// bound, exclusive, either one alone or both, and pages inside it with the cursor until the period's start.
+func TestListExecutionsWithinAPeriod(t *testing.T) {
+	e := newEnv(t)
+	e.create("daily", "")
+	now := e.clock.Now()
+	day := func(n int) time.Time { return now.Add(time.Duration(n) * 24 * time.Hour) }
+	ids := map[int]string{}
+	// Added out of creation order, one a day over the last five days.
+	for _, n := range []int{-3, -5, -1, -4, -2} {
+		x := domain.NewExecution(domain.TaskDocument{Metadata: domain.TaskMetadata{ID: "daily"}}, domain.TriggerSchedule, nil,
+			day(n))
+		started, ended := day(n), day(n).Add(time.Minute)
+		x.Status, x.StartedAt, x.EndedAt = domain.StatusCompleted, &started, &ended
+		e.app.mu.Lock()
+		e.app.addExecutionLocked(x)
+		e.app.mu.Unlock()
+		e.app.persistExecution(x)
+		ids[n] = x.ID
+	}
+	at := func(n int) *time.Time { t := day(n); return &t }
+	later := day(-1).Add(time.Hour)
+	listed := func(f ExecutionFilter) []string {
+		var out []string
+		for _, s := range e.app.ListExecutions(f) {
+			out = append(out, s.ID)
+		}
+		return out
+	}
+	for _, c := range []struct {
+		name string
+		f    ExecutionFilter
+		want []int
+	}{
+		{"a lower bound, which it includes", ExecutionFilter{CreatedFrom: at(-3)}, []int{-1, -2, -3}},
+		{"an upper bound, which it excludes", ExecutionFilter{CreatedUntil: at(-2)}, []int{-3, -4, -5}},
+		{"both bounds", ExecutionFilter{CreatedFrom: at(-4), CreatedUntil: at(-1)}, []int{-2, -3, -4}},
+		{"a period with no execution", ExecutionFilter{CreatedFrom: &later}, nil},
+		{"the first page of a period", ExecutionFilter{CreatedFrom: at(-4), CreatedUntil: at(-1), Limit: 2}, []int{-2, -3}},
+		{"the next page, the cursor inside the period", ExecutionFilter{CreatedFrom: at(-4), CreatedUntil: at(-1), Limit: 2,
+			Before: at(-3)}, []int{-4}},
+		{"a cursor at the period's start", ExecutionFilter{CreatedFrom: at(-4), CreatedUntil: at(-1), Before: at(-4)}, nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var want []string
+			for _, n := range c.want {
+				want = append(want, ids[n])
+			}
+			if got := listed(c.f); !slices.Equal(got, want) {
+				t.Errorf("ListExecutions() = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
 // The full record of an execution that ended is read from its file when it is asked for: GetExecution, its output,
 // its events, and a cancel that finds it ended all know it.
 func TestEndedExecutionReadWhenAskedFor(t *testing.T) {

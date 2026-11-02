@@ -457,12 +457,17 @@ func (s *Server) listExecutions(w http.ResponseWriter, r *http.Request) {
 	if v := q.Get("limit"); v != "" {
 		f.Limit, _ = strconv.Atoi(v) // a limit that is not a number is 0, the default
 	}
-	if v := q.Get("before"); v != "" {
-		if t, err := time.Parse(time.RFC3339Nano, v); err == nil {
-			f.Before = &t
-		}
-	}
+	f.Before, f.CreatedFrom, f.CreatedUntil = instant(q.Get("before")), instant(q.Get("createdFrom")), instant(q.Get("createdUntil"))
 	writeJSON(w, 200, s.App.ListExecutions(f))
+}
+
+// instant reads an RFC 3339 instant of a query; an empty or malformed one is none, which bounds nothing.
+func instant(v string) *time.Time {
+	t, err := time.Parse(time.RFC3339Nano, v)
+	if v == "" || err != nil {
+		return nil
+	}
+	return &t
 }
 
 func (s *Server) getExecution(w http.ResponseWriter, r *http.Request) {
