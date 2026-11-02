@@ -124,6 +124,24 @@ describe("HarnessRow", () => {
       "the Claude Code --help check timed out, so the flags it has are unknown; the first attempt proves them",
     );
   });
+
+  it("shows a ready Codex whose top-level help check timed out in a warning tone, its app server unknown (harmflow-app#643)", () => {
+    const appServerUnknown: Harness = {
+      ...ready,
+      id: "codex",
+      name: "Codex",
+      diagnostic: "the Codex --help check timed out",
+      diagnosticKey: "codex_app_server_help_timed_out",
+      diagnosticParams: { harness: "Codex" },
+    };
+    expect(readinessTone(appServerUnknown)).toBe("warning");
+    const html = renderToString(<HarnessRow harness={appServerUnknown} />);
+    expect(html).toContain("chip--warning");
+    expect(html).toContain(
+      "the Codex --help check timed out, so whether it has an app server is unknown; the first call to the app server proves it",
+    );
+    expect(html).not.toContain("flags");
+  });
 });
 
 // The inventory's rows, label to text, as rendered.
