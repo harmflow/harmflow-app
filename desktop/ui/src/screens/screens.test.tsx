@@ -718,6 +718,31 @@ describe("the choice to keep HarmFlow in the menu bar on ⌘Q", () => {
     await settle();
     expect(daemon.requests.filter((r) => !r.startsWith("GET "))).toEqual([]);
   });
+
+  it("is off and cannot be turned on once the tray is switched off in Settings", async () => {
+    // A first use: the settings of a fresh data folder, tray on and the preference off.
+    daemon.answers.set("/settings", settings);
+    await render();
+    expect(keepToggle().checked).toBe(false);
+    expect(keepToggle().disabled).toBe(false);
+
+    // The daemon stores the patch, and the settings read after it hold the tray off.
+    daemon.answers.set("/settings", { ...settings, trayEnabled: false });
+    daemon.requests.length = 0;
+    daemon.bodies.length = 0;
+    await act(async () => (document.getElementById("settings-tray") as HTMLInputElement).click());
+    await settle();
+    expect(daemon.requests.filter((r) => !r.startsWith("GET "))).toEqual(["PATCH /settings"]);
+    expect(daemon.bodies[daemon.requests.indexOf("PATCH /settings")]).toEqual({ trayEnabled: false });
+    expect(keepToggle().checked).toBe(false);
+    expect(keepToggle().disabled).toBe(true);
+
+    daemon.requests.length = 0;
+    await act(async () => keepToggle().click());
+    await settle();
+    expect(daemon.requests.filter((r) => !r.startsWith("GET "))).toEqual([]);
+    expect(keepToggle().checked).toBe(false);
+  });
 });
 
 // Settings shows its sections in a list, in three groups and About, and one section at a time (harmflow-app#251).
