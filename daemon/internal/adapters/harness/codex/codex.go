@@ -606,16 +606,16 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 	return inv, p, nil
 }
 
-// readOnlyRestriction is the read_only profile's restriction: enforced unless Codex's managed requirements leave out
-// the read-only sandbox or approvals off. Under requirements that allowed only on-request approvals, a real read_only
-// run had Codex's change to a file of its workspace approved, and only the one outside it declined. Requirements that
-// could not be read leave it as it would be with none.
+// readOnlyRestriction is the read_only profile's restriction: enforced only when Codex's managed requirements, as
+// read, allow the read-only sandbox and approvals off. Under requirements that allowed only on-request approvals, a
+// real read_only run had Codex's change to a file of its workspace approved, and only the one outside it declined.
+// Codex applies its requirements whether or not they could be read, so unread ones leave the profile not enforced.
 func readOnlyRestriction(m *ports.ManagedRequirements) ports.Restriction {
 	leftOut := func(list []string, v string) bool { return list != nil && !slices.Contains(list, v) }
-	if m != nil && (leftOut(m.ApprovalPolicies, approvalPolicy) || leftOut(m.SandboxModes, sandboxReadOnly)) {
+	if m == nil || leftOut(m.ApprovalPolicies, approvalPolicy) || leftOut(m.SandboxModes, sandboxReadOnly) {
 		return ports.Restriction{Name: "read_only", Enforced: false,
 			Text: domain.T("restriction_codex_read_only",
-				"Codex's managed requirements do not allow its read-only sandbox with approvals off, so Codex may approve a change to a file of the workspace; the session may change files in its workspace")}
+				"Codex's managed requirements do not allow its read-only sandbox with approvals off, or could not be read, so Codex may approve a change to a file of the workspace; the session may change files in its workspace")}
 	}
 	return ports.Restriction{Name: "read_only", Enforced: true,
 		Text: domain.Text{Message: "Codex's read-only sandbox refuses every write, with approvals off"}}

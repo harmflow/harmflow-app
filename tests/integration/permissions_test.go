@@ -17,9 +17,10 @@ import (
 // A read_only task on the real Codex asks the session to write one file inside its workspace and one outside it.
 // Codex's read-only sandbox, with approvals off, refuses both: after the execution neither file exists, and the
 // execution carries no warning that read_only is not enforced. Where Codex's managed requirements leave out approvals
-// off, Codex may approve the write inside, so the execution warns that read_only is not enforced instead: a file inside
-// the workspace is then logged with the workspace changes that show what wrote it, and only the warning's absence
-// fails. Only a run started by hand from a plain terminal, outside any other sandbox, proves the profile enforced.
+// off, or the daemon could not read them, Codex may approve the write inside, so the execution warns that read_only is
+// not enforced instead: a file inside the workspace is then logged with the workspace changes that show what wrote it,
+// and only the warning's absence fails. Only a run started by hand from a plain terminal, outside any other sandbox,
+// proves the profile enforced.
 func TestReadOnlyRealCodexWritesNothing(t *testing.T) {
 	h := codexForPermissions(t)
 	w := newWriteTargets(t)
@@ -34,7 +35,8 @@ func TestReadOnlyRealCodexWritesNothing(t *testing.T) {
 		r.wantEnforced(t, "read_only")
 		return
 	}
-	t.Logf("Codex's managed requirements, %v, leave out the approval policy never", r.harness["managedRequirements"])
+	t.Logf("Codex's managed requirements, %v, leave out the approval policy never or could not be read",
+		r.harness["managedRequirements"])
 	if !slices.ContainsFunc(r.unenforced, func(u unenforced) bool {
 		return u.subject == "read_only" && u.key == "restriction_codex_read_only"
 	}) {
@@ -50,10 +52,14 @@ func TestReadOnlyRealCodexWritesNothing(t *testing.T) {
 }
 
 // allowsApprovalsOff reports whether the harness's managed requirements, as the daemon read them, allow the approval
-// policy never: requirements that could not be read, or a null list, allow any. The API does not show the sandbox
-// modes they allow, which Codex's notice of a fallback names instead, as logSandbox logs it.
+// policy never: a null list allows any, and requirements that could not be read, absent from the harness, allow none
+// the daemon can count on. The API does not show the sandbox modes they allow, which Codex's notice of a fallback names
+// instead, as logSandbox logs it.
 func allowsApprovalsOff(harness map[string]any) bool {
-	m, _ := harness["managedRequirements"].(map[string]any)
+	m, ok := harness["managedRequirements"].(map[string]any)
+	if !ok {
+		return false
+	}
 	policies, ok := m["approvalPolicies"].([]any)
 	return !ok || slices.Contains(policies, any("never"))
 }

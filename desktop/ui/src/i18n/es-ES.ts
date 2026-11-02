@@ -391,7 +391,7 @@ export const esES: Resources = {
     restriction_codex_tool_lists:
       "Codex no tiene listas de herramientas permitidas o denegadas; las listas personalizadas no se aplican",
     restriction_codex_read_only:
-      "los requisitos administrados de Codex no permiten su sandbox de solo lectura con las aprobaciones desactivadas, así que Codex puede aprobar un cambio en un archivo del espacio de trabajo; la sesión puede cambiar archivos de su espacio de trabajo",
+      "los requisitos administrados de Codex no permiten su sandbox de solo lectura con las aprobaciones desactivadas, o no se pudieron leer, así que Codex puede aprobar un cambio en un archivo del espacio de trabajo; la sesión puede cambiar archivos de su espacio de trabajo",
     restriction_codex_ephemeral_missing:
       "Codex {{version}} no tiene --ephemeral, así que conserva todas las sesiones y la opción ephemeral de la tarea no cambia nada",
     harness_version_untested: "{{harness}} {{version}} es más reciente que las versiones con las que se probó HarmFlow",
