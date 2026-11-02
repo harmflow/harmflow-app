@@ -78,7 +78,7 @@ func TestDraftAtItsResumeLimitIsNotResumed(t *testing.T) {
 		// Its status is left out: the ledger may mark the item at its limit, or only once it is past it.
 		want := map[string]any{"testsStatus": "failed", "resumes": float64(resumes), "branch": draft.Head,
 			"pullRequestUrl": draft.URL}
-		if item := resumeLimitHeld(t, home, key); !resumeLimitHolds(item, want) {
+		if item := resumeLimitHeld(t, home, "queue", key); !resumeLimitHolds(item, want) {
 			t.Fatalf("after the stand-in's execution %s, reporting the item %s, the ledger holds %s as %v, want %v", id,
 				kind, key, item, want)
 		}
@@ -119,7 +119,7 @@ func TestDraftAtItsResumeLimitIsNotResumed(t *testing.T) {
 		t.Errorf("report.json gives %s the outcome %q and the kind %q, want needs_attention, or no entry\n%s", key,
 			outcome, reportedKind(t, dir, issue), runFiles(dir))
 	}
-	if item := resumeLimitHeld(t, home, key); item == nil || item["status"] != "needs_attention" {
+	if item := resumeLimitHeld(t, home, "queue", key); item == nil || item["status"] != "needs_attention" {
 		t.Errorf("after execution %s, the ledger holds %s as %v, want it needs_attention", id, key, item)
 	}
 	checkResumeLimitDraft(t, issue, draft, pushed)
@@ -245,11 +245,11 @@ func checkResumeLimitDraft(t *testing.T, issue int, draft restartPR, pushed stri
 	}
 }
 
-// resumeLimitHeld is the queue task's work item under key as the daemon's ledger in home holds it, nil when it holds
-// none. The ledger is read from its files, the archive of closed items first, then the items still in play, which hold
-// an item's later copy: GET /queue lists only the items in play (harmflow-app#341), and an item at its resume limit
-// needs attention.
-func resumeLimitHeld(t *testing.T, home, key string) map[string]any {
+// resumeLimitHeld is the work item under key of the task with the id task, as the daemon's ledger in home holds it, nil
+// when it holds none. The ledger is read from its files, the archive of closed items first, then the items still in
+// play, which hold an item's later copy: GET /queue lists only the items in play (harmflow-app#341), and an item that
+// ended completed or needs attention, such as one at its resume limit, is archived.
+func resumeLimitHeld(t *testing.T, home, task, key string) map[string]any {
 	t.Helper()
 	var held map[string]any
 	for _, name := range []string{"workitems-archive.json", "workitems.json"} {
@@ -266,7 +266,7 @@ func resumeLimitHeld(t *testing.T, home, key string) map[string]any {
 		if err := json.Unmarshal(data, &f); err != nil {
 			t.Fatal(err)
 		}
-		for k, item := range f.Tasks["queue"] {
+		for k, item := range f.Tasks[task] {
 			if strings.EqualFold(k, key) {
 				held = item
 			}
