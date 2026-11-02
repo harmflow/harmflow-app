@@ -510,16 +510,16 @@ func TestPrepareSandbox(t *testing.T) {
 }
 
 // A read_only task runs in Codex's read-only sandbox, forced with a -c override as approvals off are, with the
-// execution's folder added and its network blocked. The profile is enforced unless Codex's managed requirements leave
-// out the read-only sandbox or approvals off: then it is reported as not enforced, with its key, and the task still
-// runs. Requirements that could not be read, or that manage nothing, leave it enforced.
+// execution's folder added and its network blocked. The profile is enforced when Codex's managed requirements, as
+// read, allow the read-only sandbox and approvals off, or manage nothing. When they leave one out, or could not be
+// read, it is reported as not enforced, with its key, and the task still runs.
 func TestPrepareReadOnly(t *testing.T) {
 	for _, c := range []struct {
 		name         string
 		requirements *ports.ManagedRequirements
 		enforced     bool
 	}{
-		{"requirements unread", nil, true},
+		{"requirements unread", nil, false},
 		{"nothing managed", &ports.ManagedRequirements{}, true},
 		{"both allowed", &ports.ManagedRequirements{Managed: true, ApprovalPolicies: []string{"never", "on-request"},
 			SandboxModes: []string{"read-only", "workspace-write"}}, true},
