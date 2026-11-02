@@ -912,6 +912,7 @@ components:
         - report_schema_invalid
         - report_not_decodable
         - work_item_key_invalid
+        - pull_request_not_opened
         # Execution steps and why an attempt started
         - step_checking_harness
         - step_preparing_workspace

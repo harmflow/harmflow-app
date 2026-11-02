@@ -837,6 +837,74 @@ sleep 1.2; printf '%%s' '%[2]s' > %[1]s/report.json; echo 'END ok'`, req.Executi
 	e.wait(res.ExecutionID, domain.StatusNoWork)
 }
 
+// runOneItemReport runs a stand-in session of the task reporter that selects o/r#7 through progress.jsonl, then writes
+// a report whose top level holds outcome and whose one work item, o/r#7, holds item, with its branch and the path of a
+// real Git worktree. It waits for the execution to end as want, and returns the workspaces, the worktree's path, and
+// the execution.
+func runOneItemReport(t *testing.T, outcome, item string, want domain.ExecutionStatus) (*workspaces, string,
+	ExecutionView) {
+	t.Helper()
+	w := newWorkspaces(t)
+	w.create("reporter", "")
+	p := w.worktree("reporter", "r-7")
+	report := `{` + outcome + `"summary":"could not open the pull request","workItems":[{"key":"o/r#7",` + item +
+		`,"branch":"harmflow/7-fix","worktreePath":"` + p + `"}]}`
+	x := runTask(w.env, "reporter", want, `P="$HARMFLOW_EXECUTION_DIR/progress.jsonl"; L="`+
+		w.app.d.Paths.Logs+`/$HARMFLOW_EXECUTION_ID.jsonl"
+printf '%s\n' '{"type":"work_item.selected","workItem":"o/r#7","message":"Fix it"}' >> "$P"
+until grep -qF 'Fix it' "$L"; do sleep 0.05; done
+`+withReport(report))
+	if len(x.WorkItems) != 1 || x.WorkItems[0].Branch != "harmflow/7-fix" || x.WorkItems[0].WorktreePath != p {
+		t.Errorf("work items of the execution %+v; want o/r#7 with its branch and worktree path %s", x.WorkItems, p)
+	}
+	return w, p, x
+}
+
+// harmflow-app#615: a report whose one work item failed with no pull request ends the execution failed, whatever its
+// own outcome says, with a reason that names the item. The item keeps its branch and worktree path, the clean-up keeps
+// its worktree while the execution's log is kept, and the log holds the execution's events.
+func TestPullRequestNotOpenedFailsTheExecution(t *testing.T) {
+	for _, tc := range []struct{ name, outcome string }{
+		{"the report completed", `"outcome":"completed",`},
+		{"the report with no outcome", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w, p, x := runOneItemReport(t, tc.outcome, `"outcome":"failed","tests":{"status":"passed"}`,
+				domain.StatusFailed)
+
+			item := ledgerItem(w.env, "reporter", "o/r#7")
+			if x.ErrorKey != "pull_request_not_opened" || x.ErrorParams["workItem"] != "o/r#7" ||
+				!strings.Contains(x.ErrorMessage, "o/r#7") {
+				t.Errorf("error of the execution: %q %v %q; want pull_request_not_opened naming o/r#7", x.ErrorKey,
+					x.ErrorParams, x.ErrorMessage)
+			}
+			if item == nil || item.Status != domain.WorkItemFailed || item.Failures != 1 || item.Branch != "harmflow/7-fix" {
+				t.Errorf("o/r#7 in the ledger: %+v; want failed, with one failure and its branch", item)
+			}
+			keys := w.eventKeys(x.ID, domain.EventExecutionFailed)
+			if _, ok := keys[domain.EventWorkItemSelected]; !ok || keys[domain.EventExecutionFailed] != "pull_request_not_opened" {
+				t.Errorf("events of the execution by type, with their keys: %v; want its selection, and its end as "+
+					"pull_request_not_opened", keys)
+			}
+			w.present(w.app.CleanWorkspaces(), p, "until its execution's log expires")
+		})
+	}
+}
+
+// harmflow-app#615: a draft opened with failing tests is not a pull request left unopened: its execution still ends
+// completed, with no error, and its item stays in progress to resume, its worktree kept.
+func TestDraftWithFailingTestsCompletesTheExecution(t *testing.T) {
+	w, p, x := runOneItemReport(t, `"outcome":"completed",`, `"outcome":"completed",`+
+		`"pullRequest":{"url":"https://github.com/o/r/pull/9","created":true},"tests":{"status":"failed"}`,
+		domain.StatusCompleted)
+
+	item := ledgerItem(w.env, "reporter", "o/r#7")
+	if x.ErrorKey != "" || item == nil || item.Status != domain.WorkItemInProgress {
+		t.Errorf("error %q, item %+v; want no error, and the item in progress to resume", x.ErrorKey, item)
+	}
+	w.present(w.app.CleanWorkspaces(), p, "its work item has not ended")
+}
+
 // Each pull request is announced once: one the session announced through progress.jsonl gets no event when its report
 // names it again, and one the session did not announce gets one from the report, however many of its work items name
 // it.

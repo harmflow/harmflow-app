@@ -389,6 +389,7 @@ export const enUS = {
     report_not_decodable: "report.json cannot be decoded ({{detail}}); it was ignored",
     work_item_key_invalid:
       'work item "{{workItem}}" is not a key of the form owner/repo#<number>; its selection was ignored',
+    pull_request_not_opened: "the pull request of {{workItem}} was not opened",
     step_checking_harness: "Checking the harness",
     step_preparing_workspace: "Preparing the workspace",
     step_starting_harness: "Starting {{harness}}",
