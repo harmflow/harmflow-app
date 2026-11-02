@@ -1282,6 +1282,8 @@ export const enUS = {
     cleanResult: "{{removed}} removed, {{kept}} kept.",
     keptReason: "Kept: {{reason}}",
     refreshHarnesses: "Detect again",
+    refreshingHarnesses: "Detecting…",
+    refreshHarnessesFailed: "Detect again failed: {{error}}",
     variablesHint: "Values for ${NAME} in task paths, such as PROJECTS_ROOT. They stay on this machine.",
     variableName: "Name",
     variableValue: "Value",

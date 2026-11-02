@@ -1308,6 +1308,8 @@ export const ptBR: Resources = {
     cleanResult: "{{removed}} removidos, {{kept}} mantidos.",
     keptReason: "Mantido: {{reason}}",
     refreshHarnesses: "Detectar de novo",
+    refreshingHarnesses: "Detectando…",
+    refreshHarnessesFailed: "Não foi possível detectar de novo: {{error}}",
     variablesHint: "Valores para ${NOME} nos caminhos das tarefas, como PROJECTS_ROOT. Ficam nesta máquina.",
     variableName: "Nome",
     variableValue: "Valor",

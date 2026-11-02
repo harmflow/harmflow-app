@@ -3495,6 +3495,117 @@ func TestHarnessIsCheckingUntilItsCheckEnds(t *testing.T) {
 	}
 }
 
+// harmflow-app#669: Detect again returns at once, and its detection lands however long it takes, on the daemon's own
+// context. The harnesses are detected one at a time, and requests made while a detection runs ask for one more pass
+// after it, never for one beside it.
+func TestDetectAgainLandsAfterItsRequest(t *testing.T) {
+	e := newEnv(t)
+	// detect stores a harness's result before it announces it, so the inventory can read ready while a startup check
+	// is still to be announced. Wait for those announcements: one made after Subscribe would count as Detect again's.
+	announced := func() bool {
+		checks := map[string]int{}
+		for _, ev := range e.published(domain.EventHarnessChecked) {
+			checks[ev.Harness]++
+		}
+		return checks[domain.HarnessClaudeCode] > 0 && checks[domain.HarnessCodex] > 0
+	}
+	if !e.poll(10*time.Second, announced) {
+		t.Fatalf("the startup detection did not announce every harness: %+v", e.app.Harnesses())
+	}
+	sub, _, cancel := e.app.Subscribe(0)
+	defer cancel()
+	release := e.codex.hold(t)
+
+	e.app.RedetectHarnesses()
+	if !e.poll(10*time.Second, e.codex.holding) {
+		t.Fatal("RedetectHarnesses returned, and no detection of codex started")
+	}
+	e.app.RedetectHarnesses()
+	e.app.RedetectHarnesses()
+	time.Sleep(200 * time.Millisecond)
+	e.codex.mu.Lock()
+	held := e.codex.held
+	e.codex.mu.Unlock()
+	if held != 1 {
+		t.Errorf("%d detections of codex run at once after three requests, want 1", held)
+	}
+	release()
+
+	checks := map[string]int{}
+	timeout := time.After(10 * time.Second)
+	for checks[domain.HarnessCodex] < 2 {
+		select {
+		case ev := <-sub:
+			if ev.Type == domain.EventHarnessChecked {
+				checks[ev.Harness]++
+			}
+		case <-timeout:
+			t.Fatalf("harness.checked by harness = %v, want codex twice: the held pass, then the one asked for during it", checks)
+		}
+	}
+	extra := time.After(500 * time.Millisecond)
+	for done := false; !done; {
+		select {
+		case ev := <-sub:
+			if ev.Type == domain.EventHarnessChecked {
+				checks[ev.Harness]++
+			}
+		case <-extra:
+			done = true
+		}
+	}
+	want := map[string]int{domain.HarnessClaudeCode: 2, domain.HarnessCodex: 2}
+	if !maps.Equal(checks, want) {
+		t.Errorf("harness.checked by harness = %v, want %v: one pass, then a single one for the requests made during it", checks, want)
+	}
+}
+
+// harmflow-app#669: only the daemon's stop ends a detection Detect again asked for, and Stop waits for it, so no
+// harness check is announced after daemon.stopping.
+func TestStopEndsTheDetectionDetectAgainAskedFor(t *testing.T) {
+	var mu sync.Mutex
+	var types []string
+	e := newEnv(t, func(e *env) {
+		e.events.setHook(func(ev domain.Event) {
+			mu.Lock()
+			types = append(types, ev.Type)
+			mu.Unlock()
+		})
+	})
+	checked := func() bool {
+		for _, h := range e.app.Harnesses() {
+			if h.Readiness != "ready" {
+				return false
+			}
+		}
+		return true
+	}
+	if !e.poll(10*time.Second, checked) {
+		t.Fatalf("the startup detection did not end: %+v", e.app.Harnesses())
+	}
+	e.codex.hold(t)
+	e.codex.mu.Lock()
+	e.codex.cutLag = 300 * time.Millisecond
+	e.codex.mu.Unlock()
+	e.app.RedetectHarnesses()
+	if !e.poll(10*time.Second, e.codex.holding) {
+		t.Fatal("the detection Detect again asked for never reached codex")
+	}
+	e.app.Stop(domain.Text{Message: "test stop"})
+	if e.codex.holding() {
+		t.Fatal("Stop returned while the detection Detect again asked for was still running")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	stopping := slices.Index(types, domain.EventDaemonStopping)
+	if stopping < 0 {
+		t.Fatalf("events = %v, want %s among them", types, domain.EventDaemonStopping)
+	}
+	if after := slices.Index(types[stopping:], domain.EventHarnessChecked); after >= 0 {
+		t.Errorf("events = %v, want no %s after %s", types, domain.EventHarnessChecked, domain.EventDaemonStopping)
+	}
+}
+
 // A rate limit retries on the same harness, never switches.
 func TestRateLimitRetriesSameHarness(t *testing.T) {
 	e := newEnv(t)

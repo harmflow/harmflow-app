@@ -189,9 +189,7 @@ func TestChangedProfileIsValidatedAndAppliedNextRun(t *testing.T) {
 	d := startDaemon(t, home)
 	d.call("PUT", "/harnesses/claude-code", map[string]any{"path": recordingStandIn(t, "fake-claude", "claude")}, 200)
 	d.call("PUT", "/harnesses/codex", map[string]any{"path": recordingStandIn(t, "fake-codex", "codex")}, 200)
-	if status, body := d.request("POST", "/harnesses/refresh", nil, nil); status != 200 {
-		t.Fatalf("refresh: %d %s", status, body)
-	}
+	d.redetect()
 	// Without these capabilities, validation would be skipped and every save below would pass.
 	if h := d.harness("codex"); h["detected"] != true || h["capabilitySource"] != "reported" {
 		t.Fatalf("Codex: detected %v, capabilities %v, diagnostic %v", h["detected"], h["capabilitySource"], h["diagnostic"])

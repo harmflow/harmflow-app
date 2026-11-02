@@ -286,13 +286,21 @@ function AgentsSection({ report }: { report: DraftReport }) {
   const { t, i18n } = useTranslation();
   const harnesses = useStore((s) => s.harnesses);
   const tools = useStore((s) => s.tools);
+  const redetecting = useStore((s) => s.redetecting !== null);
+  const redetect = async () => {
+    try {
+      await actions.redetectHarnesses();
+    } catch (err) {
+      toast(t("settings.refreshHarnessesFailed", { error: errorMessage(err) }), "danger");
+    }
+  };
   return (
     <>
       <Panel
         title={t("settings.subheads.agents")}
         actions={
-          <Button size="sm" icon="refresh" onClick={() => void actions.refreshHarnesses(true)}>
-            {t("settings.refreshHarnesses")}
+          <Button size="sm" icon="refresh" disabled={redetecting} aria-busy={redetecting} onClick={() => void redetect()}>
+            {redetecting ? t("settings.refreshingHarnesses") : t("settings.refreshHarnesses")}
           </Button>
         }
       >

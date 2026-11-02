@@ -38,6 +38,8 @@ export interface State {
   tasksLoaded: boolean;
   settings?: Settings;
   harnesses: Harness[];
+  /** The harnesses whose check Detect again still waits for, by id; null while no detection it asked for runs. */
+  redetecting: string[] | null;
   tools: Tool[];
   catalog?: Catalog;
   /** The task templates, in the daemon's order, the invalid ones included. */
@@ -77,6 +79,7 @@ let state: State = {
   tasks: [],
   tasksLoaded: false,
   harnesses: [],
+  redetecting: null,
   tools: [],
   unread: [],
   events: {},
@@ -192,12 +195,27 @@ export const actions = {
     return settings;
   },
 
-  async refreshHarnesses(redetect = false) {
-    const [harnesses, tools] = await Promise.all([
-      settle(redetect ? api.refreshHarnesses() : api.harnesses()),
-      settle(api.tools()),
-    ]);
+  async refreshHarnesses() {
+    const [harnesses, tools] = await Promise.all([settle(api.harnesses()), settle(api.tools())]);
     setState((s) => ({ harnesses: harnesses ?? s.harnesses, tools: tools ?? s.tools }));
+  },
+
+  /**
+   * Detect again: the daemon answers at once and detects every harness on its own, announcing each result with
+   * harness.checked. The detection reads as running until each harness listed has announced one, or the connection to
+   * the daemon is lost. A request the daemon refuses, or that fails, ends it and is thrown.
+   */
+  async redetectHarnesses() {
+    if (state.redetecting) return;
+    const ids = state.harnesses.map((h) => h.id);
+    setState({ redetecting: ids.length > 0 ? ids : null });
+    try {
+      const [harnesses, tools] = await Promise.all([api.refreshHarnesses(), settle(api.tools())]);
+      setState((s) => ({ harnesses, tools: tools ?? s.tools }));
+    } catch (err) {
+      setState({ redetecting: null });
+      throw err;
+    }
   },
 
   async refreshCatalog() {
@@ -334,6 +352,10 @@ function handleEvent(e: HarmflowEvent) {
     if (e.type === "task.changed_externally" && e.taskId) {
       patch.externalChanges = { ...s.externalChanges, [e.taskId]: e.id };
     }
+    if (e.type === "harness.checked" && s.redetecting) {
+      const left = s.redetecting.filter((id) => id !== e.harness);
+      patch.redetecting = left.length > 0 ? left : null;
+    }
     return patch;
   });
 
@@ -371,7 +393,8 @@ export function startSync() {
   transport.stream({
     onEvent: handleEvent,
     onConnection: (connection) => {
-      setState({ connection });
+      // A lost connection may have missed a check's announcement, or the daemon stopped and ended the detection.
+      setState(connection === "connected" ? { connection } : { connection, redetecting: null });
       if (connection === "connected") {
         setState({ daemonRunning: true });
         if (previous !== "connected") recover();
