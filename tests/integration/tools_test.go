@@ -2,7 +2,9 @@ package integration
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"testing"
 )
 
@@ -78,4 +80,54 @@ esac
 			"want detected, %s, 2.83.0, invalid, not_signed_in naming gh and gh auth login", h["detected"], h["path"],
 			h["version"], h["authentication"], h["diagnosticKey"], params, gh)
 	}
+}
+
+// realGhEnv opts in to the tests that read the gh installed and signed in on the machine instead of a stand-in. They
+// start no harness and change nothing, but CI's runners have no signed-in gh, so they run only on request.
+const realGhEnv = "HARMFLOW_TEST_GH"
+
+// realGh is the installed gh's path; it skips the test unless realGhEnv opts in and gh is on the PATH.
+func realGh(t *testing.T) string {
+	t.Helper()
+	if os.Getenv(realGhEnv) != "1" {
+		t.Skipf("reads the machine's own gh: set %s=1 on a machine where gh is signed in", realGhEnv)
+	}
+	path, err := exec.LookPath("gh")
+	if err != nil {
+		t.Skip("gh is not on PATH")
+	}
+	return path
+}
+
+// The daemon's tools probe reads the machine's own signed-in gh as valid, through GET /tools: a sign-in that works in
+// the test's shell must also work when the daemon runs gh auth status in the background. The daemon gets no stand-in gh
+// and inherits the gh configuration and token variables as they are. The test never signs in, out, or refreshes.
+func TestToolsProbeReadsARealSignedInGhAsValid(t *testing.T) {
+	gh := realGh(t)
+	if err := exec.Command(gh, "auth", "status").Run(); err != nil {
+		t.Fatalf("needs a signed-in gh: gh auth status failed in the test's own process (%v)", err)
+	}
+	d := startDaemon(t, t.TempDir())
+
+	h := d.tool("gh")
+	path, _ := h["path"].(string)
+	info, err := os.Stat(path)
+	if h["detected"] != true || !filepath.IsAbs(path) || filepath.Base(path) != "gh" || err != nil ||
+		info.Mode()&0o111 == 0 {
+		t.Fatalf("GET /tools gh: detected %v at %q (%v); want detected at an absolute path to an executable gh",
+			h["detected"], path, err)
+	}
+	out, err := exec.Command(path, "--version").Output()
+	if err != nil {
+		t.Fatalf("%s --version: %v", path, err)
+	}
+	want := regexp.MustCompile(`\d+\.\d+(\.\d+)?`).FindString(string(out))
+	if want == "" || h["version"] != want {
+		t.Errorf("GET /tools gh: version %v; want %q, which %s --version prints", h["version"], want, path)
+	}
+	if h["authentication"] != "valid" || h["diagnosticKey"] != nil {
+		t.Errorf("GET /tools gh: authentication %v, diagnostic %v; want valid, none", h["authentication"],
+			h["diagnosticKey"])
+	}
+	t.Logf("gh %s at %s reads %v", want, path, h["authentication"])
 }
