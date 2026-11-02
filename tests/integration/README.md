@@ -37,12 +37,14 @@ On a machine already busy, a run of the whole package can fail to start a daemon
 
 A few tests start a real harness instead of a stand-in. Most of them start a real session and spend a little of the
 account's usage; the detection tests of `daemon/internal/app` only run the installed CLI's own checks, but need it
-installed. Each one skips unless you opt in. A helper named for the CLI decides:
+installed. One reads the machine's own signed-in `gh` and starts no harness. Each one skips unless you opt in. A
+helper named for the CLI decides:
 
 - `realClaude` (`claude_code_test.go`) skips the test unless `HARMFLOW_TEST_CLAUDE_CODE` is exactly `1` and `claude`
   is on the `PATH`;
 - `realCodex` (`codex_test.go`) skips the test unless `HARMFLOW_TEST_CODEX` is exactly `1` and `codex` is on the
-  `PATH`.
+  `PATH`;
+- `realGh` (`tools_test.go`) skips the test unless `HARMFLOW_TEST_GH` is exactly `1` and `gh` is on the `PATH`.
 
 A daemon package cannot import these helpers, so `daemon/internal/app` has its own `realClaude` and `realCodex`, which
 read the same variables the same way. Every test that calls one of them belongs in this table.
@@ -88,6 +90,7 @@ read the same variables the same way. Every test that calls one of them belongs 
 | `TestDiscoveryLimitCutsTheEligibleIssuesInOrder` (`queue_discovery_test.go`) | `HARMFLOW_TEST_CLAUDE_CODE=1` | What `TestFailedIssueIsRetriedUntilItsLimit` needs but its fixtures, and the right to open and close issues in the sandbox repository: the test opens eight issues labelled `queue-discovery-test`, one after the other, creating that label when it is missing. It runs its task twice, each time in a fresh daemon home, newest first with at most five issues discovered a cycle: with two items a cycle, then with eight. A session selects each item as it takes it up, so each one runs until it ends, selects more than the test expects, or selects nothing more for two minutes, and is then stopped; its clone has no push URL, so the push of each item it works fails. A selected key with text after the issue's number is read as that issue, and logged (#569). When it ends, failed or not, it closes the issues, found by that label, with any pull request linking one and its branch; before it opens them, it does the same to what an earlier run left open under that label. It never reads or changes the other fixture sets |
 | `TestWaitingFiringSelectsAnIssueOpenedMeanwhile` (`waiting_firing_test.go`) | `HARMFLOW_TEST_CLAUDE_CODE=1` | What `TestFailedIssueIsRetriedUntilItsLimit` needs but its fixtures, and the right to open and close issues in the sandbox repository: the test opens one issue labelled `waiting-firing-test`, creating that label when it is missing, runs the task again while the first session runs, and opens a second issue under the label while that firing waits. It stops each of its two sessions once it has selected its issue, as `TestFailedIssueIsRetriedUntilItsLimit` does. When it ends, failed or not, it closes the issues, found by that label; before it opens its first, it does the same to what an earlier run left open under it. It never reads or changes the other fixture sets |
 | `TestSessionSelectsByAnEditedQueue` (`queue_settings_test.go`) | `HARMFLOW_TEST_CLAUDE_CODE=1` | What `TestFailedIssueIsRetriedUntilItsLimit` needs but its fixtures, and the right to open and close issues in the sandbox repository: the test opens four issues labelled `queue-edit-test`, creating that label when it is missing. It runs its task twice, oldest first with one item a cycle, then, after an edit through the local API, newest first with two; each session is stopped once it has selected its issues, and its clone has no push URL. When it ends, failed or not, it closes the issues, found by that label, with any pull request linking one and its branch; before it opens them, it does the same to what an earlier run left open under that label. It never reads or changes the other fixture sets |
+| `TestToolsProbeReadsARealSignedInGhAsValid` (`tools_test.go`) | `HARMFLOW_TEST_GH=1` | An installed `gh` signed in on the machine: the test fails, saying so, when `gh auth status` fails in its own process. The daemon gets no stand-in `gh` and inherits the `gh` configuration and token variables as they are. The test starts no session and never runs `gh auth login`, `gh auth logout`, or `gh auth refresh`, so the user's sign-in stays as it is |
 
 Run one of them on its own:
 
@@ -96,7 +99,7 @@ HARMFLOW_TEST_CLAUDE_CODE=1 go -C tests test -count=1 -run TestClaudeCodeRefuses
 HARMFLOW_TEST_CLAUDE_CODE=1 go -C daemon test -count=1 -run '^TestInventoryReportsARealClaudeCodeAndNoCodex$' ./internal/app/
 ```
 
-A Codex test runs the same way with `HARMFLOW_TEST_CODEX=1`.
+A Codex test runs the same way with `HARMFLOW_TEST_CODEX=1`, and the `gh` test with `HARMFLOW_TEST_GH=1`.
 
 **They run only on a local development machine** where a harness is installed and signed in. The GitHub Actions
 runners have no real harness, so in CI these tests always skip: a green CI run says nothing about them.
