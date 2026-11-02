@@ -145,6 +145,54 @@ func TestSkillListIsCachedPerWorkspaceAndAddedFolders(t *testing.T) {
 	}
 }
 
+// The listing runs with the environment an execution's session gets: when the daemon runs with the variables of a
+// Claude Code session that started it, and with HarmFlow's own, the listing has none of them, as the session does not,
+// and keeps the rest. That holds for the adapter's environment and, when it has none, for the daemon's own.
+func TestSkillListRunsWithTheSessionEnvironment(t *testing.T) {
+	nested := []string{"CLAUDECODE=1", "CLAUDE_CODE_ENTRYPOINT=cli", "CLAUDE_CODE_SSE_PORT=50123",
+		"HARMFLOW_EXECUTION_ID=exec-of-the-daemon"}
+	for _, c := range []struct {
+		name    string
+		fromEnv bool
+	}{{"the adapter's environment", false}, {"the daemon's own environment", true}} {
+		t.Run(c.name, func(t *testing.T) {
+			envLog := filepath.Join(t.TempDir(), "env.log")
+			path, log := listingClaude(t, "env > \"$ENVLOG\"\necho '{\"type\":\"system\",\"subtype\":\"init\",\"skills\":[]}'")
+			a := &Adapter{Home: t.TempDir()}
+			kept := []string{"PATH=/usr/bin:/bin", "LOG=" + log, "ENVLOG=" + envLog}
+			if c.fromEnv {
+				for _, kv := range append(slices.Clone(nested), kept...) {
+					k, v, _ := strings.Cut(kv, "=")
+					t.Setenv(k, v)
+				}
+			} else {
+				a.Env = append(slices.Clone(nested), kept...)
+			}
+			info := ports.HarnessInfo{Detected: true, Path: path}
+
+			if _, _, err := a.UserItems(t.Context(), info, "skill", t.TempDir(), nil); err != nil {
+				t.Fatalf("UserItems(skill) error %v, want none", err)
+			}
+			data, err := os.ReadFile(envLog)
+			if err != nil {
+				t.Fatalf("os.ReadFile(%s) = %v, want the listing's environment", envLog, err)
+			}
+			got := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+			for _, kv := range nested {
+				k, _, _ := strings.Cut(kv, "=")
+				if slices.ContainsFunc(got, func(l string) bool { return strings.HasPrefix(l, k+"=") }) {
+					t.Errorf("the listing ran with %s, want it left out, as an execution's session leaves it out", k)
+				}
+			}
+			for _, kv := range kept {
+				if !slices.Contains(got, kv) {
+					t.Errorf("the listing ran without %s, want the rest of the environment kept", kv)
+				}
+			}
+		})
+	}
+}
+
 // When Claude Code cannot answer — not detected, ending before its init line with its error or silently, printing an
 // init line with no skill list, or reaching the timeout — the lookup fails with an error, never an empty list, and
 // nothing is kept, so the next lookup asks again.

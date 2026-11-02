@@ -86,9 +86,10 @@ func (a *Adapter) sessionSkills(ctx context.Context, info ports.HarnessInfo, wor
 }
 
 // listSkills starts a Claude Code session in dir with the added folders, with the flags an execution gives it that
-// change what it loads, and reads the skill list of its init line. The built-in skills, which an execution adds as a
-// plugin of its own, are not asked for: HarmFlow finds them by their prefix. A session that ends, prints no init line
-// HarmFlow can read, or reaches the timeout first fails the listing.
+// change what it loads, and reads the skill list of its init line. Its environment is the one ports.SessionEnv gives
+// an execution's session, apart from the execution's own HARMFLOW_* identifiers, which a listing has none of. The
+// built-in skills, which an execution adds as a plugin of its own, are not asked for: HarmFlow finds them by their
+// prefix. A session that ends, prints no init line HarmFlow can read, or reaches the timeout first fails the listing.
 func (a *Adapter) listSkills(ctx context.Context, info ports.HarnessInfo, dir string, added []string) ([]string, error) {
 	args := []string{"-p", "--output-format", "stream-json", "--verbose"}
 	if info.HasFeature("--no-session-persistence") {
@@ -101,14 +102,14 @@ func (a *Adapter) listSkills(ctx context.Context, info ports.HarnessInfo, dir st
 	}
 	init := make(chan []byte, 1) // the first init line, which ends the wait
 	sent := false
-	p, err := procutil.StartLines(ports.Invocation{Path: info.Path, Args: args, Env: a.Env, Dir: dir, Stdin: skillListPrompt},
-		io.Discard, func(line []byte) {
-			var h streamHead
-			if !sent && json.Unmarshal(line, &h) == nil && h.Type == "system" && h.Subtype == "init" {
-				sent = true
-				init <- slices.Clone(line)
-			}
-		}, nil)
+	inv := ports.Invocation{Path: info.Path, Args: args, Env: ports.SessionEnv(a.Env), Dir: dir, Stdin: skillListPrompt}
+	p, err := procutil.StartLines(inv, io.Discard, func(line []byte) {
+		var h streamHead
+		if !sent && json.Unmarshal(line, &h) == nil && h.Type == "system" && h.Subtype == "init" {
+			sent = true
+			init <- slices.Clone(line)
+		}
+	}, nil)
 	if err != nil {
 		return nil, skillListFailed(err.Error())
 	}

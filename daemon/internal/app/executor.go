@@ -998,23 +998,10 @@ Continue from the current state of the workspace. Reconcile before repeating any
 	return b.String()
 }
 
-// env is the environment of the harness process: the daemon's own, with a PATH that finds the user's tools, and
-// HarmFlow's identifiers.
+// env is the environment of the harness process: the daemon's own, with a PATH that finds the user's tools, as
+// ports.SessionEnv gives it to every harness session, and HarmFlow's identifiers.
 func (r *run) env() []string {
-	base := r.a.d.HarnessEnv
-	if base == nil {
-		base = os.Environ()
-	}
-	out := make([]string, 0, len(base)+6)
-	for _, kv := range base {
-		k, _, _ := strings.Cut(kv, "=")
-		switch {
-		case k == "CLAUDECODE", k == "CLAUDE_CODE_ENTRYPOINT", k == "CLAUDE_CODE_SSE_PORT", strings.HasPrefix(k, "HARMFLOW_"):
-			continue
-		}
-		out = append(out, kv)
-	}
-	return append(out,
+	return append(ports.SessionEnv(r.a.d.HarnessEnv),
 		"HARMFLOW_EXECUTION_ID="+r.x.ID,
 		"HARMFLOW_TASK_ID="+r.x.TaskID,
 		"HARMFLOW_EXECUTION_DIR="+r.dir,
