@@ -807,7 +807,7 @@ describe("settings sections", () => {
     ["paths", ["Variáveis de caminho", "Pastas permitidas"], ["PROJECTS_ROOT", "/srv/repos", "Adicionar variável", "Adicionar pasta"]],
     ["daemon", ["Estado", "Inicialização"], ["Em execução agora", "Parar o daemon", "Iniciar o daemon automaticamente com o sistema"]],
     ["storage", ["Logs", "Workspaces", "Diretórios"], ["Manter logs de execução por (dias)", "Limpar workspaces", "Disco usado pelo HarmFlow"]],
-    ["security", ["API local"], ["Endereço", "Armazenamento do token", "Substituir o token da API"]],
+    ["security", ["API local"], ["Armazenamento do token", "Substituir o token da API"]],
     ["about", ["Versões"], ["Versão do painel", "Versão do daemon"]],
   ] as const)("shows %s with its panels and settings, and no other section's", (section, panels, shown) => {
     const html = renderToString(<SettingsScreen section={section} />).replace(/<!-- -->/g, "");
@@ -815,6 +815,15 @@ describe("settings sections", () => {
     expect(titles).toEqual(panels);
     for (const text of shown) expect(html).toContain(text);
     if (section !== "general") expect(html).not.toContain("Mostrar o HarmFlow na barra de menus");
+  });
+
+  // The local API's address changes with every start of the daemon and is nothing the user calls, so Security shows
+  // only the token's storage and its replacement.
+  it("shows no Address row in Security", () => {
+    const html = renderToString(<SettingsScreen section="security" />).replace(/<!-- -->/g, "");
+    const labels = [...html.matchAll(/<span class="setting-row__label">(.*?)<\/span>/g)].map((m) => m[1]);
+    expect(labels).toEqual(["Armazenamento do token", "Token da API"]);
+    expect(labels).not.toContain("Endereço");
   });
 
   // The languages are the ones the app ships: nothing in the panel adds, imports, or downloads one.

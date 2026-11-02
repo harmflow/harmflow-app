@@ -505,7 +505,6 @@ function SecuritySection() {
 
   return (
     <Panel title={t("settings.subheads.localApi")}>
-      <SettingRow label={t("settings.address")}>{diagnostics ? <span className="mono">{diagnostics.address}</span> : "—"}</SettingRow>
       <SettingRow label={t("settings.tokenStore")}>{diagnostics ? t(`settings.tokenStores.${diagnostics.tokenStore}`) : "—"}</SettingRow>
       <SettingRow label={t("settings.apiToken")} hint={t("settings.apiTokenHint")}>
         <Button icon="key" onClick={() => void rotate()}>

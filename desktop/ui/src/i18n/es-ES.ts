@@ -1207,7 +1207,6 @@ export const esES: Resources = {
     allowedFolder: "Carpeta permitida",
     allowedFolderPlaceholder: "/ruta/absoluta",
     addAllowedFolder: "Añadir carpeta",
-    address: "Dirección",
     tokenStore: "Almacén del token",
     tokenStores: { keychain: "Llavero de macOS", file: "Archivo legible solo por ti" },
     apiToken: "Token de la API",
