@@ -547,6 +547,74 @@ func TestClaudeCodeSkillOfARepositoryFolder(t *testing.T) {
 	}
 }
 
+// A Claude Code task cites a plugin's skill by the name Claude Code's skill list reports, and keeps it through export
+// and import: the export holds it unchanged, an import of the export writes it unchanged with no warning for it, and an
+// import that also cites a plugin skill the list lacks keeps both names and warns about that one alone.
+func TestClaudeCodePluginSkillsSurviveExportAndImport(t *testing.T) {
+	a := newClaudeAppOn(t, initClaude(filepath.Join(t.TempDir(), "listings.log")))
+	ctx := t.Context()
+	missing := func(warnings []domain.Warning) []string {
+		var names []string
+		for _, w := range warnings {
+			if w.Key == "skill_missing" {
+				names = append(names, w.Params["name"])
+			}
+		}
+		return names
+	}
+
+	var exported string
+	if !t.Run("saves and exports", func(t *testing.T) {
+		created, err := a.CreateTask(ctx, TaskInput{YAML: taskYAML("plugin", "  skills: [pdf:pdf]\n")})
+		if err != nil {
+			t.Fatalf("CreateTask(plugin), citing a plugin skill of Claude Code's list = %v, want no error", err)
+		}
+		if !strings.Contains(created.YAML, "skills: [pdf:pdf]") {
+			t.Errorf("CreateTask(plugin) wrote\n%s\nwant the skill as Claude Code names it", created.YAML)
+		}
+		data, err := a.ExportTask("plugin")
+		if err != nil {
+			t.Fatalf("ExportTask(plugin) = %v, want no error", err)
+		}
+		if !strings.Contains(string(data), "skills: [pdf:pdf]") {
+			t.Errorf("ExportTask(plugin) =\n%s\nwant the plugin skill by its name", data)
+		}
+		exported = string(data)
+	}) {
+		return
+	}
+
+	t.Run("imports as a new task", func(t *testing.T) {
+		imported, err := a.ImportTask(ctx, strings.Replace(exported, "id: plugin", "id: imported", 1), false)
+		if err != nil {
+			t.Fatalf("ImportTask(export of plugin, as imported) = %v, want no error", err)
+		}
+		if !strings.Contains(imported.YAML, "id: imported") || !strings.Contains(imported.YAML, "skills: [pdf:pdf]") {
+			t.Errorf("ImportTask(export of plugin, as imported) wrote\n%s\nwant the new task with the skill's name unchanged",
+				imported.YAML)
+		}
+		if got := missing(imported.Warnings); len(got) != 0 {
+			t.Errorf("ImportTask(export of plugin, as imported) warns skill_missing for %q, want none", got)
+		}
+	})
+
+	t.Run("warns only about a plugin skill the list lacks", func(t *testing.T) {
+		doc := strings.Replace(exported, "id: plugin", "id: imported-other", 1)
+		doc = strings.Replace(doc, "skills: [pdf:pdf]", "skills: [pdf:pdf, other:skill]", 1)
+		imported, err := a.ImportTask(ctx, doc, false)
+		if err != nil {
+			t.Fatalf("ImportTask(export of plugin, citing other:skill) = %v, want no error", err)
+		}
+		if !strings.Contains(imported.YAML, "skills: [pdf:pdf, other:skill]") {
+			t.Errorf("ImportTask(export of plugin, citing other:skill) wrote\n%s\nwant both skills' names unchanged",
+				imported.YAML)
+		}
+		if got := missing(imported.Warnings); !slices.Equal(got, []string{"other:skill"}) {
+			t.Errorf("ImportTask(export of plugin, citing other:skill) warns skill_missing for %q, want only other:skill", got)
+		}
+	})
+}
+
 // writeSkill writes a SKILL.md into dir, named for the folder.
 func writeSkill(t *testing.T, dir string) {
 	t.Helper()
