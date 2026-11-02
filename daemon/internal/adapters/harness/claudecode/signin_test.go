@@ -113,8 +113,8 @@ func TestSignInThroughLongOrRestlessScreens(t *testing.T) {
 // harmflow-app#543: a screen the adapter does not recognize stops the sign-in, typing nothing, and comes back with
 // its text masked.
 func TestSignInStopsAtAnUnknownScreen(t *testing.T) {
+	// signInAdapter's bound of 5 s leaves a loaded host the time to draw the screen before the bound reads it as unknown.
 	a, info := signInAdapter(t, "unknown")
-	a.signInStep = time.Second
 	res := a.SignIn(context.Background(), info, filepath.Join(tempDir(t), "sign-in"))
 	if res.Outcome != ports.SignInUnknownScreen {
 		t.Fatalf("SignIn = %+v, want %s", res, ports.SignInUnknownScreen)
