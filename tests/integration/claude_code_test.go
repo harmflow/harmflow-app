@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -135,6 +136,145 @@ func TestCitedUserItemsReachARealClaudeCode(t *testing.T) {
 	}
 	agentMarker.check(t)
 	skillMarker.check(t)
+}
+
+// A Claude Code task's skills are the ones the installed, signed-in Claude Code lists for its workspace and the folders
+// it adds, as the init line of a session started there reports them. A skill in the workspace's .claude/skills, one in
+// the .claude/skills of a custom profile's writable path, and one in Claude Code's configuration directory are offered
+// by GET /catalog for that workspace and folder, and a task there citing all three saves with no skill_list_unverified
+// warning. A task in a third folder, adding nothing, that cites the workspace's skill is refused with skill_not_found,
+// naming Claude Code's skill list. Every skill has a name unique to the run, and the configuration directory's is
+// removed when the test ends. The daemon writes no line of its own for a listing, so a failure prints what it says of
+// one: the skills its catalog offers on Claude Code and the problems it reports for each folder, and daemon.log.
+func TestRealClaudeCodeListsWorkspaceAndAddedFolderSkills(t *testing.T) {
+	claude := realClaude(t)
+	work, added, elsewhere := resolvedTempDir(t), resolvedTempDir(t), resolvedTempDir(t)
+	run := runSuffix()
+	workSkill, addedSkill, configSkill := "workspace-skill-"+run, "added-skill-"+run, "config-skill-"+run
+	for _, s := range []struct{ dir, name, description string }{
+		{filepath.Join(work, ".claude"), workSkill, "A skill of the task's workspace."},
+		{filepath.Join(added, ".claude"), addedSkill, "A skill of a folder the task adds."},
+		{claudeConfigDir(t), configSkill, "A skill of Claude Code's configuration directory."},
+	} {
+		writeTemp(t, filepath.Join(s.dir, "skills", s.name, "SKILL.md"), itemFile(s.name, s.description, "Reply with OK."))
+	}
+
+	d := startDaemon(t, t.TempDir())
+	d.call("PUT", "/harnesses/claude-code", map[string]any{"path": claude}, 200)
+	d.call("PATCH", "/settings", map[string]any{"allowedFolders": []any{work, added, elsewhere}}, 200)
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("what the daemon says of Claude Code's skill lists:\n%s", d.skillListLog([][]string{{work, added}, {elsewhere}}))
+		}
+	})
+
+	offered := d.claudeCodeSkillsOffered(work, added)
+	for _, name := range []string{workSkill, addedSkill, configSkill} {
+		if !slices.Contains(offered, name) {
+			t.Errorf("GET /catalog for the workspace %s adding %s offers %q on Claude Code, want %s among them", work, added,
+				offered, name)
+		}
+	}
+
+	spec := func(workspace string, skills ...any) map[string]any {
+		return map[string]any{
+			"type":      "general",
+			"prompt":    "Reply with OK.",
+			"skills":    skills,
+			"harness":   map[string]any{"preferred": map[string]any{"provider": "claude-code", "model": "haiku", "effort": "low"}},
+			"workspace": map[string]any{"path": workspace},
+		}
+	}
+	listed := spec(work, workSkill, addedSkill, configSkill)
+	listed["permissions"] = map[string]any{"profile": "custom", "custom": map[string]any{"writablePaths": []any{added}}}
+	saved := d.call("POST", "/tasks", map[string]any{"document": map[string]any{"apiVersion": "harmflow/v1alpha1",
+		"kind": "Task", "metadata": map[string]any{"id": "listed-skills", "name": "Listed skills"}, "spec": listed}}, 201)
+	// The validator's warnings are in the saved task's validation; the task's own, in its warnings.
+	warnings, _ := saved["warnings"].([]any)
+	if v, _ := saved["validation"].(map[string]any); v != nil {
+		checked, _ := v["warnings"].([]any)
+		warnings = append(warnings, checked...)
+	}
+	for _, x := range warnings {
+		if w, _ := x.(map[string]any); w["messageKey"] == "skill_list_unverified" || w["code"] == "missing_skill" {
+			t.Errorf("POST /tasks listed-skills warns %v, want no skill_list_unverified and no missing skill", w)
+		}
+	}
+
+	refused := d.call("POST", "/tasks", map[string]any{"document": map[string]any{"apiVersion": "harmflow/v1alpha1",
+		"kind": "Task", "metadata": map[string]any{"id": "skills-elsewhere", "name": "Skills elsewhere"},
+		"spec": spec(elsewhere, workSkill)}}, 422)
+	e, _ := refused["error"].(map[string]any)
+	validation, _ := e["validation"].(map[string]any)
+	errs, _ := validation["errors"].([]any)
+	if !slices.ContainsFunc(errs, func(x any) bool {
+		issue, _ := x.(map[string]any)
+		params, _ := issue["params"].(map[string]any)
+		message, _ := issue["message"].(string)
+		return issue["messageKey"] == "skill_not_found" && params["name"] == workSkill && params["source"] == "skill_list" &&
+			strings.Contains(message, "Claude Code's skill list for ")
+	}) {
+		t.Errorf("POST /tasks skills-elsewhere, in %s citing %s, errors %v, want skill_not_found naming %s and Claude "+
+			"Code's skill list", elsewhere, workSkill, errs, workSkill)
+	}
+}
+
+// resolvedTempDir is a temporary folder with its symbolic links resolved, as the daemon resolves a task's paths.
+func resolvedTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// catalogFor is GET /catalog for a task in workspace that adds the folders added.
+func (d *daemon) catalogFor(workspace string, added ...string) map[string]any {
+	d.t.Helper()
+	q := url.Values{"workspace": {workspace}, "addDir": added}
+	return d.call("GET", "/catalog?"+q.Encode(), nil, 200)
+}
+
+// claudeCodeSkillsOffered are the names of the user's skills GET /catalog offers on Claude Code for a task in workspace
+// that adds the folders added.
+func (d *daemon) claudeCodeSkillsOffered(workspace string, added ...string) []string {
+	d.t.Helper()
+	var names []string
+	skills, _ := d.catalogFor(workspace, added...)["skills"].([]any)
+	for _, x := range skills {
+		s, _ := x.(map[string]any)
+		harnesses, _ := s["harnesses"].([]any)
+		if name, _ := s["name"].(string); s["source"] == "user" && slices.Contains(harnesses, any("claude-code")) {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// skillListLog is what the daemon says of Claude Code's skill list for each set of folders, a workspace first and the
+// folders it adds after it: the user's skills its catalog offers on Claude Code and the problems it reports, then the
+// end of daemon.log.
+func (d *daemon) skillListLog(folders [][]string) string {
+	d.t.Helper()
+	var b strings.Builder
+	for _, f := range folders {
+		var problems []any
+		all, _ := d.catalogFor(f[0], f[1:]...)["problems"].([]any)
+		for _, x := range all {
+			if p, _ := x.(map[string]any); p["harness"] == "claude-code" {
+				problems = append(problems, p)
+			}
+		}
+		fmt.Fprintf(&b, "%s adding %q: offers %q; problems %v\n", f[0], f[1:], d.claudeCodeSkillsOffered(f[0], f[1:]...),
+			problems)
+	}
+	daemonLog, _ := os.ReadFile(filepath.Join(d.home, "logs", "daemon.log"))
+	if len(daemonLog) > 4000 {
+		daemonLog = daemonLog[len(daemonLog)-4000:]
+	}
+	fmt.Fprintf(&b, "daemon.log ends:\n%s", daemonLog)
+	return b.String()
 }
 
 // A Claude Code task cites a built-in skill, and its prompt asks the session to use it by name and says nothing else of
