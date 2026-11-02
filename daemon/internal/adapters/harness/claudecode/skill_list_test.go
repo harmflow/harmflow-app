@@ -1,12 +1,16 @@
 package claudecode
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"go.uber.org/goleak"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
@@ -179,5 +183,216 @@ func TestSkillListThatClaudeCodeCannotGive(t *testing.T) {
 				t.Errorf("%d listing sessions ran, want %d: a failed list is not kept", len(runs(t, log)), want)
 			}
 		})
+	}
+}
+
+// waitBound bounds every wait of the tests of listings in flight; none of them waits for it unless one fails.
+const waitBound = 10 * time.Second
+
+// heldClaude is a stand-in Claude Code whose listing in the folder held waits until release is called, then runs then;
+// a listing in any other folder prints its init line at once. A test that ends releases it, so no session outlives
+// the test.
+func heldClaude(t *testing.T, held, then string) (a *Adapter, info ports.HarnessInfo, log string, release func()) {
+	t.Helper()
+	flag := filepath.Join(t.TempDir(), "released")
+	path, log := listingClaude(t, `case "$(pwd -P)" in
+"$HELD") until [ -e "$RELEASED" ]; do sleep 0.05; done
+`+then+` ;;
+esac
+echo '{"type":"system","subtype":"init","skills":["simplify"]}'
+`)
+	a = &Adapter{Home: t.TempDir(), Env: []string{"PATH=/usr/bin:/bin", "LOG=" + log, "HELD=" + resolved(t, held),
+		"RELEASED=" + flag}, skillListTimeout: 30 * time.Second}
+	release = func() {
+		if err := os.WriteFile(flag, nil, 0o600); err != nil {
+			t.Errorf("os.WriteFile(%s) = %v, want no error", flag, err)
+		}
+	}
+	t.Cleanup(release)
+	return a, ports.HarnessInfo{Detected: true, Path: path}, log, release
+}
+
+// waitForRuns waits until the stand-in has started n listing sessions.
+func waitForRuns(t *testing.T, log string, n int) {
+	t.Helper()
+	for deadline := time.Now().Add(waitBound); len(runs(t, log)) < n; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d listing sessions started within %v, want %d", len(runs(t, log)), waitBound, n)
+		}
+	}
+}
+
+// waitForWaiters waits until n lookups wait for the one listing in flight.
+func waitForWaiters(t *testing.T, a *Adapter, n int) {
+	t.Helper()
+	waiting := func() int {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		for _, l := range a.listings {
+			return l.waiters
+		}
+		return 0
+	}
+	for deadline := time.Now().Add(waitBound); waiting() != n; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d lookups waited for the listing within %v, want %d", waiting(), waitBound, n)
+		}
+	}
+}
+
+type lookupResult struct {
+	items []ports.ResolvedItem
+	err   error
+}
+
+// lookUp looks up the skills of workspace in a goroutine of its own, which ends once the lookup returns.
+func lookUp(ctx context.Context, a *Adapter, info ports.HarnessInfo, workspace string) <-chan lookupResult {
+	out := make(chan lookupResult, 1)
+	go func() {
+		items, _, err := a.UserItems(ctx, info, "skill", workspace, nil)
+		out <- lookupResult{items, err}
+	}()
+	return out
+}
+
+// result waits for a lookup to return.
+func result(t *testing.T, what string, lookup <-chan lookupResult) lookupResult {
+	t.Helper()
+	select {
+	case r := <-lookup:
+		return r
+	case <-time.After(waitBound):
+		t.Fatalf("%s did not return within %v", what, waitBound)
+		return lookupResult{}
+	}
+}
+
+// A lookup waits only for the listing of its own key: while one workspace's listing is held, another workspace's
+// lookup starts its own and returns.
+func TestSkillListingOfAnotherWorkspaceRunsAlongside(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	held, other := t.TempDir(), t.TempDir()
+	a, info, log, release := heldClaude(t, held, "")
+
+	slow := lookUp(t.Context(), a, info, held)
+	waitForRuns(t, log, 1)
+	if r := result(t, "the lookup of another workspace", lookUp(t.Context(), a, info, other)); r.err != nil ||
+		!slices.Equal(names(r.items), []string{"simplify"}) {
+		t.Errorf("UserItems(skill, %s) = %q, %v while %s is listed; want [simplify]", other, names(r.items), r.err, held)
+	}
+	select {
+	case r := <-slow:
+		t.Errorf("UserItems(skill, %s) = %q, %v before its listing was released, want it still waiting", held,
+			names(r.items), r.err)
+	default:
+	}
+	release()
+	if r := result(t, "the held lookup", slow); r.err != nil || !slices.Equal(names(r.items), []string{"simplify"}) {
+		t.Errorf("UserItems(skill, %s) = %q, %v; want [simplify]", held, names(r.items), r.err)
+	}
+}
+
+// A second lookup of a key shares the listing already running, its failure included: one session answers both, though
+// a failed list is not kept.
+func TestSkillListingOfOneWorkspaceIsShared(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	ws := t.TempDir()
+	a, info, log, release := heldClaude(t, ws, "echo 'Not logged in' >&2; exit 1")
+
+	first := lookUp(t.Context(), a, info, ws)
+	waitForRuns(t, log, 1)
+	second := lookUp(t.Context(), a, info, ws)
+	waitForWaiters(t, a, 2)
+	release()
+	for _, c := range []struct {
+		what   string
+		lookup <-chan lookupResult
+	}{{"the first lookup", first}, {"the second lookup", second}} {
+		r := result(t, c.what, c.lookup)
+		if text := domain.TextOf(r.err); r.items != nil || text.Key != "command_failed" ||
+			!strings.Contains(text.Params["detail"], "Not logged in") {
+			t.Errorf("%s: UserItems(skill, %s) = %q, %+v; want command_failed with Not logged in", c.what, ws,
+				names(r.items), text)
+		}
+	}
+	if got := len(runs(t, log)); got != 1 {
+		t.Errorf("%d listing sessions ran for two lookups of one workspace, want 1", got)
+	}
+}
+
+// A lookup whose context ends returns its context's error at once, and the listing goes on for the lookup that still
+// waits for it.
+func TestSkillLookupWhoseContextEndsReturns(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	ws := t.TempDir()
+	a, info, log, release := heldClaude(t, ws, "")
+
+	ctx, cancel := context.WithCancel(t.Context())
+	gone := lookUp(ctx, a, info, ws)
+	waitForRuns(t, log, 1)
+	stays := lookUp(t.Context(), a, info, ws)
+	waitForWaiters(t, a, 2)
+	cancel()
+	if r := result(t, "the lookup whose context ended", gone); r.items != nil || !errors.Is(r.err, context.Canceled) {
+		t.Errorf("UserItems(skill, %s) with its context cancelled = %q, %v; want %v", ws, names(r.items), r.err,
+			context.Canceled)
+	}
+	release()
+	if r := result(t, "the lookup still waiting", stays); r.err != nil || !slices.Equal(names(r.items), []string{"simplify"}) {
+		t.Errorf("UserItems(skill, %s) = %q, %v; want [simplify]", ws, names(r.items), r.err)
+	}
+	if got := len(runs(t, log)); got != 1 {
+		t.Errorf("%d listing sessions ran, want 1 that went on after a lookup left it", got)
+	}
+}
+
+// A listing that no lookup waits for any more is stopped and kept by no one: the next lookup of its key starts its own.
+func TestSkillListingNobodyWaitsForStops(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	ws := t.TempDir()
+	a, info, log, release := heldClaude(t, ws, "")
+
+	ctx, cancel := context.WithCancel(t.Context())
+	gone := lookUp(ctx, a, info, ws)
+	waitForRuns(t, log, 1)
+	cancel()
+	if r := result(t, "the lookup whose context ended", gone); !errors.Is(r.err, context.Canceled) {
+		t.Errorf("UserItems(skill, %s) with its context cancelled = %q, %v; want %v", ws, names(r.items), r.err,
+			context.Canceled)
+	}
+	next := lookUp(t.Context(), a, info, ws)
+	waitForRuns(t, log, 2)
+	release()
+	if r := result(t, "the next lookup", next); r.err != nil || !slices.Equal(names(r.items), []string{"simplify"}) {
+		t.Errorf("UserItems(skill, %s) = %q, %v; want [simplify] from a listing of its own", ws, names(r.items), r.err)
+	}
+}
+
+// ReloadUserItems does not wait for a listing in flight, and that listing, which started before the reload, does not
+// keep its list: the next lookup asks Claude Code again.
+func TestSkillReloadDoesNotWaitForAListing(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	ws := t.TempDir()
+	a, info, log, release := heldClaude(t, ws, "")
+
+	first := lookUp(t.Context(), a, info, ws)
+	waitForRuns(t, log, 1)
+	reloaded := make(chan struct{})
+	go func() {
+		a.ReloadUserItems()
+		close(reloaded)
+	}()
+	select {
+	case <-reloaded:
+	case <-time.After(waitBound):
+		t.Fatalf("ReloadUserItems did not return within %v while a listing was held", waitBound)
+	}
+	release()
+	if r := result(t, "the lookup that started before the reload", first); r.err != nil ||
+		!slices.Equal(names(r.items), []string{"simplify"}) {
+		t.Errorf("UserItems(skill, %s) = %q, %v; want [simplify]", ws, names(r.items), r.err)
+	}
+	if _, _, err := a.UserItems(t.Context(), info, "skill", ws, nil); err != nil || len(runs(t, log)) != 2 {
+		t.Errorf("UserItems after ReloadUserItems: %v, %d sessions; want a new session", err, len(runs(t, log)))
 	}
 }

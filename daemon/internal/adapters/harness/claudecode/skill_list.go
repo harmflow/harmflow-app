@@ -47,8 +47,10 @@ type initSkills struct {
 // workspace not made yet has no skills of its own, so its list is asked for in the user's home folder, and an added
 // folder not made yet, such as a repository not cloned, is left out, as it holds none. The list of each
 // CLI, folder, and set of added folders is kept until ReloadUserItems, since reading it starts a session that takes
-// seconds; one that failed is not kept. A CLI that was not detected cannot answer, which is an error, never an empty
-// list.
+// seconds; one that failed is not kept. A lookup waits only for the listing of its own key: listings of other keys run
+// alongside it, a second lookup of a key shares the listing already running, and a lookup whose context ends returns
+// while the listing goes on for the others; the last one to leave stops it. A CLI that was not detected cannot answer,
+// which is an error, never an empty list.
 func (a *Adapter) sessionSkills(ctx context.Context, info ports.HarnessInfo, workspace string, added []string) ([]ports.ResolvedItem, error) {
 	if !info.Detected || info.Path == "" {
 		return nil, domain.TextErr("harness_not_detected", "{{harness}} was not detected on this machine", "harness", Name)
@@ -63,26 +65,76 @@ func (a *Adapter) sessionSkills(ctx context.Context, info ports.HarnessInfo, wor
 	})
 	key := strings.Join(append([]string{info.Path, dir}, added...), "\x00")
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if items, ok := a.skills[key]; ok {
+		a.mu.Unlock()
 		return items, nil
 	}
-	names, err := a.listSkills(ctx, info, dir, added)
-	if err != nil {
-		return nil, err
+	l, ok := a.listings[key]
+	if !ok {
+		// The listing outlives a lookup whose context ends, for the lookups that share it, until the last one leaves.
+		listCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+		l = &skillListing{done: make(chan struct{}), cancel: cancel}
+		if a.listings == nil {
+			a.listings = map[string]*skillListing{}
+		}
+		a.listings[key] = l
+		go a.runListing(listCtx, info, dir, added, key, l)
 	}
-	slices.Sort(names)
-	var items []ports.ResolvedItem
-	for _, n := range slices.Compact(names) {
-		if n != "" {
-			items = append(items, ports.ResolvedItem{Name: n, Kind: "skill"})
+	l.waiters++
+	a.mu.Unlock()
+	select {
+	case <-l.done:
+		return l.items, l.err
+	case <-ctx.Done():
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		if l.waiters--; l.waiters == 0 {
+			// Nobody waits for the listing any more: stop it, and let the next lookup start its own.
+			if a.listings[key] == l {
+				delete(a.listings, key)
+			}
+			l.cancel()
+		}
+		return nil, ctx.Err()
+	}
+}
+
+// skillListing is one listing session in flight, which the lookups of its key share. Its items and err are set before
+// done is closed, and read only after; waiters, guarded by the adapter's mutex, counts the lookups waiting for it.
+type skillListing struct {
+	done    chan struct{}
+	cancel  context.CancelFunc
+	waiters int
+	items   []ports.ResolvedItem
+	err     error
+}
+
+// runListing lists the skills of key into l, keeps them when the listing succeeded, and closes l.done. A listing that
+// ReloadUserItems dropped, or that nobody waited for any more, does not write its result into the cache.
+func (a *Adapter) runListing(ctx context.Context, info ports.HarnessInfo, dir string, added []string, key string, l *skillListing) {
+	defer l.cancel()
+	names, err := a.listSkills(ctx, info, dir, added)
+	if err == nil {
+		slices.Sort(names)
+		for _, n := range slices.Compact(names) {
+			if n != "" {
+				l.items = append(l.items, ports.ResolvedItem{Name: n, Kind: "skill"})
+			}
 		}
 	}
-	if a.skills == nil {
-		a.skills = map[string][]ports.ResolvedItem{}
+	l.err = err
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.listings[key] == l {
+		delete(a.listings, key)
+		if err == nil {
+			if a.skills == nil {
+				a.skills = map[string][]ports.ResolvedItem{}
+			}
+			a.skills[key] = l.items
+		}
 	}
-	a.skills[key] = items
-	return items, nil
+	close(l.done)
 }
 
 // listSkills starts a Claude Code session in dir with the added folders, with the flags an execution gives it that
@@ -170,9 +222,11 @@ func (a *Adapter) ListsPerWorkspace(kind string) bool { return kind == "skill" }
 // it could not give leaves them unverified rather than missing.
 func (a *Adapter) AllowsUnverified(kind string) bool { return kind == "skill" }
 
-// ReloadUserItems implements ports.ItemReloader: the next lookup of the skills asks Claude Code for its list again.
+// ReloadUserItems implements ports.ItemReloader: the next lookup of the skills asks Claude Code for its list again. It
+// does not wait for a listing in flight: the lookups already waiting for one get its result, which is not kept.
 func (a *Adapter) ReloadUserItems() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.skills = nil
+	a.listings = nil
 }
