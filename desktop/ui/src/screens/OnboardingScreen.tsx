@@ -9,6 +9,7 @@ import { TemplateButtons } from "../components/Templates";
 import { Icon, Logo } from "../components/Icon";
 import { toast } from "../components/toast";
 import { Banner, Button, Checkbox, Chip, cx } from "../components/ui";
+import { errorMessage } from "../lib/errorMessage";
 import { actions, useStore } from "../state/store";
 
 const TOTAL = 5;
@@ -37,7 +38,7 @@ export function OnboardingScreen({
       await native.startDaemon();
       await actions.refreshAll();
     } catch (err) {
-      toast(t("daemonDown.failed", { message: (err as Error).message }), "danger");
+      toast(t("daemonDown.failed", { message: errorMessage(err) }), "danger");
     } finally {
       setStarting(false);
     }
@@ -196,7 +197,7 @@ export function DaemonDownScreen() {
       await native.startDaemon();
       await actions.refreshAll();
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorMessage(err));
     } finally {
       setStarting(false);
     }

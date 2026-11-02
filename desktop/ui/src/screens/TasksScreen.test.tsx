@@ -284,6 +284,16 @@ describe("the Tasks screen's Export", () => {
     expect(save.mock.calls).toEqual([["standup.yaml", yaml]]);
     expect(toasts()).toEqual([]);
   });
+
+  it("shows the bridge's message when the file cannot be written (harmflow-app#725)", async () => {
+    answer("GET", "/tasks/standup/export", yaml);
+    // The shell answers a failed command with its message alone, not an Error.
+    vi.spyOn(native, "saveTextFile").mockRejectedValue("permission denied: /Volumes/locked/standup.yaml");
+    await open([standup]);
+
+    await click(button("standup", "Export"));
+    expect(toasts()).toEqual([{ tone: "danger", text: "permission denied: /Volumes/locked/standup.yaml" }]);
+  });
 });
 
 describe("the Tasks screen's Delete", () => {

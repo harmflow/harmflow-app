@@ -3,14 +3,15 @@
 // autostart option is offered unchecked, and finishing onboarding turns autostart on only when the user checked it.
 // What the daemon does with the setting — a fresh daemon reads it off, and writes its launchd agent only on request —
 // is the daemon's tests'; that the system then starts it at the next login needs a real login session.
-import { act } from "react";
+import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type Mock, type MockInstance } from "vitest";
 import { native } from "../api/native";
 import type { Settings, SettingsPatch } from "../api/types";
+import { Toasts } from "../components/toast";
 import i18n from "../i18n";
 import { patchStateForTests } from "../state/store";
-import { OnboardingScreen } from "./OnboardingScreen";
+import { DaemonDownScreen, OnboardingScreen } from "./OnboardingScreen";
 
 // The daemon as the client sees it: the settings it serves, every request it received with its body, and a settings
 // update applied as the daemon applies it, `autostart` turning the service on.
@@ -160,5 +161,56 @@ describe("the onboarding screen's autostart option", () => {
     expect(loginItem).toHaveBeenCalledTimes(1);
     expect(loginItem).toHaveBeenCalledWith(fresh.trayEnabled);
     expect(daemon.settings.autostart.enabled).toBe(true);
+  });
+});
+
+// The shell answers a failed command with its message alone, not an Error (harmflow-app#725).
+describe("a start of the daemon the bridge rejects", () => {
+  const failure = "the daemon did not answer within 10 seconds; see logs/daemon.log in the HarmFlow folder";
+
+  beforeEach(() => {
+    // A toast stays 3.5 seconds in a list the module keeps; a fake clock for its timeout ends it with the test.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    native.available = true;
+    patchStateForTests({ connection: "daemon_stopped" });
+    vi.spyOn(native, "startDaemon").mockRejectedValue(failure);
+  });
+
+  afterEach(() => {
+    native.available = false;
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+  });
+
+  async function render(screen: ReactNode) {
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () =>
+      root!.render(
+        <>
+          {screen}
+          <Toasts />
+        </>,
+      ),
+    );
+    await settle();
+  }
+
+  it("shows the bridge's message in the onboarding's toast", async () => {
+    await render(<OnboardingScreen onFinish={finished} onCreateTask={() => {}} onImport={() => {}} />);
+    await toAutostartStep();
+    await click(button("Start the daemon now"));
+
+    expect(native.startDaemon).toHaveBeenCalledTimes(1);
+    expect([...host!.querySelectorAll(".toast--danger")].map((t) => t.textContent)).toEqual([`The daemon did not start: ${failure}`]);
+    expect(button("Start the daemon now").disabled).toBe(false);
+  });
+
+  it("shows the bridge's message on the daemon-down screen", async () => {
+    await render(<DaemonDownScreen />);
+    await click(button("Start daemon"));
+
+    expect(native.startDaemon).toHaveBeenCalledTimes(1);
+    expect(host!.querySelector(".banner")!.textContent).toBe(`The daemon did not start: ${failure}`);
   });
 });

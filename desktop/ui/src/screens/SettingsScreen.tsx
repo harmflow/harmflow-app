@@ -13,6 +13,7 @@ import type { LeaveCheck } from "../components/TaskEditor";
 import { toast } from "../components/toast";
 import { Banner, Button, Chip, IconButton, KeyValue, NumberInput, Panel, Select, TextInput, Toggle, cx } from "../components/ui";
 import { applyLanguage } from "../i18n";
+import { errorMessage } from "../lib/errorMessage";
 import { formatBytes, formatDateTime, formatDuration } from "../lib/format";
 import { useDraft, useNow, type DraftReport } from "../lib/hooks";
 import { actions, useStore } from "../state/store";
@@ -358,7 +359,7 @@ function DaemonSection() {
       await native.startDaemon();
       await actions.refreshAll();
     } catch (err) {
-      toast((err as Error).message, "danger");
+      toast(errorMessage(err), "danger");
     } finally {
       setStarting(false);
     }
