@@ -39,9 +39,9 @@ func TestPromptMarkingAndBranchNamingAreFollowed(t *testing.T) {
 	sweepSuiteFixtures(t, promptMarkingLabel, base)
 	run := runSuffix()
 	file := promptMarkingLabel + "/" + run + ".txt"
-	issue := suiteFixture(t, promptMarkingLabel, base, "Prompt marking test "+run+": add "+file, fmt.Sprintf(
-		"A fixture of HarmFlow's prompt marking test, which closes it when it ends.\n\n"+
-			"Add the file `%s` with the single line `%s`, and change nothing else. The repository has no tests.\n", file, run))
+	issue := suiteFixture(t, promptMarkingLabel, base, "Add the checklist "+file,
+		fmt.Sprintf("Add the file `%s` with the single line `%s`, and change nothing else. The repository has no tests.\n",
+			file, run))
 	clone := pushableClone(t)
 	d := startDaemon(t, t.TempDir())
 	useClaude(d, claude, clone)

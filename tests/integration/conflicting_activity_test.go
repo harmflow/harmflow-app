@@ -33,9 +33,9 @@ func TestIssueAssignedMeanwhileIsLoggedAsAConflict(t *testing.T) {
 	}
 	run := runSuffix()
 	file := conflictDir + "/" + run + ".txt"
-	issue := labelledFixture(t, conflictLabel, conflictDir, base, "Conflict test "+run+": add "+file,
-		fmt.Sprintf("A fixture of HarmFlow's conflicting-activity test, which closes it when it ends.\n\n"+
-			"Add the file `%s` with the single line `%s`, and change nothing else. The repository has no tests.\n", file, run))
+	issue := labelledFixture(t, conflictLabel, conflictDir, base, "Add the memo "+file,
+		fmt.Sprintf("Add the file `%s` with the single line `%s`, and change nothing else. The repository has no tests.\n",
+			file, run))
 	parent, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
