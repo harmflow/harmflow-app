@@ -1413,6 +1413,106 @@ func TestEnablingChangesTheFileAndRunsTheNextFiring(t *testing.T) {
 	}
 }
 
+// Disabling a task over the API while its execution runs lets that execution finish normally: it ends completed, its
+// session runs through its last message, and nothing cancels it. The task stays disabled, so a manual run is refused
+// and the execution that ran is its only one. The run is started by hand, so the test waits for no minute boundary.
+func TestDisablingLetsTheRunningExecutionFinish(t *testing.T) {
+	t.Parallel()
+	d := startDaemon(t, t.TempDir())
+	// The stand-in sends a message every half second for five seconds. With no notice, the log ends at
+	// execution.completed.
+	d.call("POST", "/tasks", map[string]any{"yaml": task("midway", "SCENARIO=ticks",
+		"  notifications:\n    native:\n      events: []\n")}, 201)
+	id := d.call("POST", "/tasks/midway/run", nil, 202)["executionId"].(string)
+	d.waitStatus(id, "running")
+	logPath := filepath.Join(d.home, "logs", id+".jsonl")
+	for p := newExecutionProgress(); ; time.Sleep(100 * time.Millisecond) {
+		lines := readLog(t, logPath)
+		if slices.ContainsFunc(lines, func(l logLine) bool { return l.Type == "harness.message" }) {
+			break
+		}
+		p.see(lines, nil)
+		if limit := p.over(); limit != "" {
+			t.Fatalf("execution %s logged no harness.message after %s; %v", id, limit, p)
+		}
+	}
+
+	disabled := d.call("POST", "/tasks/midway/disable", nil, 200)
+	if disabled["enabled"] != false {
+		t.Errorf("POST /tasks/midway/disable answered enabled %v, want false", disabled["enabled"])
+	}
+	// The disable must reach the execution while it runs, or the rest proves nothing.
+	if x := d.call("GET", "/executions/"+id, nil, 200); x["status"] != "running" {
+		t.Fatalf("after the disable, execution %s is %v, want running", id, x["status"])
+	}
+	for _, l := range readLog(t, logPath) {
+		if terminalTypes[l.Type] {
+			t.Fatalf("execution %s had ended (%s) when the disable answered", id, l.Type)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(d.home, "tasks", "midway.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, _ := yamlAsJSON(t, data).(map[string]any)
+	if spec, _ := doc["spec"].(map[string]any); spec["enabled"] != false {
+		t.Errorf("after the disable, the file reads spec.enabled %v, want false:\n%s", spec["enabled"], data)
+	}
+
+	d.waitStatus(id, "completed", "cancelled", "failed", "interrupted")
+	if x := d.call("GET", "/executions/"+id, nil, 200); x["status"] != "completed" {
+		t.Errorf("execution %s ended %v, want completed", id, x["status"])
+	}
+	var replay struct {
+		Events []struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"events"`
+	}
+	// The status can read completed a moment before the log holds execution.completed.
+	for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(100 * time.Millisecond) {
+		status, body := d.request("GET", "/executions/"+id+"/events", nil, nil)
+		if err := json.Unmarshal(body, &replay); status != 200 || err != nil {
+			t.Fatalf("GET /executions/%s/events: %d %v %s", id, status, err, body)
+		}
+		if bytes.Contains(body, []byte(`"type":"execution.completed"`)) || time.Now().After(deadline) {
+			break
+		}
+	}
+	var messages, types []string
+	for _, e := range replay.Events {
+		types = append(types, e.Type)
+		switch e.Type {
+		case "harness.message":
+			messages = append(messages, e.Message)
+		case "execution.cancel_requested", "execution.cancelled", "execution.failed", "execution.interrupted":
+			t.Errorf("the execution's events hold %s: %v", e.Type, types)
+		}
+	}
+	var ticks []string
+	for i := 1; i <= 10; i++ {
+		ticks = append(ticks, fmt.Sprintf("Tick %d", i))
+	}
+	if !slices.Equal(messages, ticks) {
+		t.Errorf("the execution's messages are %q, want %q", messages, ticks)
+	}
+	// The last message is the session's, so execution.completed, the last event, comes after it.
+	if end := slices.Index(types, "execution.completed"); end < 0 || end != len(types)-1 {
+		t.Errorf("the execution's events are %v, want them to end at execution.completed, after its last message", types)
+	}
+
+	refused := d.call("POST", "/tasks/midway/run", nil, 409)
+	if e, _ := refused["error"].(map[string]any); e["code"] != "task_disabled" {
+		t.Errorf("POST /tasks/midway/run of the disabled task answered %v, want the error task_disabled", refused)
+	}
+	if got := d.call("GET", "/tasks/midway", nil, 200); got["enabled"] != false {
+		t.Errorf("GET /tasks/midway reads enabled %v, want false", got["enabled"])
+	}
+	if runs := d.list("/executions?taskId=midway"); len(runs) != 1 || runs[0]["id"] != id {
+		t.Errorf("the disabled task's executions are %v, want only %s", runs, id)
+	}
+}
+
 // A task duplicated over the API, its copy disabled, and the original removed: the copy stays under a new identifier,
 // disabled in the API's answers, in the list, and in its file, and the original is gone from the disk and the API.
 func TestDuplicateDisableTheCopyRemoveTheOriginal(t *testing.T) {
