@@ -21,8 +21,9 @@ import (
 func TestReadOnlyRealCodexWritesNothing(t *testing.T) {
 	h := codexForPermissions(t)
 	w := newWriteTargets(t)
-	r := runWithProfile(t, h, "read_only", w, w.prompt("a file edit or a shell command"))
+	r := runWithProfile(t, h, "read_only", w, codexSandboxReport+w.prompt("a file edit or a shell command"))
 
+	r.logSandbox(t)
 	r.wantAttemptAtOutside(t, w)
 	wantAbsent(t, w.outside)
 	r.wantEnforced(t, "restrictToWorkspace")
@@ -134,6 +135,26 @@ func TestWorkspaceWriteRealClaudeCodeEditsOnlyItsWorkspace(t *testing.T) {
 	}) {
 		t.Errorf("the execution's unenforced restrictions are %v, want the one for restrictToWorkspace, about the shell",
 			r.unenforced)
+	}
+}
+
+// codexSandboxReport asks a Codex session, before its writes, to print the variables Codex sets on a command it runs in
+// its sandbox: Codex's JSON output names no sandbox mode, so the command's output is what logs whether the shell ran
+// sandboxed.
+const codexSandboxReport = "Before anything else, run this shell command once and report its output: " +
+	"printenv CODEX_SANDBOX CODEX_SANDBOX_NETWORK_DISABLED\n\n"
+
+// logSandbox logs what says which sandbox Codex applied: the output of the command codexSandboxReport asks for, and
+// Codex's own notices, such as one saying its configuration or requirements changed a setting HarmFlow passed.
+func (r permissionRun) logSandbox(t *testing.T) {
+	t.Helper()
+	for _, c := range r.calls {
+		if strings.Contains(c.command, "CODEX_SANDBOX") {
+			t.Logf("sandbox report: %s, %s: %q", c.command, c.status, c.output)
+		}
+	}
+	for _, n := range r.notices {
+		t.Logf("harness notice: %.500s", n)
 	}
 }
 
@@ -266,10 +287,11 @@ func wantAbsent(t *testing.T, path string) {
 }
 
 // permissionRun is what an execution of a task asking for the two writes left: its tool calls, the restrictions its
-// warnings say are not enforced, and the harness's raw output.
+// warnings say are not enforced, the harness's notices, and its raw output.
 type permissionRun struct {
 	calls      []toolCall
 	unenforced []unenforced
+	notices    []string
 	output     string
 }
 
@@ -310,8 +332,13 @@ func runWithPermissions(t *testing.T, h realHarness, permissions map[string]any,
 	r := permissionRun{calls: toolCalls(events)}
 	// A file change Codex made is no tool call: the daemon records it as a change to the workspace alone.
 	for _, e := range events {
-		if e["type"] == "workspace.changed" {
+		switch e["type"] {
+		case "workspace.changed":
 			t.Logf("workspace change: %v", e["message"])
+		case "harness.output":
+			if m, _ := e["message"].(string); m != "" {
+				r.notices = append(r.notices, m)
+			}
 		}
 	}
 	warnings, _ := x["warnings"].([]any)
