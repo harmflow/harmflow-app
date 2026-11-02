@@ -56,6 +56,7 @@ type Adapter struct {
 
 	mu               sync.Mutex
 	skills           map[string][]ports.ResolvedItem // by CLI path, workspace, and added folders, kept until ReloadUserItems
+	listings         map[string]*skillListing        // the listings in flight, by the same key as skills
 	helpTimeout      time.Duration                   // the --help check; zero is defaultHelpTimeout
 	skillListTimeout time.Duration                   // the skill list's session; zero is defaultSkillListTimeout
 	quotaTimeout     time.Duration                   // `claude -p "/usage"`; zero is defaultQuotaTimeout
