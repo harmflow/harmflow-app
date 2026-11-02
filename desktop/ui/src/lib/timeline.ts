@@ -61,6 +61,12 @@ export function toolKey(e: HarmflowEvent): string | undefined {
   return str(p.toolUseId) ?? str(p.toolId) ?? str(p.id);
 }
 
+/** A call's key within its attempt: a harness such as Codex numbers its calls again in each session. */
+function callKey(e: HarmflowEvent): string | undefined {
+  const key = toolKey(e);
+  return key ? `${e.attempt ?? 0}:${key}` : undefined;
+}
+
 export function toolDetail(e: HarmflowEvent): string | undefined {
   const p = payloadOf(e);
   const input = (p.input ?? {}) as Payload;
@@ -188,7 +194,7 @@ export function buildTimeline(events: readonly HarmflowEvent[]): TimelineItem[] 
     if (RAW_TYPES.has(e.type) || HIDDEN_TYPES.has(e.type)) continue;
 
     if (e.type === "tool.completed") {
-      const key = toolKey(e);
+      const key = callKey(e);
       const tool = key ? tools.get(key) : undefined;
       if (tool) {
         const p = payloadOf(e);
@@ -222,7 +228,7 @@ export function buildTimeline(events: readonly HarmflowEvent[]): TimelineItem[] 
 
     items.push(item);
     if (e.type === "tool.started") {
-      const key = toolKey(e);
+      const key = callKey(e);
       if (key) tools.set(key, item);
     }
   }

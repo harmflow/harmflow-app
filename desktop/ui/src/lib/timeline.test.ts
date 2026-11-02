@@ -71,6 +71,18 @@ describe("buildTimeline", () => {
     expect(items[0].completed).toBeUndefined();
   });
 
+  it("keeps a later attempt's end with no start as a line of its own, though it reuses an earlier call's id", () => {
+    // Codex numbers its calls again in each session, so a second attempt may end an item_4 it never started here.
+    const items = buildTimeline([
+      ev("tool.started", { attempt: 1, payload: { toolId: "item_4", tool: "shell", command: "make test" } }),
+      ev("tool.completed", { attempt: 1, payload: { toolId: "item_4", tool: "shell", status: "succeeded", exitCode: 0 } }),
+      ev("tool.completed", { attempt: 2, severity: "warning", payload: { toolId: "item_4", tool: "shell", status: "declined" } }),
+    ]);
+    expect(items.map((i) => i.event.type)).toEqual(["tool.started", "tool.completed"]);
+    expect(items[0].completed).toMatchObject({ ok: true });
+    expect(items[0].completed?.declined).toBeUndefined();
+  });
+
   it("shows the daemon's messages in the interface's language, the agent's and tools' as they are", async () => {
     await i18n.changeLanguage("pt-BR");
     try {

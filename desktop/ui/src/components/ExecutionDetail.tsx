@@ -397,7 +397,9 @@ function outputFor(item: TimelineItem, events: HarmflowEvent[]): string | undefi
     // A harness may end a call twice, correcting it later with no output: the first end that has one shows.
     const key = toolKey(item.event);
     const ends = key
-      ? events.filter((e) => e.type === "tool.completed" && toolKey(e) === key).sort((a, b) => a.id - b.id)
+      ? events
+          .filter((e) => e.type === "tool.completed" && toolKey(e) === key && e.attempt === item.event.attempt)
+          .sort((a, b) => a.id - b.id)
       : [];
     if (ends.length) {
       for (const end of ends) {
