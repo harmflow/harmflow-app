@@ -174,11 +174,12 @@ export function labelKey(type: string): string {
 
 /**
  * Builds the timeline of one execution: one item per meaningful event, in order, with each tool.completed folded into
- * the tool.started it ends.
+ * the tool.started it ends. A harness may correct a call's end later, as Claude Code does when it says at the session's
+ * end which calls it declined: the last end gives the state, and the line keeps the time of the first.
  */
 export function buildTimeline(events: readonly HarmflowEvent[]): TimelineItem[] {
   const items: TimelineItem[] = [];
-  const openTools = new Map<string, TimelineItem>();
+  const tools = new Map<string, TimelineItem>();
   const seen = new Set<number>();
 
   for (const e of [...events].sort((a, b) => a.id - b.id)) {
@@ -188,13 +189,13 @@ export function buildTimeline(events: readonly HarmflowEvent[]): TimelineItem[] 
 
     if (e.type === "tool.completed") {
       const key = toolKey(e);
-      const open = key ? openTools.get(key) : undefined;
-      if (open) {
+      const tool = key ? tools.get(key) : undefined;
+      if (tool) {
         const p = payloadOf(e);
         const failed = p.isError === true || p.status === "failed" || (typeof p.exitCode === "number" && p.exitCode !== 0);
         const declined = p.status === "declined";
-        open.completed = declined ? { ok: false, declined, at: e.timestamp } : { ok: !failed, at: e.timestamp };
-        if (key) openTools.delete(key);
+        const at = tool.completed?.at ?? e.timestamp;
+        tool.completed = declined ? { ok: false, declined, at } : { ok: !failed, at };
         continue;
       }
     }
@@ -222,7 +223,7 @@ export function buildTimeline(events: readonly HarmflowEvent[]): TimelineItem[] 
     items.push(item);
     if (e.type === "tool.started") {
       const key = toolKey(e);
-      if (key) openTools.set(key, item);
+      if (key) tools.set(key, item);
     }
   }
   return items;

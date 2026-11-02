@@ -44,6 +44,33 @@ describe("buildTimeline", () => {
     expect(items[0].completed).toMatchObject({ ok: false, declined: true });
   });
 
+  it("folds a later end that corrects a call to declined into the call's line, with the first end's time", () => {
+    // Claude Code ends a refused call as failed while the session runs, and says it declined it at the session's end.
+    const items = buildTimeline([
+      ev("tool.started", { payload: { toolId: "t4", tool: "Bash", command: "cd /tmp && ls missing 2>&1" } }),
+      ev("tool.completed", {
+        severity: "warning",
+        timestamp: "2026-10-20T19:32:15-03:00",
+        payload: { toolId: "t4", tool: "Bash", status: "failed", output: "This command requires approval" },
+      }),
+      ev("harness.message", { message: "I could not list it." }),
+      ev("tool.completed", {
+        severity: "warning",
+        timestamp: "2026-10-20T19:40:00-03:00",
+        payload: { toolId: "t4", tool: "Bash", status: "declined", output: "" },
+      }),
+    ]);
+    expect(items.map((i) => i.event.type)).toEqual(["tool.started", "harness.message"]);
+    expect(items[0].completed).toEqual({ ok: false, declined: true, at: "2026-10-20T19:32:15-03:00" });
+  });
+
+  it("keeps an end with no start before it as a line of its own", () => {
+    const items = buildTimeline([ev("tool.completed", { severity: "warning", payload: { toolId: "t5", tool: "Bash", status: "declined" } })]);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ labelKey: "eventTypes.tool.completed", title: "Bash" });
+    expect(items[0].completed).toBeUndefined();
+  });
+
   it("shows the daemon's messages in the interface's language, the agent's and tools' as they are", async () => {
     await i18n.changeLanguage("pt-BR");
     try {

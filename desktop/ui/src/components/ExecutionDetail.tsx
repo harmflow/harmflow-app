@@ -394,9 +394,18 @@ function outputFor(item: TimelineItem, events: HarmflowEvent[]): string | undefi
   const pick = (o: Record<string, unknown>) =>
     [o.output, o.result, o.stdout, o.text, payloadError(o)].find((v): v is string => typeof v === "string" && v !== "");
   if (item.event.type === "tool.started") {
+    // A harness may end a call twice, correcting it later with no output: the first end that has one shows.
     const key = toolKey(item.event);
-    const done = key ? events.find((e) => e.type === "tool.completed" && toolKey(e) === key) : undefined;
-    if (done) return pick((done.payload ?? {}) as Record<string, unknown>) ?? eventText(done);
+    const ends = key
+      ? events.filter((e) => e.type === "tool.completed" && toolKey(e) === key).sort((a, b) => a.id - b.id)
+      : [];
+    if (ends.length) {
+      for (const end of ends) {
+        const output = pick((end.payload ?? {}) as Record<string, unknown>);
+        if (output) return output;
+      }
+      return eventText(ends[0]);
+    }
   }
   return pick(p) ?? (item.event.type === "harness.message" ? item.event.message : undefined);
 }
