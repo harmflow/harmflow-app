@@ -237,9 +237,58 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 			if t, found := read.disallowed(); found {
 				info.SetDiagnostic(t)
 			}
+			info.ManagedRequirements = read.managed()
 		}
+		// The account is shown, never checked: a plan that cannot be read stops no run, and leaves the diagnostic and the
+		// readiness as they are.
+		info.Account = a.account(ctx, info)
 	}
 	return info
+}
+
+// account is how the account Codex runs under signs in, and its plan, as account/read answers; a read that fails
+// leaves both unknown, with its error as the plan's reason.
+func (a *Adapter) account(ctx context.Context, info ports.HarnessInfo) *ports.HarnessAccount {
+	acct := &ports.HarnessAccount{SignInMethod: "unknown"}
+	read, err := a.readAccount(ctx, info)
+	switch {
+	case err != nil:
+		acct.SetPlanUnknown(domain.TextOf(err))
+	case read.Account == nil:
+		acct.SetPlanUnknown(domain.T("codex_account_unnamed", "Codex's app server names no account"))
+	default:
+		switch read.Account.Type {
+		case "chatgpt":
+			acct.SignInMethod = "chatgpt"
+		case "apiKey":
+			acct.SignInMethod = "api_key"
+		}
+		switch read.Account.PlanType {
+		case "":
+			// A sign-in with an API key has no plan.
+			if acct.SignInMethod != "api_key" {
+				acct.SetPlanUnknown(domain.T("codex_plan_unknown", "Codex reports the account's plan as unknown"))
+			}
+		case "unknown":
+			acct.SetPlanUnknown(domain.T("codex_plan_unknown", "Codex reports the account's plan as unknown"))
+		default:
+			acct.Plan = read.Account.PlanType
+		}
+	}
+	return acct
+}
+
+// managed is what the requirements allow: none managed when Codex reports none.
+func (r configRequirements) managed() *ports.ManagedRequirements {
+	if r.Requirements == nil {
+		return &ports.ManagedRequirements{}
+	}
+	return &ports.ManagedRequirements{
+		Managed:            true,
+		ApprovalPolicies:   r.Requirements.AllowedApprovalPolicies,
+		ApprovalsReviewers: r.Requirements.AllowedApprovalsReviewers,
+		PermissionProfiles: r.Requirements.AllowedPermissionProfiles,
+	}
 }
 
 // The settings Prepare runs Codex with: an approval policy under which no command waits for an approval, and the

@@ -2,12 +2,17 @@ package codex
 
 import (
 	"context"
+	"encoding/json"
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
 // tempDir is a temporary directory by its real path: on macOS the temporary directories are under /var, a symlink to
@@ -154,6 +159,98 @@ func TestDetectReportsRequirementsThatOverrideASetting(t *testing.T) {
 					info.Readiness, info.DiagnosticKey, info.DiagnosticParams, info.Diagnostic, c.wantKey, c.wantParams)
 			}
 		})
+	}
+}
+
+// harmflow-app#571: the check reads how Codex's account signs in and its plan, and whether an administrator manages
+// its requirements, with what they allow. A plan Codex reports as unknown, or an account/read that fails, reads
+// unknown with the reason and leaves Codex ready, its diagnostic untouched. No e-mail and no ID the app server
+// answers with reaches what the check reports.
+func TestDetectReadsTheAccountAndItsManagedRequirements(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	noRequirements := answer(`{"requirements":null}`)
+	managed := answer(`{"requirements":{"allowedApprovalPolicies":["never","on-request"],` +
+		`"allowedApprovalsReviewers":["user"],"allowedPermissionProfiles":["read-only","workspace-write"],` +
+		`"allowedSandboxModes":null,"featureRequirements":{"web_search":false}}}`)
+	account := func(fields string) string {
+		return answer(`{"account":{` + fields + `,"email":"someone@example.com"},"requiresOpenaiAuth":true,` +
+			`"workspaceRouting":{"accountId":"acct-7f3a9c","workspaceId":"ws-51d2e8"}}`)
+	}
+	cases := []struct {
+		name, onRequirements, onAccount string
+		want                            ports.HarnessAccount
+		wantRequirements                ports.ManagedRequirements
+	}{
+		{"a personal plan", noRequirements, account(`"type":"chatgpt","planType":"plus"`),
+			ports.HarnessAccount{SignInMethod: "chatgpt", Plan: "plus"}, ports.ManagedRequirements{}},
+		{"a workspace plan with managed requirements", managed, account(`"type":"chatgpt","planType":"business"`),
+			ports.HarnessAccount{SignInMethod: "chatgpt", Plan: "business"},
+			ports.ManagedRequirements{Managed: true, ApprovalPolicies: []string{"never", "on-request"},
+				ApprovalsReviewers: []string{"user"}, PermissionProfiles: []string{"read-only", "workspace-write"}}},
+		{"an unknown plan", noRequirements, account(`"type":"chatgpt","planType":"unknown"`),
+			ports.HarnessAccount{SignInMethod: "chatgpt", Plan: "unknown", PlanReasonKey: "codex_plan_unknown"},
+			ports.ManagedRequirements{}},
+		{"an API key", noRequirements, account(`"type":"apiKey"`), ports.HarnessAccount{SignInMethod: "api_key"},
+			ports.ManagedRequirements{}},
+		{"no account named", noRequirements, answer(`{"account":null,"requiresOpenaiAuth":true}`),
+			ports.HarnessAccount{SignInMethod: "unknown", Plan: "unknown", PlanReasonKey: "codex_account_unnamed"},
+			ports.ManagedRequirements{}},
+		{"a failing account/read", noRequirements,
+			`printf '{"id":%s,"error":{"code":-32603,"message":"account unavailable"}}\n' "$id"`,
+			ports.HarnessAccount{SignInMethod: "unknown", Plan: "unknown", PlanReasonKey: "codex_app_server_error",
+				PlanReasonParams: map[string]string{"method": "account/read", "detail": "account unavailable"}},
+			ports.ManagedRequirements{}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path, received := appServerStandInAnswering(t, answer(`{"data":[]}`), c.onRequirements, c.onAccount)
+			a := appServerAdapter(t)
+			a.listTimeout = time.Second
+			info := a.Detect(context.Background(), path)
+			if info.Readiness != "ready" || info.DiagnosticKey != "" {
+				t.Errorf("Detect(%s) readiness %s, diagnostic %q (%s); want ready, no diagnostic", c.name, info.Readiness,
+					info.DiagnosticKey, info.Diagnostic)
+			}
+			got := info.Account
+			if got == nil {
+				t.Fatalf("Detect(%s).Account = nil, want %+v", c.name, c.want)
+			}
+			if got.SignInMethod != c.want.SignInMethod || got.Plan != c.want.Plan || got.PlanReasonKey != c.want.PlanReasonKey ||
+				(c.want.PlanReasonParams != nil && !maps.Equal(got.PlanReasonParams, c.want.PlanReasonParams)) ||
+				(got.PlanReasonKey != "" && got.PlanReason == "") {
+				t.Errorf("Detect(%s).Account = %+v, want %+v", c.name, *got, c.want)
+			}
+			if r := info.ManagedRequirements; r == nil || !reflect.DeepEqual(*r, c.wantRequirements) {
+				t.Errorf("Detect(%s).ManagedRequirements = %+v, want %+v", c.name, r, c.wantRequirements)
+			}
+			if p := requests(t, received)["account/read"]; len(p) != 1 || p[0] == nil || len(p[0]) != 0 {
+				t.Errorf("Detect(%s) sent account/read with params %v, want once with {}", c.name, p)
+			}
+			data, err := json.Marshal(info)
+			if err != nil {
+				t.Fatalf("json.Marshal(Detect(%s)) = %v, want no error", c.name, err)
+			}
+			for _, secret := range []string{"someone@example.com", "acct-7f3a9c", "ws-51d2e8", "web_search"} {
+				if strings.Contains(string(data), secret) {
+					t.Errorf("Detect(%s) reports %s: %s", c.name, secret, data)
+				}
+			}
+		})
+	}
+}
+
+// harmflow-app#571: requirements that cannot be read leave whether they are managed unknown, and the account is read
+// all the same.
+func TestDetectWithRequirementsItCannotRead(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	path, _ := appServerStandInWith(t, answer(`{"data":[]}`),
+		`printf '{"id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"`)
+	a := appServerAdapter(t)
+	a.listTimeout = time.Second
+	info := a.Detect(context.Background(), path)
+	if info.Readiness != "ready" || info.ManagedRequirements != nil || info.Account == nil || info.Account.Plan != "plus" {
+		t.Errorf("Detect readiness %s, managed requirements %+v, account %+v; want ready, requirements unknown, the "+
+			"plus plan", info.Readiness, info.ManagedRequirements, info.Account)
 	}
 }
 

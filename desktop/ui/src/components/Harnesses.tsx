@@ -1,6 +1,6 @@
 // The AI tools list: each harness detected, where, at which version, and whether it is ready.
 // Credentials are never shown.
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
 import type { Harness, Tool } from "../api/types";
@@ -115,6 +115,38 @@ export function HarnessInventory({ harness, locale, onDraft }: { harness: Harnes
 
   // A harness still being checked has no check time yet.
   const checking = harness.readiness === "checking";
+
+  // A list the requirements allow: a null one allows any value, an empty one none.
+  const allowed = (list: string[] | null): ReactNode =>
+    list === null ? t("harness.allowedAny") : list.length ? <span className="mono">{list.join(", ")}</span> : t("harness.allowedNone");
+  // The account's rows, for a harness whose check read it: how it signs in, its plan, unknown with the reason, and
+  // whether an administrator manages its requirements, with what they allow. Never a credential or an account ID.
+  const { account, managedRequirements: requirements } = harness;
+  const accountItems: Array<[ReactNode, ReactNode]> = [];
+  if (account) {
+    accountItems.push([t("harness.signInMethod"), t(`harness.signIn.${account.signInMethod}`)]);
+    if (account.plan) {
+      accountItems.push([
+        t("harness.plan"),
+        account.plan === "unknown" ? (
+          <span>
+            {t("harness.planUnknown")}
+            {account.planReason ? <span className="muted"> · {fieldText(account.planReason, account.planReasonKey, account.planReasonParams)}</span> : null}
+          </span>
+        ) : (
+          <span className="mono">{account.plan}</span>
+        ),
+      ]);
+    }
+    accountItems.push([t("harness.requirements"), t(`harness.requirementsState.${!requirements ? "unknown" : requirements.managed ? "managed" : "none"}`)]);
+    if (requirements?.managed) {
+      accountItems.push(
+        [t("harness.allowedApprovalPolicies"), allowed(requirements.approvalPolicies)],
+        [t("harness.allowedApprovalsReviewers"), allowed(requirements.approvalsReviewers)],
+        [t("harness.allowedPermissionProfiles"), allowed(requirements.permissionProfiles)],
+      );
+    }
+  }
   return (
     <div className="inventory">
       <HarnessRow harness={harness} />
@@ -185,6 +217,7 @@ export function HarnessInventory({ harness, locale, onDraft }: { harness: Harnes
           [t("harness.models"), harness.models.length ? <span className="mono">{harness.models.map((m) => m.id).join(", ")}</span> : null],
           [t("harness.efforts"), harness.efforts.length ? <span className="mono">{harness.efforts.join(", ")}</span> : null],
           [t("harness.controls"), harness.enforceableControls?.length ? <span className="mono">{harness.enforceableControls.join(", ")}</span> : null],
+          ...accountItems,
           [
             t("harness.lastCheck"),
             checking ? null : (

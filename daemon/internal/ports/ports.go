@@ -116,13 +116,44 @@ type HarnessInfo struct {
 	Diagnostic          string            `json:"diagnostic,omitempty"`
 	DiagnosticKey       string            `json:"diagnosticKey,omitempty"`
 	DiagnosticParams    map[string]string `json:"diagnosticParams,omitempty"`
-	Features            map[string]bool   `json:"-"`
+	// Account is how the account the harness runs under signs in, and its plan; nil for a harness that does not say.
+	Account *HarnessAccount `json:"account,omitempty"`
+	// ManagedRequirements are the settings an administrator allows the harness; nil when it could not say.
+	ManagedRequirements *ManagedRequirements `json:"managedRequirements,omitempty"`
+	Features            map[string]bool      `json:"-"`
 	// FeaturesUnknown is true when the help that lists the CLI's flags could not be read within its check's limit, so
 	// Features cannot tell a flag the CLI lacks from one the help did not get to.
 	FeaturesUnknown bool `json:"-"`
 	// UnknownFeatures are the features beyond those flags whose check could not finish within its limit, such as a
 	// command another help lists: Features reads false for each, though the CLI may have it, and the first use proves it.
 	UnknownFeatures map[string]bool `json:"-"`
+}
+
+// HarnessAccount is how a harness's account signs in and its plan, and never a credential, an ID, or an e-mail.
+// SignInMethod is chatgpt, api_key, or unknown. Plan is the harness's own name of the plan, unknown with the reason
+// when the harness does not know it or could not be asked, and empty for a sign-in that has no plan.
+type HarnessAccount struct {
+	SignInMethod     string            `json:"signInMethod"`
+	Plan             string            `json:"plan,omitempty"`
+	PlanReason       string            `json:"planReason,omitempty"`
+	PlanReasonKey    string            `json:"planReasonKey,omitempty"`
+	PlanReasonParams map[string]string `json:"planReasonParams,omitempty"`
+}
+
+// SetPlanUnknown records that the plan is unknown, and why; PlanReason is the en-US text.
+func (a *HarnessAccount) SetPlanUnknown(why domain.Text) {
+	a.Plan = "unknown"
+	a.PlanReason, a.PlanReasonKey, a.PlanReasonParams = why.Message, why.Key, why.Params
+}
+
+// ManagedRequirements are the settings an administrator allows a harness: whether one manages them, and the approval
+// policies, the reviewers of approvals, and the permission profiles they allow. A nil list allows any value; an empty
+// one allows none.
+type ManagedRequirements struct {
+	Managed            bool     `json:"managed"`
+	ApprovalPolicies   []string `json:"approvalPolicies"`
+	ApprovalsReviewers []string `json:"approvalsReviewers"`
+	PermissionProfiles []string `json:"permissionProfiles"`
 }
 
 // SetDiagnostic records what is wrong with the harness; Diagnostic is the en-US text.
