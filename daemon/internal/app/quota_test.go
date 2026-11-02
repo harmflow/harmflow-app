@@ -87,6 +87,52 @@ func TestQuotaReadAtMostOnceInFiveMinutes(t *testing.T) {
 	}
 }
 
+// A quota read that timed out, with the error each adapter returns at its bound, is a quota that cannot be read: the
+// attempt starts, and the execution carries one warning that names the harness and why.
+func TestTimedOutQuotaReadLetsTheAttemptStart(t *testing.T) {
+	cases := []struct {
+		name, harness string
+		timedOut      error
+		detail        string
+	}{
+		{"Claude Code", domain.HarnessClaudeCode, domain.TextErr("command_failed", "{{command}} failed: {{detail}}",
+			"command", `claude -p "/usage"`, "detail", "signal: killed"), "signal: killed"},
+		{"Codex", domain.HarnessCodex, domain.TextErr("codex_app_server_timed_out",
+			"Codex's app server did not answer {{method}} within {{seconds}} seconds", "method", "account/rateLimits/read",
+			"seconds", "15"), "did not answer account/rateLimits/read"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t)
+			doc := strings.Replace(taskYAML("unread", ""), "provider: claude-code", "provider: "+c.harness, 1)
+			if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: doc}); err != nil {
+				t.Fatalf("CreateTask(unread on %s) = %v, want no error", c.harness, err)
+			}
+			h := map[string]*fakeHarness{domain.HarnessClaudeCode: e.claude, domain.HarnessCodex: e.codex}[c.harness]
+			h.setQuota(func() (domain.Quota, error) { return domain.Quota{}, c.timedOut })
+			r, _ := e.app.RunTask("unread")
+			x := e.wait(r.ExecutionID, domain.StatusCompleted)
+			if n := h.reads(); n != 1 {
+				t.Errorf("%d quota reads, want 1", n)
+			}
+			if len(x.Attempts) != 1 || x.Attempts[0].Harness != c.harness || x.Attempts[0].Outcome != domain.AttemptSucceeded {
+				t.Errorf("attempts %+v, want one on %s that succeeded", x.Attempts, c.harness)
+			}
+			// A Codex task that allows no extra usage is also warned that nothing stops Codex once it runs.
+			var unread []domain.Warning
+			for _, w := range x.Warnings {
+				if w.Key == "quota_unread" {
+					unread = append(unread, w)
+				}
+			}
+			if len(unread) != 1 || unread[0].Subject != c.harness || unread[0].Params["harness"] != h.Name() ||
+				!strings.Contains(unread[0].Message, c.detail) {
+				t.Errorf("warnings %+v, want one quota_unread naming %s and %q", x.Warnings, c.harness, c.detail)
+			}
+		})
+	}
+}
+
 // A Claude Code attempt that turns to extra usage is ended as an exhausted quota when its task does not allow it, and
 // the execution goes on with its fallback. What the attempt reported is the harness's reading: the next attempt on it
 // within five minutes is held back with no read.

@@ -1,9 +1,12 @@
 package claudecode
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -62,6 +65,35 @@ func TestReadQuota(t *testing.T) {
 				t.Errorf("ReadQuota = %v (%s), want %s", err, got.Key, c.key)
 			}
 		})
+	}
+}
+
+// A usage report that never comes ends at the read's bound, long before the stand-in would answer: the read is a
+// command that failed, and the stand-in's process is gone once it returns.
+func TestReadQuotaThatTimesOut(t *testing.T) {
+	pidFile := filepath.Join(tempDir(t), "pid")
+	a := &Adapter{Home: tempDir(t), quotaTimeout: 2 * time.Second}
+	info := quotaStandIn(t, "echo $$ > '"+pidFile+"'\nexec sleep 30")
+	began := time.Now()
+	_, err := a.ReadQuota(t.Context(), info)
+	took := time.Since(began)
+	if got := domain.TextOf(err); err == nil || got.Key != "command_failed" {
+		t.Errorf("ReadQuota of a stand-in that never answers = %v (%s), want command_failed", err, got.Key)
+	}
+	if limit := a.quotaTimeout + 5*time.Second; took < a.quotaTimeout || took > limit {
+		t.Errorf("ReadQuota of a stand-in that never answers took %v, want between its bound %v and %v", took,
+			a.quotaTimeout, limit)
+	}
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%s) = %v, want the stand-in's process ID", pidFile, err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatalf("strconv.Atoi(%q) = %v, want the stand-in's process ID", data, err)
+	}
+	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Errorf("syscall.Kill(%d, 0) once ReadQuota returned = %v, want ESRCH: the stand-in still runs", pid, err)
 	}
 }
 
