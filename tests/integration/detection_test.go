@@ -314,10 +314,15 @@ func signedOutOnlyProbes(t *testing.T, installed, id, name, key string, probes [
 }
 
 // signedOutEnv is what the daemon of a signed-out real CLI adds to the test's environment: config as Claude Code's
-// configuration directory, and empty each variable through which either harness takes an API key or a token instead
-// of its sign-in, with every CLAUDE_CODE_ variable, which a run inside a Claude Code session inherits from it.
+// configuration directory, and noCredentialEnv.
 func signedOutEnv(config string) []string {
-	env := []string{"CLAUDE_CONFIG_DIR=" + config}
+	return append([]string{"CLAUDE_CONFIG_DIR=" + config}, noCredentialEnv()...)
+}
+
+// noCredentialEnv empties each variable through which either harness takes an API key or a token instead of its
+// sign-in, with every CLAUDE_CODE_ variable, which a run inside a Claude Code session inherits from it.
+func noCredentialEnv() []string {
+	var env []string
 	for _, name := range []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY",
 		"CODEX_API_KEY"} {
 		env = append(env, name+"=")
@@ -374,6 +379,45 @@ func versionOf(t *testing.T, env []string, path string) string {
 		t.Fatalf("%s --version printed %q, with no version number", path, out)
 	}
 	return v
+}
+
+// harmflow-app#744: the real Claude Code, signed in on the machine, reads detected at its resolved file, at the version
+// it prints, with a valid sign-in, and ready. The daemon runs with the user's own Claude Code configuration, as the
+// real-session tests do. A sign-in check that failed whenever the daemon runs it, in the background with no terminal,
+// would read unknown and the harness ready all the same, which no stand-in and no completed session shows.
+func TestSignedInRealClaudeCodeReadsValid(t *testing.T) {
+	signedInReadsValid(t, realClaude(t), "claude-code", "claude_not_signed_in")
+}
+
+// harmflow-app#744: the same as TestSignedInRealClaudeCodeReadsValid with the real Codex, the daemon running with the
+// user's own Codex home.
+func TestSignedInRealCodexReadsValid(t *testing.T) {
+	signedInReadsValid(t, realCodex(t), "codex", "not_signed_in", "CODEX_HOME="+codexHome(t))
+}
+
+// signedInReadsValid sets the resolved file of the real CLI at installed as the harness id: Claude Code reports a path
+// set by hand resolved, so its link would never read as set. The daemon runs with the test's environment, env, and
+// noCredentialEnv, so the CLI reads the user's own sign-in and no API key or token stands in for it. The harness must
+// read detected, at that file, at the version the CLI prints, with a valid sign-in, and ready, its diagnostic neither
+// the unverified sign-in nor notSignedIn. The test runs no task and never signs in or out, so the user's sign-in and
+// configuration stay as they are.
+func signedInReadsValid(t *testing.T, installed, id, notSignedIn string, env ...string) {
+	t.Helper()
+	env = append(env, noCredentialEnv()...)
+	file := resolved(t, installed)
+	version := versionOf(t, daemonEnv(env), file)
+
+	d := startDaemon(t, t.TempDir(), env...)
+	h := d.setHarness(id, file)
+	path, _ := h["path"].(string)
+	if h["detected"] != true || path != file || !filepath.IsAbs(path) || h["version"] != version ||
+		h["authentication"] != "valid" || h["readiness"] != "ready" || h["diagnosticKey"] == "authentication_unverified" ||
+		h["diagnosticKey"] == notSignedIn {
+		t.Errorf("PUT /harnesses/%s = detected %v, path %v, version %v, authentication %v, readiness %v, diagnostic %v (%v); "+
+			"want detected, %s, %s, valid, ready, with neither authentication_unverified nor %s", id, h["detected"],
+			h["path"], h["version"], h["authentication"], h["readiness"], h["diagnosticKey"], h["diagnostic"], file, version,
+			notSignedIn)
+	}
 }
 
 // harmflow-app#68: the inventory names a path set by hand as such, and a run uses that file.
