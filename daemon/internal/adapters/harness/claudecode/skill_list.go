@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -44,21 +45,18 @@ type initSkills struct {
 // sessionSkills are the skills Claude Code loads for a session in workspace with the added folders, as it reports them,
 // sorted by name and each once. HarmFlow does not search Claude Code's folders: it starts `claude -p` there, as an
 // execution starts it, reads the skills of the stream's init line, and stops the session before the model answers. A
-// workspace not made yet has no skills of its own, so its list is asked for in the user's home folder, and an added
-// folder not made yet, such as a repository not cloned, is left out, as it holds none. The list of each
-// CLI, folder, and set of added folders is kept until ReloadUserItems, since reading it starts a session that takes
-// seconds; one that failed is not kept. A lookup waits only for the listing of its own key: listings of other keys run
-// alongside it, a second lookup of a key shares the listing already running, and a lookup whose context ends returns
-// while the listing goes on for the others; the last one to leave stops it. A CLI that was not detected cannot answer,
-// which is an error, never an empty list.
+// workspace not made yet is listed in its nearest parent that exists (listingDir), and an added folder not made yet,
+// such as a repository not cloned, is left out, as Claude Code cannot add it. The list of each CLI, folder, and set of
+// added folders is kept until ReloadUserItems, since reading it starts a session that takes seconds; one that failed
+// is not kept. A lookup waits only for the listing of its own key: listings of other keys run alongside it, a second
+// lookup of a key shares the listing already running, and a lookup whose context ends returns while the listing goes
+// on for the others; the last one to leave stops it. A CLI that was not detected cannot answer, which is an error,
+// never an empty list.
 func (a *Adapter) sessionSkills(ctx context.Context, info ports.HarnessInfo, workspace string, added []string) ([]ports.ResolvedItem, error) {
 	if !info.Detected || info.Path == "" {
 		return nil, domain.TextErr("harness_not_detected", "{{harness}} was not detected on this machine", "harness", Name)
 	}
-	dir := workspace
-	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
-		dir = a.Home
-	}
+	dir := a.listingDir(workspace)
 	added = slices.DeleteFunc(uniq(slices.Sorted(slices.Values(added))), func(d string) bool {
 		st, err := os.Stat(d)
 		return err != nil || !st.IsDir()
@@ -97,6 +95,27 @@ func (a *Adapter) sessionSkills(ctx context.Context, info ports.HarnessInfo, wor
 		}
 		return nil, ctx.Err()
 	}
+}
+
+// listingDir is the folder the listing session for workspace starts in: the workspace when it exists, as it is given
+// and whether its path is absolute or not, otherwise its nearest parent that does. HarmFlow chooses only where Claude
+// Code starts, and copies none of its rules about where a session finds its skills. A workspace not made yet whose path
+// is not absolute has no parent to look in, so it is listed in the user's home folder.
+func (a *Adapter) listingDir(workspace string) string {
+	if st, err := os.Stat(workspace); err == nil && st.IsDir() {
+		return workspace
+	}
+	if !filepath.IsAbs(workspace) {
+		return a.Home
+	}
+	dir := filepath.Clean(workspace)
+	for filepath.Dir(dir) != dir {
+		dir = filepath.Dir(dir)
+		if st, err := os.Stat(dir); err == nil && st.IsDir() {
+			break
+		}
+	}
+	return dir
 }
 
 // skillListing is one listing session in flight, which the lookups of its key share. Its items and err are set before

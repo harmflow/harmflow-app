@@ -113,7 +113,9 @@ touch "$MARKER"
 
 // A list is kept per workspace and set of added folders, in any order, so a second lookup starts no session; another
 // set of folders, another workspace, and a lookup after ReloadUserItems ask again. A workspace not made yet is listed
-// in the user's home folder, and an added folder not made yet is left out.
+// in its nearest parent that exists, never the home folder, so two such workspaces under one folder share its list;
+// only one whose path is not absolute, which has no parent to look in, is listed in the home folder. A workspace that
+// exists is listed in itself, its path absolute or not. An added folder not made yet is left out.
 func TestSkillListIsCachedPerWorkspaceAndAddedFolders(t *testing.T) {
 	path, log := listingClaude(t, `echo '{"type":"system","subtype":"init","skills":["simplify"]}'`)
 	home, ws, other, x, y := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
@@ -131,6 +133,8 @@ func TestSkillListIsCachedPerWorkspaceAndAddedFolders(t *testing.T) {
 		{ws, []string{x, filepath.Join(x, "not-made")}, 2},
 		{other, []string{x}, 3},
 		{filepath.Join(ws, "not-made"), nil, 4},
+		{filepath.Join(ws, "sub", "new"), nil, 4},
+		{ws, nil, 4},
 	}
 	for _, l := range lookups {
 		if _, _, err := a.UserItems(ctx, info, "skill", l.workspace, l.added); err != nil {
@@ -140,11 +144,31 @@ func TestSkillListIsCachedPerWorkspaceAndAddedFolders(t *testing.T) {
 			t.Errorf("after UserItems(skill, %s, %q), %d listing sessions ran, want %d", l.workspace, l.added, got, l.runs)
 		}
 	}
-	if got := runs(t, log); !strings.HasPrefix(got[len(got)-1], resolved(t, home)+"|") {
-		t.Errorf("the listing for a workspace not made ran as %q, want in the home folder %s", got[len(got)-1], home)
+	if got := runs(t, log); !strings.HasPrefix(got[len(got)-1], resolved(t, ws)+"|") {
+		t.Errorf("the listing for a workspace not made ran as %q, want in its nearest parent that exists %s, not the home folder %s",
+			got[len(got)-1], ws, home)
+	}
+	if _, _, err := a.UserItems(ctx, info, "skill", "not-absolute", nil); err != nil {
+		t.Fatalf("UserItems(skill, not-absolute) error %v, want none", err)
+	}
+	if got := runs(t, log); len(got) != 5 || !strings.HasPrefix(got[4], resolved(t, home)+"|") {
+		t.Errorf("the listing for a workspace not made whose path is not absolute ran as %q, want a fifth in the home folder %s",
+			got, home)
+	}
+	t.Chdir(other)
+	rel := filepath.Join(other, "rel")
+	if err := os.Mkdir(rel, 0o700); err != nil {
+		t.Fatalf("os.Mkdir(%s) = %v, want no error", rel, err)
+	}
+	if _, _, err := a.UserItems(ctx, info, "skill", "rel", nil); err != nil {
+		t.Fatalf("UserItems(skill, rel) error %v, want none", err)
+	}
+	if got := runs(t, log); len(got) != 6 || !strings.HasPrefix(got[5], resolved(t, rel)+"|") {
+		t.Errorf("the listing for a workspace that exists and whose path is not absolute ran as %q, want a sixth in itself %s",
+			got, rel)
 	}
 	a.ReloadUserItems()
-	if _, _, err := a.UserItems(ctx, info, "skill", ws, []string{x, y}); err != nil || len(runs(t, log)) != 5 {
+	if _, _, err := a.UserItems(ctx, info, "skill", ws, []string{x, y}); err != nil || len(runs(t, log)) != 7 {
 		t.Errorf("UserItems after ReloadUserItems: %v, %d sessions; want a new session", err, len(runs(t, log)))
 	}
 }
