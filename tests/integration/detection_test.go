@@ -475,6 +475,68 @@ func TestVersionsOutsideTheTestedRange(t *testing.T) {
 	}
 }
 
+// harmflow-app#745: a harness whose check of its flags outlasts the check's limit reads ready, its flags unknown, and
+// not as a version that lacks one. A task that prefers it, with the other harness ready as its fallback, runs its first
+// attempt on it and completes there, with no switch. Each case has a daemon of its own, so the other harness is the
+// stand-in every daemon starts with. The check's limit is 15 seconds, which the daemon has no setting to shorten, and
+// the daemon checks the harness when its path is set and again before the attempt.
+func TestHelpCheckThatTimesOutLeavesTheHarnessReady(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		id, fallback, fake, name, version, help, run string
+		probes                                       []string
+	}{
+		{"claude-code", "codex", "fake-claude", "claude", "2.1.239", "--help", claudeRun, claudeProbes},
+		{"codex", "claude-code", "fake-codex", "codex", "0.163.0", "exec --help", codexRun, codexProbes},
+	} {
+		t.Run(c.id, func(t *testing.T) {
+			t.Parallel()
+			d := startDaemon(t, t.TempDir())
+			// Only the help check waits, well past its limit; the stand-in's other probes answer at once.
+			slow := standIn(t, c.fake, c.name, "#!/bin/bash\n",
+				"#!/bin/bash\n[ \"$*\" = \""+c.help+"\" ] && exec sleep 60\n")
+
+			h := d.setHarness(c.id, slow.path)
+			params, _ := h["diagnosticParams"].(map[string]any)
+			if h["detected"] != true || h["version"] != c.version || h["readiness"] != "ready" ||
+				h["versionSupport"] == "below_minimum" || h["diagnosticKey"] != "harness_help_timed_out" ||
+				params["command"] != c.help {
+				t.Errorf("PUT /harnesses/%s = detected %v, version %v, readiness %v, versionSupport %v, diagnostic %v %v; "+
+					"want detected, %s, ready, not below_minimum, harness_help_timed_out naming %s", c.id, h["detected"],
+					h["version"], h["readiness"], h["versionSupport"], h["diagnosticKey"], params, c.version, c.help)
+			}
+			if h := d.harness(c.fallback); h["readiness"] != "ready" {
+				t.Fatalf("GET /harnesses: the fallback %s is %v (%v), want ready", c.fallback, h["readiness"],
+					h["diagnosticKey"])
+			}
+
+			// The fallback's default triggers include an unavailable harness, so a harness read as lacking a flag would
+			// switch to it.
+			doc := strings.Replace(task("slowhelp", "Say hi.", "    fallback:\n      candidates:\n        - provider: "+
+				c.fallback+"\n"), "provider: claude-code", "provider: "+c.id, 1)
+			d.call("POST", "/tasks", map[string]any{"yaml": doc}, 201)
+			run := d.call("POST", "/tasks/slowhelp/run", nil, 202)
+			x := d.waitStatus(run["executionId"].(string), "completed", "failed")
+			attempts, _ := x["attempts"].([]any)
+			if x["status"] != "completed" || len(attempts) != 1 {
+				t.Fatalf("POST /tasks/slowhelp/run: status %v, attempts %v, error %v; want completed in one attempt",
+					x["status"], attempts, x["errorMessage"])
+			}
+			if a := attempts[0].(map[string]any); a["harness"] != c.id || a["outcome"] != "succeeded" {
+				t.Errorf("the attempt ran on %v with outcome %v, want %s, succeeded", a["harness"], a["outcome"], c.id)
+			}
+			for _, e := range d.events(x["id"].(string)) {
+				if e["type"] == "harness.unavailable" || e["type"] == "harness.switched" {
+					t.Errorf("the execution's log holds %v, want no harness.unavailable and no harness.switched", e)
+				}
+			}
+			if counts := slow.only(t, append(c.probes, c.run)...); counts[c.help] == 0 || counts[c.run] != 1 {
+				t.Errorf("%s invocations = %v, want its help checked and one run", c.id, counts)
+			}
+		})
+	}
+}
+
 // jsonString is a JSON value as a string, empty when it is none.
 func jsonString(v any) string {
 	s, _ := v.(string)
