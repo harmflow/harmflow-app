@@ -468,6 +468,105 @@ func TestInventoryCarriesNoCredential(t *testing.T) {
 	}
 }
 
+// codexAppServer is a branch of fake-codex's case that answers as Codex's app server: each request at once, from the
+// builtins alone, since each process the stand-in starts can take seconds on a loaded host. The managed requirements
+// are none and the quota has room left; the skill list is empty, and any other request is an error. It records each
+// request's method, one line each, in app-server.log beside itself.
+const codexAppServer = `  app-server)
+    while IFS= read -r line; do
+      [[ $line =~ \"id\":([0-9]+) ]] || continue
+      id=${BASH_REMATCH[1]}
+      method=
+      [[ $line =~ \"method\":\"([^\"]+)\" ]] && method=${BASH_REMATCH[1]}
+      echo "$method" >> "${0%/*}/app-server.log"
+      case "$method" in
+        initialize) printf '{"id":%s,"result":{"userAgent":"stand-in"}}\n' "$id" ;;
+        configRequirements/read) printf '{"id":%s,"result":{"requirements":null}}\n' "$id" ;;
+        account/rateLimits/read) printf '{"id":%s,"result":{"rateLimits":{"primary":{"usedPercent":12,"resetsAt":null},"secondary":null,"rateLimitReachedType":null,"spendControlReached":false}}}\n' "$id" ;;
+        skills/list) printf '{"id":%s,"result":{"data":[]}}\n' "$id" ;;
+        *) printf '{"id":%s,"error":{"code":-32601,"message":"the stand-in does not answer %s"}}\n' "$id" "$method" ;;
+      esac
+    done
+    exit 0 ;;
+`
+
+// harmflow-app#746: a Codex whose top-level --help check outlasts the check's limit, while exec --help was read in
+// full, reads ready, at its version, with the diagnostic that says whether it has an app server is unknown, and not as
+// a Codex that lacks one. The daemon then calls the app server: it reads the managed requirements at the check, and the
+// quota before the attempt, whose answer leaves no quota_unread warning, and a task on Codex completes. The check's
+// limit is 15 seconds, which the daemon has no setting to shorten, and the daemon checks Codex when its path is set and
+// again before the attempt.
+func TestTopLevelHelpCheckThatTimesOutLeavesCodexReady(t *testing.T) {
+	t.Parallel()
+	// Made before the daemon, so its folder is removed after the daemon and the app server it started have stopped.
+	codex := standIn(t, "fake-codex", "codex", "#!/bin/bash\n", "#!/bin/bash\n[ \"$*\" = \"--help\" ] && exec sleep 60\n",
+		"case \"$1\" in\n", "case \"$1\" in\n"+codexAppServer)
+	received := filepath.Join(filepath.Dir(codex.path), "app-server.log")
+	methods := func() []string {
+		data, err := os.ReadFile(received)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.Fields(string(data))
+	}
+	d := startDaemon(t, t.TempDir())
+
+	h := d.setHarness("codex", codex.path)
+	if h["detected"] != true || h["version"] != "0.163.0" || h["readiness"] != "ready" ||
+		h["versionSupport"] == "below_minimum" || h["diagnosticKey"] != "codex_app_server_help_timed_out" {
+		t.Errorf("PUT /harnesses/codex = detected %v, version %v, readiness %v, versionSupport %v, diagnostic %v (%v); "+
+			"want detected, 0.163.0, ready, not below_minimum, codex_app_server_help_timed_out, neither "+
+			"harness_feature_missing nor codex_app_server_missing", h["detected"], h["version"], h["readiness"],
+			h["versionSupport"], h["diagnosticKey"], h["diagnostic"])
+	}
+	if got := methods(); !slices.Contains(got, "configRequirements/read") {
+		t.Errorf("at the check, Codex's app server received %q, want configRequirements/read among them", got)
+	}
+
+	doc := strings.Replace(task("apphelp", "Say hi.", ""), "provider: claude-code", "provider: codex", 1)
+	d.call("POST", "/tasks", map[string]any{"yaml": doc}, 201)
+	id := d.call("POST", "/tasks/apphelp/run", nil, 202)["executionId"].(string)
+	// The check before the attempt logs nothing while it waits out its limit, so its end is awaited under a fixed bound,
+	// not under waitStatus's limit on silence.
+	d.waitLogUntil(id, func(events []map[string]any) bool {
+		return slices.ContainsFunc(events, func(e map[string]any) bool {
+			return e["type"] == "harness.started" || e["type"] == "harness.unavailable"
+		})
+	})
+	x := d.waitStatus(id, "completed", "failed")
+	attempts, _ := x["attempts"].([]any)
+	if x["status"] != "completed" || len(attempts) != 1 {
+		t.Fatalf("POST /tasks/apphelp/run: status %v, attempts %v, error %v; want completed in one attempt", x["status"],
+			attempts, x["errorMessage"])
+	}
+	if a := attempts[0].(map[string]any); a["harness"] != "codex" || a["outcome"] != "succeeded" {
+		t.Errorf("the attempt ran on %v with outcome %v, want codex, succeeded", a["harness"], a["outcome"])
+	}
+	for _, e := range d.events(id) {
+		if e["type"] == "harness.unavailable" {
+			t.Errorf("the execution's log holds %v, want no harness.unavailable", e)
+		}
+	}
+	// A quota read refused as a Codex with no app server, or left unanswered, would be this warning.
+	warnings, _ := x["warnings"].([]any)
+	for _, w := range warnings {
+		if w, _ := w.(map[string]any); w["messageKey"] == "quota_unread" {
+			t.Errorf("the execution carries %v, want the quota read from the app server's answer", w)
+		}
+	}
+	if got := methods(); !slices.Contains(got, "account/rateLimits/read") {
+		t.Errorf("Codex's app server received %q, want account/rateLimits/read among them, the quota before the attempt",
+			got)
+	}
+	if counts := codex.only(t, append(codexProbes, codexRun, "app-server")...); counts["--help"] == 0 ||
+		counts["app-server"] == 0 || counts[codexRun] != 1 {
+		t.Errorf("codex invocations = %v, want its --help checked, its app server started, and one run", counts)
+	}
+}
+
 // harmflow-app#68: a version below the minimum is not ready, and a task on it never starts; an untested newer version
 // is ready, and each run on it records one warning naming the version.
 func TestVersionsOutsideTheTestedRange(t *testing.T) {
