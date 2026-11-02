@@ -288,6 +288,7 @@ func (r configRequirements) managed() *ports.ManagedRequirements {
 		ApprovalPolicies:   r.Requirements.AllowedApprovalPolicies,
 		ApprovalsReviewers: r.Requirements.AllowedApprovalsReviewers,
 		PermissionProfiles: r.Requirements.AllowedPermissionProfiles,
+		SandboxModes:       r.Requirements.AllowedSandboxModes,
 	}
 }
 
@@ -549,13 +550,9 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 	dirs := append([]string{}, req.AdditionalDirs...)
 	switch perm.Profile {
 	case domain.ProfileReadOnly:
-		args = append(args, "--sandbox", sandboxReadOnly)
-		// A real read_only session wrote a file in its workspace, with no shell call naming it: until a real run proves
-		// that the sandbox refuses every write, Codex's own file changes included, the profile is not enforced.
-		restrictions = append(restrictions,
-			ports.Restriction{Name: "read_only", Enforced: false,
-				Text: domain.T("restriction_codex_read_only",
-					"Codex's read-only sandbox is not proven to refuse the file changes Codex makes itself; the session may change files in its workspace")},
+		// The -c override, as for approval_policy, keeps a sandbox_mode of the user's configuration from widening it.
+		args = append(args, "--sandbox", sandboxReadOnly, "-c", fmt.Sprintf("sandbox_mode=%q", sandboxReadOnly))
+		restrictions = append(restrictions, readOnlyRestriction(info.ManagedRequirements),
 			ports.Restriction{Name: "network", Enforced: true,
 				Text: domain.Text{Message: "Codex's read-only sandbox blocks network access"}})
 	default:
@@ -607,6 +604,21 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 		}
 	}
 	return inv, p, nil
+}
+
+// readOnlyRestriction is the read_only profile's restriction: enforced unless Codex's managed requirements leave out
+// the read-only sandbox or approvals off. Under requirements that allowed only on-request approvals, a real read_only
+// run had Codex's change to a file of its workspace approved, and only the one outside it declined. Requirements that
+// could not be read leave it as it would be with none.
+func readOnlyRestriction(m *ports.ManagedRequirements) ports.Restriction {
+	leftOut := func(list []string, v string) bool { return list != nil && !slices.Contains(list, v) }
+	if m != nil && (leftOut(m.ApprovalPolicies, approvalPolicy) || leftOut(m.SandboxModes, sandboxReadOnly)) {
+		return ports.Restriction{Name: "read_only", Enforced: false,
+			Text: domain.T("restriction_codex_read_only",
+				"Codex's managed requirements do not allow its read-only sandbox with approvals off, so Codex may approve a change to a file of the workspace; the session may change files in its workspace")}
+	}
+	return ports.Restriction{Name: "read_only", Enforced: true,
+		Text: domain.Text{Message: "Codex's read-only sandbox refuses every write, with approvals off"}}
 }
 
 var configModelRe = regexp.MustCompile(`^\s*model\s*=\s*(?:"([^"]*)"|'([^']*)')`)

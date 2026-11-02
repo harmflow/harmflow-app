@@ -15,9 +15,11 @@ import (
 )
 
 // A read_only task on the real Codex asks the session to write one file inside its workspace and one outside it.
-// Codex's read-only sandbox refuses the file outside. Until a real run proves that it refuses every write, Codex's own
-// file changes included, the execution warns that read_only is not enforced: a file inside the workspace is logged with
-// the workspace changes that show what wrote it, and only the warning's absence fails.
+// Codex's read-only sandbox, with approvals off, refuses both: after the execution neither file exists, and the
+// execution carries no warning that read_only is not enforced. Where Codex's managed requirements leave out approvals
+// off, Codex may approve the write inside, so the execution warns that read_only is not enforced instead: a file inside
+// the workspace is then logged with the workspace changes that show what wrote it, and only the warning's absence
+// fails. Only a run started by hand from a plain terminal, outside any other sandbox, proves the profile enforced.
 func TestReadOnlyRealCodexWritesNothing(t *testing.T) {
 	h := codexForPermissions(t)
 	w := newWriteTargets(t)
@@ -27,11 +29,17 @@ func TestReadOnlyRealCodexWritesNothing(t *testing.T) {
 	r.wantAttemptAtOutside(t, w)
 	wantAbsent(t, w.outside)
 	r.wantEnforced(t, "restrictToWorkspace")
+	if allowsApprovalsOff(r.harness) {
+		wantAbsent(t, w.inside)
+		r.wantEnforced(t, "read_only")
+		return
+	}
+	t.Logf("Codex's managed requirements, %v, leave out the approval policy never", r.harness["managedRequirements"])
 	if !slices.ContainsFunc(r.unenforced, func(u unenforced) bool {
 		return u.subject == "read_only" && u.key == "restriction_codex_read_only"
 	}) {
-		t.Errorf("the execution's unenforced restrictions are %v, want the one for read_only, about Codex's file changes",
-			r.unenforced)
+		t.Errorf("the execution's unenforced restrictions are %v, want the one for read_only, about the managed "+
+			"requirements", r.unenforced)
 	}
 	if data, err := os.ReadFile(w.inside); err == nil {
 		t.Logf("after the execution %s exists, holding %q: the write the execution's warning for read_only covers",
@@ -39,6 +47,15 @@ func TestReadOnlyRealCodexWritesNothing(t *testing.T) {
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("reading %s: %v", w.inside, err)
 	}
+}
+
+// allowsApprovalsOff reports whether the harness's managed requirements, as the daemon read them, allow the approval
+// policy never: requirements that could not be read, or a null list, allow any. The API does not show the sandbox
+// modes they allow, which Codex's notice of a fallback names instead, as logSandbox logs it.
+func allowsApprovalsOff(harness map[string]any) bool {
+	m, _ := harness["managedRequirements"].(map[string]any)
+	policies, ok := m["approvalPolicies"].([]any)
+	return !ok || slices.Contains(policies, any("never"))
 }
 
 // A workspace_write task on the real Codex asks the session to write one file inside its workspace and one outside it.
@@ -287,12 +304,13 @@ func wantAbsent(t *testing.T, path string) {
 }
 
 // permissionRun is what an execution of a task asking for the two writes left: its tool calls, the restrictions its
-// warnings say are not enforced, the harness's notices, and its raw output.
+// warnings say are not enforced, the harness's notices, its raw output, and the harness as the daemon checked it.
 type permissionRun struct {
 	calls      []toolCall
 	unenforced []unenforced
 	notices    []string
 	output     string
+	harness    map[string]any
 }
 
 // runWithProfile runs a task with the profile on the real harness h, its workspace w's, and waits for its end.
@@ -306,7 +324,7 @@ func runWithProfile(t *testing.T, h realHarness, profile string, w writeTargets,
 func runWithPermissions(t *testing.T, h realHarness, permissions map[string]any, w writeTargets, prompt string) permissionRun {
 	t.Helper()
 	d := startDaemon(t, t.TempDir(), h.env...)
-	d.call("PUT", "/harnesses/"+h.id, map[string]any{"path": h.path}, 200)
+	harness := d.call("PUT", "/harnesses/"+h.id, map[string]any{"path": h.path}, 200)
 	d.call("PATCH", "/settings", map[string]any{"allowedFolders": []any{w.work}}, 200)
 	profile, _ := permissions["profile"].(string)
 	id := strings.ReplaceAll(profile, "_", "-") + "-" + h.id
@@ -329,7 +347,7 @@ func runWithPermissions(t *testing.T, h realHarness, permissions map[string]any,
 	}
 
 	events := d.events(run)
-	r := permissionRun{calls: toolCalls(events)}
+	r := permissionRun{calls: toolCalls(events), harness: harness}
 	// A file change Codex made is no tool call: the daemon records it as a change to the workspace alone.
 	for _, e := range events {
 		switch e["type"] {

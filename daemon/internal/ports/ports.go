@@ -150,13 +150,15 @@ func (a *HarnessAccount) SetPlanUnknown(why domain.Text) {
 }
 
 // ManagedRequirements are the settings an administrator allows a harness: whether one manages them, and the approval
-// policies, the reviewers of approvals, and the permission profiles they allow. A nil list allows any value; an empty
-// one allows none.
+// policies, the reviewers of approvals, the permission profiles, and the sandbox modes they allow. A nil list allows
+// any value; an empty one allows none.
 type ManagedRequirements struct {
 	Managed            bool     `json:"managed"`
 	ApprovalPolicies   []string `json:"approvalPolicies"`
 	ApprovalsReviewers []string `json:"approvalsReviewers"`
 	PermissionProfiles []string `json:"permissionProfiles"`
+	// SandboxModes are read by the adapter that prepares a run, which the API does not show.
+	SandboxModes []string `json:"-"`
 }
 
 // SetDiagnostic records what is wrong with the harness; Diagnostic is the en-US text.

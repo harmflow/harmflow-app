@@ -381,7 +381,7 @@ export const enUS = {
       "Claude Code adds the allow rules and additional directories of its $t(claudeSettings.{{sources}}) to the task's permissions, and they allow file edits outside the workspace and the added directories or could not be read; managed settings are not checked",
     restriction_codex_tool_lists: "Codex has no per-tool allow or deny list; the custom tool lists are not enforced",
     restriction_codex_read_only:
-      "Codex's read-only sandbox is not proven to refuse the file changes Codex makes itself; the session may change files in its workspace",
+      "Codex's managed requirements do not allow its read-only sandbox with approvals off, so Codex may approve a change to a file of the workspace; the session may change files in its workspace",
     restriction_codex_ephemeral_missing:
       "Codex {{version}} has no --ephemeral, so it keeps every session and the task's ephemeral setting changes nothing",
     harness_version_untested: "{{harness}} {{version}} is newer than the versions HarmFlow was tested with",
