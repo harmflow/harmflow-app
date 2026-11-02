@@ -75,6 +75,30 @@ func TestReadOnlyRealClaudeCodeWritesNothing(t *testing.T) {
 	r.wantEnforced(t, "read_only", "restrictToWorkspace")
 }
 
+// A read_only task on the real Claude Code, with the network denied, asks the session to fetch a public page with
+// WebFetch and to search the web with WebSearch. The session is given no web or shell tool, and a deny rule takes each
+// one away, so every call it makes to one fails, as the restriction for the network says. As above, a call to a tool
+// the session was not given is the model's, and fails no case. The execution carries no warning that the profile or
+// the network restriction is not enforced.
+func TestReadOnlyNetworkDeniedRealClaudeCodeFetchesNothing(t *testing.T) {
+	h := claudeForPermissions(t)
+	w := newWriteTargets(t)
+	prompt := "Do these two things, one at a time, and nothing else:\n\n" +
+		"1. Fetch https://example.com with the WebFetch tool.\n" +
+		"2. Search the web for \"example domain\" with the WebSearch tool.\n\n" +
+		"Try each one, even if you expect it to be refused: do not decide in advance that it will fail. " +
+		"Then say, for each, whether it worked and what refused it if it did not."
+	r := runWithPermissions(t, h, map[string]any{"profile": "read_only", "network": "deny"}, w, prompt)
+
+	for _, c := range r.calls {
+		if slices.Contains(netTools, c.tool) && c.status != "failed" && c.status != "declined" {
+			t.Errorf("a read_only Claude Code session's %s call with the network denied (%s%s) ended %q, want every call "+
+				"to a web or shell tool to fail", c.tool, c.path, c.command, c.status)
+		}
+	}
+	r.wantEnforced(t, "read_only", "network", "restrictToWorkspace")
+}
+
 // A workspace_write task on the real Claude Code asks the session to write, with the Write tool, one file inside its
 // workspace and one outside it. The file inside is written, and no editing tool's call to the file outside succeeds.
 // Claude Code does not confine its shell to the workspace, which the execution's warning for restrictToWorkspace says:
@@ -144,6 +168,9 @@ var (
 	editingTools = []string{"Write", "Edit", "MultiEdit", "NotebookEdit"}
 	writingTools = append(slices.Clone(editingTools), "Bash")
 )
+
+// netTools are Claude Code's tools that can reach the network: its web tools and its shell.
+var netTools = []string{"WebFetch", "WebSearch", "Bash"}
 
 // writeTargets are the two files a task asks its session to write: one inside its workspace, a Git worktree, and one in
 // a folder beside it, which is no directory the session is given. Both lie under a parent outside $TMPDIR and /tmp,
@@ -246,13 +273,20 @@ type permissionRun struct {
 	output     string
 }
 
-// runWithProfile runs a task with the profile on the real harness h, its workspace w's, and waits for its end. The
-// daemon's allowed folders are the workspace alone, so the outside folder is no directory the session is given.
+// runWithProfile runs a task with the profile on the real harness h, its workspace w's, and waits for its end.
 func runWithProfile(t *testing.T, h realHarness, profile string, w writeTargets, prompt string) permissionRun {
+	t.Helper()
+	return runWithPermissions(t, h, map[string]any{"profile": profile}, w, prompt)
+}
+
+// runWithPermissions runs a task with the permissions on the real harness h, its workspace w's, and waits for its end.
+// The daemon's allowed folders are the workspace alone, so the outside folder is no directory the session is given.
+func runWithPermissions(t *testing.T, h realHarness, permissions map[string]any, w writeTargets, prompt string) permissionRun {
 	t.Helper()
 	d := startDaemon(t, t.TempDir(), h.env...)
 	d.call("PUT", "/harnesses/"+h.id, map[string]any{"path": h.path}, 200)
 	d.call("PATCH", "/settings", map[string]any{"allowedFolders": []any{w.work}}, 200)
+	profile, _ := permissions["profile"].(string)
 	id := strings.ReplaceAll(profile, "_", "-") + "-" + h.id
 	doc := map[string]any{"apiVersion": "harmflow/v1alpha1", "kind": "Task",
 		"metadata": map[string]any{"id": id, "name": profile + " on " + h.id},
@@ -261,7 +295,7 @@ func runWithProfile(t *testing.T, h realHarness, profile string, w writeTargets,
 			"prompt":      prompt,
 			"harness":     map[string]any{"preferred": h.preferred},
 			"workspace":   map[string]any{"path": w.work},
-			"permissions": map[string]any{"profile": profile},
+			"permissions": permissions,
 			"execution":   map[string]any{"timeoutMinutes": 5},
 		}}
 	d.call("POST", "/tasks", map[string]any{"document": doc}, 201)
