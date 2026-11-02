@@ -165,7 +165,7 @@ func (a *Adapter) listSkills(ctx context.Context, info ports.HarnessInfo, dir st
 	if err != nil {
 		return nil, skillListFailed(err.Error())
 	}
-	timeout := a.skillListTimeout
+	timeout := a.SkillListTimeout
 	if timeout == 0 {
 		timeout = defaultSkillListTimeout
 	}

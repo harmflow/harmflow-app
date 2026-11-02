@@ -53,13 +53,15 @@ type Adapter struct {
 	Env     []string
 	// KnownLocations are searched after PATH; nil is the usual install locations, an empty list none.
 	KnownLocations []string
+	// SkillListTimeout bounds the session started to read the skill list, up to its init line; zero is
+	// defaultSkillListTimeout.
+	SkillListTimeout time.Duration
 
-	mu               sync.Mutex
-	skills           map[string][]ports.ResolvedItem // by CLI path, workspace, and added folders, kept until ReloadUserItems
-	listings         map[string]*skillListing        // the listings in flight, by the same key as skills
-	helpTimeout      time.Duration                   // the --help check; zero is defaultHelpTimeout
-	skillListTimeout time.Duration                   // the skill list's session; zero is defaultSkillListTimeout
-	quotaTimeout     time.Duration                   // `claude -p "/usage"`; zero is defaultQuotaTimeout
+	mu           sync.Mutex
+	skills       map[string][]ports.ResolvedItem // by CLI path, workspace, and added folders, kept until ReloadUserItems
+	listings     map[string]*skillListing        // the listings in flight, by the same key as skills
+	helpTimeout  time.Duration                   // the --help check; zero is defaultHelpTimeout
+	quotaTimeout time.Duration                   // `claude -p "/usage"`; zero is defaultQuotaTimeout
 }
 
 // defaultHelpTimeout bounds the --help check; help it could not read by then leaves the flags unknown.
