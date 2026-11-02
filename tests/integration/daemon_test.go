@@ -1508,9 +1508,9 @@ func TestFormDocumentIsTheFile(t *testing.T) {
 	// written: a path variable left undefined would skip the path's check.
 	d.call("PATCH", "/settings", map[string]any{"allowedFolders": []any{repo},
 		"pathVariables": map[string]any{"FORM_REPO": repo}}, 200)
-	complete := formDocument(t, "complete")
+	complete := formDocument(t, "task-form-document.json", "complete")
 	// An empty list of failover triggers or notified events is a choice the file keeps (harmflow/harmflow-app#83).
-	empty := formDocument(t, "empty-lists")
+	empty := formDocument(t, "task-form-document.json", "empty-lists")
 	spec := empty["spec"].(map[string]any)
 	spec["harness"].(map[string]any)["fallback"].(map[string]any)["on"] = []any{}
 	spec["notifications"].(map[string]any)["native"].(map[string]any)["events"] = []any{}
@@ -1567,19 +1567,20 @@ func TestFormDocumentIsTheFile(t *testing.T) {
 	}
 }
 
-// formDocument is testdata/task-form-document.json under the id, read anew on each call so that no two documents share
-// a value. It sets every section of the form to a value other than its default, with a non-empty list wherever the
-// field is a list, and agents, skills, models, and efforts that resolve on the stand-in harnesses. Its repository and
-// writable path are the path variable FORM_REPO.
-func formDocument(t *testing.T, id string) map[string]any {
+// formDocument is the document of the task form the fixture testdata/<name> holds, under the id, read anew on each call
+// so that no two documents share a value. Each fixture sets every section of its form to a value other than its
+// default, with a non-empty list wherever the field is a list, and its paths are the path variable FORM_REPO.
+// task-form-document.json is a GitHub task's, with agents, skills, models, and efforts that resolve on the stand-in
+// harnesses; script-task-form-document.json is a script task's.
+func formDocument(t *testing.T, name, id string) map[string]any {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(repoRoot(), "tests", "integration", "testdata", "task-form-document.json"))
+	data, err := os.ReadFile(filepath.Join(repoRoot(), "tests", "integration", "testdata", name))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var doc map[string]any
 	if err := json.Unmarshal(data, &doc); err != nil {
-		t.Fatalf("parsing the form's document: %v", err)
+		t.Fatalf("parsing the form's document %s: %v", name, err)
 	}
 	doc["metadata"].(map[string]any)["id"] = id
 	return doc
