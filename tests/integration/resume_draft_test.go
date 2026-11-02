@@ -94,8 +94,9 @@ func TestDraftWhoseTestsFailedIsResumedOnItsPullRequest(t *testing.T) {
 		t.Errorf("progress.jsonl selects %v, want %s alone\n%s", selected, key, runFiles(dir))
 	}
 	checkUpdatedPullRequest(t, d, next, dir, issue, draft)
-	if item := queuedItem(d, key); item == nil || item["resumes"] != 1.0 {
-		t.Errorf("after execution %s, GET /queue gives %s as %v, want it resumed once", next, key, item)
+	// The resume ends the item completed, which the ledger archives and GET /queue leaves out.
+	if item := resumeLimitHeld(t, home, resumeDraftTask, key); item == nil || item["resumes"] != 1.0 {
+		t.Errorf("after execution %s, the ledger holds %s as %v, want it resumed once", next, key, item)
 	}
 
 	prs, err := linkingPullRequests(issue)
