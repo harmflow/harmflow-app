@@ -6,12 +6,13 @@
 // what the daemon removed and kept, or its error. Which worktrees the daemon removes is app › CleanWorkspaces' tests'.
 // Then shows what AI tools, Security, and Storage read from the harnesses, the tools, and the diagnostics in the store:
 // each harness's readiness and path, the command-line tools, the token store, the disk used, and the directories with
-// their Show in Finder buttons, which ask the desktop's bridge to open the row's path.
+// their Show in Finder buttons, which ask the desktop's bridge to open the row's path. And the Daemon section's Stop
+// daemon control, whose question names one running execution in the singular and more in the plural.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { native } from "../api/native";
-import type { Diagnostics, Harness, Settings, Tool } from "../api/types";
+import type { Diagnostics, Harness, Settings, Stats, Tool } from "../api/types";
 import type { LeaveCheck } from "../components/TaskEditor";
 import { Toasts } from "../components/toast";
 import i18n from "../i18n";
@@ -423,6 +424,33 @@ describe("the Daemon section's Start daemon", () => {
       native.available = false;
       patchStateForTests({ connection: "connecting" });
     }
+  });
+});
+
+describe("the Daemon section's Stop daemon control", () => {
+  /** Stats as GET /stats answers them, with `running` executions. */
+  const stats = (running: number): Stats => ({
+    running,
+    queued: 0,
+    completedToday: 0,
+    failedToday: 0,
+    activity: { running: [], queued: [], completed: [], failed: [] },
+    system: { cpuPercent: 0, memoryUsedBytes: 0, memoryTotalBytes: 0, diskUsedBytes: 0, diskTotalBytes: 0 },
+  });
+  const stopButton = () => [...host!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Stop daemon")!;
+
+  afterEach(() => patchStateForTests({ stats: undefined, connection: "connecting" }));
+
+  it.each([
+    [1, "1 execution is running. Stopping the daemon now interrupts it; it will be recorded as interrupted."],
+    [2, "2 executions are running. Stopping the daemon now interrupts them; they will be recorded as interrupted."],
+  ])("asks before stopping with %i running, in the number's form", async (running, message) => {
+    const confirm = vi.spyOn(native, "confirm").mockResolvedValue(false);
+    patchStateForTests({ connection: "connected", stats: stats(running) });
+    await open("daemon");
+    await click(stopButton());
+    expect(confirm.mock.calls).toEqual([[message, "Stop the daemon?", "Stop daemon", "Cancel"]]);
+    expect(daemon.requests.filter((r) => r.method === "POST")).toEqual([]);
   });
 });
 

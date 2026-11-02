@@ -101,7 +101,8 @@ export function App() {
     }
   }, [sidebarCollapsed]);
 
-  // The tray and the app menu's Settings… speak the interface's language too.
+  // The tray and the app menu's Settings… speak the interface's language too. A count given as a string reads the key
+  // as written, so both forms of the stop confirmation go with their `{{count}}` left in, for the tray to choose.
   useEffect(() => {
     void native.setTrayLabels({
       idle: t("tray.idle"),
@@ -111,7 +112,8 @@ export function App() {
       stop: t("tray.stop"),
       stopTitle: t("settings.stopConfirmTitle"),
       stopConfirm: t("settings.stopConfirm"),
-      stopConfirmRunning: t("settings.stopConfirmRunning", { count: "{{count}}" as unknown as number }),
+      stopConfirmRunning_one: t("settings.stopConfirmRunning_one", { count: "{{count}}" as unknown as number }),
+      stopConfirmRunning_other: t("settings.stopConfirmRunning_other", { count: "{{count}}" as unknown as number }),
       stopOk: t("settings.stopDaemon"),
       stopFailedTitle: t("settings.stopFailedTitle"),
       stopFailedOk: t("settings.stopFailedOk"),
