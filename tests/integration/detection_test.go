@@ -286,8 +286,8 @@ func signedOutOnlyProbes(t *testing.T, installed, id, name, key string, probes [
 	if err := os.MkdirAll(codexHome, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	// The sign-in the daemon starts on a signed-out Claude Code ends within a second, before its first key: it waits for
-	// each screen to settle first, so it never reaches the browser's sign-in, and never signs in.
+	// The sign-in the daemon starts on a signed-out Claude Code meets the first-run screen of this empty configuration
+	// directory, which it does not recognize, so it types nothing; it ends at a timeout of one second.
 	env := append(signedOutEnv(t.TempDir()), "HARMFLOW_SIGN_IN_TIMEOUT=1s")
 	// The test's own probes run with the environment the daemon runs with, so they read the same state.
 	probeEnv := append(append(os.Environ(), "CODEX_HOME="+codexHome), env...)
