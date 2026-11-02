@@ -376,6 +376,52 @@ func TestScriptRecordIsRedacted(t *testing.T) {
 	check(e.restart(t), "after a restart")
 }
 
+// The record keeps the working directory and the program's path redacted like the raw output, as the daemon returns it
+// and as a restarted daemon reads it back, while the program still runs from its real path in the real directory. The
+// parts of each path that hold no credential are kept as written.
+func TestScriptRecordRedactsItsPaths(t *testing.T) {
+	e := newEnv(t)
+	token := "ghp_" + strings.Repeat("a", 36)
+	base := t.TempDir()
+	dir := filepath.Join(base, token)
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatalf("os.Mkdir(%s): %v", dir, err)
+	}
+	// The program leaves a file where it runs, which proves both its path and its working directory were the real ones.
+	tool := filepath.Join(dir, "tool")
+	if err := os.WriteFile(tool, []byte("#!/bin/sh\ntouch ran\n"), 0o700); err != nil {
+		t.Fatalf("os.WriteFile(%s): %v", tool, err)
+	}
+	e.createScript("paths", fmt.Sprintf("  script:\n    command: [%s]\n    workingDirectory: %s\n", tool, dir))
+	id := e.runScript("paths", domain.StatusCompleted).ID
+	if _, err := os.Stat(filepath.Join(dir, "ran")); err != nil {
+		t.Errorf("the program's mark in its working directory: %v, want the file the program wrote", err)
+	}
+
+	wantDir := filepath.Join(base, "[REDACTED]")
+	wantProgram := filepath.Join(wantDir, "tool")
+	check := func(e *env, when string) {
+		t.Helper()
+		x, err := e.app.GetExecution(id)
+		if err != nil {
+			t.Fatalf("GetExecution(%s) %s: %v", id, when, err)
+		}
+		if x.Script.WorkingDirectory != wantDir {
+			t.Errorf("GetExecution(%s).Script.WorkingDirectory %s = %q, want %q", id, when, x.Script.WorkingDirectory,
+				wantDir)
+		}
+		if x.Script.Program != wantProgram {
+			t.Errorf("GetExecution(%s).Script.Program %s = %q, want %q", id, when, x.Script.Program, wantProgram)
+		}
+		if want := []string{wantProgram}; !slices.Equal(x.Script.Command, want) {
+			t.Errorf("GetExecution(%s).Script.Command %s = %q, want %q", id, when, x.Script.Command, want)
+		}
+		noToken(t, x.Script, id, when, token)
+	}
+	check(e, "after the run")
+	check(e.restart(t), "after a restart")
+}
+
 // noToken fails t when the script record holds token anywhere.
 func noToken(t *testing.T, rec *domain.ScriptRun, id, when, token string) {
 	t.Helper()
