@@ -326,6 +326,30 @@ func TestPrepareTranslatesPermissions(t *testing.T) {
 		t.Error("the prompt goes through stdin")
 	}
 
+	// With the network denied, the web tools are not given either, and the one deny rule takes them away with the
+	// writing and shell tools, each named once (harmflow-app#710).
+	ro.Network = domain.NetworkDeny
+	inv, _, err = a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: ro, ExecutionDir: exec, Prompt: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := slices.Index(inv.Args, "--disallowedTools"); n < 0 || slices.Index(inv.Args[n+1:], "--disallowedTools") >= 0 {
+		t.Errorf("read_only with the network denied args = %s, want one --disallowedTools", strings.Join(inv.Args, " "))
+	}
+	tools, _ = flagValue(inv.Args, "--tools")
+	denied, _ = flagValue(inv.Args, "--disallowedTools")
+	if want := "Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch"; denied != want {
+		t.Errorf("read_only with the network denied --disallowedTools = %q, want %q", denied, want)
+	}
+	for _, tool := range []string{"WebFetch", "WebSearch"} {
+		if slices.Contains(strings.Split(tools, ","), tool) {
+			t.Errorf("read_only with the network denied --tools = %q, want no %s", tools, tool)
+		}
+	}
+	if r, ok := restriction(inv.Restrictions, "network"); !ok || !r.Enforced {
+		t.Errorf("read_only with the network denied: network restriction = %+v (found %v), want enforced", r, ok)
+	}
+
 	ww := *perm
 	ww.Network = domain.NetworkDeny
 	inv, _, _ = a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: ww, ExecutionDir: exec, AdditionalDirs: []string{"/repo"}})
