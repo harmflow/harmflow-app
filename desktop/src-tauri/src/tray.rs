@@ -166,11 +166,14 @@ struct StopDialog {
     cancel: String,
 }
 
-/// The dialog for `count` running executions: it names them when there are some, and says no schedule fires while
-/// the daemon is stopped when there are none. `label` is as for `menu_entries`.
+/// The dialog for `count` running executions: it names them when there are some, in the singular for one, and says no
+/// schedule fires while the daemon is stopped when there are none. `label` is as for `menu_entries`.
 fn stop_dialog(count: usize, label: impl Fn(&str, &str) -> String) -> StopDialog {
-    let message = if count > 0 {
-        label("stopConfirmRunning", "{{count}} executions are running. Stopping the daemon now interrupts them.")
+    let message = if count == 1 {
+        label("stopConfirmRunning_one", "{{count}} execution is running. Stopping the daemon now interrupts it.")
+            .replace("{{count}}", &count.to_string())
+    } else if count > 1 {
+        label("stopConfirmRunning_other", "{{count}} executions are running. Stopping the daemon now interrupts them.")
             .replace("{{count}}", &count.to_string())
     } else {
         label("stopConfirm", "No schedule fires while the daemon is stopped.")
@@ -370,7 +373,7 @@ mod tests {
     fn a_stop_with_an_execution_running_asks_and_names_it() {
         let dialog = stop_dialog(1, defaults);
         assert_eq!(dialog.title, "Stop the daemon?");
-        assert_eq!(dialog.message, "1 executions are running. Stopping the daemon now interrupts them.");
+        assert_eq!(dialog.message, "1 execution is running. Stopping the daemon now interrupts it.");
         assert_eq!((dialog.ok.as_str(), dialog.cancel.as_str()), ("Stop daemon", "Cancel"));
         assert_eq!(stop_request(1, false), None);
         assert_eq!(
@@ -391,13 +394,25 @@ mod tests {
     }
 
     #[test]
+    fn the_stop_dialog_names_one_execution_in_the_singular_and_two_in_the_plural() {
+        assert_eq!(stop_dialog(1, defaults).message, "1 execution is running. Stopping the daemon now interrupts it.");
+        assert_eq!(
+            stop_dialog(2, defaults).message,
+            "2 executions are running. Stopping the daemon now interrupts them."
+        );
+    }
+
+    #[test]
     fn the_interfaces_texts_replace_the_defaults() {
         let label = |key: &str, fallback: &str| match key {
             "active" => "{{count}} em execução".to_string(),
-            "stopConfirmRunning" => "{{count}} execuções em andamento.".to_string(),
+            "stopConfirmRunning_one" => "{{count}} execução em andamento.".to_string(),
+            "stopConfirmRunning_other" => "{{count}} execuções em andamento.".to_string(),
             _ => fallback.to_string(),
         };
         assert_eq!(items(&menu_entries(&running(3), label))[0].1, "3 em execução");
+        assert_eq!(stop_dialog(1, label).message, "1 execução em andamento.");
+        assert_eq!(stop_dialog(2, label).message, "2 execuções em andamento.");
         assert_eq!(stop_dialog(3, label).message, "3 execuções em andamento.");
     }
 

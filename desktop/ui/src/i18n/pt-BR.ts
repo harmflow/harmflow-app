@@ -1170,7 +1170,9 @@ export const ptBR: Resources = {
     stopConfirmTitle: "Parar o daemon?",
     stopConfirm:
       "Nenhum agendamento dispara com o daemon parado; os disparos perdidos seguem a política de execuções perdidas de cada tarefa.",
-    stopConfirmRunning:
+    stopConfirmRunning_one:
+      "{{count}} execução está em andamento. Parar o daemon agora a interrompe; ela será registrada como interrompida.",
+    stopConfirmRunning_other:
       "{{count}} execuções estão em andamento. Parar o daemon agora as interrompe; elas serão registradas como interrompidas.",
     stopped: "O daemon está parando.",
     stopFailedTitle: "O daemon não parou",

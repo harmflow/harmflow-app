@@ -574,6 +574,22 @@ describe("settings from the app menu", () => {
       labels.mockRestore();
     }
   });
+
+  it("sends the shell both forms of the stop confirmation, each with its count left for the shell to fill", async () => {
+    const labels = vi.spyOn(native, "setTrayLabels");
+    try {
+      await launch();
+      const sent = labels.mock.lastCall?.[0];
+      expect(sent?.stopConfirmRunning_one).toBe(
+        "{{count}} execution is running. Stopping the daemon now interrupts it; it will be recorded as interrupted.",
+      );
+      expect(sent?.stopConfirmRunning_other).toBe(
+        "{{count}} executions are running. Stopping the daemon now interrupts them; they will be recorded as interrupted.",
+      );
+    } finally {
+      labels.mockRestore();
+    }
+  });
 });
 
 // Settings shows one section at a time, picked from its list (harmflow-app#251).

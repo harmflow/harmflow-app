@@ -1,12 +1,13 @@
 // @vitest-environment happy-dom
 // The topbar's warning for a daemon of another version, its banner for a window and a daemon built from different
 // commits, and that banner's restart of the daemon on the window's build, driven in a DOM against a stand-in for the
-// daemon's local API.
+// daemon's local API. And the More actions menu's Stop daemon…, whose question names one running execution in the
+// singular and more in the plural.
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { native, type DaemonStatus } from "../api/native";
-import type { Health } from "../api/types";
+import type { Health, Stats } from "../api/types";
 import i18n from "../i18n";
 import { getState, patchStateForTests } from "../state/store";
 import { Header, commitsDiffer } from "./Shell";
@@ -214,5 +215,32 @@ describe("restarting the daemon from the banner", () => {
     expect(host!.querySelector(".toast--danger")?.textContent).toContain(
       "The daemon could not be restarted: daemon pid 4242 did not exit within 30 seconds",
     );
+  });
+});
+
+describe("stopping the daemon from the More actions menu", () => {
+  /** Stats as GET /stats answers them, with `running` executions. */
+  const stats = (running: number): Stats => ({
+    running,
+    queued: 0,
+    completedToday: 0,
+    failedToday: 0,
+    activity: { running: [], queued: [], completed: [], failed: [] },
+    system: { cpuPercent: 0, memoryUsedBytes: 0, memoryTotalBytes: 0, diskUsedBytes: 0, diskTotalBytes: 0 },
+  });
+
+  afterEach(() => patchStateForTests({ stats: undefined }));
+
+  it.each([
+    [1, "1 execution is running. Stopping the daemon now interrupts it; it will be recorded as interrupted."],
+    [2, "2 executions are running. Stopping the daemon now interrupts them; they will be recorded as interrupted."],
+  ])("asks before stopping with %i running, in the number's form", async (running, message) => {
+    const confirm = vi.spyOn(native, "confirm").mockResolvedValue(false);
+    patchStateForTests({ stats: stats(running) });
+    await show();
+    await act(async () => host!.querySelector<HTMLButtonElement>('button[aria-label="More actions"]')!.click());
+    await act(async () => [...host!.querySelectorAll<HTMLButtonElement>(".popover button")].find((b) => b.textContent === "Stop daemon…")!.click());
+    expect(confirm.mock.calls).toEqual([[message, "Stop the daemon?", "Stop daemon", "Cancel"]]);
+    expect(daemon.requests.filter((r) => r.method === "POST")).toEqual([]);
   });
 });
