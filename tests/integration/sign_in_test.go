@@ -15,8 +15,9 @@ import (
 // probes read signed in once its credential's file exists; its sessions run as fake-claude's. Started with no
 // arguments, it records the start in @SESSIONS@ and draws the screens Claude Code 2.1.309 drew: the question whether to
 // trust its folder, asked once per folder, the session's header, /login's menu, and the browser's step, whose URL holds
-// @STATE@. It then waits for the test to approve the sign-in by writing @APPROVED@, writes its credential, and says the
-// sign-in succeeded. With @UNKNOWN@ present, it draws a screen the adapter does not know instead, holding @STATE@ too.
+// @STATE@. It then waits for the test to approve the sign-in by writing @APPROVED@, writes @SECRET@ as its credential,
+// and says the sign-in succeeded. With @UNKNOWN@ present, it draws a screen the adapter does not know instead, holding
+// @STATE@ too.
 // The paths are part of the copy, so they need no variable, which the daemon's environment could drop.
 const signInClaude = `#!/bin/bash
 case "$1" in
@@ -52,18 +53,26 @@ printf 'Opening browser to sign in\xe2\x80\xa6\r\nBrowser didn'"'"'t open? Use t
 printf 'https://claude.com/cai/oauth/authorize?code=true&state=%s\r\n\r\nPaste code here if prompted >\r\n' '@STATE@'
 until [ -f '@APPROVED@' ]; do sleep 0.1; done
 mkdir -p "$(dirname '@CREDENTIAL@')"
-printf 'signed-in' > '@CREDENTIAL@'
+printf '%s' '@SECRET@' > '@CREDENTIAL@'
 printf ' Login successful. Press Enter to continue\xe2\x80\xa6\r\n'
 sleep 120
 `
 
 // signInStandIn is a signInClaude written for one test: its path, the files through which the test approves the
-// sign-in or makes the session show an unknown screen, the log of its sessions, and the state its URL holds.
+// sign-in or makes the session show an unknown screen, the log of its sessions, the state its URL holds, and the
+// credential a sign-in writes.
 type signInStandIn struct {
-	path, approved, unknown, sessions, credential, state string
+	path, approved, unknown, sessions, credential, state, secret string
 }
 
+// newSignInStandIn writes a signInClaude whose sign-in writes the fixed text signed-in as its credential.
 func newSignInStandIn(t *testing.T) signInStandIn {
+	t.Helper()
+	return newSignInStandInWriting(t, "signed-in")
+}
+
+// newSignInStandInWriting writes a signInClaude whose sign-in writes secret as its credential.
+func newSignInStandInWriting(t *testing.T, secret string) signInStandIn {
 	t.Helper()
 	dir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -75,10 +84,10 @@ func newSignInStandIn(t *testing.T) signInStandIn {
 	}
 	s := signInStandIn{path: filepath.Join(dir, "bin", "claude"), approved: filepath.Join(dir, "approved"),
 		unknown: filepath.Join(dir, "unknown"), sessions: filepath.Join(dir, "sessions.log"),
-		credential: filepath.Join(dir, "config", "credential"), state: "state" + hex.EncodeToString(random)}
+		credential: filepath.Join(dir, "config", "credential"), state: "state" + hex.EncodeToString(random), secret: secret}
 	src := strings.NewReplacer("@FAKE@", filepath.Join(repoRoot(), "tests", "integration", "testdata", "fake-claude"),
 		"@SESSIONS@", s.sessions, "@UNKNOWN@", s.unknown, "@APPROVED@", s.approved, "@CREDENTIAL@", s.credential,
-		"@STATE@", s.state).Replace(signInClaude)
+		"@STATE@", s.state, "@SECRET@", s.secret).Replace(signInClaude)
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -175,6 +184,41 @@ func TestSignInThroughTheBrowser(t *testing.T) {
 	}
 	d.stop()
 	noLeakInHome(t, homeFiles(t, home), map[string]string{"the sign-in URL's state": claude.state})
+}
+
+// harmflow-app#791: a sign-in leaves Claude Code's credential where Claude Code keeps it. The stand-in writes a random
+// credential of the test's own once the user approves; once the harness reads ready, neither GET /harnesses nor any
+// file under the daemon's home, the sign-in's folder under its runtime folder included, holds it or a piece of it of
+// eight characters or more, and the credential's file is still the stand-in's, unchanged.
+func TestSignInCopiesNoCredential(t *testing.T) {
+	t.Parallel()
+	random := make([]byte, 24)
+	if _, err := rand.Read(random); err != nil {
+		t.Fatal(err)
+	}
+	// Random alone: a word in it, such as "credential", is also in the daemon's own texts.
+	claude := newSignInStandInWriting(t, hex.EncodeToString(random))
+	home := t.TempDir()
+	d := startDaemon(t, home)
+	d.setHarness("claude-code", claude.path)
+	d.waitHarness("claude-code", 30*time.Second, func(h map[string]any) bool { return h["signIn"] == "running" })
+	claude.write(t, claude.approved)
+	d.waitHarness("claude-code", 60*time.Second, func(h map[string]any) bool {
+		return h["readiness"] == "ready" && h["signIn"] == "available"
+	})
+	status, body := d.request("GET", "/harnesses", nil, nil)
+	if status != 200 {
+		t.Fatalf("GET /harnesses: status %d, want 200: %s", status, body)
+	}
+	if at := leakedPieces(body, claude.secret); len(at) != 0 {
+		t.Errorf("GET /harnesses holds pieces of Claude Code's credential, at offsets %v of it", at)
+	}
+	d.stop()
+	noLeakInHome(t, homeFiles(t, home), map[string]string{"Claude Code's credential": claude.secret})
+	if got, err := os.ReadFile(claude.credential); err != nil || string(got) != claude.secret {
+		t.Errorf("the stand-in's credential file after the sign-in: %d bytes, %v; want the credential it wrote, unchanged",
+			len(got), err)
+	}
 }
 
 // harmflow-app#543: a sign-in nobody approves ends at its timeout. The harness stays not ready, saying the browser
