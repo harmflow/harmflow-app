@@ -80,12 +80,12 @@ describe("daemonText", () => {
       "detail.detail.command": "codex login",
     };
     expect(daemonText({ message: "", messageKey: "no_alternative_harness_detail", params: unavailable })).toBe(
-      "Codex não pode continuar (harness indisponível) e nenhum harness alternativo está disponível: " +
+      "Codex não pode continuar (ferramenta de IA indisponível) e nenhuma ferramenta de IA alternativa está disponível: " +
         "Codex está indisponível: Codex não está conectado; execute `codex login` em um terminal",
     );
     const quota = { harness: "Codex", reason: "quota exhausted", errorClass: "quota_exhausted", detail: "You've hit your usage limit" };
     expect(daemonText({ message: "", messageKey: "no_alternative_harness_detail", params: quota })).toBe(
-      "Codex não pode continuar (cota esgotada) e nenhum harness alternativo está disponível: You've hit your usage limit",
+      "Codex não pode continuar (cota esgotada) e nenhuma ferramenta de IA alternativa está disponível: You've hit your usage limit",
     );
   });
 

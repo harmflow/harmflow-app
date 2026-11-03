@@ -238,7 +238,7 @@ describe("task form agent", () => {
     // The task has no description, model, or skills of its own yet, so replacing the copy sets all three.
     expect(fieldRows()).toEqual([
       ["Description", "None → Reviews a change"],
-      ["Model", "Harness default → sonnet"],
+      ["Model", "AI tool default → sonnet"],
       ["Skills", "None → review-notes"],
     ]);
     await act(async () => button("Cancel")!.click());
@@ -737,7 +737,7 @@ describe("task form document", () => {
 
     // Notifications: off, and of the default events only operational failures kept, with failed tests added.
     await click(toggle("Native notifications"));
-    for (const event of ["Execution completed", "Needs attention", "Draft PR created", "No alternative harness"]) await tick("Notify me about", event);
+    for (const event of ["Execution completed", "Needs attention", "Draft PR created", "No alternative AI tool"]) await tick("Notify me about", event);
     await tick("Notify me about", "Tests failed");
 
     await click(button("Save"));
@@ -785,7 +785,7 @@ describe("task form document", () => {
       ],
       repository: ["harmflow/example", "${FORM_REPO}", "develop"],
       queue: ["newest_first", "5", "2", "alternate", "1", "0", "0"],
-      harness: [["codex", "gpt-5.6-terra", "high"], ["claude-code", "sonnet", "high"], ["Harness unavailable"], "2"],
+      harness: [["codex", "gpt-5.6-terra", "high"], ["claude-code", "sonnet", "high"], ["AI tool unavailable"], "2"],
       schedule: ["weekdays", "06:30", "30 6 * * 1-5", "America/Sao_Paulo", "skip", "skip"],
       permissions: ["custom", "deny", false, "Read\nGrep", "WebFetch", "${FORM_REPO}"],
       execution: ["45", "10", "2", "30", "600"],
@@ -796,13 +796,13 @@ describe("task form document", () => {
     await enter(control<HTMLTextAreaElement>("Description"), "");
     await enter(control("Workspace"), "");
     await enter(control("Items discovered per cycle"), "");
-    await tick("Fail over on", "Harness unavailable");
-    expect(checked("Fail over on")).toEqual(["Quota exhausted", "Harness unavailable"]);
+    await tick("Fail over on", "AI tool unavailable");
+    expect(checked("Fail over on")).toEqual(["Quota exhausted", "AI tool unavailable"]);
     await enter(control("Time zone"), "");
     await enter(control<HTMLSelectElement>("Network"), "");
     await enter(control("Timeout (minutes), shared by all attempts"), "");
     for (const event of ["Operational failure", "Tests failed"]) await tick("Notify me about", event);
-    expect(checked("Notify me about")).toEqual(["Execution completed", "Operational failure", "Needs attention", "Draft PR created", "No alternative harness"]);
+    expect(checked("Notify me about")).toEqual(["Execution completed", "Operational failure", "Needs attention", "Draft PR created", "No alternative AI tool"]);
     await click(button("Save"));
     await settle();
 
@@ -915,7 +915,7 @@ describe("script task form document", () => {
 
     // Notifications: off, and of the default events only operational failures kept, with cancellations added.
     await click(toggle("Native notifications"));
-    for (const event of ["Execution completed", "Needs attention", "Draft PR created", "No alternative harness"]) await tick("Notify me about", event);
+    for (const event of ["Execution completed", "Needs attention", "Draft PR created", "No alternative AI tool"]) await tick("Notify me about", event);
     await tick("Notify me about", "Cancellation");
 
     await click(button("Save"));
@@ -981,7 +981,7 @@ describe("script task form document", () => {
     await enter(control<HTMLSelectElement>("Network"), "");
     await enter(control("Timeout (minutes), shared by all attempts"), "");
     for (const event of ["Operational failure", "Cancellation"]) await tick("Notify me about", event);
-    expect(checked("Notify me about")).toEqual(["Execution completed", "Operational failure", "Needs attention", "Draft PR created", "No alternative harness"]);
+    expect(checked("Notify me about")).toEqual(["Execution completed", "Operational failure", "Needs attention", "Draft PR created", "No alternative AI tool"]);
     await click(button("Save"));
     await settle();
 
@@ -1045,7 +1045,7 @@ describe("task form checkbox groups", () => {
   };
 
   it.each([
-    { caption: "Fail over on", doc: task({}), options: ["Quota exhausted", "Harness unavailable"] },
+    { caption: "Fail over on", doc: task({}), options: ["Quota exhausted", "AI tool unavailable"] },
     {
       caption: "Notify me about",
       doc: task({}),
@@ -1058,8 +1058,8 @@ describe("task form checkbox groups", () => {
         "Draft PR created",
         "Draft PR updated",
         "Tests failed",
-        "Harness unavailable",
-        "No alternative harness",
+        "AI tool unavailable",
+        "No alternative AI tool",
       ],
     },
     { caption: "Runs on", doc: script, options: ["macOS", "Linux", "Windows"] },
@@ -1141,7 +1141,7 @@ describe("task form extra usage", () => {
     // Named by its label alone: the hint sits beside the toggle's label, not in it.
     expect(label()).toBe("Allow extra usage");
     expect(hint()).toBe(
-      "Usage billed beyond what the harness's plan includes. Off, an attempt does not start on a harness whose plan is used up, and a Claude Code attempt that turns to extra usage is ended. On, neither check holds an attempt back.",
+      "Usage billed beyond what the AI tool's plan includes. Off, an attempt does not start on an AI tool whose plan is used up, and a Claude Code attempt that turns to extra usage is ended. On, neither check holds an attempt back.",
     );
     expect(input("Longest wait (seconds)").compareDocumentPosition(toggle()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(spec().execution).toBeUndefined();
@@ -1184,8 +1184,8 @@ describe("task form extra usage", () => {
   });
 
   it.each([
-    ["pt-BR", "Permitir uso extra", "Uso cobrado além do que o plano do harness inclui."],
-    ["es-ES", "Permitir uso extra", "Uso facturado más allá de lo que incluye el plan del harness."],
+    ["pt-BR", "Permitir uso extra", "Uso cobrado além do que o plano da ferramenta de IA inclui."],
+    ["es-ES", "Permitir uso extra", "Uso facturado más allá de lo que incluye el plan de la herramienta de IA."],
   ])("labels the toggle and its hint in %s", async (language, text, hintStart) => {
     await i18n.changeLanguage(language);
     try {
