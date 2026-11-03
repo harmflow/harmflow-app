@@ -802,13 +802,13 @@ export interface components {
         Spend: {
             /** @description The month, YYYY-MM. */
             month: string;
-            /** @description The days of the month */
+            /** @description The days of the month, those still to come included. */
             daysInMonth: number;
             /** @description Each day from the first of the month to today, oldest first. */
             days: components["schemas"]["SpendDay"][];
             /** @description The month's total in both units. */
             total: {
-                /** @description The estimated cost in US dollars */
+                /** @description The estimated cost in US dollars, at API prices. */
                 costUsd: number;
                 /** @description Every token class summed. */
                 tokens: number;
@@ -818,7 +818,7 @@ export interface components {
         SpendDay: {
             /** Format: date */
             date: string;
-            /** @description The estimated cost in US dollars */
+            /** @description The estimated cost in US dollars, at API prices. */
             costUsd: number;
             /** @description Every token class summed. */
             tokens: number;
@@ -829,9 +829,9 @@ export interface components {
                 unpriced: number;
                 /** @description Attempts whose harness reported no usage. */
                 notReported: number;
-                /** @description Attempts that ended with only a partial count */
+                /** @description Attempts that ended with only a partial count, before their harness reported. */
                 partial: number;
-                /** @description Today only */
+                /** @description Today only, the attempts still running, which count on no day yet. */
                 running: number;
             };
         };
@@ -1074,7 +1074,7 @@ export interface components {
             revision: string;
             harness: string;
             fallbackHarnesses?: string[];
-            /** @description The cron expression or interval */
+            /** @description The cron expression or interval, if any. */
             schedule?: string;
             timezone?: string;
             /** Format: date-time */
@@ -1791,7 +1791,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description The token */
+                    /** @description The token, without spaces, quotes, or line breaks. */
                     token: string;
                 };
             };
