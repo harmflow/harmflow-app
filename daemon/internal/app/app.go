@@ -105,6 +105,9 @@ type Deps struct {
 	HarnessEnv []string
 	// OS is this machine's operating system, as a script task names it; the running one when empty.
 	OS string
+	// Identify reads a script task's started program's process identity, which its record keeps for crash recovery;
+	// procutil's reading when nil.
+	Identify func(ctx context.Context, pid int) (domain.ProcessIdentity, error)
 	// TickInterval is how often the scheduler looks for due firings.
 	TickInterval time.Duration
 	// TimeoutUnit is what a task's timeoutMinutes counts, a minute when zero; tests shorten it, since a timeout is at
@@ -240,6 +243,9 @@ func New(d Deps) (*App, error) {
 	}
 	if d.OS == "" {
 		d.OS = currentOS()
+	}
+	if d.Identify == nil {
+		d.Identify = identifyProcess
 	}
 	if d.Logger == nil {
 		d.Logger = log.New(os.Stderr, "harmflowd ", log.LstdFlags)

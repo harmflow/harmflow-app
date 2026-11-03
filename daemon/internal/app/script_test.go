@@ -589,16 +589,20 @@ func (s *scriptSaves) takeEarly() ([]*domain.ProcessIdentity, int) {
 // than its pipes hold is not stalled, every line comes after script.started, and the record holds no identity.
 func TestHeldOutputIsReleasedWhenTheIdentityReadFails(t *testing.T) {
 	saves := &scriptSaves{}
-	e := newEnv(t, saves.wrap)
+	var failing atomic.Bool
+	e := newEnv(t, saves.wrap, func(e *env) {
+		e.identify = func(ctx context.Context, pid int) (domain.ProcessIdentity, error) {
+			if failing.Load() {
+				return domain.ProcessIdentity{}, errors.New("ps: exit status 1")
+			}
+			return identifyProcess(ctx, pid)
+		}
+	})
 	e.createScript("flood", floodScript)
 	want := e.runFlood("flood")
 	_, _ = saves.takeEarly()
 
-	read := identify
-	t.Cleanup(func() { identify = read })
-	identify = func(context.Context, int) (procutil.Identity, error) {
-		return procutil.Identity{}, errors.New("ps: exit status 1")
-	}
+	failing.Store(true)
 	if got := e.runFlood("flood"); !slices.Equal(got, want) {
 		t.Errorf("events with the identity read failing = %v, want %v as when it succeeds", got, want)
 	}
