@@ -97,7 +97,7 @@ describe("SpendBand", () => {
     expect(host.querySelectorAll(".spend__mark--day")).toHaveLength(2);
     const total = host.querySelector(".spend__total");
     expect(total?.textContent).toContain("$4.25");
-    expect(total?.textContent).toContain("estimated at API prices");
+    expect(total?.textContent).toContain("an estimate at API list prices");
     expect(total?.querySelector(".spend__mark")).toBeNull();
     expect(host.querySelector(".spend__note")?.textContent).toContain("model has no price");
   });

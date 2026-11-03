@@ -858,7 +858,7 @@ export const enUS = {
       view: "Show the spend in",
       cost: "Cost",
       tokens: "Tokens",
-      totalCost: "this month, estimated at API prices",
+      totalCost: "this month, an estimate at API list prices",
       totalTokens: "tokens this month",
       noExecution: "No execution this month",
       undercounts: "undercounts",
