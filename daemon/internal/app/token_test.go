@@ -26,6 +26,9 @@ type tokenHarness struct {
 	uses      []string // each token UseToken set, in order
 	ownSignIn bool
 	rejects   bool
+	// hold, when set, is the next check to hold once it has read its answer: it is closed to say so, and the check
+	// returns once release is closed.
+	hold, release chan struct{}
 }
 
 var _ ports.TokenSignIn = (*tokenHarness)(nil)
@@ -49,7 +52,23 @@ func (h *tokenHarness) Detect(ctx context.Context, manual string) ports.HarnessI
 		info.Readiness, info.Authentication = "not_ready", "invalid"
 		info.SetDiagnostic(domain.T("claude_not_signed_in", "Claude Code is not signed in; run `claude` in a terminal and sign in"))
 	}
+	if hold, release := h.hold, h.release; hold != nil {
+		h.hold = nil
+		h.mu.Unlock()
+		close(hold)
+		<-release
+		h.mu.Lock()
+	}
 	return info
+}
+
+// holdNextCheck holds the next check once it has read its answer; held is closed then, and release lets it return.
+func (h *tokenHarness) holdNextCheck() (held <-chan struct{}, release func()) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.hold, h.release = make(chan struct{}), make(chan struct{})
+	r := h.release
+	return h.hold, func() { close(r) }
 }
 
 func (h *tokenHarness) using() string {
@@ -134,6 +153,35 @@ func noTokenInHome(t *testing.T, home string) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A check that read Claude Code signed out before a token was saved, and returns after, does not reject that token:
+// it never ran with it. The token stays in use, not marked rejected.
+func TestACheckFromBeforeATokenDoesNotRejectIt(t *testing.T) {
+	claude, store := newTokenHarness(), &fakeStore{}
+	e := tokenEnv(t, claude, store)
+	held, release := claude.holdNextCheck()
+	checked := make(chan struct{})
+	go func() {
+		defer close(checked)
+		e.app.detect(t.Context(), domain.HarnessClaudeCode)
+	}()
+	select {
+	case <-held:
+	case <-time.After(10 * time.Second):
+		release()
+		t.Fatal("no check read Claude Code within 10s, want the one started")
+	}
+	if _, err := e.app.SetHarnessToken(t.Context(), domain.HarnessClaudeCode, secretToken); err != nil {
+		release()
+		t.Fatal(err)
+	}
+	release()
+	<-checked
+	if info := e.claudeInfo(); info.Token == nil || info.Token.Rejected || claude.using() != secretToken {
+		t.Errorf("after a check from before the token returned signed out, token %+v, in use %q; want the token, not "+
+			"rejected, in use", info.Token, claude.using())
 	}
 }
 

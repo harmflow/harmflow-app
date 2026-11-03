@@ -102,9 +102,10 @@ func (a *App) detect(ctx context.Context, id string) ports.HarnessInfo {
 	ad := a.adapters[id]
 	a.mu.Lock()
 	manual := a.manualPaths[id]
+	checked := a.tokens[id] // the token this check runs with, if any
 	a.mu.Unlock()
 	info := ad.Detect(ctx, manual)
-	if info.Authentication == "invalid" && a.rejectToken(id) {
+	if info.Authentication == "invalid" && a.rejectCheckedToken(id, checked) {
 		// The harness rejected its saved token: check it again without, on its own sign-in.
 		info = ad.Detect(ctx, manual)
 	}
