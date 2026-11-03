@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { native } from "./api/native";
 import { RootBoundary, ScreenBoundary } from "./components/ErrorBoundary";
-import { Header, Sidebar, noticeText, type Screen } from "./components/Shell";
+import { Header, NAV, Sidebar, navDigit, noticeText, type Screen } from "./components/Shell";
 import type { LeaveCheck } from "./components/TaskEditor";
 import { Toasts } from "./components/toast";
 import { applyLanguage } from "./i18n";
@@ -184,6 +184,10 @@ export function App() {
       if (s === "tasks") setTaskView({ kind: "list" });
     });
   };
+  // The keydown handler below is added again only when the shell or the screen changes, so it reads the navigation of
+  // the latest render: the Settings section last open changes with no new handler.
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
 
   const onboarding =
     !onboardingDismissed && ((settings && !settings.onboardingCompleted) || (daemonRunning === false && !wasOnboarded()));
@@ -210,20 +214,22 @@ export function App() {
     }
   }, [navigation]);
 
-  // ⌘B collapses and expands the sidebar, ⌘N opens the template picker as the topbar's New task does, and ⌘E hides
-  // and shows the Executions screen's aside, from any focus, a text field or the YAML editor included. ⌘E acts on the
-  // Executions screen alone: elsewhere it is left to the system and the saved state stays as it was. The onboarding
-  // and daemon-down screens have no shell, and a modal dialog, the picker included, keeps the keyboard. Linux and
-  // Windows would check ctrlKey.
+  // ⌘B collapses and expands the sidebar, ⌘N opens the template picker as the topbar's New task does, ⌘E hides and
+  // shows the Executions screen's aside, and ⌘1 to ⌘9 open the sidebar's items in its order, as a click on each does,
+  // from any focus, a text field or the YAML editor included. ⌘E acts on the Executions screen alone: elsewhere it is
+  // left to the system and the saved state stays as it was. The onboarding and daemon-down screens have no shell, and a
+  // modal dialog, the picker included, keeps the keyboard. Linux and Windows would check ctrlKey.
   useEffect(() => {
     if (!shell) return;
     const onKey = (e: KeyboardEvent) => {
       if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat) return;
       const key = e.key.toLowerCase();
-      if (key !== "b" && key !== "n" && !(key === "e" && screen === "executions")) return;
+      const item = NAV.find((_, index) => navDigit(index) === key);
+      if (key !== "b" && key !== "n" && !(key === "e" && screen === "executions") && !item) return;
       if (document.querySelector('[aria-modal="true"]')) return;
       e.preventDefault();
-      if (key === "b") setSidebarCollapsed((collapsed) => !collapsed);
+      if (item) navigateRef.current(item.key);
+      else if (key === "b") setSidebarCollapsed((collapsed) => !collapsed);
       else if (key === "e") setExecutionsAsideHidden((hidden) => !hidden);
       else setPicker(true);
     };

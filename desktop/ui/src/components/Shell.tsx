@@ -15,13 +15,19 @@ import { Banner, Button, Gauge, IconButton, cx } from "./ui";
 
 export type Screen = "overview" | "executions" | "tasks" | "history" | "settings";
 
-const NAV: Array<{ key: Screen; icon: IconName }> = [
+/** The sidebar's items, in the order it shows them; ⌘1 opens the first, and so on to ⌘9. */
+export const NAV: Array<{ key: Screen; icon: IconName }> = [
   { key: "overview", icon: "grid" },
   { key: "executions", icon: "playFilled" },
   { key: "tasks", icon: "list" },
   { key: "history", icon: "history" },
   { key: "settings", icon: "settings" },
 ];
+
+/** The digit of the sidebar item at index, from 1; the items past the ninth get none. */
+export function navDigit(index: number): string | undefined {
+  return index < 9 ? String(index + 1) : undefined;
+}
 
 const TOGGLE_SHORTCUT = "⌘B";
 const NEW_TASK_SHORTCUT = "⌘N";
@@ -125,20 +131,24 @@ export function Sidebar({
       </div>
 
       <nav className="nav" aria-label="HarmFlow">
-        {NAV.map((item) => (
-          <button
-            key={item.key}
-            type="button"
-            className={cx("nav__item", screen === item.key && "nav__item--active")}
-            aria-current={screen === item.key ? "page" : undefined}
-            onClick={() => onNavigate(item.key)}
-            {...(collapsed ? tipped(t(`nav.${item.key}`)) : {})}
-          >
-            <Icon name={item.icon} size={19} />
-            <span className={cx("nav__label", collapsed && "sr-only")}>{t(`nav.${item.key}`)}</span>
-            {item.key === "executions" && running > 0 ? <span className="nav__badge">{running}</span> : null}
-          </button>
-        ))}
+        {NAV.map((item, index) => {
+          const digit = navDigit(index);
+          return (
+            <button
+              key={item.key}
+              type="button"
+              className={cx("nav__item", screen === item.key && "nav__item--active")}
+              aria-current={screen === item.key ? "page" : undefined}
+              aria-keyshortcuts={digit ? `Meta+${digit}` : undefined}
+              onClick={() => onNavigate(item.key)}
+              {...(collapsed ? tipped(t(`nav.${item.key}`), digit ? `⌘${digit}` : undefined) : {})}
+            >
+              <Icon name={item.icon} size={19} />
+              <span className={cx("nav__label", collapsed && "sr-only")}>{t(`nav.${item.key}`)}</span>
+              {item.key === "executions" && running > 0 ? <span className="nav__badge">{running}</span> : null}
+            </button>
+          );
+        })}
       </nav>
 
       <div className="sidebar__spacer" />
