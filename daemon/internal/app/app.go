@@ -287,8 +287,10 @@ func (noWake) LastWake() time.Time { return time.Time{} }
 
 func (a *App) now() time.Time { return a.d.Clock.Now() }
 
-// Start loads state, recovers interrupted executions, detects harnesses, and starts the scheduler, the task-file
-// watcher, and maintenance. The loops run until ctx ends or Stop is called, whichever comes first.
+// Start loads state, recovers interrupted executions, and starts the scheduler, the task-file watcher, and maintenance.
+// It waits for no harness: the task files load without the checks that ask one, and the harnesses are detected, then
+// the task files checked again with them, in the background. The loops run until ctx ends or Stop is called, whichever
+// comes first.
 func (a *App) Start(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	detectCtx, stopDetection := context.WithCancel(ctx)
@@ -311,9 +313,9 @@ func (a *App) Start(ctx context.Context) error {
 	if err := a.recover(ctx); err != nil {
 		return err
 	}
-	a.repairLedger()      // after recovery, so that every execution its items name has ended
-	a.loadHarnessTokens() // before detection, which checks each harness with its token
-	a.refreshHarnessesAsync(detectCtx)
+	a.repairLedger()                  // after recovery, so that every execution its items name has ended
+	a.loadHarnessTokens()             // before detection, which checks each harness with its token
+	a.detectThenCheckTasks(detectCtx) // the task files were loaded without asking a harness
 	a.noticeTokenExpiry()
 	a.detection.Go(func() { a.redetectLoop(detectCtx) })
 	a.emit(domain.Event{Type: domain.EventDaemonStarted, Payload: map[string]any{"version": a.d.Version, "pid": os.Getpid()}}.Says(

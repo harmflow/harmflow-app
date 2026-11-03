@@ -16,28 +16,28 @@ describe("daemonText", () => {
     expect(daemonText(text)).toBe('a skill "lint" não foi encontrada para Codex (na configuração do Codex)');
   });
 
-  it("names the harness's skill list for the workspace a skill was looked for in", () => {
-    const where = "Claude Code's skill list for /w";
+  it("names the harness's skill list a skill was looked for in", () => {
+    const where = "Claude Code's skill list";
     const text = {
       message: `skill "release-notes" cannot be found for Claude Code (${where})`,
       messageKey: "skill_not_found" as const,
-      params: { name: "release-notes", harness: "Claude Code", where, source: "skill_list", workspace: "/w" },
+      params: { name: "release-notes", harness: "Claude Code", where, source: "skill_list" },
     };
     expect(daemonText(text)).toBe(
-      'a skill "release-notes" não foi encontrada para Claude Code (na lista de skills do Claude Code para /w)',
+      'a skill "release-notes" não foi encontrada para Claude Code (na lista de skills do Claude Code)',
     );
   });
 
   it("names the files the harness's skill list could not load", () => {
     const errors = "/w/.codex/skills/lint/SKILL.md: invalid front matter";
-    const where = `Codex's skill list for /w, which could not load ${errors}`;
+    const where = `Codex's skill list, which could not load ${errors}`;
     const text = {
       message: `skill "lint" cannot be found for Codex (${where})`,
       messageKey: "skill_not_found" as const,
-      params: { name: "lint", harness: "Codex", where, source: "skill_list_errors", workspace: "/w", errors },
+      params: { name: "lint", harness: "Codex", where, source: "skill_list_errors", errors },
     };
     expect(daemonText(text)).toBe(
-      `a skill "lint" não foi encontrada para Codex (na lista de skills do Codex para /w, que não conseguiu carregar ${errors})`,
+      `a skill "lint" não foi encontrada para Codex (na lista de skills do Codex, que não conseguiu carregar ${errors})`,
     );
   });
 

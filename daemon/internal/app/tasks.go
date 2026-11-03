@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -51,15 +53,16 @@ type ExecutionRef struct {
 	EndedAt   *time.Time             `json:"endedAt,omitempty"`
 }
 
-// loadTasks reads every task file; a file that fails validation is listed as invalid and never fires, and is reported
-// as one the watcher finds.
+// loadTasks reads every task file at start; a file that fails validation is listed as invalid and never fires, and is
+// reported as one the watcher finds. It asks no harness (catalogStart): checkTasks completes the validation once the
+// daemon has started.
 func (a *App) loadTasks(ctx context.Context) error {
 	files, err := a.d.Tasks.List()
 	if err != nil {
 		return err
 	}
 	for _, f := range files {
-		e := a.loadTaskFile(ctx, f)
+		e := a.loadTaskFile(ctx, f, catalogStart)
 		a.mu.Lock()
 		invalid := e.invalid
 		a.mu.Unlock()
@@ -85,10 +88,58 @@ func invalidEvent(f ports.TaskFile, r *ValidationResult, text domain.Text) domai
 		Payload: map[string]any{"file": taskFileName(f), "errors": r.Errors, "revision": f.Revision}}.Says(text)
 }
 
-func (a *App) loadTaskFile(ctx context.Context, f ports.TaskFile) *taskEntry {
-	r := a.validate(ctx, TaskInput{YAML: string(f.Content)}, catalogLenient)
+// checkTasks validates again, with the checks that ask the harnesses, every task file loadTasks loaded and found valid,
+// one after another, until ctx ends. A file that changed since was validated in full by whatever changed it, and is
+// left as it is. A task found invalid is announced as the watcher announces one, and keeps its last valid definition;
+// one whose warnings changed is announced as updated, so the dashboard reads it again.
+func (a *App) checkTasks(ctx context.Context) {
+	a.mu.Lock()
+	var files []ports.TaskFile
+	for _, e := range a.tasks {
+		if e.invalid == nil {
+			files = append(files, e.file)
+		}
+	}
+	a.mu.Unlock()
+	slices.SortFunc(files, func(x, y ports.TaskFile) int { return strings.Compare(x.ID, y.ID) })
+	for _, f := range files {
+		r := a.validate(ctx, TaskInput{YAML: string(f.Content)}, catalogLenient)
+		if ctx.Err() != nil {
+			return
+		}
+		a.mu.Lock()
+		e := a.tasks[f.ID]
+		if e == nil || e.file.Revision != f.Revision || e.invalid != nil {
+			a.mu.Unlock()
+			continue
+		}
+		before := e.warnings
+		a.applyValidationLocked(f, r)
+		invalid, changed := e.invalid, !reflect.DeepEqual(before, e.warnings)
+		a.mu.Unlock()
+		switch {
+		case invalid != nil:
+			a.rescheduleTask(f.ID)
+			a.emit(invalidEvent(f, invalid, domain.T("task_file_invalid", "the task file {{file}} fails validation",
+				"file", taskFileName(f))))
+		case changed:
+			a.emit(domain.Event{Type: domain.EventTaskUpdated, TaskID: f.ID, Payload: map[string]any{"revision": f.Revision}}.Says(
+				domain.T("task_checked", "the task was checked against its harnesses")))
+		}
+	}
+}
+
+// loadTaskFile validates a task file in mode and makes it the task's current file.
+func (a *App) loadTaskFile(ctx context.Context, f ports.TaskFile, mode catalogMode) *taskEntry {
+	r := a.validate(ctx, TaskInput{YAML: string(f.Content)}, mode)
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	return a.applyValidationLocked(f, r)
+}
+
+// applyValidationLocked makes f, validated as r, the task's current file: its definition when it is valid, its errors
+// when it is not, beside the last valid definition. a.mu is held.
+func (a *App) applyValidationLocked(f ports.TaskFile, r *ValidationResult) *taskEntry {
 	e := a.tasks[f.ID]
 	if e == nil {
 		e = &taskEntry{}
@@ -501,7 +552,7 @@ func (a *App) scanTaskFiles(ctx context.Context) {
 		if !changed || self {
 			continue
 		}
-		ne := a.loadTaskFile(ctx, f)
+		ne := a.loadTaskFile(ctx, f, catalogLenient)
 		a.rescheduleTask(f.ID)
 		a.mu.Lock()
 		invalid := ne.invalid

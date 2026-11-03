@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -42,26 +40,20 @@ type initSkills struct {
 	Skills *[]string `json:"skills"`
 }
 
-// sessionSkills are the skills Claude Code loads for a session in workspace with the added folders, as it reports them,
-// sorted by name and each once. HarmFlow does not search Claude Code's folders: it starts `claude -p` there, as an
-// execution starts it, reads the skills of the stream's init line, and stops the session before the model answers. A
-// workspace not made yet is listed in its nearest parent that exists (listingDir), and an added folder not made yet,
-// such as a repository not cloned, is left out, as Claude Code cannot add it. The list of each CLI, folder, and set of
-// added folders is kept until ReloadUserItems, since reading it starts a session that takes seconds; one that failed
-// is not kept. A lookup waits only for the listing of its own key: listings of other keys run alongside it, a second
-// lookup of a key shares the listing already running, and a lookup whose context ends returns while the listing goes
-// on for the others; the last one to leave stops it. A CLI that was not detected cannot answer, which is an error,
-// never an empty list.
-func (a *Adapter) sessionSkills(ctx context.Context, info ports.HarnessInfo, workspace string, added []string) ([]ports.ResolvedItem, error) {
+// installedSkills are the skills the installed Claude Code loads for a session in the user's home folder, with no
+// folder added, as it reports them, sorted by name and each once: its bundled skills, the user's, and those of the
+// plugins installed. HarmFlow does not search Claude Code's folders: it starts `claude -p` there, as an execution
+// starts it, reads the skills of the stream's init line, and stops the session before the model answers. The list is of
+// the installation, the same whatever the task's workspace, so a skill of a task's own project, or of a folder it adds,
+// is not on it. Each CLI's list is kept until ReloadUserItems, since reading it starts a session that takes seconds;
+// one that failed is not kept. A second lookup shares the listing already running, and a lookup whose context ends
+// returns while the listing goes on for the others; the last one to leave stops it. A CLI that was not detected cannot
+// answer, which is an error, never an empty list.
+func (a *Adapter) installedSkills(ctx context.Context, info ports.HarnessInfo) ([]ports.ResolvedItem, error) {
 	if !info.Detected || info.Path == "" {
 		return nil, domain.TextErr("harness_not_detected", "{{harness}} was not detected on this machine", "harness", Name)
 	}
-	dir := a.listingDir(workspace)
-	added = slices.DeleteFunc(uniq(slices.Sorted(slices.Values(added))), func(d string) bool {
-		st, err := os.Stat(d)
-		return err != nil || !st.IsDir()
-	})
-	key := strings.Join(append([]string{info.Path, dir}, added...), "\x00")
+	key := info.Path
 	a.mu.Lock()
 	if items, ok := a.skills[key]; ok {
 		a.mu.Unlock()
@@ -76,7 +68,7 @@ func (a *Adapter) sessionSkills(ctx context.Context, info ports.HarnessInfo, wor
 			a.listings = map[string]*skillListing{}
 		}
 		a.listings[key] = l
-		go a.runListing(listCtx, info, dir, added, key, l)
+		go a.runListing(listCtx, info, key, l)
 	}
 	l.waiters++
 	a.mu.Unlock()
@@ -97,28 +89,7 @@ func (a *Adapter) sessionSkills(ctx context.Context, info ports.HarnessInfo, wor
 	}
 }
 
-// listingDir is the folder the listing session for workspace starts in: the workspace when it exists, as it is given
-// and whether its path is absolute or not, otherwise its nearest parent that does. HarmFlow chooses only where Claude
-// Code starts, and copies none of its rules about where a session finds its skills. A workspace not made yet whose path
-// is not absolute has no parent to look in, so it is listed in the user's home folder.
-func (a *Adapter) listingDir(workspace string) string {
-	if st, err := os.Stat(workspace); err == nil && st.IsDir() {
-		return workspace
-	}
-	if !filepath.IsAbs(workspace) {
-		return a.Home
-	}
-	dir := filepath.Clean(workspace)
-	for filepath.Dir(dir) != dir {
-		dir = filepath.Dir(dir)
-		if st, err := os.Stat(dir); err == nil && st.IsDir() {
-			break
-		}
-	}
-	return dir
-}
-
-// skillListing is one listing session in flight, which the lookups of its key share. Its items and err are set before
+// skillListing is one listing session in flight, which the lookups of its CLI share. Its items and err are set before
 // done is closed, and read only after; waiters, guarded by the adapter's mutex, counts the lookups waiting for it.
 type skillListing struct {
 	done    chan struct{}
@@ -130,9 +101,9 @@ type skillListing struct {
 
 // runListing lists the skills of key into l, keeps them when the listing succeeded, and closes l.done. A listing that
 // ReloadUserItems dropped, or that nobody waited for any more, does not write its result into the cache.
-func (a *Adapter) runListing(ctx context.Context, info ports.HarnessInfo, dir string, added []string, key string, l *skillListing) {
+func (a *Adapter) runListing(ctx context.Context, info ports.HarnessInfo, key string, l *skillListing) {
 	defer l.cancel()
-	names, err := a.listSkills(ctx, info, dir, added)
+	names, err := a.listSkills(ctx, info)
 	if err == nil {
 		slices.Sort(names)
 		for _, n := range slices.Compact(names) {
@@ -156,24 +127,19 @@ func (a *Adapter) runListing(ctx context.Context, info ports.HarnessInfo, dir st
 	close(l.done)
 }
 
-// listSkills starts a Claude Code session in dir with the added folders, with the flags an execution gives it that
-// change what it loads, and reads the skill list of its init line. Its environment is the one ports.SessionEnv gives
-// an execution's session, apart from the execution's own HARMFLOW_* identifiers, which a listing has none of. The
-// built-in skills, which an execution adds as a plugin of its own, are not asked for: HarmFlow finds them by their
-// prefix. A session that ends, prints no init line HarmFlow can read, or reaches the timeout first fails the listing.
-func (a *Adapter) listSkills(ctx context.Context, info ports.HarnessInfo, dir string, added []string) ([]string, error) {
+// listSkills starts a Claude Code session in the user's home folder, with the flags an execution gives it that change
+// what it loads, and reads the skill list of its init line. Its environment is the one ports.SessionEnv gives an
+// execution's session, apart from the execution's own HARMFLOW_* identifiers, which a listing has none of. The built-in
+// skills, which an execution adds as a plugin of its own, are not asked for: HarmFlow finds them by their prefix. A
+// session that ends, prints no init line HarmFlow can read, or reaches the timeout first fails the listing.
+func (a *Adapter) listSkills(ctx context.Context, info ports.HarnessInfo) ([]string, error) {
 	args := []string{"-p", "--output-format", "stream-json", "--verbose"}
 	if info.HasFeature("--no-session-persistence") {
 		args = append(args, "--no-session-persistence")
 	}
-	for _, d := range added {
-		if d != dir {
-			args = append(args, "--add-dir", d)
-		}
-	}
 	init := make(chan []byte, 1) // the first init line, which ends the wait
 	sent := false
-	inv := ports.Invocation{Path: info.Path, Args: args, Env: a.withToken(ports.SessionEnv(a.Env)), Dir: dir,
+	inv := ports.Invocation{Path: info.Path, Args: args, Env: a.withToken(ports.SessionEnv(a.Env)), Dir: a.Home,
 		Stdin: skillListPrompt}
 	p, err := procutil.StartLines(inv, io.Discard, func(line []byte) {
 		var h streamHead
@@ -235,9 +201,9 @@ func skillListFailed(detail string) error {
 		"detail", detail)
 }
 
-// ListsPerWorkspace implements ports.WorkspaceLister: skills come from the list Claude Code reports for the workspace,
+// ListsInstallation implements ports.InstallationLister: skills come from the list the installed Claude Code reports,
 // agents from its configuration directory.
-func (a *Adapter) ListsPerWorkspace(kind string) bool { return kind == "skill" }
+func (a *Adapter) ListsInstallation(kind string) bool { return kind == "skill" }
 
 // AllowsUnverified implements ports.UnverifiedItemsAllower: Claude Code loads a task's skills itself, so a skill list
 // it could not give leaves them unverified rather than missing.

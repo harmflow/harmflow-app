@@ -59,10 +59,11 @@ func names(items []ports.ResolvedItem) []string {
 	return out
 }
 
-// The skills a task can cite are the ones Claude Code's init line lists for the workspace and the added folders, sorted
-// and each once: its bundled skills and a plugin's among them, and a skill on disk it does not list not found. The
-// listing session runs in the workspace, as an execution does, with stream-json output and each added folder, and is
-// stopped at the init line, before the model would answer. Agents are still read from the configuration directory.
+// The skills a task can cite are the ones the installed Claude Code's init line lists, sorted and each once: its
+// bundled skills and a plugin's among them, and a skill on disk it does not list not found, the workspace's own
+// included. The listing session runs in the user's home folder with stream-json output and no folder added, whatever
+// the workspace and the added folders of the lookup, and is stopped at the init line, before the model would answer.
+// Agents are still read from the configuration directory.
 func TestSkillsComeFromTheInitLine(t *testing.T) {
 	config := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", config)
@@ -74,9 +75,9 @@ echo '{"type":"system","subtype":"init","skills":["simplify","review-notes","pdf
 sleep 1
 touch "$MARKER"
 `)
-	ws, added := t.TempDir(), t.TempDir()
+	home, ws, added := t.TempDir(), t.TempDir(), t.TempDir()
 	writeSettings(t, filepath.Join(ws, ".claude", "skills", "on-disk", "SKILL.md"), "---\nname: on-disk\n---\n")
-	a := &Adapter{Home: t.TempDir(), Env: []string{"PATH=/usr/bin:/bin", "LOG=" + log, "MARKER=" + marker}}
+	a := &Adapter{Home: home, Env: []string{"PATH=/usr/bin:/bin", "LOG=" + log, "MARKER=" + marker}}
 	info := ports.HarnessInfo{Detected: true, Path: path, Features: map[string]bool{"--no-session-persistence": true}}
 	ctx := t.Context()
 
@@ -84,9 +85,9 @@ touch "$MARKER"
 	if want := []string{"pdf:pdf", "review-notes", "simplify"}; !slices.Equal(names(items), want) || problems != nil || err != nil {
 		t.Errorf("UserItems(skill, %s, [%s]) = %q, %v, %v; want %q", ws, added, names(items), problems, err, want)
 	}
-	want := resolved(t, ws) + "|-p --output-format stream-json --verbose --no-session-persistence --add-dir " + added
+	want := resolved(t, home) + "|-p --output-format stream-json --verbose --no-session-persistence"
 	if got := runs(t, log); !slices.Equal(got, []string{want}) {
-		t.Errorf("the listing ran as %q, want %q", got, want)
+		t.Errorf("the listing ran as %q, want %q: in the home folder, with no folder added", got, want)
 	}
 	for _, c := range []struct {
 		name  string
@@ -99,8 +100,8 @@ touch "$MARKER"
 	if agents, _, err := a.UserItems(ctx, info, "agent", ws, nil); !slices.Equal(names(agents), []string{"reviewer"}) || err != nil {
 		t.Errorf("UserItems(agent) = %q, %v; want [reviewer] from the configuration directory", names(agents), err)
 	}
-	if skill, agent := a.ListsPerWorkspace("skill"), a.ListsPerWorkspace("agent"); !skill || agent {
-		t.Errorf("ListsPerWorkspace(skill), ListsPerWorkspace(agent) = %v, %v; want true, false", skill, agent)
+	if skill, agent := a.ListsInstallation("skill"), a.ListsInstallation("agent"); !skill || agent {
+		t.Errorf("ListsInstallation(skill), ListsInstallation(agent) = %v, %v; want true, false", skill, agent)
 	}
 	if skill, agent := a.AllowsUnverified("skill"), a.AllowsUnverified("agent"); !skill || agent {
 		t.Errorf("AllowsUnverified(skill), AllowsUnverified(agent) = %v, %v; want true, false", skill, agent)
@@ -111,64 +112,42 @@ touch "$MARKER"
 	}
 }
 
-// A list is kept per workspace and set of added folders, in any order, so a second lookup starts no session; another
-// set of folders, another workspace, and a lookup after ReloadUserItems ask again. A workspace not made yet is listed
-// in its nearest parent that exists, never the home folder, so two such workspaces under one folder share its list;
-// only one whose path is not absolute, which has no parent to look in, is listed in the home folder. A workspace that
-// exists is listed in itself, its path absolute or not. An added folder not made yet is left out.
-func TestSkillListIsCachedPerWorkspaceAndAddedFolders(t *testing.T) {
+// A list is kept per installation: lookups for any workspace and any added folders, made or not, absolute or not, share
+// the one session of their CLI, which runs in the home folder. Another CLI, and a lookup after ReloadUserItems, ask
+// again.
+func TestSkillListIsKeptPerInstallation(t *testing.T) {
 	path, log := listingClaude(t, `echo '{"type":"system","subtype":"init","skills":["simplify"]}'`)
-	home, ws, other, x, y := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+	other, otherLog := listingClaude(t, `echo '{"type":"system","subtype":"init","skills":["simplify"]}'`)
+	home, ws, elsewhere, x := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
 	a := &Adapter{Home: home, Env: []string{"PATH=/usr/bin:/bin", "LOG=" + log}}
 	info := ports.HarnessInfo{Detected: true, Path: path}
 	ctx := t.Context()
-	lookups := []struct {
+	for _, l := range []struct {
 		workspace string
 		added     []string
-		runs      int
 	}{
-		{ws, []string{x, y}, 1},
-		{ws, []string{y, x}, 1},
-		{ws, []string{x}, 2},
-		{ws, []string{x, filepath.Join(x, "not-made")}, 2},
-		{other, []string{x}, 3},
-		{filepath.Join(ws, "not-made"), nil, 4},
-		{filepath.Join(ws, "sub", "new"), nil, 4},
-		{ws, nil, 4},
-	}
-	for _, l := range lookups {
+		{ws, []string{x}},
+		{ws, nil},
+		{elsewhere, []string{x, filepath.Join(x, "not-made")}},
+		{filepath.Join(ws, "not-made"), nil},
+		{"not-absolute", nil},
+	} {
 		if _, _, err := a.UserItems(ctx, info, "skill", l.workspace, l.added); err != nil {
 			t.Fatalf("UserItems(skill, %s, %q) error %v, want none", l.workspace, l.added, err)
 		}
-		if got := len(runs(t, log)); got != l.runs {
-			t.Errorf("after UserItems(skill, %s, %q), %d listing sessions ran, want %d", l.workspace, l.added, got, l.runs)
-		}
 	}
-	if got := runs(t, log); !strings.HasPrefix(got[len(got)-1], resolved(t, ws)+"|") {
-		t.Errorf("the listing for a workspace not made ran as %q, want in its nearest parent that exists %s, not the home folder %s",
-			got[len(got)-1], ws, home)
+	want := []string{resolved(t, home) + "|-p --output-format stream-json --verbose"}
+	if got := runs(t, log); !slices.Equal(got, want) {
+		t.Errorf("five lookups for other workspaces and folders ran %q, want the one listing %q", got, want)
 	}
-	if _, _, err := a.UserItems(ctx, info, "skill", "not-absolute", nil); err != nil {
-		t.Fatalf("UserItems(skill, not-absolute) error %v, want none", err)
+	a.Env = []string{"PATH=/usr/bin:/bin", "LOG=" + otherLog}
+	if _, _, err := a.UserItems(ctx, ports.HarnessInfo{Detected: true, Path: other}, "skill", ws, nil); err != nil ||
+		len(runs(t, otherLog)) != 1 {
+		t.Errorf("UserItems with another CLI: %v, %d sessions; want a session of its own", err, len(runs(t, otherLog)))
 	}
-	if got := runs(t, log); len(got) != 5 || !strings.HasPrefix(got[4], resolved(t, home)+"|") {
-		t.Errorf("the listing for a workspace not made whose path is not absolute ran as %q, want a fifth in the home folder %s",
-			got, home)
-	}
-	t.Chdir(other)
-	rel := filepath.Join(other, "rel")
-	if err := os.Mkdir(rel, 0o700); err != nil {
-		t.Fatalf("os.Mkdir(%s) = %v, want no error", rel, err)
-	}
-	if _, _, err := a.UserItems(ctx, info, "skill", "rel", nil); err != nil {
-		t.Fatalf("UserItems(skill, rel) error %v, want none", err)
-	}
-	if got := runs(t, log); len(got) != 6 || !strings.HasPrefix(got[5], resolved(t, rel)+"|") {
-		t.Errorf("the listing for a workspace that exists and whose path is not absolute ran as %q, want a sixth in itself %s",
-			got, rel)
-	}
+	a.Env = []string{"PATH=/usr/bin:/bin", "LOG=" + log}
 	a.ReloadUserItems()
-	if _, _, err := a.UserItems(ctx, info, "skill", ws, []string{x, y}); err != nil || len(runs(t, log)) != 7 {
+	if _, _, err := a.UserItems(ctx, info, "skill", ws, nil); err != nil || len(runs(t, log)) != 2 {
 		t.Errorf("UserItems after ReloadUserItems: %v, %d sessions; want a new session", err, len(runs(t, log)))
 	}
 }
@@ -261,20 +240,17 @@ func TestSkillListThatClaudeCodeCannotGive(t *testing.T) {
 // waitBound bounds every wait of the tests of listings in flight; none of them waits for it unless one fails.
 const waitBound = 10 * time.Second
 
-// heldClaude is a stand-in Claude Code whose listing in the folder held waits until release is called, then runs then;
-// a listing in any other folder prints its init line at once. A test that ends releases it, so no session outlives
-// the test.
-func heldClaude(t *testing.T, held, then string) (a *Adapter, info ports.HarnessInfo, log string, release func()) {
+// heldClaude is a stand-in Claude Code whose listing waits until release is called, then runs then and prints its init
+// line. A test that ends releases it, so no session outlives the test.
+func heldClaude(t *testing.T, then string) (a *Adapter, info ports.HarnessInfo, log string, release func()) {
 	t.Helper()
 	flag := filepath.Join(t.TempDir(), "released")
-	path, log := listingClaude(t, `case "$(pwd -P)" in
-"$HELD") until [ -e "$RELEASED" ]; do sleep 0.05; done
-`+then+` ;;
-esac
+	path, log := listingClaude(t, `until [ -e "$RELEASED" ]; do sleep 0.05; done
+`+then+`
 echo '{"type":"system","subtype":"init","skills":["simplify"]}'
 `)
-	a = &Adapter{Home: t.TempDir(), Env: []string{"PATH=/usr/bin:/bin", "LOG=" + log, "HELD=" + resolved(t, held),
-		"RELEASED=" + flag}, SkillListTimeout: 30 * time.Second}
+	a = &Adapter{Home: t.TempDir(), Env: []string{"PATH=/usr/bin:/bin", "LOG=" + log, "RELEASED=" + flag},
+		SkillListTimeout: 30 * time.Second}
 	release = func() {
 		if err := os.WriteFile(flag, nil, 0o600); err != nil {
 			t.Errorf("os.WriteFile(%s) = %v, want no error", flag, err)
@@ -317,10 +293,13 @@ type lookupResult struct {
 	err   error
 }
 
-// lookUp looks up the skills of workspace in a goroutine of its own, which ends once the lookup returns.
-func lookUp(ctx context.Context, a *Adapter, info ports.HarnessInfo, workspace string) <-chan lookupResult {
+// lookUp looks up the skills of the CLI of info in a goroutine of its own, which ends once the lookup returns. Each
+// lookup is for a workspace of its own, which changes nothing.
+func lookUp(ctx context.Context, a *Adapter, info ports.HarnessInfo) <-chan lookupResult {
 	out := make(chan lookupResult, 1)
+	workspace, _ := os.MkdirTemp("", "workspace")
 	go func() {
+		defer os.RemoveAll(workspace)
 		items, _, err := a.UserItems(ctx, info, "skill", workspace, nil)
 		out <- lookupResult{items, err}
 	}()
@@ -339,41 +318,42 @@ func result(t *testing.T, what string, lookup <-chan lookupResult) lookupResult 
 	}
 }
 
-// A lookup waits only for the listing of its own key: while one workspace's listing is held, another workspace's
-// lookup starts its own and returns.
-func TestSkillListingOfAnotherWorkspaceRunsAlongside(t *testing.T) {
+// A lookup waits only for the listing of its own CLI: while one installation's listing is held, another's lookup starts
+// its own and returns.
+func TestSkillListingOfAnotherInstallationRunsAlongside(t *testing.T) {
 	defer goleak.VerifyNone(t)
-	held, other := t.TempDir(), t.TempDir()
-	a, info, log, release := heldClaude(t, held, "")
+	a, info, log, release := heldClaude(t, "")
+	other, _ := listingClaude(t, `echo '{"type":"system","subtype":"init","skills":["simplify"]}'`)
 
-	slow := lookUp(t.Context(), a, info, held)
+	slow := lookUp(t.Context(), a, info)
 	waitForRuns(t, log, 1)
-	if r := result(t, "the lookup of another workspace", lookUp(t.Context(), a, info, other)); r.err != nil ||
+	otherInfo := ports.HarnessInfo{Detected: true, Path: other}
+	if r := result(t, "the lookup of another CLI", lookUp(t.Context(), a, otherInfo)); r.err != nil ||
 		!slices.Equal(names(r.items), []string{"simplify"}) {
-		t.Errorf("UserItems(skill, %s) = %q, %v while %s is listed; want [simplify]", other, names(r.items), r.err, held)
+		t.Errorf("UserItems(skill) with %s = %q, %v while %s is listed; want [simplify]", other, names(r.items), r.err,
+			info.Path)
 	}
 	select {
 	case r := <-slow:
-		t.Errorf("UserItems(skill, %s) = %q, %v before its listing was released, want it still waiting", held,
+		t.Errorf("UserItems(skill) with %s = %q, %v before its listing was released, want it still waiting", info.Path,
 			names(r.items), r.err)
 	default:
 	}
 	release()
 	if r := result(t, "the held lookup", slow); r.err != nil || !slices.Equal(names(r.items), []string{"simplify"}) {
-		t.Errorf("UserItems(skill, %s) = %q, %v; want [simplify]", held, names(r.items), r.err)
+		t.Errorf("UserItems(skill) with %s = %q, %v; want [simplify]", info.Path, names(r.items), r.err)
 	}
 }
 
-// A second lookup of a key shares the listing already running, its failure included: one session answers both, though
-// a failed list is not kept.
-func TestSkillListingOfOneWorkspaceIsShared(t *testing.T) {
+// A second lookup of an installation, for another workspace, shares the listing already running, its failure
+// included: one session answers both, though a failed list is not kept.
+func TestSkillListingOfOneInstallationIsShared(t *testing.T) {
 	defer goleak.VerifyNone(t)
-	ws := t.TempDir()
-	a, info, log, release := heldClaude(t, ws, "echo 'Not logged in' >&2; exit 1")
+	a, info, log, release := heldClaude(t, "echo 'Not logged in' >&2; exit 1")
 
-	first := lookUp(t.Context(), a, info, ws)
+	first := lookUp(t.Context(), a, info)
 	waitForRuns(t, log, 1)
-	second := lookUp(t.Context(), a, info, ws)
+	second := lookUp(t.Context(), a, info)
 	waitForWaiters(t, a, 2)
 	release()
 	for _, c := range []struct {
@@ -383,12 +363,12 @@ func TestSkillListingOfOneWorkspaceIsShared(t *testing.T) {
 		r := result(t, c.what, c.lookup)
 		if text := domain.TextOf(r.err); r.items != nil || text.Key != "command_failed" ||
 			!strings.Contains(text.Params["detail"], "Not logged in") {
-			t.Errorf("%s: UserItems(skill, %s) = %q, %+v; want command_failed with Not logged in", c.what, ws,
-				names(r.items), text)
+			t.Errorf("%s: UserItems(skill) = %q, %+v; want command_failed with Not logged in", c.what, names(r.items),
+				text)
 		}
 	}
 	if got := len(runs(t, log)); got != 1 {
-		t.Errorf("%d listing sessions ran for two lookups of one workspace, want 1", got)
+		t.Errorf("%d listing sessions ran for two lookups of one installation, want 1", got)
 	}
 }
 
@@ -397,12 +377,12 @@ func TestSkillListingOfOneWorkspaceIsShared(t *testing.T) {
 func TestSkillLookupWhoseContextEndsReturns(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	ws := t.TempDir()
-	a, info, log, release := heldClaude(t, ws, "")
+	a, info, log, release := heldClaude(t, "")
 
 	ctx, cancel := context.WithCancel(t.Context())
-	gone := lookUp(ctx, a, info, ws)
+	gone := lookUp(ctx, a, info)
 	waitForRuns(t, log, 1)
-	stays := lookUp(t.Context(), a, info, ws)
+	stays := lookUp(t.Context(), a, info)
 	waitForWaiters(t, a, 2)
 	cancel()
 	if r := result(t, "the lookup whose context ended", gone); r.items != nil || !errors.Is(r.err, context.Canceled) {
@@ -422,17 +402,17 @@ func TestSkillLookupWhoseContextEndsReturns(t *testing.T) {
 func TestSkillListingNobodyWaitsForStops(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	ws := t.TempDir()
-	a, info, log, release := heldClaude(t, ws, "")
+	a, info, log, release := heldClaude(t, "")
 
 	ctx, cancel := context.WithCancel(t.Context())
-	gone := lookUp(ctx, a, info, ws)
+	gone := lookUp(ctx, a, info)
 	waitForRuns(t, log, 1)
 	cancel()
 	if r := result(t, "the lookup whose context ended", gone); !errors.Is(r.err, context.Canceled) {
 		t.Errorf("UserItems(skill, %s) with its context cancelled = %q, %v; want %v", ws, names(r.items), r.err,
 			context.Canceled)
 	}
-	next := lookUp(t.Context(), a, info, ws)
+	next := lookUp(t.Context(), a, info)
 	waitForRuns(t, log, 2)
 	release()
 	if r := result(t, "the next lookup", next); r.err != nil || !slices.Equal(names(r.items), []string{"simplify"}) {
@@ -445,9 +425,9 @@ func TestSkillListingNobodyWaitsForStops(t *testing.T) {
 func TestSkillReloadDoesNotWaitForAListing(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	ws := t.TempDir()
-	a, info, log, release := heldClaude(t, ws, "")
+	a, info, log, release := heldClaude(t, "")
 
-	first := lookUp(t.Context(), a, info, ws)
+	first := lookUp(t.Context(), a, info)
 	waitForRuns(t, log, 1)
 	reloaded := make(chan struct{})
 	go func() {

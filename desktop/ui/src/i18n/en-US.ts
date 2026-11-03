@@ -338,11 +338,11 @@ export const enUS = {
       '{{harness}} is not a valid fallback: agent "{{name}}" cannot be found for it ($t(itemSource.{{source}}))',
     fallback_skill_missing:
       '{{harness}} is not a valid fallback: skill "{{name}}" cannot be found for it ($t(itemSource.{{source}}))',
-    skill_list_unreadable: "{{harness}}'s skill list for {{workspace}} could not be read: {{detail}}",
+    skill_list_unreadable: "{{harness}}'s skill list could not be read: {{detail}}",
     skill_list_unverified:
-      "{{harness}} could not say which skills it loads for {{workspace}}, so the task's skills are not verified: {{detail}}",
+      "{{harness}} could not say which skills it loads, so the task's skills are not verified: {{detail}}",
     fallback_skill_list_unreadable:
-      "{{harness}} is not a valid fallback: its skill list for {{workspace}} could not be read: {{detail}}",
+      "{{harness}} is not a valid fallback: its skill list could not be read: {{detail}}",
     claude_skill_list_unrecognized: "{{command}} printed no skill list HarmFlow can read",
     claude_skill_list_timed_out: "{{command}} printed no init line within {{timeout}}, so the skills Claude Code loads are unknown",
     codex_app_server_missing: "Codex {{version}} has no app server",
@@ -411,6 +411,7 @@ export const enUS = {
     daemon_stop_requested: "stopped at the user's request",
     local_api_stopped: "the local API stopped",
     task_delete_pending: "deletion waits for the running execution",
+    task_checked: "the task was checked against its harnesses",
     task_changed_externally: "the task file was changed outside HarmFlow",
     task_changed_externally_invalid:
       "the task file {{file}} was changed outside HarmFlow and fails validation; the last valid definition stays",
@@ -563,8 +564,8 @@ export const enUS = {
   itemSource: {
     builtin: "built in",
     harness: "the {{harness}} configuration",
-    skill_list: "{{harness}}'s skill list for {{workspace}}",
-    skill_list_errors: "{{harness}}'s skill list for {{workspace}}, which could not load {{errors}}",
+    skill_list: "{{harness}}'s skill list",
+    skill_list_errors: "{{harness}}'s skill list, which could not load {{errors}}",
   },
   // The Claude Code settings sources whose allow rules widen a task's tool list or its file edits, as
   // restriction_claude_allow_rules and restriction_claude_edit_rules name them.

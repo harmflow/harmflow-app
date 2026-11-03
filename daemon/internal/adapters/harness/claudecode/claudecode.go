@@ -58,7 +58,7 @@ type Adapter struct {
 	SkillListTimeout time.Duration
 
 	mu           sync.Mutex
-	skills       map[string][]ports.ResolvedItem // by CLI path, workspace, and added folders, kept until ReloadUserItems
+	skills       map[string][]ports.ResolvedItem // the installed skills by CLI path, kept until ReloadUserItems
 	listings     map[string]*skillListing        // the listings in flight, by the same key as skills
 	helpTimeout  time.Duration                   // the --help check; zero is defaultHelpTimeout
 	quotaTimeout time.Duration                   // `claude -p "/usage"`; zero is defaultQuotaTimeout
@@ -77,7 +77,7 @@ var (
 	_ ports.HarnessIdentifier      = (*Adapter)(nil)
 	_ ports.QuotaReader            = (*Adapter)(nil)
 	_ ports.ExtraUsageReporter     = (*Adapter)(nil)
-	_ ports.WorkspaceLister        = (*Adapter)(nil)
+	_ ports.InstallationLister     = (*Adapter)(nil)
 	_ ports.UnverifiedItemsAllower = (*Adapter)(nil)
 	_ ports.ItemReloader           = (*Adapter)(nil)
 	_ ports.TokenSignIn            = (*Adapter)(nil)
@@ -306,11 +306,12 @@ func (a *Adapter) ValidateProfile(info ports.HarnessInfo, model, effort string) 
 // workspace.
 func (a *Adapter) agentDir() catalog.Dir { return catalog.Dir{Root: a.configDir()} }
 
-// UserItem implements ports.HarnessAdapter: a skill is one Claude Code reports it loads for workspace and the added
-// folders, which a CLI that was not detected cannot report; an agent is looked up in the configuration directory.
-func (a *Adapter) UserItem(ctx context.Context, info ports.HarnessInfo, kind, name, workspace string, added []string) (ports.ResolvedItem, bool, []ports.DiscoveryError, error) {
+// UserItem implements ports.HarnessAdapter: a skill is one the installed Claude Code reports it loads, which a CLI that
+// was not detected cannot report; an agent is looked up in the configuration directory. The list is the installation's,
+// so the workspace and the added folders change nothing.
+func (a *Adapter) UserItem(ctx context.Context, info ports.HarnessInfo, kind, name, _ string, _ []string) (ports.ResolvedItem, bool, []ports.DiscoveryError, error) {
 	if kind == "skill" {
-		skills, err := a.sessionSkills(ctx, info, workspace, added)
+		skills, err := a.installedSkills(ctx, info)
 		if err != nil {
 			return ports.ResolvedItem{}, false, nil, err
 		}
@@ -325,12 +326,12 @@ func (a *Adapter) UserItem(ctx context.Context, info ports.HarnessInfo, kind, na
 	return it, ok, nil, nil
 }
 
-// UserItems implements ports.HarnessAdapter: the skills Claude Code reports it loads for workspace and the added
-// folders, or the agents of the configuration directory, sorted by name, each name once. A skill list Claude Code
-// could not give is the error.
-func (a *Adapter) UserItems(ctx context.Context, info ports.HarnessInfo, kind, workspace string, added []string) ([]ports.ResolvedItem, []ports.DiscoveryError, error) {
+// UserItems implements ports.HarnessAdapter: the skills the installed Claude Code reports it loads, or the agents of
+// the configuration directory, sorted by name, each name once; the workspace and the added folders change nothing. A
+// skill list Claude Code could not give is the error.
+func (a *Adapter) UserItems(ctx context.Context, info ports.HarnessInfo, kind, _ string, _ []string) ([]ports.ResolvedItem, []ports.DiscoveryError, error) {
 	if kind == "skill" {
-		skills, err := a.sessionSkills(ctx, info, workspace, added)
+		skills, err := a.installedSkills(ctx, info)
 		return skills, nil, err
 	}
 	items := a.agentDir().Items(kind)
