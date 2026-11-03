@@ -265,7 +265,11 @@ out=$(build_app 2>&1) || fail "build_app failed: $out"
 [[ $(cat "$work/make" 2>&1) == "-C $root app" ]] || fail "did not run make app: $out"
 
 # From here on, api answers from $work/responses, one "STATUS BODY" line per call, and logs each call to $work/calls;
-# sleep only moves SECONDS on, so a wait takes no time.
+# sleep only moves SECONDS on, so a wait takes no time. Unset, SECONDS loses its special property and counts no real
+# time, so stop_daemon's deadline reads the same clock as sleep: the processes the stubs start cost a count nothing,
+# however long a loaded machine takes to start them (harmflow-app#357).
+unset SECONDS
+SECONDS=0
 fake_api() {
 	printf '%s\n' "$@" >"$work/responses"
 	: >"$work/calls"
