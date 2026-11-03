@@ -214,7 +214,12 @@ func TestSignInCopiesNoCredential(t *testing.T) {
 		t.Errorf("GET /harnesses holds pieces of Claude Code's credential, at offsets %v of it", at)
 	}
 	d.stop()
-	noLeakInHome(t, homeFiles(t, home), map[string]string{"Claude Code's credential": claude.secret})
+	files := homeFiles(t, home)
+	// The session ran in the sign-in's folder, where the stand-in marked the folder trusted: the scan reads that folder.
+	if _, ok := files[filepath.Join("run", "sign-in", "claude-code", ".trusted")]; !ok {
+		t.Errorf("no file under the daemon's run/sign-in/claude-code, so the scan missed the sign-in's folder")
+	}
+	noLeakInHome(t, files, map[string]string{"Claude Code's credential": claude.secret})
 	if got, err := os.ReadFile(claude.credential); err != nil || string(got) != claude.secret {
 		t.Errorf("the stand-in's credential file after the sign-in: %d bytes, %v; want the credential it wrote, unchanged",
 			len(got), err)
