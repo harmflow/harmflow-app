@@ -214,7 +214,7 @@ paths:
               type: object
               required: [token]
               properties:
-                token: { type: string, description: The token, without spaces, quotes, or line breaks. }
+                token: { type: string, description: "The token, without spaces, quotes, or line breaks." }
       responses:
         "200":
           description: The harness, checked again with the token.
@@ -1226,7 +1226,7 @@ components:
       required: [month, daysInMonth, days, total]
       properties:
         month: { type: string, description: "The month, YYYY-MM." }
-        daysInMonth: { type: integer, description: The days of the month, those still to come included. }
+        daysInMonth: { type: integer, description: "The days of the month, those still to come included." }
         days:
           description: Each day from the first of the month to today, oldest first.
           type: array
@@ -1236,7 +1236,7 @@ components:
           type: object
           required: [costUsd, tokens]
           properties:
-            costUsd: { type: number, description: The estimated cost in US dollars, at API prices. }
+            costUsd: { type: number, description: "The estimated cost in US dollars, at API prices." }
             tokens: { type: integer, description: Every token class summed. }
 
     SpendDay:
@@ -1245,7 +1245,7 @@ components:
       required: [date, costUsd, tokens, attempts, undercount]
       properties:
         date: { type: string, format: date }
-        costUsd: { type: number, description: The estimated cost in US dollars, at API prices. }
+        costUsd: { type: number, description: "The estimated cost in US dollars, at API prices." }
         tokens: { type: integer, description: Every token class summed. }
         attempts: { type: integer, description: The attempts that ended that day. }
         undercount:
@@ -1254,8 +1254,8 @@ components:
           properties:
             unpriced: { type: integer, description: "Attempts whose model has no price: tokens, and no cost." }
             notReported: { type: integer, description: Attempts whose harness reported no usage. }
-            partial: { type: integer, description: Attempts that ended with only a partial count, before their harness reported. }
-            running: { type: integer, description: Today only, the attempts still running, which count on no day yet. }
+            partial: { type: integer, description: "Attempts that ended with only a partial count, before their harness reported." }
+            running: { type: integer, description: "Today only, the attempts still running, which count on no day yet." }
 
     SystemGauges:
       description: >-
@@ -1567,7 +1567,7 @@ components:
         revision: { type: string }
         harness: { type: string }
         fallbackHarnesses: { type: array, items: { type: string } }
-        schedule: { type: string, description: The cron expression or interval, if any. }
+        schedule: { type: string, description: "The cron expression or interval, if any." }
         timezone: { type: string }
         nextFireAt: { type: string, format: date-time }
         running: { type: boolean }
