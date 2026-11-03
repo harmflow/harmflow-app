@@ -479,6 +479,33 @@ type ExecutionSummary struct {
 	LogExpired        bool              `json:"logExpired,omitempty"`
 	// Script is set for a script task's execution, whose working directory is no workspace of worktrees.
 	Script bool `json:"script,omitempty"`
+	// Spend is each harness attempt's figures, in the attempts' order, which the month's spend sums
+	// (harmflow-app#583); absent for a script task's execution, which runs no model.
+	Spend []AttemptSpend `json:"spend,omitempty"`
+}
+
+// AttemptSpend is what the month's spend reads of one attempt: when it ended, absent while it runs; its cost in USD,
+// absent when it has none, as an unpriced model or a partial count leaves it; its tokens, every class summed; and how
+// complete its count is, not reported when its harness reported no usage.
+type AttemptSpend struct {
+	EndedAt *time.Time  `json:"endedAt,omitempty"`
+	CostUSD *float64    `json:"costUsd,omitempty"`
+	Tokens  int64       `json:"tokens"`
+	Usage   UsageStatus `json:"usage"`
+}
+
+// Count is the sum of every class of t, as one number.
+func (t Tokens) Count() int64 {
+	return t.Input + t.CacheWriteShort + t.CacheWriteLong + t.CacheRead + t.Output
+}
+
+// spendOf is the attempt's figures for the month's spend.
+func spendOf(at *Attempt) AttemptSpend {
+	s := AttemptSpend{EndedAt: at.EndedAt, Usage: UsageNotReported}
+	if u := at.Usage; u != nil {
+		s.CostUSD, s.Tokens, s.Usage = u.CostUSD, u.Total().Count(), u.Status
+	}
+	return s
 }
 
 // WorkItemRef is what a summary keeps of a work item an execution's report named: its key, its outcome, and the
@@ -509,6 +536,11 @@ func (x *Execution) Summarize() *ExecutionSummary {
 	}
 	for _, w := range x.WorkItems {
 		s.WorkItems = append(s.WorkItems, WorkItemRef{Key: w.Key, Outcome: w.Outcome, WorktreePath: w.WorktreePath})
+	}
+	if x.Script == nil {
+		for i := range x.Attempts {
+			s.Spend = append(s.Spend, spendOf(&x.Attempts[i]))
+		}
 	}
 	return s
 }

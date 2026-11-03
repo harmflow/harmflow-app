@@ -853,6 +853,32 @@ export const enUS = {
     tasksCount: "{{enabled}} of {{total}} tasks enabled",
     noTasks: "No tasks yet.",
     createFirst: "Create your first task",
+    spend: {
+      title: "Spend this month",
+      view: "Show the spend in",
+      cost: "Cost",
+      tokens: "Tokens",
+      totalCost: "this month, estimated at API prices",
+      totalTokens: "tokens this month",
+      noExecution: "No execution this month",
+      undercounts: "undercounts",
+      attemptsEnded_one: "{{formatted}} attempt ended",
+      attemptsEnded_other: "{{formatted}} attempts ended",
+      markNoteCost:
+        "A marked day undercounts: an attempt's model has no price, its harness reported no usage, it ended with only a partial count, or, today, it is still running.",
+      markNoteTokens:
+        "A marked day undercounts: an attempt's harness reported no usage, it ended with only a partial count, or, today, it is still running.",
+      reasons: {
+        unpriced_one: "{{count}} attempt's model has no price",
+        unpriced_other: "{{count}} attempts' models have no price",
+        notReported_one: "{{count}} attempt reported no usage",
+        notReported_other: "{{count}} attempts reported no usage",
+        partial_one: "{{count}} attempt ended with only a partial count",
+        partial_other: "{{count}} attempts ended with only a partial count",
+        running_one: "{{count}} attempt still running",
+        running_other: "{{count}} attempts still running",
+      },
+    },
   },
   harness: {
     names: { "claude-code": "Claude Code", codex: "Codex" },

@@ -878,6 +878,32 @@ export const ptBR: Resources = {
     tasksCount: "{{enabled}} de {{total}} tarefas ativadas",
     noTasks: "Nenhuma tarefa ainda.",
     createFirst: "Crie sua primeira tarefa",
+    spend: {
+      title: "Gasto deste mês",
+      view: "Mostrar o gasto em",
+      cost: "Custo",
+      tokens: "Tokens",
+      totalCost: "neste mês, estimado a preços de API",
+      totalTokens: "tokens neste mês",
+      noExecution: "Nenhuma execução neste mês",
+      undercounts: "subestimado",
+      attemptsEnded_one: "{{formatted}} tentativa terminou",
+      attemptsEnded_other: "{{formatted}} tentativas terminaram",
+      markNoteCost:
+        "Um dia marcado está subestimado: o modelo de uma tentativa não tem preço, sua ferramenta não informou o uso, ela terminou só com uma contagem parcial ou, hoje, ainda está em execução.",
+      markNoteTokens:
+        "Um dia marcado está subestimado: a ferramenta de uma tentativa não informou o uso, ela terminou só com uma contagem parcial ou, hoje, ainda está em execução.",
+      reasons: {
+        unpriced_one: "{{count}} tentativa com modelo sem preço",
+        unpriced_other: "{{count}} tentativas com modelo sem preço",
+        notReported_one: "{{count}} tentativa não informou o uso",
+        notReported_other: "{{count}} tentativas não informaram o uso",
+        partial_one: "{{count}} tentativa terminou só com uma contagem parcial",
+        partial_other: "{{count}} tentativas terminaram só com uma contagem parcial",
+        running_one: "{{count}} tentativa ainda em execução",
+        running_other: "{{count}} tentativas ainda em execução",
+      },
+    },
   },
   harness: {
     names: { "claude-code": "Claude Code", codex: "Codex" },

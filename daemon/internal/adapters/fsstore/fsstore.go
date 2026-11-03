@@ -267,8 +267,9 @@ var _ ports.ExecutionRepository = (*Executions)(nil)
 const IndexFile = "index.json"
 
 // indexVersion is the schemaVersion of the index; an index at any other is rebuilt. Version 2 added the current
-// attempt's effort and configured model and effort to each summary.
-const indexVersion = "2"
+// attempt's effort and configured model and effort to each summary, and version 3 each attempt's figures for the
+// month's spend.
+const indexVersion = "3"
 
 type indexDocument struct {
 	SchemaVersion string       `json:"schemaVersion"`

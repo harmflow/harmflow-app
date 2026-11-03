@@ -23,6 +23,7 @@ import type {
   SchedulePreview,
   Settings,
   SettingsPatch,
+  Spend,
   Stats,
   SystemGauges,
   Task,
@@ -83,6 +84,8 @@ export const api = {
   stopDaemon: (force = false) => call<Accepted>("POST", "/daemon/stop", { force }),
   diagnostics: () => call<Diagnostics>("GET", "/diagnostics"),
   stats: () => call<Stats>("GET", "/stats"),
+  /** The current month's spend per day, for the Overview's band. */
+  spend: () => call<Spend>("GET", "/spend"),
   system: () => call<SystemGauges>("GET", "/system"),
 
   harnesses: () => call<Harness[]>("GET", "/harnesses"),

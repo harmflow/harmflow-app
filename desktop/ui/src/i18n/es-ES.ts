@@ -876,6 +876,32 @@ export const esES: Resources = {
     tasksCount: "{{enabled}} de {{total}} tareas activadas",
     noTasks: "Aún no hay tareas.",
     createFirst: "Crea tu primera tarea",
+    spend: {
+      title: "Gasto de este mes",
+      view: "Mostrar el gasto en",
+      cost: "Coste",
+      tokens: "Tokens",
+      totalCost: "este mes, estimado a precios de API",
+      totalTokens: "tokens este mes",
+      noExecution: "Ninguna ejecución este mes",
+      undercounts: "subestimado",
+      attemptsEnded_one: "{{formatted}} intento terminó",
+      attemptsEnded_other: "{{formatted}} intentos terminaron",
+      markNoteCost:
+        "Un día marcado está subestimado: el modelo de un intento no tiene precio, su herramienta no informó del uso, terminó solo con un recuento parcial o, hoy, aún está en ejecución.",
+      markNoteTokens:
+        "Un día marcado está subestimado: la herramienta de un intento no informó del uso, terminó solo con un recuento parcial o, hoy, aún está en ejecución.",
+      reasons: {
+        unpriced_one: "{{count}} intento con un modelo sin precio",
+        unpriced_other: "{{count}} intentos con un modelo sin precio",
+        notReported_one: "{{count}} intento no informó del uso",
+        notReported_other: "{{count}} intentos no informaron del uso",
+        partial_one: "{{count}} intento terminó solo con un recuento parcial",
+        partial_other: "{{count}} intentos terminaron solo con un recuento parcial",
+        running_one: "{{count}} intento aún en ejecución",
+        running_other: "{{count}} intentos aún en ejecución",
+      },
+    },
   },
   harness: {
     names: { "claude-code": "Claude Code", codex: "Codex" },
