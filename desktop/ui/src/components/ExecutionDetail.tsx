@@ -10,6 +10,7 @@ import { isActive } from "../api/types";
 import type { Tone } from "../design/tokens";
 import { daemonText, eventText, fieldText } from "../lib/daemonText";
 import { formatBytes, formatDateTime, formatDuration, formatTime, elapsedMs } from "../lib/format";
+import { matching } from "../lib/shortcuts";
 import { toneClass, typeGlyph } from "../lib/taskType";
 import { buildTimeline, changedFilesFromEvents, toolKey, type TimelineItem } from "../lib/timeline";
 import { actions, useStore } from "../state/store";
@@ -291,12 +292,13 @@ function Timeline({
 
   // The list is one tab stop whose arrow keys step through the events, without wrapping (harmflow-app#190).
   const onKeyDown = (e: KeyboardEvent<HTMLOListElement>) => {
-    if (e.target !== e.currentTarget || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (e.target !== e.currentTarget) return;
+    const key = matching(e, ["previousEvent", "nextEvent", "firstEvent", "lastEvent"]);
+    if (!key) return;
     const at = items.findIndex((i) => i.id === selectedId);
     const last = items.length - 1;
-    const moves: Partial<Record<string, number>> = { ArrowUp: Math.max(at - 1, 0), ArrowDown: Math.min(at + 1, last), Home: 0, End: last };
-    const to = moves[e.key];
-    if (to === undefined) return;
+    const moves = { previousEvent: Math.max(at - 1, 0), nextEvent: Math.min(at + 1, last), firstEvent: 0, lastEvent: last };
+    const to = moves[key];
     e.preventDefault(); // the list does not scroll by itself, even at an edge
     if (to === at) return;
     select(items[to].id);

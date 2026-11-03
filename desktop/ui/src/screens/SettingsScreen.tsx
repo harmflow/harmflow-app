@@ -1,5 +1,5 @@
 // Settings, divided into sections: a list of them on the left, and the open one beside it. Interface: the language, the
-// menu bar, and notifications. Execution: the AI tools and the command-line tools, and the paths a task may use. This
+// menu bar, notifications, and the keyboard shortcuts. Execution: the AI tools and the command-line tools, and the paths a task may use. This
 // computer: the daemon, storage, and local API security. About stands alone at the foot of the list.
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
@@ -16,13 +16,14 @@ import { applyLanguage } from "../i18n";
 import { errorMessage } from "../lib/errorMessage";
 import { formatBytes, formatDateTime, formatDuration } from "../lib/format";
 import { useDraft, useNow, type DraftReport } from "../lib/hooks";
+import { SHORTCUTS, keycaps, shortcutsByGroup } from "../lib/shortcuts";
 import { actions, useStore } from "../state/store";
 
-export type SettingsSection = "general" | "notifications" | "agents" | "paths" | "daemon" | "storage" | "security" | "about";
+export type SettingsSection = "general" | "notifications" | "shortcuts" | "agents" | "paths" | "daemon" | "storage" | "security" | "about";
 
 /** The section list's groups, in order; About follows them alone, under a divider. */
 export const SECTION_GROUPS: ReadonlyArray<{ key: "interface" | "agents" | "computer"; sections: SettingsSection[] }> = [
-  { key: "interface", sections: ["general", "notifications"] },
+  { key: "interface", sections: ["general", "notifications", "shortcuts"] },
   { key: "agents", sections: ["agents", "paths"] },
   { key: "computer", sections: ["daemon", "storage", "security"] },
 ];
@@ -30,6 +31,7 @@ export const SECTION_GROUPS: ReadonlyArray<{ key: "interface" | "agents" | "comp
 const SECTION_ICONS: Record<SettingsSection, IconName> = {
   general: "globe",
   notifications: "bell",
+  shortcuts: "keyboard",
   agents: "agent",
   paths: "folder",
   daemon: "power",
@@ -142,6 +144,7 @@ export function SettingsScreen({
         </h2>
         {section === "general" ? <GeneralSection /> : null}
         {section === "notifications" ? <NotificationsSection /> : null}
+        {section === "shortcuts" ? <ShortcutsSection /> : null}
         {section === "agents" ? <AgentsSection report={report} /> : null}
         {section === "paths" ? <PathsSection report={report} /> : null}
         {section === "daemon" ? <DaemonSection /> : null}
@@ -321,6 +324,35 @@ function PathsSection({ report }: { report: DraftReport }) {
       <Panel title={t("settings.subheads.allowedFolders")}>
         <AllowedFolders value={settings?.allowedFolders ?? []} onSave={(v) => void patch({ allowedFolders: v })} onDraft={report} />
       </Panel>
+    </>
+  );
+}
+
+/** HarmFlow's keyboard shortcuts, grouped by where they work, read from the one table the handlers match. */
+function ShortcutsSection() {
+  const { t } = useTranslation();
+  return (
+    <>
+      {shortcutsByGroup().map(({ group, ids }) => (
+        <Panel key={group} title={t(`settings.shortcuts.groups.${group}`)}>
+          {ids.map((id) => (
+            <SettingRow key={id} label={t(`settings.shortcuts.labels.${id}`)}>
+              <span className="keycaps" data-shortcut={id}>
+                {SHORTCUTS[id].chords.map((chord, i) => (
+                  <span key={i} className="keycaps__chord">
+                    {i > 0 ? <span className="keycaps__or">/</span> : null}
+                    {keycaps(chord).map((cap, j) => (
+                      <kbd key={j} className="keycap">
+                        {cap}
+                      </kbd>
+                    ))}
+                  </span>
+                ))}
+              </span>
+            </SettingRow>
+          ))}
+        </Panel>
+      ))}
     </>
   );
 }

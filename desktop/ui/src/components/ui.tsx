@@ -14,6 +14,7 @@ import type { ExecutionStatus } from "../api/types";
 import { toneColor, type Tone } from "../design/tokens";
 import { formatElapsed } from "../lib/format";
 import { useNow } from "../lib/hooks";
+import { matches } from "../lib/shortcuts";
 import { Icon, type IconName } from "./Icon";
 
 export function cx(...classes: Array<string | false | null | undefined>): string {
@@ -422,7 +423,7 @@ export function Modal({
 }) {
   const { t } = useTranslation();
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => matches(e, "close") && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);

@@ -875,6 +875,80 @@ describe("settings from the app menu", () => {
   });
 });
 
+// The Help menu's Keyboard Shortcuts reaches the interface as a navigation to Settings, on its Shortcuts section, under
+// the rules Settings… follows.
+describe("keyboard shortcuts from the Help menu", () => {
+  const title = () => host!.querySelector(".topbar__title")!.textContent;
+  const open = () => host!.querySelector(".settings__title")?.textContent ?? null;
+  const breadcrumb = () => host!.querySelector(".breadcrumb")!.textContent;
+  const fromMenu = () => act(async () => actions.navigate({ screen: "settings", section: "shortcuts" }));
+
+  it("opens Settings on Shortcuts from every screen, and from another section of Settings", async () => {
+    await launch();
+    for (const screen of ["Overview", "Executions", "Tasks", "History", "Settings"]) {
+      await act(async () => navButton(screen).click());
+      await fromMenu();
+      expect(title()).toBe("Settings");
+      expect(open()).toBe("Shortcuts");
+      expect(breadcrumb()).toContain("shortcuts");
+    }
+    expect(getState().navigation).toBeUndefined();
+  });
+
+  it("does nothing over an open modal dialog, and the target it ignored never fires later", async () => {
+    await launch();
+    await act(async () => [...host!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "New task")!.click());
+    await fromMenu();
+    expect(title()).toBe("Live executions");
+    expect(getState().navigation).toBeUndefined();
+
+    await act(async () => void window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
+    expect(host!.querySelector('[aria-modal="true"]')).toBeNull();
+    expect(title()).toBe("Live executions");
+  });
+
+  it("does nothing on the onboarding screen, and nothing once the shell returns", async () => {
+    patchStateForTests({ settings: { ...settings, onboardingCompleted: false } });
+    await launch();
+    await fromMenu();
+    await act(async () => patchStateForTests({ settings }));
+    expect(title()).toBe("Live executions");
+  });
+
+  it("does nothing on the daemon-down screen, and nothing once the daemon is back", async () => {
+    native.available = true;
+    localStorage.setItem("harmflow.onboarded", "1");
+    patchStateForTests({ daemonRunning: false });
+    try {
+      await launch();
+      expect(host!.querySelector(".daemon-down")).not.toBeNull();
+      await fromMenu();
+      await act(async () => patchStateForTests({ daemonRunning: true }));
+      expect(title()).toBe("Live executions");
+    } finally {
+      native.available = false;
+    }
+  });
+
+  it("sends the shell the item's text in the interface's language, with no ellipsis, again when the language changes", async () => {
+    const labels = vi.spyOn(native, "setTrayLabels");
+    try {
+      await launch();
+      expect(labels.mock.lastCall?.[0].shortcuts).toBe("Keyboard Shortcuts");
+      for (const [language, label] of [
+        ["pt-BR", "Atalhos de teclado"],
+        ["es-ES", "Atajos de teclado"],
+      ]) {
+        await act(async () => void i18n.changeLanguage(language));
+        expect(labels.mock.lastCall?.[0].shortcuts).toBe(label);
+      }
+    } finally {
+      await act(async () => void i18n.changeLanguage("en-US"));
+      labels.mockRestore();
+    }
+  });
+});
+
 // Settings shows one section at a time, picked from its list (harmflow-app#251).
 describe("settings sections", () => {
   const title = () => host!.querySelector(".topbar__title")!.textContent;
@@ -1095,6 +1169,25 @@ describe("unsaved changes", () => {
     await click(navButton("History"));
     expect(asked()).toBe(3);
     expect(title()).toBe("History");
+  });
+
+  it("asks before the Help menu's Keyboard Shortcuts leaves, stays on Cancel, and opens Shortcuts on Discard", async () => {
+    await editing();
+    const fromMenu = () => act(async () => actions.navigate({ screen: "settings", section: "shortcuts" }));
+
+    confirm.mockResolvedValue(false);
+    await fromMenu();
+    await settle();
+    expect(asked()).toBe(1);
+    expect(title()).toBe("Tasks");
+    expect(unsaved()).toBe("Unsaved changes");
+
+    confirm.mockResolvedValue(true);
+    await fromMenu();
+    await settle();
+    expect(asked()).toBe(2);
+    expect(title()).toBe("Settings");
+    expect(host!.querySelector(".settings__title")!.textContent).toBe("Shortcuts");
   });
 
   it("asks before a picked template replaces the editor, with ⌘N too, and Discard opens the picked one", async () => {

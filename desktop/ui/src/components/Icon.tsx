@@ -176,6 +176,12 @@ const paths: Record<string, ReactNode> = {
       <path d="M3.5 12h17M12 3.5c2.5 2.6 3.5 5.4 3.5 8.5s-1 5.9-3.5 8.5c-2.5-2.6-3.5-5.4-3.5-8.5s1-5.9 3.5-8.5Z" />
     </>
   ),
+  keyboard: (
+    <>
+      <rect x="3" y="6.5" width="18" height="11" rx="2" />
+      <path d="M7 10h.01M10 10h.01M13 10h.01M16 10h.01M7 13.5h.01M16 13.5h.01M9.5 13.5h4" />
+    </>
+  ),
   key: (
     <>
       <circle cx="8" cy="15.5" r="3.5" />

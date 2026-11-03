@@ -1,6 +1,6 @@
 //! The app menu in the screen's menu bar, on macOS: Tauri's default menu with HarmFlow's own entries in its app submenu,
-//! Settings… (⌘,) and Quit (⌘Q). Every menu event, the tray's included, reaches one handler here, so none is handled
-//! twice.
+//! Settings… (⌘,) and Quit (⌘Q), and in its Help submenu, Keyboard Shortcuts. Every menu event, the tray's included,
+//! reaches one handler here, so none is handled twice.
 
 use std::sync::Arc;
 
@@ -14,12 +14,21 @@ use crate::{tray, window};
 pub const SETTINGS: &str = "app:settings";
 /// The app menu's Quit, on ⌘Q: apart from the tray's Quit interface, which always ends the desktop.
 pub const QUIT: &str = "app:quit";
+/// The Help menu's Keyboard Shortcuts item, with no key of its own.
+pub const SHORTCUTS: &str = "app:shortcuts";
+
+/// Settings…'s key. The dashboard's list of shortcuts shows it, and a test of the interface reads it here.
+pub const SETTINGS_ACCELERATOR: &str = "CmdOrCtrl+,";
+/// Quit's key. The dashboard's list of shortcuts shows it, and a test of the interface reads it here.
+pub const QUIT_ACCELERATOR: &str = "CmdOrCtrl+Q";
 
 /// What a menu item asks for, by its id.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Action<'a> {
     /// The app menu's Settings…: the dashboard's Settings screen.
     Settings,
+    /// The Help menu's Keyboard Shortcuts: the Settings screen on its Shortcuts section.
+    Shortcuts,
     /// The app menu's Quit: it ends the desktop, or only hides the window when `quit_hides` says so.
     Quit,
     /// The tray's Open dashboard.
@@ -37,6 +46,7 @@ pub enum Action<'a> {
 pub fn action(id: &str) -> Option<Action<'_>> {
     match id {
         SETTINGS => Some(Action::Settings),
+        SHORTCUTS => Some(Action::Shortcuts),
         QUIT => Some(Action::Quit),
         tray::OPEN => Some(Action::OpenDashboard),
         tray::STOP => Some(Action::StopDaemon),
@@ -54,7 +64,8 @@ pub fn quit_hides(tray_enabled: bool, keep_tray_on_quit: bool) -> bool {
 /// The one handler of every menu event, the app menu's and the tray's.
 pub fn on_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
     match action(id) {
-        Some(Action::Settings) => window::show_screen(app, "settings"),
+        Some(Action::Settings) => window::show_screen(app, "settings", None),
+        Some(Action::Shortcuts) => window::show_screen(app, "settings", Some("shortcuts")),
         Some(Action::Quit) => {
             let state = app.state::<Arc<AppState>>();
             if quit_hides(state.tray_enabled(), state.keep_tray_on_quit()) {
@@ -72,17 +83,21 @@ pub fn on_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
 }
 
 /// Tauri's default menu with Settings… after About and its separator, followed by a separator, as macOS apps place it,
-/// and a Quit of HarmFlow's own. Starting from the default menu keeps the Edit menu, which copy and paste in text fields
-/// need, and the Window menu.
+/// a Quit of HarmFlow's own, and Keyboard Shortcuts in the Help menu, which is empty on macOS. Starting from the default
+/// menu keeps the Edit menu, which copy and paste in text fields need, and the Window menu.
 #[cfg(target_os = "macos")]
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::menu::Menu<R>> {
-    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, HELP_SUBMENU_ID};
 
     let menu = Menu::default(app)?;
+    if let Some(help_menu) = menu.get(HELP_SUBMENU_ID).as_ref().and_then(MenuItemKind::as_submenu) {
+        let label = shortcuts_label(&app.state::<Arc<AppState>>());
+        help_menu.append(&MenuItem::with_id(app, SHORTCUTS, label, true, None::<&str>)?)?;
+    }
     let submenus = menu.items()?;
     if let Some(app_menu) = submenus.first().and_then(MenuItemKind::as_submenu) {
         let label = settings_label(&app.state::<Arc<AppState>>());
-        let settings = MenuItem::with_id(app, SETTINGS, label, true, Some("CmdOrCtrl+,"))?;
+        let settings = MenuItem::with_id(app, SETTINGS, label, true, Some(SETTINGS_ACCELERATOR))?;
         app_menu.insert_items(&[&settings, &PredefinedMenuItem::separator(app)?], 2)?;
 
         // The default app menu ends with the predefined Quit, which sends terminate: to macOS: no handler of the app's
@@ -93,25 +108,36 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::menu::Menu<
             let text = quit.text()?;
             if text.starts_with("Quit") {
                 app_menu.remove(quit)?;
-                app_menu.append(&MenuItem::with_id(app, QUIT, text, true, Some("CmdOrCtrl+Q"))?)?;
+                app_menu.append(&MenuItem::with_id(app, QUIT, text, true, Some(QUIT_ACCELERATOR))?)?;
             }
         }
     }
     Ok(menu)
 }
 
-/// Sets Settings… in the interface's language, which the webview sends with the tray's texts.
+/// Sets Settings… and Keyboard Shortcuts in the interface's language, which the webview sends with the tray's texts.
 pub fn render<R: Runtime>(app: &AppHandle<R>) {
     let Some(menu) = app.menu() else { return };
-    let Ok(items) = menu.items() else { return };
-    let Some(item) = items.first().and_then(MenuItemKind::as_submenu).and_then(|m| m.get(SETTINGS)) else { return };
-    if let Some(settings) = item.as_menuitem() {
-        let _ = settings.set_text(settings_label(&app.state::<Arc<AppState>>()));
+    let state = app.state::<Arc<AppState>>();
+    if let Ok(items) = menu.items() {
+        let item = items.first().and_then(MenuItemKind::as_submenu).and_then(|m| m.get(SETTINGS));
+        if let Some(settings) = item.as_ref().and_then(MenuItemKind::as_menuitem) {
+            let _ = settings.set_text(settings_label(&state));
+        }
+    }
+    let help_menu = menu.get(tauri::menu::HELP_SUBMENU_ID);
+    let item = help_menu.as_ref().and_then(MenuItemKind::as_submenu).and_then(|m| m.get(SHORTCUTS));
+    if let Some(shortcuts) = item.as_ref().and_then(MenuItemKind::as_menuitem) {
+        let _ = shortcuts.set_text(shortcuts_label(&state));
     }
 }
 
 fn settings_label(state: &AppState) -> String {
     state.label("settings", "Settings…")
+}
+
+fn shortcuts_label(state: &AppState) -> String {
+    state.label("shortcuts", "Keyboard Shortcuts")
 }
 
 #[cfg(test)]
@@ -121,6 +147,20 @@ mod tests {
     #[test]
     fn settings_opens_the_settings_screen() {
         assert_eq!(action(SETTINGS), Some(Action::Settings));
+    }
+
+    #[test]
+    fn keyboard_shortcuts_opens_the_shortcuts_section() {
+        assert_eq!(action(SHORTCUTS), Some(Action::Shortcuts));
+    }
+
+    #[test]
+    fn keyboard_shortcuts_is_none_of_the_other_items() {
+        // Its id reads as no other item, and no other item's id reads as it.
+        for id in [SETTINGS, QUIT, "open", "stop", "quit", "header", "shortcuts", "exec:app:shortcuts"] {
+            assert_ne!(action(id), Some(Action::Shortcuts), "{id}");
+        }
+        assert_ne!(action(SHORTCUTS), Some(Action::Settings));
     }
 
     #[test]
