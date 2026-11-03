@@ -16,6 +16,7 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/eventlog"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/fsstore"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/claudecode"
+	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/codex"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/schema"
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
@@ -98,26 +99,33 @@ func lastCwds(t *testing.T, received string) []string {
 
 const codexSkills = "  skills: [review-notes]\n"
 
+// codexListingFolder is the folder the Codex adapter of a asks its skill list for: the user's home folder it was given.
+func codexListingFolder(a *App) []string {
+	return []string{a.adapters[domain.HarnessCodex].(*codex.Adapter).Home}
+}
+
 // A Codex user's skill is found where Codex finds it: a Codex task that cites it saves, a Claude Code task with Codex
 // as its fallback imports with no invalid-fallback warning, and an execution that fails over to Codex resolves it at
-// the SKILL.md Codex reports. Each lookup asks for the right workspace, never for none.
+// the SKILL.md Codex reports. Every lookup asks for the installation's list, in the user's home folder, whatever the
+// task's workspace.
 func TestCodexSkillsComeFromItsSkillList(t *testing.T) {
 	received := filepath.Join(t.TempDir(), "received.jsonl")
 	skill := filepath.Join(t.TempDir(), ".agents", "skills", "review-notes", "SKILL.md")
 	a, _ := newCodexAppOn(t, skillListCodex(received, listAnswer([]string{"review-notes", skill}, "")))
 	ctx := t.Context()
+	home := codexListingFolder(a)
 
 	if _, err := a.CreateTask(ctx, TaskInput{YAML: codexTaskYAML("plain", codexSkills)}); err != nil {
 		t.Fatalf("CreateTask(plain), citing a skill of Codex's list = %v, want no error", err)
 	}
-	if got, want := lastCwds(t, received), []string{filepath.Join(a.d.Paths.Workspace, "plain")}; !slices.Equal(got, want) {
-		t.Errorf("CreateTask(plain), with no workspace path, listed skills for %q, want its run folder %q", got, want)
+	if got := lastCwds(t, received); !slices.Equal(got, home) {
+		t.Errorf("CreateTask(plain), with no workspace path, listed skills for %q, want the home folder %q", got, home)
 	}
 	if _, err := a.CreateTask(ctx, TaskInput{YAML: codexTaskYAML("placed", codexSkills+"  workspace:\n    path: ~/ws\n")}); err != nil {
 		t.Fatalf("CreateTask(placed), with a workspace path = %v, want no error", err)
 	}
-	if got, want := lastCwds(t, received), []string{filepath.Join(a.d.Paths.UserHome, "ws")}; !slices.Equal(got, want) {
-		t.Errorf("CreateTask(placed) listed skills for %q, want its expanded workspace path %q", got, want)
+	if got := lastCwds(t, received); !slices.Equal(got, home) {
+		t.Errorf("CreateTask(placed) listed skills for %q, want the home folder %q, not its workspace", got, home)
 	}
 
 	fallback := taskYAML("failover", "    fallback:\n      candidates:\n        - provider: codex\n"+codexSkills)
@@ -145,17 +153,18 @@ func TestCodexSkillsComeFromItsSkillList(t *testing.T) {
 	if err != nil || len(skills) != 1 || skills[0].Path != filepath.Dir(skill) {
 		t.Errorf("resolve(codex) = %+v, %v; want review-notes at %s", skills, err, filepath.Dir(skill))
 	}
-	if got := lastCwds(t, received); !slices.Equal(got, []string{work}) {
-		t.Errorf("resolve(codex) listed skills for %q, want the execution's working directory %q", got, work)
+	if got := lastCwds(t, received); !slices.Equal(got, home) {
+		t.Errorf("resolve(codex) listed skills for %q, want the home folder %q, not the working directory %s", got, home,
+			work)
 	}
 }
 
-// The catalog lists a skill of Codex's list once, with Codex once among its harnesses, for the workspace path asked,
-// for the run folder of a task asked with none, as validation does, or for the workspace root with neither; what Codex
-// could not load is in its problems and in a missing skill's message. A plugin's skill is offered by the name Codex
+// The catalog lists a skill of Codex's list once, with Codex once among its harnesses, from the installation's list,
+// whatever workspace path or task it is asked for; what Codex could not load is in its problems and in a missing
+// skill's message. A plugin's skill is offered by the name Codex
 // reports, `<plugin>:<skill>`, spaces included; a skill a task cannot cite, a name with the hf- prefix or one that is
 // neither an identifier nor a plugin's skill, is not offered, though Codex lists it.
-func TestCatalogListsCodexSkillsForTheWorkspace(t *testing.T) {
+func TestCatalogListsCodexSkillsOfTheInstallation(t *testing.T) {
 	received := filepath.Join(t.TempDir(), "received.jsonl")
 	broken := `{"path":"/x/broken/SKILL.md","message":"invalid front matter"}`
 	a, _ := newCodexAppOn(t, skillListCodex(received,
@@ -181,26 +190,25 @@ func TestCatalogListsCodexSkillsForTheWorkspace(t *testing.T) {
 			t.Errorf("Catalog(ctx, %s, plain) %s = %+v, want one entry, on codex once", ws, name, got)
 		}
 	}
-	if got := lastCwds(t, received); !slices.Equal(got, []string{ws}) {
-		t.Errorf("Catalog(ctx, %s, plain) listed skills for %q, want the workspace path [%s]", ws, got, ws)
+	home := codexListingFolder(a)
+	if got := lastCwds(t, received); !slices.Equal(got, home) {
+		t.Errorf("Catalog(ctx, %s, plain) listed skills for %q, want the home folder %q", ws, got, home)
 	}
 	if len(c.Problems) != 1 || c.Problems[0].Path != "/x/broken/SKILL.md" || c.Problems[0].Message != "invalid front matter" ||
 		c.Problems[0].Harness != domain.HarnessCodex {
 		t.Errorf("Catalog(ctx, %s, plain) problems = %+v, want the SKILL.md Codex could not load", ws, c.Problems)
 	}
-	a.Catalog(ctx, "", "plain")
-	if got, want := lastCwds(t, received), []string{filepath.Join(a.d.Paths.Workspace, "plain")}; !slices.Equal(got, want) {
-		t.Errorf(`Catalog(ctx, "", plain) listed skills for %q, want the task's run folder %q, as validation reads`, got, want)
-	}
-	a.Catalog(ctx, "", "")
-	if got := lastCwds(t, received); !slices.Equal(got, []string{a.d.Paths.Workspace}) {
-		t.Errorf(`Catalog(ctx, "", "") listed skills for %q, want the workspace root %q`, got, a.d.Paths.Workspace)
+	for _, task := range []string{"plain", ""} {
+		a.Catalog(ctx, "", task)
+		if got := lastCwds(t, received); !slices.Equal(got, home) {
+			t.Errorf(`Catalog(ctx, "", %q) listed skills for %q, want the home folder %q`, task, got, home)
+		}
 	}
 
 	_, err := a.CreateTask(ctx, TaskInput{YAML: codexTaskYAML("gone", "  skills: [no-such-skill]\n")})
 	ae, ok := err.(*Error)
 	if !ok || ae.Key != "skill_not_found" || ae.Params["source"] != "skill_list_errors" ||
-		!strings.Contains(ae.Message, "invalid front matter") || !strings.Contains(ae.Message, "skill list for") {
+		!strings.Contains(ae.Message, "invalid front matter") || !strings.Contains(ae.Message, "Codex's skill list") {
 		t.Errorf("CreateTask(gone) = %v (%+v), want skill_not_found naming Codex's skill list and its errors", err, ae)
 	}
 }
@@ -370,12 +378,12 @@ func listings(t *testing.T, log string) []string {
 	return strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
 }
 
-// A Claude Code task's skills are the ones Claude Code lists for its workspace and added folders, and only those. A
-// task whose workspace is a folder of a repository cites the repository's skill, a bundled one, and a plugin's, and
-// saves; one placed elsewhere is refused, naming Claude Code's skill list for its workspace; a skill on disk that
-// Claude Code does not list is not found. The folder a task adds with a writable path counts, in the task editor's
-// catalog, on save, and in an execution. A failover to Claude Code reads the same list. Each list is asked for once
-// per workspace and added folders, and again after a refresh.
+// A Claude Code task's skills are the ones the installed Claude Code lists, and only those, whatever the task's
+// workspace and the folders it adds. A task citing a bundled skill and a plugin's saves wherever it is placed; one
+// citing a skill only its repository's folder, a folder it adds, or a SKILL.md on disk would bring is refused, naming
+// Claude Code's skill list, as HarmFlow neither reads a task's project nor copies Claude Code's rules for finding
+// skills. The task editor's catalog, an execution, and a failover to Claude Code read the same list. The list is asked
+// for once, in the home folder with no folder added, and again after a refresh.
 func TestClaudeCodeSkillsComeFromItsSkillList(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "listings.log")
 	a := newClaudeAppOn(t, initClaude(log))
@@ -396,80 +404,74 @@ func TestClaudeCodeSkillsComeFromItsSkillList(t *testing.T) {
 			"  permissions:\n    profile: custom\n    custom:\n      writablePaths: [~/extra]\n")
 	}
 
-	if _, err := a.CreateTask(ctx, TaskInput{YAML: placed("sub", "repo-skill, simplify, pdf:pdf", "~/repo/sub")}); err != nil {
-		t.Fatalf("CreateTask(sub), citing the repository's skill, a bundled one, and a plugin's = %v, want no error", err)
-	}
-	for _, c := range []struct{ id, skill, workspace string }{
-		{"elsewhere", "repo-skill", "~/other"},
-		{"on-disk", "on-disk", "~/repo/sub"},
+	for _, c := range []struct{ id, yaml string }{
+		{"sub", placed("sub", "simplify, pdf:pdf", "~/repo/sub")},
+		{"elsewhere", placed("elsewhere", "simplify, pdf:pdf", "~/other")},
+		{"adding", adding("adding", "simplify")},
 	} {
-		_, err := a.CreateTask(ctx, TaskInput{YAML: placed(c.id, c.skill, c.workspace)})
+		if _, err := a.CreateTask(ctx, TaskInput{YAML: c.yaml}); err != nil {
+			t.Errorf("CreateTask(%s), citing a bundled skill and a plugin's = %v, want no error", c.id, err)
+		}
+	}
+	for _, c := range []struct{ id, skill, yaml string }{
+		{"repo-skill", "repo-skill", placed("repo-skill", "repo-skill", "~/repo/sub")},
+		{"on-disk", "on-disk", placed("on-disk", "on-disk", "~/repo/sub")},
+		{"extra-skill", "extra-skill", adding("extra-skill", "extra-skill")},
+	} {
+		_, err := a.CreateTask(ctx, TaskInput{YAML: c.yaml})
 		ae, ok := err.(*Error)
 		if !ok || ae.Key != "skill_not_found" || ae.Params["name"] != c.skill || ae.Params["source"] != "skill_list" ||
-			!strings.Contains(ae.Message, "Claude Code's skill list for ") {
+			!strings.Contains(ae.Message, "Claude Code's skill list)") {
 			t.Errorf("CreateTask(%s) = %v (%+v), want skill_not_found naming %s and Claude Code's skill list", c.id, err, ae,
 				c.skill)
 		}
 	}
-	if _, err := a.CreateTask(ctx, TaskInput{YAML: adding("adding", "extra-skill")}); err != nil {
-		t.Fatalf("CreateTask(adding), citing the skill of a folder it adds = %v, want no error", err)
-	}
 
-	if got, want := claudeCodeOffers(ctx, a, "~/repo/sub", "sub"), []string{"pdf:pdf", "repo-skill", "simplify"}; !slices.Equal(got, want) {
+	want := []string{"pdf:pdf", "simplify"}
+	if got := claudeCodeOffers(ctx, a, "~/repo/sub", "sub"); !slices.Equal(got, want) {
 		t.Errorf(`Catalog(ctx, "~/repo/sub", sub) offers %q on Claude Code, want %q`, got, want)
 	}
-	var offered []string
-	for _, e := range a.Catalog(ctx, "~/other", "adding", "~/extra").Skills {
-		if e.Source == "user" && slices.Contains(e.Harnesses, domain.HarnessClaudeCode) {
-			offered = append(offered, e.Name)
-		}
-	}
-	if want := []string{"extra-skill", "pdf:pdf", "simplify"}; !slices.Equal(offered, want) {
-		t.Errorf(`Catalog(ctx, "~/other", adding, "~/extra") offers %q on Claude Code, want %q`, offered, want)
+	if got := claudeCodeOffers(ctx, a, "~/other", "adding", "~/extra"); !slices.Equal(got, want) {
+		t.Errorf(`Catalog(ctx, "~/other", adding, "~/extra") offers %q on Claude Code, want %q`, got, want)
 	}
 
-	res := a.Validate(ctx, TaskInput{YAML: adding("adding", "extra-skill")})
+	res := a.Validate(ctx, TaskInput{YAML: adding("adding", "simplify")})
 	if res.doc == nil {
 		t.Fatalf("Validate(adding) errors = %+v, want none", res.Errors)
 	}
 	resolvedExtra, _ := domain.ResolvePath(extra)
 	r := &run{a: a, def: *res.doc, eff: res.doc.Effective(), work: other, writable: []string{resolvedExtra}}
 	if _, skills, err := r.resolve(ctx, a.adapters[domain.HarnessClaudeCode]); err != nil || len(skills) != 1 ||
-		skills[0].Name != "extra-skill" {
-		t.Errorf("resolve(claude-code) adding %s = %+v, %v; want extra-skill", extra, skills, err)
+		skills[0].Name != "simplify" {
+		t.Errorf("resolve(claude-code) in %s = %+v, %v; want simplify", other, skills, err)
 	}
 
-	// The fake Codex finds every skill named user-skill, so a Codex task cites it with repo-skill.
-	fallback := func(id, workspace string) string {
-		return codexTaskYAML(id, "    fallback:\n      candidates:\n        - provider: claude-code\n"+
-			"  skills: [repo-skill]\n  workspace:\n    path: "+workspace+"\n")
+	// The fake Codex finds every skill named user-skill, so a Codex task cites it with a skill Claude Code may list.
+	fallback := func(skill string) string {
+		return codexTaskYAML("fb", "    fallback:\n      candidates:\n        - provider: claude-code\n"+
+			"  skills: ["+skill+"]\n  workspace:\n    path: ~/repo/sub\n")
 	}
 	for _, c := range []struct {
-		workspace string
-		invalid   bool
-	}{{"~/repo/sub", false}, {"~/other", true}} {
-		res := a.Validate(ctx, TaskInput{YAML: fallback("fb", c.workspace)})
+		skill   string
+		invalid bool
+	}{{"simplify", false}, {"repo-skill", true}} {
+		res := a.Validate(ctx, TaskInput{YAML: fallback(c.skill)})
 		invalid := slices.ContainsFunc(res.Warnings, func(w schemaIssue) bool { return w.Code == domain.WarningInvalidFallback })
 		if invalid != c.invalid {
-			t.Errorf("Validate(fallback in %s) invalid-fallback warning = %v (%+v), want %v", c.workspace, invalid,
+			t.Errorf("Validate(fallback citing %s) invalid-fallback warning = %v (%+v), want %v", c.skill, invalid,
 				res.Warnings, c.invalid)
 		}
 	}
 
-	before := len(listings(t, log))
-	claudeCodeOffers(ctx, a, "~/repo/sub", "sub")
-	if got := len(listings(t, log)); got != before {
-		t.Errorf("a second catalog for ~/repo/sub ran %d more listings, want none: the list is kept", got-before)
+	resolvedHome, _ := domain.ResolvePath(a.adapters[domain.HarnessClaudeCode].(*claudecode.Adapter).Home)
+	only := []string{resolvedHome + "|-p --output-format stream-json --verbose --no-session-persistence"}
+	if got := listings(t, log); !slices.Equal(got, only) {
+		t.Errorf("tasks, catalogs, and an execution in three folders ran listings %q, want the one %q", got, only)
 	}
 	a.RefreshHarnesses(ctx)
 	claudeCodeOffers(ctx, a, "~/repo/sub", "sub")
-	if got := len(listings(t, log)); got != before+1 {
-		t.Errorf("the catalog after a refresh ran %d more listings, want 1", got-before)
-	}
-	for _, l := range listings(t, log) {
-		if !strings.Contains(l, "|-p --output-format stream-json --verbose --no-session-persistence") {
-			t.Errorf("a listing ran as %q, want claude -p with stream-json output and no session kept", l)
-		}
+	if got := len(listings(t, log)); got != 2 {
+		t.Errorf("the catalog after a refresh made %d listings in all, want 2", got)
 	}
 }
 
@@ -505,10 +507,10 @@ func TestExecutionRunsWithTheSessionEnvironment(t *testing.T) {
 	}
 }
 
-// A repository's local path is a folder a Claude Code task's session adds, so a skill Claude Code lists only with that
-// folder added counts: the task saves citing it, the task editor's catalog offers it when the path is sent as addDir,
-// and an execution resolves it. The listing adds the repository's folder.
-func TestClaudeCodeSkillOfARepositoryFolder(t *testing.T) {
+// A repository's local path is a folder a Claude Code task's session adds, but the skill list is the installation's: a
+// skill Claude Code lists only with that folder added is not on it. The task is refused citing it, the task editor's
+// catalog does not offer it even when the path is sent as addDir, and no listing adds the folder.
+func TestClaudeCodeSkillOfARepositoryFolderIsNotListed(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "listings.log")
 	a := newClaudeAppOn(t, initClaude(log))
 	ctx := t.Context()
@@ -523,29 +525,15 @@ func TestClaudeCodeSkillOfARepositoryFolder(t *testing.T) {
 		fmt.Sprintf("  github:\n    repositories:\n      - name: o/r\n        localPath: %q\n", checkout)),
 		"type: general", "type: github", 1)
 
-	if _, err := a.CreateTask(ctx, TaskInput{YAML: doc}); err != nil {
-		t.Fatalf("CreateTask(repo), citing the skill of its repository's folder = %v, want no error", err)
+	_, err := a.CreateTask(ctx, TaskInput{YAML: doc})
+	if ae, ok := err.(*Error); !ok || ae.Key != "skill_not_found" || ae.Params["name"] != "checkout-skill" {
+		t.Errorf("CreateTask(repo), citing the skill of its repository's folder = %v, want skill_not_found", err)
 	}
-	resolved, _ := domain.ResolvePath(checkout)
-	if !slices.ContainsFunc(listings(t, log), func(l string) bool { return strings.Contains(l, "--add-dir "+resolved) }) {
-		t.Errorf("CreateTask(repo) ran listings %q, want one adding the repository's folder %s", listings(t, log), resolved)
-	}
-
-	if got := claudeCodeOffers(ctx, a, "~/other", "repo"); slices.Contains(got, "checkout-skill") {
-		t.Errorf(`Catalog(ctx, "~/other", repo) offers %q on Claude Code, want no checkout-skill without the folder`, got)
-	}
-	if got, want := claudeCodeOffers(ctx, a, "~/other", "repo", checkout), []string{"checkout-skill", "pdf:pdf", "simplify"}; !slices.Equal(got, want) {
+	if got, want := claudeCodeOffers(ctx, a, "~/other", "repo", checkout), []string{"pdf:pdf", "simplify"}; !slices.Equal(got, want) {
 		t.Errorf(`Catalog(ctx, "~/other", repo, %s) offers %q on Claude Code, want %q`, checkout, got, want)
 	}
-
-	res := a.Validate(ctx, TaskInput{YAML: doc})
-	if res.doc == nil {
-		t.Fatalf("Validate(repo) errors = %+v, want none", res.Errors)
-	}
-	r := &run{a: a, def: *res.doc, eff: res.doc.Effective(), work: other, extra: []string{resolved}}
-	if _, skills, err := r.resolve(ctx, a.adapters[domain.HarnessClaudeCode]); err != nil || len(skills) != 1 ||
-		skills[0].Name != "checkout-skill" {
-		t.Errorf("resolve(claude-code) with the repository %s = %+v, %v; want checkout-skill", resolved, skills, err)
+	if slices.ContainsFunc(listings(t, log), func(l string) bool { return strings.Contains(l, "--add-dir") }) {
+		t.Errorf("listings ran as %q, want none adding a folder", listings(t, log))
 	}
 }
 
@@ -720,5 +708,93 @@ func TestRefreshReloadsCodexSkills(t *testing.T) {
 	data, _ := os.ReadFile(received)
 	if n := strings.Count(string(data), `"method":"initialize"`); n != 1 {
 		t.Errorf(`Catalog(ctx, "", ""), three calls, sent initialize %d times, want once`, n)
+	}
+}
+
+// heldListingClaude is initClaude whose -p session, once it is logged, waits until the file released exists before it
+// prints its init line.
+func heldListingClaude(log, released string) string {
+	return strings.Replace(initClaude(log), "    skills='", "    until [ -e '"+released+"' ]; do sleep 0.05; done\n    skills='", 1)
+}
+
+// The daemon starts without waiting for a harness: Start returns while Claude Code's skill list is held, with the task
+// file loaded, valid, and without the warning only the list can give. Once the list comes, the check Start left running
+// gives the task its missing-skill warning and announces it as updated, with task_checked.
+func TestStartDoesNotWaitForTheSkillList(t *testing.T) {
+	released := filepath.Join(t.TempDir(), "released")
+	a := newClaudeAppOn(t, heldListingClaude(filepath.Join(t.TempDir(), "listings.log"), released))
+	t.Cleanup(func() { os.WriteFile(released, nil, 0o600) })
+	doc := taskYAML("cites", "  skills: [simplify, no-such-skill]\n")
+	if err := os.WriteFile(filepath.Join(a.d.Paths.Tasks, "cites.yaml"), []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	events, _, unsubscribe := a.Subscribe(0)
+	defer unsubscribe()
+
+	started := make(chan error, 1)
+	go func() { started <- a.Start(t.Context()) }()
+	select {
+	case err := <-started:
+		if err != nil {
+			t.Fatalf("Start = %v, want no error", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Start did not return within 10s while the skill list was held, want it not to wait for it")
+	}
+	t.Cleanup(func() { a.Stop(domain.Text{Message: "test done"}) })
+	missingSkill := func(v TaskView) bool {
+		return slices.ContainsFunc(v.Warnings, func(w domain.Warning) bool { return w.Code == domain.WarningMissingSkill })
+	}
+	if v, err := a.GetTask("cites"); err != nil || v.Invalid || missingSkill(v) {
+		t.Errorf("GetTask(cites) after Start = %+v, %v; want valid, without the missing-skill warning yet", v, err)
+	}
+
+	if err := os.WriteFile(released, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(30 * time.Second)
+	for {
+		select {
+		case e := <-events:
+			if e.Type != domain.EventTaskUpdated || e.TaskID != "cites" || e.MessageKey != "task_checked" {
+				continue
+			}
+			if v, err := a.GetTask("cites"); err != nil || v.Invalid || !missingSkill(v) {
+				t.Errorf("GetTask(cites) after task_checked = %+v, %v; want valid, warning no-such-skill is missing", v, err)
+			}
+			return
+		case <-deadline:
+			t.Fatal("no task.updated with task_checked for cites within 30s of the skill list, want the check to announce it")
+		}
+	}
+}
+
+// Stop ends the check Start left running, and its listing, though Claude Code never gives its skill list.
+func TestStopEndsTheCheckOfTheTasks(t *testing.T) {
+	released := filepath.Join(t.TempDir(), "released")
+	log := filepath.Join(t.TempDir(), "listings.log")
+	a := newClaudeAppOn(t, heldListingClaude(log, released))
+	t.Cleanup(func() { os.WriteFile(released, nil, 0o600) })
+	if err := os.WriteFile(filepath.Join(a.d.Paths.Tasks, "cites.yaml"), []byte(taskYAML("cites", "  skills: [simplify]\n")),
+		0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Start(t.Context()); err != nil {
+		t.Fatalf("Start = %v, want no error", err)
+	}
+	for deadline := time.Now().Add(30 * time.Second); len(listings(t, log)) == 0; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the check started no listing within 30s, want one for the task's skill")
+		}
+	}
+	stopped := make(chan struct{})
+	go func() {
+		a.Stop(domain.Text{Message: "test done"})
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Stop did not return within 10s while the check waited for the skill list, want it to end the check")
 	}
 }

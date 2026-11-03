@@ -101,9 +101,10 @@ func appServerInfo(path string) ports.HarnessInfo {
 	return ports.HarnessInfo{ID: ID, Detected: true, Path: path, Version: "0.163.0", Features: map[string]bool{"app-server": true}}
 }
 
-// A Codex user's skills are what Codex's skill list returns for the workspace: the enabled ones, each name once and the
-// first of it in the list's order, at the folder of the SKILL.md Codex reports, with what Codex could not load. Names a
-// task cannot cite are kept: leaving them out is the application's decision.
+// A Codex user's skills are what the installed Codex's skill list returns, asked for the user's home folder whatever
+// the workspace: the enabled ones, each name once and the first of it in the list's order, at the folder of the
+// SKILL.md Codex reports, with what Codex could not load. Names a task cannot cite are kept: leaving them out is the
+// application's decision.
 func TestSkillsFromTheAppServer(t *testing.T) {
 	home := tempDir(t)
 	mine := filepath.Join(home, ".agents", "skills", "my-skill", "SKILL.md")
@@ -162,9 +163,9 @@ func TestSkillsFromTheAppServer(t *testing.T) {
 	}
 	for _, p := range got["skills/list"] {
 		cwds, _ := p["cwds"].([]any)
-		if len(cwds) != 1 || cwds[0] != workspace || p["forceReload"] != false {
-			t.Errorf("UserItem(skill, %s) sent skills/list %v, want cwds [%s] and forceReload false", workspace, p,
-				workspace)
+		if len(cwds) != 1 || cwds[0] != a.Home || p["forceReload"] != false {
+			t.Errorf("UserItem(skill, %s) sent skills/list %v, want cwds [%s], the home folder, and forceReload false",
+				workspace, p, a.Home)
 		}
 	}
 
@@ -292,9 +293,9 @@ func TestAppServerFollowsTheDetectedCodex(t *testing.T) {
 			t.Errorf("UserItems(skill) sent initialize %v to this Codex, want once, from harmflow 1.2.3", hello)
 		}
 	}
-	if skill, agent := a.ListsPerWorkspace("skill"), a.ListsPerWorkspace("agent"); !skill || agent {
-		t.Errorf("ListsPerWorkspace(skill), ListsPerWorkspace(agent) = %v, %v; want true, false: skills from the "+
-			"workspace's list, agents from the Codex home", skill, agent)
+	if skill, agent := a.ListsInstallation("skill"), a.ListsInstallation("agent"); !skill || agent {
+		t.Errorf("ListsInstallation(skill), ListsInstallation(agent) = %v, %v; want true, false: skills from the "+
+			"installation's list, agents from the Codex home", skill, agent)
 	}
 }
 

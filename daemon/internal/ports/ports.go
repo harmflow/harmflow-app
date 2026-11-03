@@ -320,13 +320,14 @@ type HarnessAdapter interface {
 	Detect(ctx context.Context, manualPath string) HarnessInfo
 	ValidateProfile(info HarnessInfo, model, effort string) error
 	Prepare(info HarnessInfo, req RunRequest) (Invocation, OutputParser, error)
-	// UserItem looks up an agent or skill in the user's harness configuration, as the harness finds it for workspace, a
-	// folder that is never empty, and for the folders a session of the task adds, added. An error says the harness's
-	// list could not be read, which is not the item missing; the discovery errors are what the harness reported it
-	// could not load on the way.
+	// UserItem looks up an agent or skill in the user's harness configuration. It is given the task's workspace, a folder
+	// that is never empty, and the folders a session of the task adds, added, for a harness that finds items per folder;
+	// one that is an InstallationLister for the kind ignores them. An error says the harness's list could not be read,
+	// which is not the item missing; the discovery errors are what the harness reported it could not load on the way.
 	UserItem(ctx context.Context, info HarnessInfo, kind, name, workspace string, added []string) (ResolvedItem, bool, []DiscoveryError, error)
-	// UserItems lists the agents or skills of the user's harness configuration for workspace and the added folders, each
-	// name once, with the discovery errors the harness reported; an error says the list could not be read.
+	// UserItems lists the agents or skills of the user's harness configuration, given the workspace and the added folders
+	// as UserItem is, each name once, with the discovery errors the harness reported; an error says the list could not
+	// be read.
 	UserItems(ctx context.Context, info HarnessInfo, kind, workspace string, added []string) ([]ResolvedItem, []DiscoveryError, error)
 }
 
@@ -343,10 +344,12 @@ type ItemReloader interface {
 	ReloadUserItems()
 }
 
-// WorkspaceLister is a HarnessAdapter that finds the user's items of a kind in its harness's own list for a workspace,
-// not in a folder of its configuration: ListsPerWorkspace says which kinds.
-type WorkspaceLister interface {
-	ListsPerWorkspace(kind string) bool
+// InstallationLister is a HarnessAdapter that asks its harness which items of a kind its installation loads, rather
+// than reading a folder of its configuration: ListsInstallation says which kinds. The list is the same for every task,
+// whatever its workspace, so HarmFlow neither reads a task's project for more items nor copies the harness's rules for
+// finding them.
+type InstallationLister interface {
+	ListsInstallation(kind string) bool
 }
 
 // UnverifiedItemsAllower is a HarnessAdapter whose harness loads a task's items of a kind itself, so a list of them it

@@ -1028,6 +1028,7 @@ components:
         - daemon_stop_requested
         - local_api_stopped
         - task_delete_pending
+        - task_checked
         - task_changed_externally
         - task_changed_externally_invalid
         - task_removed_externally

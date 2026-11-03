@@ -60,14 +60,14 @@ type Adapter struct {
 }
 
 var (
-	_ ports.HarnessAdapter    = (*Adapter)(nil)
-	_ ports.HarnessIdentifier = (*Adapter)(nil)
-	_ ports.ProfileWarner     = (*Adapter)(nil)
-	_ ports.ItemReloader      = (*Adapter)(nil)
-	_ ports.HarnessCloser     = (*Adapter)(nil)
-	_ ports.WorkspaceLister   = (*Adapter)(nil)
-	_ ports.QuotaReader       = (*Adapter)(nil)
-	_ ports.SessionKeeper     = (*Adapter)(nil)
+	_ ports.HarnessAdapter     = (*Adapter)(nil)
+	_ ports.HarnessIdentifier  = (*Adapter)(nil)
+	_ ports.ProfileWarner      = (*Adapter)(nil)
+	_ ports.ItemReloader       = (*Adapter)(nil)
+	_ ports.HarnessCloser      = (*Adapter)(nil)
+	_ ports.InstallationLister = (*Adapter)(nil)
+	_ ports.QuotaReader        = (*Adapter)(nil)
+	_ ports.SessionKeeper      = (*Adapter)(nil)
 )
 
 // ID implements ports.HarnessAdapter: the harness's identifier.
@@ -472,15 +472,15 @@ func (a *Adapter) ProfileWarning(info ports.HarnessInfo, model, effort string) (
 
 func (a *Adapter) userDir() catalog.Dir { return catalog.Dir{Root: a.codexHome()} }
 
-// UserItem implements ports.HarnessAdapter: a skill is the first of that name in Codex's skill list for workspace, an
-// agent is looked up in the Codex home. Codex's list is asked for the workspace alone, so the added folders change
+// UserItem implements ports.HarnessAdapter: a skill is the first of that name in the installed Codex's skill list, an
+// agent is looked up in the Codex home. The list is the installation's, so the workspace and the added folders change
 // nothing.
-func (a *Adapter) UserItem(ctx context.Context, info ports.HarnessInfo, kind, name, workspace string, _ []string) (ports.ResolvedItem, bool, []ports.DiscoveryError, error) {
+func (a *Adapter) UserItem(ctx context.Context, info ports.HarnessInfo, kind, name, _ string, _ []string) (ports.ResolvedItem, bool, []ports.DiscoveryError, error) {
 	if kind != "skill" {
 		it, ok := a.userDir().Item(kind, name)
 		return it, ok, nil, nil
 	}
-	items, problems, err := a.skills(ctx, info, workspace)
+	items, problems, err := a.skills(ctx, info)
 	if err != nil {
 		return ports.ResolvedItem{}, false, nil, err
 	}
@@ -492,13 +492,13 @@ func (a *Adapter) UserItem(ctx context.Context, info ports.HarnessInfo, kind, na
 	return ports.ResolvedItem{}, false, problems, nil
 }
 
-// UserItems implements ports.HarnessAdapter: the skills of Codex's skill list for workspace, or the agents of the Codex
-// home; the added folders change nothing.
-func (a *Adapter) UserItems(ctx context.Context, info ports.HarnessInfo, kind, workspace string, _ []string) ([]ports.ResolvedItem, []ports.DiscoveryError, error) {
+// UserItems implements ports.HarnessAdapter: the skills of the installed Codex's skill list, or the agents of the Codex
+// home; the workspace and the added folders change nothing.
+func (a *Adapter) UserItems(ctx context.Context, info ports.HarnessInfo, kind, _ string, _ []string) ([]ports.ResolvedItem, []ports.DiscoveryError, error) {
 	if kind != "skill" {
 		return a.userDir().Items(kind), nil, nil
 	}
-	return a.skills(ctx, info, workspace)
+	return a.skills(ctx, info)
 }
 
 // KeepsSessions implements ports.SessionKeeper: run without --ephemeral, Codex keeps the session under its home's

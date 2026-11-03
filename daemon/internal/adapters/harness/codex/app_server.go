@@ -196,13 +196,14 @@ func startFailed(err error) error {
 		"detail", err.Error()), true}
 }
 
-// listSkills asks the app server for the skills Codex has in workspace. The first list after ReloadUserItems carries
-// forceReload.
-func (a *Adapter) listSkills(ctx context.Context, info ports.HarnessInfo, workspace string) (skillsList, error) {
+// listSkills asks the app server for the skills the installed Codex has in the user's home folder, which are its own,
+// the user's, and its system and admin scopes', whatever a task's workspace. The first list after ReloadUserItems
+// carries forceReload.
+func (a *Adapter) listSkills(ctx context.Context, info ports.HarnessInfo) (skillsList, error) {
 	var list skillsList
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	params := map[string]any{"cwds": []string{workspace}, "forceReload": a.reload}
+	params := map[string]any{"cwds": []string{a.Home}, "forceReload": a.reload}
 	if err := a.callLocked(ctx, info, "skills/list", params, &list); err != nil {
 		return skillsList{}, err
 	}
@@ -341,11 +342,11 @@ func (a *Adapter) readRequirements(ctx context.Context, info ports.HarnessInfo) 
 	return read, err
 }
 
-// skills are the skills Codex lists for workspace and has enabled, each name once: the first in the list's own order,
+// skills are the skills the installed Codex lists and has enabled, each name once: the first in the list's own order,
 // never sorted again. A skill's folder is the one of the SKILL.md Codex reports. Which names a task can cite is the
 // application's to decide, so every name Codex lists is kept.
-func (a *Adapter) skills(ctx context.Context, info ports.HarnessInfo, workspace string) ([]ports.ResolvedItem, []ports.DiscoveryError, error) {
-	list, err := a.listSkills(ctx, info, workspace)
+func (a *Adapter) skills(ctx context.Context, info ports.HarnessInfo) ([]ports.ResolvedItem, []ports.DiscoveryError, error) {
+	list, err := a.listSkills(ctx, info)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -367,8 +368,9 @@ func (a *Adapter) skills(ctx context.Context, info ports.HarnessInfo, workspace 
 	return items, problems, nil
 }
 
-// ListsPerWorkspace implements ports.WorkspaceLister: skills come from Codex's skill list, agents from the Codex home.
-func (a *Adapter) ListsPerWorkspace(kind string) bool { return kind == "skill" }
+// ListsInstallation implements ports.InstallationLister: skills come from the installed Codex's skill list, agents from
+// the Codex home.
+func (a *Adapter) ListsInstallation(kind string) bool { return kind == "skill" }
 
 // ReloadUserItems implements ports.ItemReloader: the next skills/list asks Codex to read its skills from disk again.
 func (a *Adapter) ReloadUserItems() {

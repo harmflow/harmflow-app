@@ -138,17 +138,17 @@ func TestCitedUserItemsReachARealClaudeCode(t *testing.T) {
 	skillMarker.check(t)
 }
 
-// A Claude Code task's skills are the ones the installed, signed-in Claude Code lists for its workspace and the folders
-// it adds, as the init line of a session started there reports them. A skill in the workspace's .claude/skills, one in
-// the .claude/skills of a custom profile's writable path, and one in Claude Code's configuration directory are offered
-// by GET /catalog for that workspace and folder, and a task there citing all three saves with no skill_list_unverified
-// warning. A task in a third folder, adding nothing, that cites the workspace's skill is refused with skill_not_found,
-// naming Claude Code's skill list. Every skill has a name unique to the run, and the configuration directory's is
-// removed when the test ends. The daemon writes no line of its own for a listing, so a failure prints what it says of
-// one: the skills its catalog offers on Claude Code and the problems it reports for each folder, and daemon.log.
-func TestRealClaudeCodeListsWorkspaceAndAddedFolderSkills(t *testing.T) {
+// A Claude Code task's skills are the ones the installed, signed-in Claude Code lists, as the init line of a session
+// started in the home folder reports them, whatever the task's workspace and the folders it adds. A skill in Claude
+// Code's configuration directory is offered by GET /catalog for any workspace and folder, and a task citing it saves
+// with no skill_list_unverified warning; a skill in the workspace's .claude/skills, or in that of a custom profile's
+// writable path, is not offered, and a task citing it is refused with skill_not_found, naming Claude Code's skill list.
+// Every skill has a name unique to the run, and the configuration directory's is removed when the test ends. The daemon
+// writes no line of its own for a listing, so a failure prints what it says of one: the skills its catalog offers on
+// Claude Code and the problems it reports, and daemon.log.
+func TestRealClaudeCodeListsInstalledSkills(t *testing.T) {
 	claude := realClaude(t)
-	work, added, elsewhere := resolvedTempDir(t), resolvedTempDir(t), resolvedTempDir(t)
+	work, added := resolvedTempDir(t), resolvedTempDir(t)
 	run := runSuffix()
 	workSkill, addedSkill, configSkill := "workspace-skill-"+run, "added-skill-"+run, "config-skill-"+run
 	for _, s := range []struct{ dir, name, description string }{
@@ -161,34 +161,37 @@ func TestRealClaudeCodeListsWorkspaceAndAddedFolderSkills(t *testing.T) {
 
 	d := startDaemon(t, t.TempDir())
 	d.call("PUT", "/harnesses/claude-code", map[string]any{"path": claude}, 200)
-	d.call("PATCH", "/settings", map[string]any{"allowedFolders": []any{work, added, elsewhere}}, 200)
+	d.call("PATCH", "/settings", map[string]any{"allowedFolders": []any{work, added}}, 200)
 	t.Cleanup(func() {
 		if t.Failed() {
-			t.Logf("what the daemon says of Claude Code's skill lists:\n%s", d.skillListLog([][]string{{work, added}, {elsewhere}}))
+			t.Logf("what the daemon says of Claude Code's skill list:\n%s", d.skillListLog([][]string{{work, added}}))
 		}
 	})
 
 	offered := d.claudeCodeSkillsOffered(work, added)
-	for _, name := range []string{workSkill, addedSkill, configSkill} {
-		if !slices.Contains(offered, name) {
-			t.Errorf("GET /catalog for the workspace %s adding %s offers %q on Claude Code, want %s among them", work, added,
-				offered, name)
+	if !slices.Contains(offered, configSkill) {
+		t.Errorf("GET /catalog for the workspace %s adding %s offers %q on Claude Code, want %s among them", work, added,
+			offered, configSkill)
+	}
+	for _, name := range []string{workSkill, addedSkill} {
+		if slices.Contains(offered, name) {
+			t.Errorf("GET /catalog offers %s on Claude Code, want only the installation's skills", name)
 		}
 	}
 
-	spec := func(workspace string, skills ...any) map[string]any {
+	spec := func(skills ...any) map[string]any {
 		return map[string]any{
-			"type":      "general",
-			"prompt":    "Reply with OK.",
-			"skills":    skills,
-			"harness":   map[string]any{"preferred": map[string]any{"provider": "claude-code", "model": "haiku", "effort": "low"}},
-			"workspace": map[string]any{"path": workspace},
+			"type":        "general",
+			"prompt":      "Reply with OK.",
+			"skills":      skills,
+			"harness":     map[string]any{"preferred": map[string]any{"provider": "claude-code", "model": "haiku", "effort": "low"}},
+			"workspace":   map[string]any{"path": work},
+			"permissions": map[string]any{"profile": "custom", "custom": map[string]any{"writablePaths": []any{added}}},
 		}
 	}
-	listed := spec(work, workSkill, addedSkill, configSkill)
-	listed["permissions"] = map[string]any{"profile": "custom", "custom": map[string]any{"writablePaths": []any{added}}}
 	saved := d.call("POST", "/tasks", map[string]any{"document": map[string]any{"apiVersion": "harmflow/v1alpha1",
-		"kind": "Task", "metadata": map[string]any{"id": "listed-skills", "name": "Listed skills"}, "spec": listed}}, 201)
+		"kind": "Task", "metadata": map[string]any{"id": "listed-skills", "name": "Listed skills"},
+		"spec": spec(configSkill)}}, 201)
 	// The validator's warnings are in the saved task's validation; the task's own, in its warnings.
 	warnings, _ := saved["warnings"].([]any)
 	if v, _ := saved["validation"].(map[string]any); v != nil {
@@ -201,21 +204,23 @@ func TestRealClaudeCodeListsWorkspaceAndAddedFolderSkills(t *testing.T) {
 		}
 	}
 
-	refused := d.call("POST", "/tasks", map[string]any{"document": map[string]any{"apiVersion": "harmflow/v1alpha1",
-		"kind": "Task", "metadata": map[string]any{"id": "skills-elsewhere", "name": "Skills elsewhere"},
-		"spec": spec(elsewhere, workSkill)}}, 422)
-	e, _ := refused["error"].(map[string]any)
-	validation, _ := e["validation"].(map[string]any)
-	errs, _ := validation["errors"].([]any)
-	if !slices.ContainsFunc(errs, func(x any) bool {
-		issue, _ := x.(map[string]any)
-		params, _ := issue["params"].(map[string]any)
-		message, _ := issue["message"].(string)
-		return issue["messageKey"] == "skill_not_found" && params["name"] == workSkill && params["source"] == "skill_list" &&
-			strings.Contains(message, "Claude Code's skill list for ")
-	}) {
-		t.Errorf("POST /tasks skills-elsewhere, in %s citing %s, errors %v, want skill_not_found naming %s and Claude "+
-			"Code's skill list", elsewhere, workSkill, errs, workSkill)
+	for _, skill := range []string{workSkill, addedSkill} {
+		refused := d.call("POST", "/tasks", map[string]any{"document": map[string]any{"apiVersion": "harmflow/v1alpha1",
+			"kind": "Task", "metadata": map[string]any{"id": "project-skill", "name": "Project skill"},
+			"spec": spec(skill)}}, 422)
+		e, _ := refused["error"].(map[string]any)
+		validation, _ := e["validation"].(map[string]any)
+		errs, _ := validation["errors"].([]any)
+		if !slices.ContainsFunc(errs, func(x any) bool {
+			issue, _ := x.(map[string]any)
+			params, _ := issue["params"].(map[string]any)
+			message, _ := issue["message"].(string)
+			return issue["messageKey"] == "skill_not_found" && params["name"] == skill && params["source"] == "skill_list" &&
+				strings.Contains(message, "Claude Code's skill list")
+		}) {
+			t.Errorf("POST /tasks citing %s errors %v, want skill_not_found naming %s and Claude Code's skill list", skill,
+				errs, skill)
+		}
 	}
 }
 

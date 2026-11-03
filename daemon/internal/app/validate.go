@@ -37,12 +37,17 @@ type ValidationResult struct {
 	node    *yaml.Node
 }
 
-// catalogMode decides whether a missing agent or skill is an error (saving) or a warning (import and external edits).
+// catalogMode decides whether a missing agent or skill is an error (saving) or a warning (import and external edits),
+// and whether the harnesses are asked at all (start).
 type catalogMode int
 
 const (
 	catalogStrict catalogMode = iota
 	catalogLenient
+	// catalogStart is catalogLenient without the checks that ask a harness: its detection, its models, its readiness,
+	// and its lists of agents and skills. The daemon loads its task files with it, so that it starts without waiting for
+	// a harness, and checks them again with catalogLenient once it has started (checkTasks).
+	catalogStart
 )
 
 // Validate checks a task without writing anything.
@@ -188,12 +193,16 @@ func (a *App) semanticChecks(ctx context.Context, r *ValidationResult, doc domai
 			r.addError(path+"/provider", domain.T("harness_unknown", `unknown harness "{{harness}}"`, "harness", p.Provider))
 			continue
 		}
-		info := a.harnessInfo(ctx, p.Provider)
-		if err := ad.ValidateProfile(info, p.Model, p.Effort); err != nil {
-			r.addError(path, domain.TextOf(err))
-		} else if w, ok := ad.(ports.ProfileWarner); ok {
-			if text, unchecked := w.ProfileWarning(info, p.Model, p.Effort); unchecked {
-				r.addWarning(path, domain.WarningOther, text)
+		asks := mode != catalogStart
+		var info ports.HarnessInfo
+		if asks {
+			info = a.harnessInfo(ctx, p.Provider)
+			if err := ad.ValidateProfile(info, p.Model, p.Effort); err != nil {
+				r.addError(path, domain.TextOf(err))
+			} else if w, ok := ad.(ports.ProfileWarner); ok {
+				if text, unchecked := w.ProfileWarning(info, p.Model, p.Effort); unchecked {
+					r.addWarning(path, domain.WarningOther, text)
+				}
 			}
 		}
 		if p.KeepsSession() {
@@ -207,6 +216,9 @@ func (a *App) semanticChecks(ctx context.Context, r *ValidationResult, doc domai
 		}
 		if !doc.AllowsExtraUsage() && !reportsExtraUsage(ad) {
 			r.addWarning(path+"/provider", domain.WarningPolicyUnenforced, extraUsageUnenforced(ad.Name()))
+		}
+		if !asks {
+			continue
 		}
 		if !info.Detected {
 			r.addWarning(path+"/provider", domain.WarningHarnessNotReady,
@@ -271,6 +283,9 @@ func (a *App) semanticChecks(ctx context.Context, r *ValidationResult, doc domai
 		}
 	}
 	a.scriptChecks(r, doc)
+	if mode == catalogStart {
+		return // the restrictions a harness enforces depend on what its detection found
+	}
 	for _, w := range a.policyWarnings(ctx, doc) {
 		r.addWarning("/spec/permissions", w.Code, w.Text)
 	}
@@ -281,7 +296,6 @@ func (a *App) semanticChecks(ctx context.Context, r *ValidationResult, doc domai
 type missingItem struct {
 	kind, name, where string
 	source            string // builtin, harness, or <kind>_list, with _errors when the list reported discovery errors
-	workspace         string // the folder a harness's list was read for
 	errors            string // the discovery errors, as one line
 	unreadable        error
 	// unverifiable says the harness loads the task's items of this kind itself, so a list it could not give leaves them
@@ -289,19 +303,19 @@ type missingItem struct {
 	unverifiable bool
 }
 
-// unverified says a harness could not give its list of the user's skills for workspace, so the task's skills are not
+// unverified says a harness could not give the list of skills its installation loads, so the task's skills are not
 // verified, and why.
 func (m missingItem) unverified(harness string) domain.Text {
 	return domain.T("skill_list_unverified",
-		"{{harness}} could not say which skills it loads for {{workspace}}, so the task's skills are not verified: {{detail}}",
-		"harness", harness, "workspace", m.workspace).Nest("detail", domain.TextOf(m.unreadable))
+		"{{harness}} could not say which skills it loads, so the task's skills are not verified: {{detail}}",
+		"harness", harness).Nest("detail", domain.TextOf(m.unreadable))
 }
 
-// listUnreadable says a harness's list of the user's skills for workspace could not be read, and why. Only skills are
-// listed per workspace.
-func listUnreadable(harness, workspace string, err error) domain.Text {
-	return domain.T("skill_list_unreadable", "{{harness}}'s skill list for {{workspace}} could not be read: {{detail}}",
-		"harness", harness, "workspace", workspace).Nest("detail", domain.TextOf(err))
+// listUnreadable says the list of skills a harness's installation loads could not be read, and why. Only skills are
+// listed by the harness.
+func listUnreadable(harness string, err error) domain.Text {
+	return domain.T("skill_list_unreadable", "{{harness}}'s skill list could not be read: {{detail}}",
+		"harness", harness).Nest("detail", domain.TextOf(err))
 }
 
 // notFound, missing, and invalidFallback say an item is missing for a harness: on save, on import, and for a fallback.
@@ -309,7 +323,7 @@ func listUnreadable(harness, workspace string, err error) domain.Text {
 // be read is said to be so instead.
 func (m missingItem) notFound(harness string) domain.Text {
 	if m.unreadable != nil {
-		return listUnreadable(harness, m.workspace, m.unreadable)
+		return listUnreadable(harness, m.unreadable)
 	}
 	if m.kind == "agent" {
 		return domain.T("agent_not_found", `agent "{{name}}" cannot be found for {{harness}} ({{where}})`, m.params(harness)...)
@@ -319,7 +333,7 @@ func (m missingItem) notFound(harness string) domain.Text {
 
 func (m missingItem) missing(harness string) domain.Text {
 	if m.unreadable != nil {
-		return listUnreadable(harness, m.workspace, m.unreadable)
+		return listUnreadable(harness, m.unreadable)
 	}
 	if m.kind == "agent" {
 		return domain.T("agent_missing", `agent "{{name}}" is missing on this machine for {{harness}} ({{where}})`,
@@ -332,8 +346,8 @@ func (m missingItem) missing(harness string) domain.Text {
 func (m missingItem) invalidFallback(harness string) domain.Text {
 	if m.unreadable != nil {
 		return domain.T("fallback_skill_list_unreadable",
-			"{{harness}} is not a valid fallback: its skill list for {{workspace}} could not be read: {{detail}}",
-			"harness", harness, "workspace", m.workspace).Nest("detail", domain.TextOf(m.unreadable))
+			"{{harness}} is not a valid fallback: its skill list could not be read: {{detail}}",
+			"harness", harness).Nest("detail", domain.TextOf(m.unreadable))
 	}
 	if m.kind == "agent" {
 		return domain.T("fallback_agent_missing",
@@ -349,9 +363,6 @@ func (m missingItem) params(harness string) []string {
 		source = "harness"
 	}
 	params := []string{"name", m.name, "harness", harness, "where", m.where, "source", source}
-	if m.workspace != "" {
-		params = append(params, "workspace", m.workspace)
-	}
 	if m.errors != "" {
 		params = append(params, "errors", m.errors)
 	}

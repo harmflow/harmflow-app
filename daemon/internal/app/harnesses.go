@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/catalog"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/procutil"
@@ -79,12 +80,18 @@ func (a *App) redetectLoop(ctx context.Context) {
 	}
 }
 
-// refreshHarnessesAsync detects every harness, each on a goroutine of its own that a.detection counts, and that ends
-// with ctx.
-func (a *App) refreshHarnessesAsync(ctx context.Context) {
-	for _, id := range sortedKeys(a.adapters) {
-		a.detection.Go(func() { a.detect(ctx, id) })
-	}
+// detectThenCheckTasks detects every harness, each on a goroutine of its own, and once every detection has ended
+// validates the task files again with what it found (checkTasks). It returns at once: a.detection counts the goroutine
+// that does it, which ends with ctx.
+func (a *App) detectThenCheckTasks(ctx context.Context) {
+	a.detection.Go(func() {
+		var detections sync.WaitGroup
+		for _, id := range sortedKeys(a.adapters) {
+			detections.Go(func() { a.detect(ctx, id) })
+		}
+		detections.Wait()
+		a.checkTasks(ctx)
+	})
 }
 
 // detect revalidates one harness and stores what it found, including the resolved path, then announces it, so the
@@ -250,8 +257,8 @@ func (a *App) resolveItem(ctx context.Context, kind, name, harness, workspace st
 		return itemLookup{missing: m}
 	}
 	m.where = "the " + ad.Name() + " configuration"
-	if l, ok := ad.(ports.WorkspaceLister); ok && l.ListsPerWorkspace(kind) {
-		m.where, m.source, m.workspace = ad.Name()+"'s "+kind+" list for "+workspace, kind+"_list", workspace
+	if l, ok := ad.(ports.InstallationLister); ok && l.ListsInstallation(kind) {
+		m.where, m.source = ad.Name()+"'s "+kind+" list", kind+"_list"
 	}
 	if u, ok := ad.(ports.UnverifiedItemsAllower); ok && u.AllowsUnverified(kind) {
 		m.unverifiable = true
@@ -366,7 +373,7 @@ func (a *App) Catalog(ctx context.Context, workspace, task string, added ...stri
 			items, problems, err := ad.UserItems(ctx, a.harnessInfo(ctx, id), kind, workspace, folders)
 			if err != nil {
 				c.Problems = append(c.Problems, CatalogProblem{Harness: id, Kind: kind,
-					Text: listUnreadable(ad.Name(), workspace, err)})
+					Text: listUnreadable(ad.Name(), err)})
 			}
 			for _, p := range problems {
 				c.Problems = append(c.Problems, CatalogProblem{Harness: id, Kind: kind, Path: p.Path,

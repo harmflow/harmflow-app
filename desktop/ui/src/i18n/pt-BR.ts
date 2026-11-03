@@ -343,11 +343,11 @@ export const ptBR: Resources = {
       '{{harness}} não é um fallback válido: o agente "{{name}}" não foi encontrado para ele ($t(itemSource.{{source}}))',
     fallback_skill_missing:
       '{{harness}} não é um fallback válido: a skill "{{name}}" não foi encontrada para ele ($t(itemSource.{{source}}))',
-    skill_list_unreadable: "não foi possível ler a lista de skills do {{harness}} para {{workspace}}: {{detail}}",
+    skill_list_unreadable: "não foi possível ler a lista de skills do {{harness}}: {{detail}}",
     fallback_skill_list_unreadable:
-      "{{harness}} não é um fallback válido: não foi possível ler a lista de skills dele para {{workspace}}: {{detail}}",
+      "{{harness}} não é um fallback válido: não foi possível ler a lista de skills dele: {{detail}}",
     skill_list_unverified:
-      "o {{harness}} não conseguiu dizer quais skills carrega para {{workspace}}, então as skills da tarefa não foram verificadas: {{detail}}",
+      "o {{harness}} não conseguiu dizer quais skills carrega, então as skills da tarefa não foram verificadas: {{detail}}",
     claude_skill_list_unrecognized: "{{command}} não imprimiu uma lista de skills que o HarmFlow consiga ler",
     claude_skill_list_timed_out:
       "{{command}} não imprimiu a linha init em {{timeout}}, então não se sabe quais skills o Claude Code carrega",
@@ -418,6 +418,7 @@ export const ptBR: Resources = {
     daemon_stop_requested: "parado a pedido do usuário",
     local_api_stopped: "a API local parou",
     task_delete_pending: "a exclusão aguarda a execução em andamento",
+    task_checked: "a tarefa foi verificada com os seus harnesses",
     task_changed_externally: "o arquivo da tarefa foi alterado fora do HarmFlow",
     task_changed_externally_invalid:
       "o arquivo da tarefa {{file}} foi alterado fora do HarmFlow e não passa na validação; a última definição válida continua valendo",
@@ -588,8 +589,8 @@ export const ptBR: Resources = {
   itemSource: {
     builtin: "embutido",
     harness: "na configuração do {{harness}}",
-    skill_list: "na lista de skills do {{harness}} para {{workspace}}",
-    skill_list_errors: "na lista de skills do {{harness}} para {{workspace}}, que não conseguiu carregar {{errors}}",
+    skill_list: "na lista de skills do {{harness}}",
+    skill_list_errors: "na lista de skills do {{harness}}, que não conseguiu carregar {{errors}}",
   },
   claudeSettings: {
     user: "configurações de usuário",
