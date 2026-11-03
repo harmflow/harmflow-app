@@ -1,5 +1,5 @@
 // The first and priority screen: every active execution at once, the selected one in detail, the queue and the recent
-// history beside them.
+// history beside them. With the aside hidden (⌘E), the main column takes the whole width.
 import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { isActive } from "../api/types";
@@ -12,11 +12,13 @@ import { actions, useStore } from "../state/store";
 export function ExecutionsScreen({
   selectedId,
   onSelect,
+  asideHidden = false,
   onGoToTasks,
   onSeeHistory,
 }: {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
+  asideHidden?: boolean;
   onGoToTasks: () => void;
   onSeeHistory: () => void;
 }) {
@@ -37,7 +39,7 @@ export function ExecutionsScreen({
   const summary = [...all, ...recent].find((e) => e.id === effective);
 
   return (
-    <div className="screen screen--with-aside">
+    <div className={asideHidden ? "screen" : "screen screen--with-aside"}>
       <div className="screen__main">
         <Counters />
         <SectionTitle>{t("executions.activeTitle", { count: running.length })}</SectionTitle>
@@ -70,11 +72,13 @@ export function ExecutionsScreen({
         )}
         {effective ? <ExecutionDetail executionId={effective} summary={summary} /> : null}
       </div>
-      <div className="screen__aside">
-        <QueuePanel onOpenExecution={(id) => onSelect(id)} />
-        <RecentHistory onOpenExecution={(id) => onSelect(id)} onSeeAll={onSeeHistory} />
-        <QuoteCard />
-      </div>
+      {asideHidden ? null : (
+        <div className="screen__aside">
+          <QueuePanel onOpenExecution={(id) => onSelect(id)} />
+          <RecentHistory onOpenExecution={(id) => onSelect(id)} onSeeAll={onSeeHistory} />
+          <QuoteCard />
+        </div>
+      )}
     </div>
   );
 }

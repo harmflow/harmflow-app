@@ -10,6 +10,8 @@
 // A render error never leaves the window empty, and the interface tells the shell when it has painted (harmflow-app#96).
 // A first launch opens in the system's language when it is official, and in en-US otherwise (harmflow-app#633).
 // Notices the daemon held while no dashboard ran show as unread once it starts (harmflow-app#522).
+// ⌘E hides and shows the Executions screen's aside, on that screen alone, and the choice outlives a restart
+// (harmflow-app#505).
 import { EditorView } from "@codemirror/view";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -327,6 +329,99 @@ describe("sidebar", () => {
     } finally {
       await act(async () => patchStateForTests({ connection: "connected" }));
     }
+  });
+});
+
+describe("executions aside", () => {
+  const cmdE = { key: "e" };
+  const aside = () => host!.querySelector(".screen__aside");
+  const wide = () => !host!.querySelector(".screen")!.classList.contains("screen--with-aside");
+  const stored = () => localStorage.getItem("harmflow.executionsAsideHidden");
+
+  it("hides with ⌘E, the main column taking the full width, and shows again, from a text field too", async () => {
+    await launch();
+    expect(aside()).not.toBeNull();
+    expect(wide()).toBe(false);
+
+    expect(await press(undefined, cmdE)).toBe(true);
+    expect(aside()).toBeNull();
+    expect(wide()).toBe(true);
+    expect(host!.querySelector(".screen__main")).not.toBeNull();
+    expect(stored()).toBe("1");
+
+    const field = host!.querySelector(".app__content")!.appendChild(document.createElement("input"));
+    field.focus();
+    expect(await press(field, cmdE)).toBe(true);
+    expect(aside()).not.toBeNull();
+    expect(wide()).toBe(false);
+    expect(stored()).toBe("0");
+  });
+
+  it("takes ⌘E alone, not with another modifier or as a held key", async () => {
+    await launch();
+    expect(await press(undefined, { ...cmdE, shiftKey: true })).toBe(false);
+    expect(await press(undefined, { ...cmdE, ctrlKey: true })).toBe(false);
+    expect(await press(undefined, { ...cmdE, altKey: true })).toBe(false);
+    expect(await press(undefined, { ...cmdE, repeat: true })).toBe(false);
+    expect(await press(undefined, { ...cmdE, metaKey: false })).toBe(false);
+    expect(aside()).not.toBeNull();
+  });
+
+  it("leaves ⌘E alone while a modal dialog is open, and on the onboarding screen", async () => {
+    await launch();
+    const newTask = [...host!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "New task")!;
+    await act(async () => newTask.click());
+    expect(host!.querySelector('[aria-modal="true"]')).not.toBeNull();
+    expect(await press(undefined, cmdE)).toBe(false);
+    expect(aside()).not.toBeNull();
+    quit();
+
+    patchStateForTests({ settings: { ...settings, onboardingCompleted: false } });
+    await launch();
+    expect(host!.querySelector(".sidebar")).toBeNull();
+    expect(await press(undefined, cmdE)).toBe(false);
+    await act(async () => patchStateForTests({ settings }));
+    expect(aside()).not.toBeNull();
+  });
+
+  it("does nothing on another screen, and leaves the saved state as it was", async () => {
+    await launch();
+    await press(undefined, cmdE);
+    expect(stored()).toBe("1");
+
+    await act(async () => navButton("History").click());
+    expect(await press(undefined, cmdE)).toBe(false);
+    expect(stored()).toBe("1");
+    await act(async () => navButton("Tasks").click());
+    expect(await press(undefined, cmdE)).toBe(false);
+    expect(stored()).toBe("1");
+
+    await act(async () => navButton("Executions").click());
+    expect(aside()).toBeNull();
+    expect(await press(undefined, cmdE)).toBe(true);
+    expect(aside()).not.toBeNull();
+  });
+
+  it("keeps the choice across a restart of the app", async () => {
+    await launch();
+    await press(undefined, cmdE);
+    expect(aside()).toBeNull();
+    quit();
+
+    await launch();
+    expect(aside()).toBeNull();
+    expect(wide()).toBe(true);
+    await press(undefined, cmdE);
+    quit();
+
+    await launch();
+    expect(aside()).not.toBeNull();
+  });
+
+  it("shows the aside when the saved value is missing or unreadable", async () => {
+    localStorage.setItem("harmflow.executionsAsideHidden", "yes");
+    await launch();
+    expect(aside()).not.toBeNull();
   });
 });
 

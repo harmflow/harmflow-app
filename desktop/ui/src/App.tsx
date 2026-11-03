@@ -19,6 +19,7 @@ import { actions, setNotificationHandler, startSync, useStore } from "./state/st
 
 const ONBOARDED_KEY = "harmflow.onboarded";
 const SIDEBAR_KEY = "harmflow.sidebarCollapsed";
+const EXECUTIONS_ASIDE_KEY = "harmflow.executionsAsideHidden";
 
 function wasOnboarded(): boolean {
   try {
@@ -31,6 +32,15 @@ function wasOnboarded(): boolean {
 function wasSidebarCollapsed(): boolean {
   try {
     return localStorage.getItem(SIDEBAR_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** Whether the Executions screen's aside was hidden; a missing or unreadable value shows it. */
+function wasExecutionsAsideHidden(): boolean {
+  try {
+    return localStorage.getItem(EXECUTIONS_ASIDE_KEY) === "1";
   } catch {
     return false;
   }
@@ -57,6 +67,7 @@ export function App() {
   const [importing, setImporting] = useState(false);
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(wasSidebarCollapsed);
+  const [executionsAsideHidden, setExecutionsAsideHidden] = useState(wasExecutionsAsideHidden);
   const [zoom, setZoom] = useState(storedZoom);
   const zoomApplied = useRef<Promise<void>>(Promise.resolve());
 
@@ -100,6 +111,14 @@ export function App() {
       // Without storage the choice lasts until the app quits.
     }
   }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(EXECUTIONS_ASIDE_KEY, executionsAsideHidden ? "1" : "0");
+    } catch {
+      // Without storage the choice lasts until the app quits.
+    }
+  }, [executionsAsideHidden]);
 
   // The tray and the app menu's Settings… speak the interface's language too. A count given as a string reads the key
   // as written, so both forms of the stop confirmation go with their `{{count}}` left in, for the tray to choose.
@@ -191,23 +210,26 @@ export function App() {
     }
   }, [navigation]);
 
-  // ⌘B collapses and expands the sidebar, and ⌘N opens the template picker as the topbar's New task does, from
-  // any focus, a text field or the YAML editor included. The onboarding and daemon-down screens have no shell, and a
-  // modal dialog, the picker included, keeps the keyboard. Linux and Windows would check ctrlKey.
+  // ⌘B collapses and expands the sidebar, ⌘N opens the template picker as the topbar's New task does, and ⌘E hides
+  // and shows the Executions screen's aside, from any focus, a text field or the YAML editor included. ⌘E acts on the
+  // Executions screen alone: elsewhere it is left to the system and the saved state stays as it was. The onboarding
+  // and daemon-down screens have no shell, and a modal dialog, the picker included, keeps the keyboard. Linux and
+  // Windows would check ctrlKey.
   useEffect(() => {
     if (!shell) return;
     const onKey = (e: KeyboardEvent) => {
       if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat) return;
       const key = e.key.toLowerCase();
-      if (key !== "b" && key !== "n") return;
+      if (key !== "b" && key !== "n" && !(key === "e" && screen === "executions")) return;
       if (document.querySelector('[aria-modal="true"]')) return;
       e.preventDefault();
       if (key === "b") setSidebarCollapsed((collapsed) => !collapsed);
+      else if (key === "e") setExecutionsAsideHidden((hidden) => !hidden);
       else setPicker(true);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [shell]);
+  }, [shell, screen]);
 
   // ⌘+, ⌘−, and ⌘0 zoom the dashboard everywhere, from any focus: unlike ⌘B, on the onboarding and daemon-down
   // screens too, and over an open dialog.
@@ -272,6 +294,7 @@ export function App() {
             <ExecutionsScreen
               selectedId={selectedExecution}
               onSelect={setSelectedExecution}
+              asideHidden={executionsAsideHidden}
               onGoToTasks={() => navigate("tasks")}
               onSeeHistory={() => navigate("history")}
             />
