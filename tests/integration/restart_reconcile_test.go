@@ -113,7 +113,11 @@ func TestRestartDuplicatesNoBranchOrPullRequest(t *testing.T) {
 // rather than leaving it as an earlier session left it. Its events hold a pull_request.updated for the issue with the
 // pull request's URL, and no pull_request.created. Its report.json gives the issue the kind resume and that pull
 // request, a draft it did not create. On GitHub, the record of the body's edits puts the last one after the
-// execution's execution.started event and before the event that ended it.
+// execution's execution.started event and before the event that ended it. GitHub records no edit that leaves a body
+// as it was, so with no edit in that window the session's gh pr edit proves the update instead: one that succeeded in
+// the execution, whose body file holds the body GitHub holds. A failure of the body's check carries the commands the
+// session ran, read from the daemon before the test removes its folder, which tell a skipped edit from an unrecorded
+// one.
 func checkUpdatedPullRequest(t *testing.T, d *daemon, id, dir string, issue int, pr restartPR) {
 	t.Helper()
 	key := issueKey(issue)
@@ -155,13 +159,164 @@ func checkUpdatedPullRequest(t *testing.T, d *daemon, id, dir string, issue int,
 	}
 
 	if started.IsZero() || ended.IsZero() {
-		t.Fatalf("execution %s logged no start or no end: started %v, ended %v", id, started, ended)
+		t.Fatalf("execution %s logged no start or no end: started %v, ended %v\nthe session ran:\n%s", id, started, ended,
+			commandsOf(d, id))
 	}
 	edited := lastBodyEdit(t, pr.Number)
 	// GitHub records an edit to the second, so the start is compared to the second too.
-	if edited.Before(started.Truncate(time.Second)) || edited.After(ended) {
-		t.Errorf("GitHub records the last edit of the body of %s at %v, want it within execution %s, from %v to %v",
-			pr.URL, edited, id, started, ended)
+	if !edited.Before(started.Truncate(time.Second)) && !edited.After(ended) {
+		return
+	}
+	recorded := fmt.Sprintf("GitHub records the last edit of the body of %s at %v, not within execution %s, from %v to %v",
+		pr.URL, edited, id, started, ended)
+	edit, file := bodyEdit(d, id)
+	if edit == "" {
+		t.Errorf("%s, and the session ran no gh pr edit that succeeded: it skipped the edit\nthe session ran:\n%s",
+			recorded, commandsOf(d, id))
+		return
+	}
+	if file == "" {
+		t.Errorf("%s, and the session's %q names no body file it wrote\nthe session ran:\n%s", recorded, edit,
+			commandsOf(d, id))
+		return
+	}
+	wrote, err := os.ReadFile(file)
+	if err != nil {
+		t.Errorf("%s, and the body file of the session's %q: %v\nthe session ran:\n%s", recorded, edit, err,
+			commandsOf(d, id))
+		return
+	}
+	if holds := pullRequestBody(t, pr.Number); plainBody(holds) != plainBody(string(wrote)) {
+		t.Errorf("%s, and the body GitHub holds is not the one the session's %q wrote\nGitHub holds:\n%s\nthe session "+
+			"wrote:\n%s\nthe session ran:\n%s", recorded, edit, holds, wrote, commandsOf(d, id))
+	}
+}
+
+// bodyEdit is the last gh pr edit the execution ran that succeeded, and the body file it passed with --body-file or
+// -F, as the path of a file the session wrote: the path itself when it is absolute, otherwise the last file the session
+// wrote by that name. edit is "" when no gh pr edit succeeded, and file is "" when the edit names no body file the
+// session wrote.
+func bodyEdit(d *daemon, id string) (edit, file string) {
+	d.t.Helper()
+	commands := map[any]string{}
+	var written []string
+	for _, e := range d.events(id) {
+		p, _ := e["payload"].(map[string]any)
+		switch e["type"] {
+		case "tool.started":
+			if path, _ := p["path"].(string); path != "" && (p["tool"] == "Write" || p["tool"] == "Edit") {
+				written = append(written, path)
+			}
+			if c, _ := p["command"].(string); strings.Contains(c, "gh pr edit") {
+				commands[p["toolId"]] = c
+			}
+		case "tool.completed":
+			if c, ok := commands[p["toolId"]]; ok && p["status"] == "succeeded" {
+				edit = c
+			}
+		}
+	}
+	name := bodyFileArg(edit)
+	if name == "" {
+		return edit, ""
+	}
+	if filepath.IsAbs(name) && !strings.Contains(name, "$") {
+		return edit, name
+	}
+	for i := len(written) - 1; i >= 0; i-- {
+		if filepath.Base(written[i]) == filepath.Base(name) {
+			return edit, written[i]
+		}
+	}
+	return edit, ""
+}
+
+// bodyFileArg is the value of the --body-file or -F flag of the gh pr edit in the shell command, "" when it has none.
+// The edit's words end at the first control operator.
+func bodyFileArg(command string) string {
+	words := shellWords(command)
+	for i := 0; i+2 < len(words); i++ {
+		if words[i] != "gh" || words[i+1] != "pr" || words[i+2] != "edit" {
+			continue
+		}
+		for j := i + 3; j < len(words) && !slices.Contains([]string{";", "|", "&"}, words[j]); j++ {
+			switch {
+			case (words[j] == "--body-file" || words[j] == "-F") && j+1 < len(words):
+				return words[j+1]
+			case strings.HasPrefix(words[j], "--body-file="):
+				return strings.TrimPrefix(words[j], "--body-file=")
+			}
+		}
+	}
+	return ""
+}
+
+// shellWords splits a shell command into words at the spaces outside single and double quotes, dropping the quotes.
+// Each ;, |, and & outside quotes ends a word and is a word of its own, so && is two.
+func shellWords(command string) []string {
+	var words []string
+	var word strings.Builder
+	inWord := false
+	var quote rune
+	for _, r := range command {
+		switch {
+		case quote != 0 && r == quote:
+			quote = 0
+		case quote != 0:
+			word.WriteRune(r)
+		case r == '\'' || r == '"':
+			quote, inWord = r, true
+		case r == ' ' || r == '\t' || r == '\n' || r == ';' || r == '|' || r == '&':
+			if inWord {
+				words = append(words, word.String())
+				word.Reset()
+				inWord = false
+			}
+			if r == ';' || r == '|' || r == '&' {
+				words = append(words, string(r))
+			}
+		default:
+			word.WriteRune(r)
+			inWord = true
+		}
+	}
+	if inWord {
+		words = append(words, word.String())
+	}
+	return words
+}
+
+// pullRequestBody is the body the pull request of queueRepo holds on GitHub now.
+func pullRequestBody(t *testing.T, number int) string {
+	t.Helper()
+	out, err := exec.Command("gh", "pr", "view", strconv.Itoa(number), "--repo", queueRepo, "--json", "body",
+		"--jq", ".body").Output()
+	if err != nil {
+		t.Fatalf("gh pr view %d --json body: %v", number, err)
+	}
+	return string(out)
+}
+
+// plainBody is a pull request's body without the line endings and the surrounding blank space that GitHub and gh may
+// change on the way.
+func plainBody(body string) string {
+	return strings.TrimSpace(strings.ReplaceAll(body, "\r\n", "\n"))
+}
+
+// The body file of a session's gh pr edit is read from its command however the command spells the flag, quotes the
+// path, or chains the edit with other commands, and a command whose edit passes none has none.
+func TestBodyFileArgReadsTheEditsBodyFile(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct{ command, want string }{
+		{"gh pr edit 142 --repo o/r --body-file /tmp/body.md", "/tmp/body.md"},
+		{`cd "/a b" && gh pr edit https://github.com/o/r/pull/142 -F 'my body.md' && echo done`, "my body.md"},
+		{"gh pr edit 142 --body-file=$HARMFLOW_EXECUTION_DIR/pr-body.md", "$HARMFLOW_EXECUTION_DIR/pr-body.md"},
+		{"gh pr edit 142 --body 'same text'; cat --body-file x", ""},
+		{"gh pr view 142 --json body -F x", ""},
+	} {
+		if got := bodyFileArg(c.command); got != c.want {
+			t.Errorf("bodyFileArg(%q) = %q, want %q", c.command, got, c.want)
+		}
 	}
 }
 
