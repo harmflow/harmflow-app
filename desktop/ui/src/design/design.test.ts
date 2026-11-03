@@ -5,6 +5,7 @@ import { esES } from "../i18n/es-ES";
 import { ptBR } from "../i18n/pt-BR";
 
 const ui = join(__dirname, "..", "..");
+const appCss = readFileSync(join(__dirname, "app.css"), "utf8");
 const fontsCss = readFileSync(join(__dirname, "fonts.css"), "utf8");
 const tokensCss = readFileSync(join(__dirname, "tokens.css"), "utf8");
 
@@ -61,6 +62,23 @@ describe("animations", () => {
         `@keyframes ${name} in ${file}`,
       ).toEqual([]);
     }
+  });
+});
+
+describe("the History filter bar", () => {
+  it("keeps a date field only as wide as its date, not the full width of the bar's line", () => {
+    // A rule of app.css by its exact selector, with where it starts: of two rules of one class each, the later wins.
+    const rule = (selector: string) => {
+      const match = new RegExp(`(?:^|\\n)${selector.replace(/[.]/g, "\\.")}\\s*{([^}]*)}`).exec(appCss);
+      expect(match, selector).not.toBeNull();
+      return { at: match!.index, body: match![1] };
+    };
+    const input = rule(".input");
+    const date = rule(".filters__date");
+    expect(input.body).toMatch(/width:\s*100%;/);
+    expect(date.body).toMatch(/(?:^|[\s;])width:\s*auto;/);
+    expect(date.body).not.toMatch(/width:\s*100%/);
+    expect(date.at).toBeGreaterThan(input.at);
   });
 });
 

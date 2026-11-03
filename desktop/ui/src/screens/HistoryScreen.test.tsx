@@ -2,7 +2,8 @@
 // Drives the History screen, the task's history, in a DOM against a stand-in for the daemon's local API: an execution
 // whose log expired under the retention period is still listed for its task, with its whole record, and opening it says
 // its log is gone. That the daemon keeps the record and serves it so is app › TestRetentionDeletesOnlyExpiredLogs's and
-// itest › TestRetentionExpiresTheLogAtStart's.
+// itest › TestRetentionExpiresTheLogAtStart's. Its filter bar gives the date fields the class that keeps them on the
+// filters' line.
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -254,5 +255,18 @@ describe("the task's history, after an execution's log expired", () => {
     await act(async () => pr.click());
     expect(openUrl.mock.calls).toEqual([[pullRequestUrl]]);
     expect(banners()).toEqual([expired]);
+  });
+});
+
+describe("the filter bar", () => {
+  // The DOM here lays nothing out: design.test.ts checks that the class keeps a date field only as wide as its date.
+  it("gives both date fields the class that keeps them on the filters' line", async () => {
+    await open();
+    const dates = [...host!.querySelectorAll<HTMLInputElement>('.filters input[type="date"]')];
+    expect(dates.map((d) => d.getAttribute("aria-label"))).toEqual(["From", "To"]);
+    for (const date of dates) {
+      expect(date.classList.contains("input"), date.getAttribute("aria-label")!).toBe(true);
+      expect(date.classList.contains("filters__date"), date.getAttribute("aria-label")!).toBe(true);
+    }
   });
 });

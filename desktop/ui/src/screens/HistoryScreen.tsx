@@ -129,8 +129,22 @@ export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpe
             </option>
           ))}
         </Select>
-        <TextInput type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} aria-label={t("history.filters.from")} />
-        <TextInput type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} aria-label={t("history.filters.to")} />
+        <TextInput
+          type="date"
+          className="filters__date"
+          value={from}
+          max={to || undefined}
+          onChange={(e) => setFrom(e.target.value)}
+          aria-label={t("history.filters.from")}
+        />
+        <TextInput
+          type="date"
+          className="filters__date"
+          value={to}
+          min={from || undefined}
+          onChange={(e) => setTo(e.target.value)}
+          aria-label={t("history.filters.to")}
+        />
         <IconButton icon="refresh" label={t("common.refresh")} className="icon-btn--framed" onClick={() => void load()} />
       </div>
       {bounds ? null : <Banner tone="warning">{t("history.filters.invalidPeriod")}</Banner>}
