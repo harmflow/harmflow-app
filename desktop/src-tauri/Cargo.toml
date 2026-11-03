@@ -30,7 +30,7 @@ dirs = "7"
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSEvent", "NSMenu", "NSMenuItem", "NSResponder"] }
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSBundle", "NSEnumerator", "NSString", "NSUserNotification"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSBundle", "NSDate", "NSEnumerator", "NSRunLoop", "NSString", "NSUserNotification"] }
 
 [profile.release]
 codegen-units = 1

@@ -11,8 +11,9 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use objc2::MainThreadMarker;
+use objc2::{sel, MainThreadMarker};
 use objc2_app_kit::{NSApplication, NSEventModifierFlags, NSMenu};
+use objc2_foundation::NSObjectNSDelayedPerforming;
 use serde_json::{json, Value};
 use tauri::menu::MenuItemKind;
 use tauri::{AppHandle, Manager, Runtime};
@@ -38,7 +39,8 @@ enum Command<'a> {
     ChooseAppMenu(&'a str),
     /// Chooses the tray menu's item with this id, through the handler of every menu event.
     ChooseTray(&'a str),
-    /// Sends the app `terminate:`, the request macOS sends when the user quits it from the Dock.
+    /// Sends the app `terminate:`, the request macOS sends when the user quits it from the Dock, from the run loop as
+    /// macOS does.
     Terminate,
     /// The notices macOS's notification center holds as delivered for the shell, with the identity they were sent under.
     Notices,
@@ -113,7 +115,13 @@ fn run<R: Runtime>(app: &AppHandle<R>, command: Command) -> Value {
             // The answer goes out before macOS ends the app, which may then exit before the test reads it.
             let _ = app.run_on_main_thread(|| {
                 let mtm = MainThreadMarker::new().expect("run_on_main_thread runs on the main thread");
-                NSApplication::sharedApplication(mtm).terminate(None);
+                // Not terminate: itself: this closure runs inside the event loop's handler, which holds the event
+                // loop's lock, and terminate: ends that loop under the same lock on the same thread, so the shell
+                // hangs (harmflow-app#805). The Dock's Quit reaches the app from the run loop, outside the handler;
+                // the next turn of the run loop sends terminate: from there too.
+                let ns_app = NSApplication::sharedApplication(mtm);
+                // SAFETY: terminate: is NSApplication's, and takes its sender, which may be nil.
+                unsafe { ns_app.performSelector_withObject_afterDelay(sel!(terminate:), None, 0.0) };
             });
             json!({ "ok": true })
         }
