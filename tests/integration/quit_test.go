@@ -12,7 +12,7 @@ import (
 // shell whatever the preference. The app menu is read as macOS shows it: its last item is HarmFlow's own Quit on ⌘Q,
 // and no item sends macOS's terminate:, which no handler of the app sees. The test drives the shell through the debug
 // build's control channel, so it needs no Accessibility or Automation permission. The Dock's Quit is macOS's terminate:
-// request, which the channel sends inside the app.
+// request, which the channel sends inside the app from the run loop, where macOS delivers it (harmflow-app#805).
 func TestEachWayToQuitFollowsThePreference(t *testing.T) {
 	bin := realDesktop(t)
 	for _, c := range []struct {
