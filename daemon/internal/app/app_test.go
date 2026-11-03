@@ -4077,12 +4077,13 @@ func TestInvalidAtStartKeepsItsSchedule(t *testing.T) {
 		if got.Outcome != "skipped" || got.ReasonKey != "task_file_invalid" || got.ReasonParams["file"] != tc.id+".yaml" ||
 			got.Trigger != domain.TriggerCatchUp || got.Missed != tc.misfires || !got.ScheduledFor.Equal(tc.first) ||
 			got.ExecutionID != "" {
-			t.Errorf("%s's record after the restart: %+v", tc.id, got)
+			t.Errorf("%s's record after the restart: %+v, want skipped, task_file_invalid naming %s.yaml, catch-up of %d from %v",
+				tc.id, got, tc.id, tc.misfires, tc.first)
 		}
 	}
 	for _, id := range []string{"unscheduled", "deleted", "new-broken"} {
 		if s := e.savedSchedule(id); s != nil {
-			t.Errorf("%s keeps a schedule state: %+v", id, s)
+			t.Errorf("%s keeps a schedule state: %+v, want none", id, s)
 		}
 	}
 
@@ -4091,7 +4092,8 @@ func TestInvalidAtStartKeepsItsSchedule(t *testing.T) {
 	e.app.Tick()
 	if got := e.lastFiring("daily"); got.Outcome != "skipped" || got.ReasonKey != "task_file_invalid" ||
 		got.Trigger != domain.TriggerSchedule || !got.ScheduledFor.Equal(day(23, 9)) {
-		t.Errorf("daily's record of the firing due while invalid: %+v", got)
+		t.Errorf("daily's record of the firing due while invalid: %+v, want skipped, task_file_invalid, on schedule at %v",
+			got, day(23, 9))
 	}
 
 	// Fixed at 10:17, the next firings are the saved ones: an interval counted from now would fire at 10:17 tomorrow.
@@ -4108,7 +4110,7 @@ func TestInvalidAtStartKeepsItsSchedule(t *testing.T) {
 	e.app.Tick()
 	for _, id := range []string{"daily", "every-day"} {
 		if runs := e.executions(id); len(runs) != 0 {
-			t.Errorf("a firing recorded as skipped ran %s once fixed: %+v", id, runs)
+			t.Errorf("a firing recorded as skipped ran %s once fixed: %+v, want no execution", id, runs)
 		}
 	}
 
