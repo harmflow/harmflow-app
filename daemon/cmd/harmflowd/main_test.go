@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -125,6 +127,37 @@ func TestHoldsBuiltins(t *testing.T) {
 			}
 			if got := holdsBuiltins(dir); got != c.want {
 				t.Errorf("holdsBuiltins(%v, %q) = %v, want %v", c.dirs, c.file, got, c.want)
+			}
+		})
+	}
+}
+
+// harmflow-app#791: HARMFLOW_SIGN_IN_TIMEOUT shortens the sign-in's wait only with a positive duration. Unset, or set
+// to anything else, it gives zero, which leaves the sign-in its ten-minute default.
+func TestSignInTimeout(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string // "" leaves the variable unset
+		want  time.Duration
+	}{
+		{"unset", "", 0},
+		{"not a duration", "ten minutes", 0},
+		{"a number without a unit", "8", 0},
+		{"zero", "0s", 0},
+		{"negative", "-5s", 0},
+		{"positive", "8s", 8 * time.Second},
+		{"positive in minutes", "2m30s", 150 * time.Second},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv(signInTimeoutVariable, c.value) // restores the variable when the subtest ends
+			if c.value == "" {
+				if err := os.Unsetenv(signInTimeoutVariable); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := signInTimeout(log.New(io.Discard, "", 0)); got != c.want {
+				t.Errorf("signInTimeout() with %s=%q = %v, want %v", signInTimeoutVariable, c.value, got, c.want)
 			}
 		})
 	}

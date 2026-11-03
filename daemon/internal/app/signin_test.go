@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -15,11 +16,15 @@ import (
 type signingHarness struct {
 	*fakeHarness
 	end chan ports.SignInResult // unbuffered: the test hands each sign-in its end
+	// unverified makes its check unable to tell whether it is signed in: it reads unknown and ready, as the real adapter
+	// does when its sign-in probe fails. Set before the daemon starts.
+	unverified bool
 
 	mu       sync.Mutex
 	signedIn bool
-	signIns  int      // the sign-ins started
-	dirs     []string // the folder of each
+	signIns  int             // the sign-ins started
+	dirs     []string        // the folder of each
+	left     []time.Duration // the time each one's context had left when it started; 0 for one with no deadline
 }
 
 var _ ports.SignInDriver = (*signingHarness)(nil)
@@ -33,7 +38,11 @@ func (s *signingHarness) Detect(ctx context.Context, manual string) ports.Harnes
 	info := s.fakeHarness.Detect(ctx, manual)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.signedIn {
+	switch {
+	case s.unverified:
+		info.Authentication = "unknown"
+		info.SetDiagnostic(domain.T("authentication_unverified", "authentication could not be verified"))
+	case !s.signedIn:
 		info.Readiness, info.Authentication = "not_ready", "invalid"
 		info.SetDiagnostic(domain.T("claude_not_signed_in", "Claude Code is not signed in; run `claude` in a terminal and sign in"))
 	}
@@ -41,9 +50,14 @@ func (s *signingHarness) Detect(ctx context.Context, manual string) ports.Harnes
 }
 
 func (s *signingHarness) SignIn(ctx context.Context, _ ports.HarnessInfo, dir string) ports.SignInResult {
+	var left time.Duration
+	if deadline, ok := ctx.Deadline(); ok {
+		left = time.Until(deadline)
+	}
 	s.mu.Lock()
 	s.signIns++
 	s.dirs = append(s.dirs, dir)
+	s.left = append(s.left, left)
 	s.mu.Unlock()
 	select {
 	case res := <-s.end:
@@ -161,6 +175,23 @@ func TestSignInTimesOutAndWaitsForTheButton(t *testing.T) {
 	e.waitSignIns(signer, 2)
 }
 
+// harmflow-app#791: with no timeout set, a sign-in waits ten minutes for the browser: the context its adapter drives it
+// under ends ten minutes after it started.
+func TestSignInWaitsTenMinutesByDefault(t *testing.T) {
+	signer := newSigningHarness(false)
+	e := signInEnv(t, signer, 0)
+	e.waitSignIns(signer, 1)
+	signer.mu.Lock()
+	left := signer.left[0]
+	signer.mu.Unlock()
+	if left == 0 {
+		t.Fatal("the sign-in's context has no deadline, want one ten minutes after its start")
+	}
+	if d := left - 10*time.Minute; d < -time.Second || d > time.Second {
+		t.Errorf("the sign-in's context had %v left at its start, want 10m within a second", left)
+	}
+}
+
 // harmflow-app#543: a trigger while a sign-in runs — a check, an attempt signed out, the button — starts no second one.
 func TestSignInRunsOneAtATime(t *testing.T) {
 	signer := newSigningHarness(false)
@@ -217,6 +248,99 @@ func TestSignedOutAttemptStartsTheSignIn(t *testing.T) {
 	e.waitSignIns(signer, 1)
 	signer.end <- ports.SignInResult{Outcome: ports.SignInSucceeded}
 	e.waitPublished(domain.EventHarnessSignInCompleted)
+}
+
+// harmflow-app#791: a Claude Code whose check cannot tell whether it is signed in reads unknown and stays ready, and
+// the daemon starts no sign-in for it: not once the daemon starts, not at a check, and not when a task runs on it. Only
+// a harness that says it is signed out gets one.
+func TestUnknownSignInStartsNone(t *testing.T) {
+	signer := newSigningHarness(false)
+	signer.unverified = true
+	e := signInEnv(t, signer, 0)
+	noSignIn := func(when string) {
+		t.Helper()
+		time.Sleep(200 * time.Millisecond) // a sign-in starts on a goroutine of its own
+		info := e.claudeInfo()
+		if info.Authentication != "unknown" || info.Readiness != "ready" || info.DiagnosticKey != "authentication_unverified" {
+			t.Errorf("%s, authentication %q, readiness %q, diagnostic %q; want unknown, ready, authentication_unverified",
+				when, info.Authentication, info.Readiness, info.DiagnosticKey)
+		}
+		if info.SignIn != ports.SignInAvailable {
+			t.Errorf("%s, Harnesses() sign-in = %q, want %q", when, info.SignIn, ports.SignInAvailable)
+		}
+		if n := signer.started(); n != 0 {
+			t.Errorf("%s, %d sign-ins started, want none", when, n)
+		}
+		if got := e.published(domain.EventHarnessSignInStarted); len(got) > 0 {
+			t.Errorf("%s, %s events %+v, want none", when, domain.EventHarnessSignInStarted, got)
+		}
+	}
+	if !e.poll(10*time.Second, func() bool { return e.claudeInfo().Readiness != "checking" }) {
+		t.Fatal("Claude Code's first check never ended")
+	}
+	noSignIn("after the daemon started")
+	e.app.RefreshHarnesses(t.Context())
+	e.app.RefreshHarnesses(t.Context())
+	noSignIn("after two checks")
+	e.create("unknown", "")
+	r, err := e.app.RunTask("unknown")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.wait(r.ExecutionID, domain.StatusCompleted)
+	noSignIn("after a task ran on it")
+}
+
+// harmflow-app#791: an execution never waits for the sign-in. Whether Claude Code reads signed out before the task
+// fires or says so at the end of its attempt, the execution goes on to its Codex fallback and completes there while the
+// one sign-in still runs, which the test ends only after the execution has.
+func TestFailoverBesideARunningSignIn(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		signedIn bool     // whether Claude Code reads signed in when the task fires
+		harness  []string // the harness of each attempt
+	}{
+		{"signed out at the check", false, []string{domain.HarnessCodex}},
+		{"signed out during the attempt", true, []string{domain.HarnessClaudeCode, domain.HarnessCodex}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			signer := newSigningHarness(c.signedIn)
+			e := signInEnv(t, signer, 0)
+			e.create("beside", codexFallback)
+			if c.signedIn {
+				signer.setScript(func(ports.RunRequest) string { return "echo working; echo 'END unavailable'" })
+			} else {
+				e.waitSignIns(signer, 1)
+			}
+			r, err := e.app.RunTask("beside")
+			if err != nil {
+				t.Fatal(err)
+			}
+			x := e.wait(r.ExecutionID, domain.StatusCompleted)
+			var harness []string
+			for _, at := range x.Attempts {
+				harness = append(harness, at.Harness)
+			}
+			if !slices.Equal(harness, c.harness) || x.Attempts[len(x.Attempts)-1].Outcome != domain.AttemptSucceeded {
+				t.Errorf("attempts %+v, want attempts on %v, the last succeeding", x.Attempts, c.harness)
+			}
+			// An attempt that ends signed out switches to the fallback once.
+			if counts, _ := e.eventCounts(r.ExecutionID); c.signedIn &&
+				(x.HarnessSwitches != 1 || counts[domain.EventHarnessSwitched] != 1) {
+				t.Errorf("%d switches and %d %s events, want one", x.HarnessSwitches, counts[domain.EventHarnessSwitched],
+					domain.EventHarnessSwitched)
+			}
+			e.waitSignIns(signer, 1)
+			if n := signer.started(); n != 1 {
+				t.Errorf("%d sign-ins started once the execution ended, want one", n)
+			}
+			if got := e.claudeInfo().SignIn; got != ports.SignInRunning {
+				t.Errorf("Harnesses() sign-in = %q once the execution ended, want %q", got, ports.SignInRunning)
+			}
+			signer.end <- ports.SignInResult{Outcome: ports.SignInSucceeded}
+			e.waitPublished(domain.EventHarnessSignInCompleted)
+		})
+	}
 }
 
 // harmflow-app#543: a sign-in the daemon's stop cuts short ends with it and announces nothing more.
