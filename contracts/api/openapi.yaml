@@ -90,6 +90,18 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Stats" }
 
+  /system:
+    get:
+      tags: [daemon]
+      operationId: getSystem
+      summary: Gauges of the machine and of HarmFlow's own directory
+      responses:
+        "200":
+          description: The last sample of each gauge; a gauge not read yet is left out.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SystemGauges" }
+
   /harnesses:
     get:
       tags: [harnesses]
@@ -1172,6 +1184,9 @@ components:
         diskUsageBytes: { type: integer }
 
     Stats:
+      description: >-
+        The execution counters: executions running and queued now, those that completed or failed since midnight, and
+        their activity over the last hours.
       type: object
       required: [running, queued, completedToday, failedToday, activity]
       properties:
@@ -1179,16 +1194,6 @@ components:
         queued: { type: integer }
         completedToday: { type: integer }
         failedToday: { type: integer }
-        system:
-          description: Gauges of the machine and of HarmFlow's own directory, for the sidebar foot.
-          type: object
-          properties:
-            cpuPercent: { type: number }
-            memoryUsedBytes: { type: integer }
-            memoryTotalBytes: { type: integer }
-            diskUsedBytes: { type: integer }
-            diskTotalBytes: { type: integer }
-            harmflowDirBytes: { type: integer }
         activity:
           description: Per hour, the last 12 hours, oldest first.
           type: object
@@ -1198,6 +1203,19 @@ components:
             queued: { type: array, items: { type: integer } }
             completed: { type: array, items: { type: integer } }
             failed: { type: array, items: { type: integer } }
+
+    SystemGauges:
+      description: >-
+        Gauges of the machine and of HarmFlow's own directory, for the sidebar foot. A gauge that cannot be read, or has
+        not been sampled yet, is left out.
+      type: object
+      properties:
+        cpuPercent: { type: number }
+        memoryUsedBytes: { type: integer }
+        memoryTotalBytes: { type: integer }
+        diskUsedBytes: { type: integer }
+        diskTotalBytes: { type: integer }
+        harmflowDirBytes: { type: integer }
 
     ReadinessState:
       description: checking while a harness's first check runs; a later check keeps the previous state.

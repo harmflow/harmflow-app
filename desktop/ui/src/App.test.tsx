@@ -158,8 +158,8 @@ beforeEach(() => {
       completedToday: 0,
       failedToday: 0,
       activity: { running: [], queued: [], completed: [], failed: [] },
-      system: { cpuPercent: 12, memoryUsedBytes: 2.1e9, memoryTotalBytes: 16e9, diskUsedBytes: 48e9, diskTotalBytes: 500e9 },
     },
+    system: { cpuPercent: 12, memoryUsedBytes: 2.1e9, memoryTotalBytes: 16e9, diskUsedBytes: 48e9, diskTotalBytes: 500e9 },
     templates,
   });
   answerDrafts();

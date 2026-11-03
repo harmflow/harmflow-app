@@ -440,7 +440,18 @@ type ExtraUsageReporter interface {
 
 // SystemInfo reads the gauges of the sidebar.
 type SystemInfo interface {
-	Snapshot(dir string) map[string]any
+	Snapshot(dir string) SystemGauges
+}
+
+// SystemGauges is the last sample of each gauge of the machine and of HarmFlow's own directory. A gauge that cannot be
+// read, or has not been sampled yet, is nil and left out.
+type SystemGauges struct {
+	CPUPercent       *float64 `json:"cpuPercent,omitempty"`
+	MemoryUsedBytes  *int64   `json:"memoryUsedBytes,omitempty"`
+	MemoryTotalBytes *int64   `json:"memoryTotalBytes,omitempty"`
+	DiskUsedBytes    *int64   `json:"diskUsedBytes,omitempty"`
+	DiskTotalBytes   *int64   `json:"diskTotalBytes,omitempty"`
+	HarmflowDirBytes *int64   `json:"harmflowDirBytes,omitempty"`
 }
 
 // ToolProber reports git and gh.

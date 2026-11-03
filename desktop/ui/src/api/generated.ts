@@ -75,6 +75,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Gauges of the machine and of HarmFlow's own directory */
+        get: operations["getSystem"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/harnesses": {
         parameters: {
             query?: never;
@@ -750,20 +767,12 @@ export interface components {
             builtinsDir: string;
             diskUsageBytes?: number;
         };
+        /** @description The execution counters: executions running and queued now, those that completed or failed since midnight, and their activity over the last hours. */
         Stats: {
             running: number;
             queued: number;
             completedToday: number;
             failedToday: number;
-            /** @description Gauges of the machine and of HarmFlow's own directory, for the sidebar foot. */
-            system?: {
-                cpuPercent?: number;
-                memoryUsedBytes?: number;
-                memoryTotalBytes?: number;
-                diskUsedBytes?: number;
-                diskTotalBytes?: number;
-                harmflowDirBytes?: number;
-            };
             /** @description Per hour, the last 12 hours, oldest first. */
             activity: {
                 running: number[];
@@ -771,6 +780,15 @@ export interface components {
                 completed: number[];
                 failed: number[];
             };
+        };
+        /** @description Gauges of the machine and of HarmFlow's own directory, for the sidebar foot. A gauge that cannot be read, or has not been sampled yet, is left out. */
+        SystemGauges: {
+            cpuPercent?: number;
+            memoryUsedBytes?: number;
+            memoryTotalBytes?: number;
+            diskUsedBytes?: number;
+            diskTotalBytes?: number;
+            harmflowDirBytes?: number;
         };
         /**
          * @description checking while a harness's first check runs; a later check keeps the previous state.
@@ -1554,6 +1572,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Stats"];
+                };
+            };
+        };
+    };
+    getSystem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The last sample of each gauge; a gauge not read yet is left out. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemGauges"];
                 };
             };
         };

@@ -2,12 +2,15 @@ package sysinfo
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"go.uber.org/goleak"
+
+	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
 func TestMain(m *testing.M) {
@@ -47,16 +50,41 @@ func blockingReader(t *testing.T, dir string) (r *Reader, started <-chan struct{
 }
 
 // snapshotWithin calls Snapshot and fails the test when it does not answer within a second.
-func snapshotWithin(t *testing.T, r *Reader, dir string) map[string]any {
+func snapshotWithin(t *testing.T, r *Reader, dir string) ports.SystemGauges {
 	t.Helper()
-	got := make(chan map[string]any, 1)
+	got := make(chan ports.SystemGauges, 1)
 	go func() { got <- r.Snapshot(dir) }()
 	select {
 	case s := <-got:
 		return s
 	case <-time.After(time.Second):
 		t.Fatal("Snapshot did not answer within a second while a sample was under way")
+		return ports.SystemGauges{}
+	}
+}
+
+// gauges names each gauge of s by its key in the API, nil when it is left out.
+func gauges(s ports.SystemGauges) map[string]any {
+	value := func(p any) any {
+		switch v := p.(type) {
+		case *float64:
+			if v != nil {
+				return *v
+			}
+		case *int64:
+			if v != nil {
+				return *v
+			}
+		}
 		return nil
+	}
+	return map[string]any{
+		"cpuPercent":       value(s.CPUPercent),
+		"memoryUsedBytes":  value(s.MemoryUsedBytes),
+		"memoryTotalBytes": value(s.MemoryTotalBytes),
+		"diskUsedBytes":    value(s.DiskUsedBytes),
+		"diskTotalBytes":   value(s.DiskTotalBytes),
+		"harmflowDirBytes": value(s.HarmflowDirBytes),
 	}
 }
 
@@ -71,15 +99,17 @@ func TestSnapshotAnswersWithLastSampleWhileSamplesBlock(t *testing.T) {
 		t.Fatal("the sources were not called a second time")
 	}
 
-	got := snapshotWithin(t, r, dir)
+	got := gauges(snapshotWithin(t, r, dir))
 	want := map[string]any{"cpuPercent": 42.5, "memoryTotalBytes": int64(1000), "memoryUsedBytes": int64(400), "harmflowDirBytes": int64(7)}
 	for k, v := range want {
 		if got[k] != v {
 			t.Errorf("Snapshot(%q)[%q] = %v, want %v", dir, k, got[k], v)
 		}
 	}
-	if _, ok := got["diskTotalBytes"]; !ok {
-		t.Errorf("Snapshot(%q) has no diskTotalBytes, want the disk read at the request", dir)
+	for _, k := range []string{"diskTotalBytes", "diskUsedBytes"} {
+		if got[k] == nil {
+			t.Errorf("Snapshot(%q) has no %s, want the disk read at the request", dir, k)
+		}
 	}
 
 	stopped := make(chan struct{})
@@ -102,10 +132,34 @@ func TestSnapshotLeavesOutGaugesNotSampledYet(t *testing.T) {
 	defer r.Stop()
 	defer close(release)
 
-	got := snapshotWithin(t, r, dir)
+	got := gauges(snapshotWithin(t, r, dir))
 	for _, k := range []string{"cpuPercent", "memoryTotalBytes", "memoryUsedBytes", "harmflowDirBytes"} {
-		if v, ok := got[k]; ok {
+		if v := got[k]; v != nil {
 			t.Errorf("Snapshot(%q)[%q] = %v, want it left out before its first sample", dir, k, v)
+		}
+	}
+}
+
+// A gauge sampled at 0, such as the memory in use when vm_stat cannot be read, is sent as 0, not left out.
+func TestSnapshotKeepsAGaugeSampledAtZero(t *testing.T) {
+	dir := t.TempDir()
+	r := New(dir)
+	r.cpu.Store(new(0.0))
+	r.mem.Store(&memSample{total: 1000})
+	r.size.Store(new(int64(0)))
+
+	got, err := json.Marshal(r.Snapshot(dir))
+	if err != nil {
+		t.Fatalf("json.Marshal(Snapshot(%q)): %v", dir, err)
+	}
+	var keys map[string]any
+	if err := json.Unmarshal(got, &keys); err != nil {
+		t.Fatalf("json.Unmarshal(%s): %v", got, err)
+	}
+	want := map[string]any{"cpuPercent": 0.0, "memoryTotalBytes": 1000.0, "memoryUsedBytes": 0.0, "harmflowDirBytes": 0.0}
+	for k, v := range want {
+		if keys[k] != v {
+			t.Errorf("Snapshot(%q) as JSON = %s, want %s: %v", dir, got, k, v)
 		}
 	}
 }

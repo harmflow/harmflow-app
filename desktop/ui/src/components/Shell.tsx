@@ -26,6 +26,9 @@ const NAV: Array<{ key: Screen; icon: IconName }> = [
 const TOGGLE_SHORTCUT = "⌘B";
 const NEW_TASK_SHORTCUT = "⌘N";
 
+/** How often the expanded sidebar reads its gauges again. */
+const GAUGES_EVERY_MS = 5000;
+
 interface Tip {
   text: string;
   keys?: string;
@@ -76,7 +79,7 @@ export function useTooltip(place: Place) {
 
 /**
  * The sidebar, expanded or collapsed to its icons (⌘B). The daemon's connection state is the topbar's alone; the
- * gauges and the version show only while expanded.
+ * gauges and the version show only while expanded, and the gauges are read from /system only then.
  */
 export function Sidebar({
   screen,
@@ -90,7 +93,7 @@ export function Sidebar({
   onToggle: () => void;
 }) {
   const { t, i18n } = useTranslation();
-  const system = useStore((s) => s.stats?.system);
+  const system = useStore((s) => s.system);
   const version = useStore((s) => s.appVersion);
   const running = useStore((s) => s.stats?.running ?? 0);
   const locale = i18n.language;
@@ -98,6 +101,14 @@ export function Sidebar({
 
   // The layout moves under a shown tooltip; the next hover or focus places it again.
   useEffect(hide, [collapsed, hide]);
+
+  // The gauges are read at once on expanding and then on their own clock; collapsed, nothing shows them.
+  useEffect(() => {
+    if (collapsed) return;
+    void actions.refreshSystem();
+    const timer = setInterval(() => void actions.refreshSystem(), GAUGES_EVERY_MS);
+    return () => clearInterval(timer);
+  }, [collapsed]);
 
   const toggleLabel = collapsed ? t("sidebar.expand") : t("sidebar.collapse");
 

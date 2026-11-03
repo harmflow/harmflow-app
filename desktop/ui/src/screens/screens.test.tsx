@@ -177,8 +177,8 @@ beforeAll(async () => {
       completedToday: 12,
       failedToday: 1,
       activity: { running: [1, 2, 3], queued: [0, 1], completed: [3, 4], failed: [0, 1] },
-      system: { cpuPercent: 12, memoryUsedBytes: 2.1e9, memoryTotalBytes: 16e9, diskUsedBytes: 48e9, diskTotalBytes: 500e9 },
     },
+    system: { cpuPercent: 12, memoryUsedBytes: 2.1e9, memoryTotalBytes: 16e9, diskUsedBytes: 48e9, diskTotalBytes: 500e9 },
     queue: {
       waiting: [{ ...running, id: "exec-q", status: "queued" }],
       upcoming: [{ taskId: "docs", taskName: "Generate docs", nextFireAt: "2026-10-21T10:00:00-03:00" }],

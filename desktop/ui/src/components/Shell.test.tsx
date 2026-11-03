@@ -2,15 +2,15 @@
 // The topbar's warning for a daemon of another version, its banner for a window and a daemon built from different
 // commits, and that banner's restart of the daemon on the window's build, driven in a DOM against a stand-in for the
 // daemon's local API. And the More actions menu's Stop daemon…, whose question names one running execution in the
-// singular and more in the plural.
+// singular and more in the plural. And the sidebar's gauges, read from /system only while the sidebar is expanded.
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { native, type DaemonStatus } from "../api/native";
-import type { Health, Stats } from "../api/types";
+import type { Health, Stats, SystemGauges } from "../api/types";
 import i18n from "../i18n";
 import { getState, patchStateForTests } from "../state/store";
-import { Header, commitsDiffer } from "./Shell";
+import { Header, Sidebar, commitsDiffer } from "./Shell";
 import { Toasts } from "./toast";
 
 // The daemon as the client sees it: an answer per method and route, and every request it received.
@@ -226,7 +226,6 @@ describe("stopping the daemon from the More actions menu", () => {
     completedToday: 0,
     failedToday: 0,
     activity: { running: [], queued: [], completed: [], failed: [] },
-    system: { cpuPercent: 0, memoryUsedBytes: 0, memoryTotalBytes: 0, diskUsedBytes: 0, diskTotalBytes: 0 },
   });
 
   afterEach(() => patchStateForTests({ stats: undefined }));
@@ -242,5 +241,86 @@ describe("stopping the daemon from the More actions menu", () => {
     await act(async () => [...host!.querySelectorAll<HTMLButtonElement>(".popover button")].find((b) => b.textContent === "Stop daemon…")!.click());
     expect(confirm.mock.calls).toEqual([[message, "Stop the daemon?", "Stop daemon", "Cancel"]]);
     expect(daemon.requests.filter((r) => r.method === "POST")).toEqual([]);
+  });
+});
+
+describe("the sidebar's gauges", () => {
+  const gauges: SystemGauges = { cpuPercent: 12, memoryUsedBytes: 2.1e9, memoryTotalBytes: 16e9, diskUsedBytes: 48e9, diskTotalBytes: 500e9 };
+  const reads = () => daemon.requests.filter((r) => r.method === "GET" && r.path === "/system").length;
+  const texts = () => Array.from(host!.querySelectorAll(".gauge__text"), (g) => g.textContent);
+
+  /** Moves the clock by ms, letting each read it starts answer. */
+  async function elapse(ms: number) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  }
+
+  async function showSidebar(collapsed: boolean) {
+    host ??= document.body.appendChild(document.createElement("div"));
+    root ??= createRoot(host);
+    const sidebar = createElement(Sidebar, { screen: "overview", onNavigate: () => {}, collapsed, onToggle: () => {} });
+    await act(async () => root!.render(sidebar));
+    // Lets the read the render started answer, without moving the clock.
+    await elapse(0);
+  }
+
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    patchStateForTests({ system: undefined, stats: undefined });
+  });
+
+  it("reads /system at once and every 5 seconds while expanded, and shows its values", async () => {
+    daemon.answers.set("GET /system", { status: 200, body: gauges });
+    await showSidebar(false);
+    expect(reads()).toBe(1);
+    expect(getState().system).toEqual(gauges);
+    expect(texts()[0]).toBe("12%");
+
+    await elapse(4999);
+    expect(reads()).toBe(1);
+    await elapse(1);
+    expect(reads()).toBe(2);
+    await elapse(5000);
+    expect(reads()).toBe(3);
+  });
+
+  it("reads nothing while collapsed, and stops reading on collapsing", async () => {
+    daemon.answers.set("GET /system", { status: 200, body: gauges });
+    await showSidebar(true);
+    await elapse(15000);
+    expect(reads()).toBe(0);
+
+    await showSidebar(false);
+    expect(reads()).toBe(1);
+    await showSidebar(true);
+    await elapse(15000);
+    expect(reads()).toBe(1);
+  });
+
+  it("shows — in every meter against an older daemon, whose /system answers 404", async () => {
+    patchStateForTests({ system: gauges });
+    await showSidebar(false);
+    expect(reads()).toBe(1);
+    expect(getState().system).toBeUndefined();
+    expect(texts()).toEqual(["—", "—", "—"]);
+  });
+
+  it("keeps the gauges it has when /system fails otherwise", async () => {
+    patchStateForTests({ system: gauges });
+    daemon.answers.set("GET /system", { status: 0, body: null });
+    await showSidebar(false);
+    expect(reads()).toBe(1);
+    expect(getState().system).toEqual(gauges);
+    expect(texts()[0]).toBe("12%");
+  });
+
+  it("shows the counters' running badge from /stats, which brings no gauges", async () => {
+    daemon.answers.set("GET /system", { status: 200, body: {} });
+    patchStateForTests({ stats: { running: 3, queued: 0, completedToday: 0, failedToday: 0, activity: { running: [], queued: [], completed: [], failed: [] } } });
+    await showSidebar(false);
+    expect(host!.querySelector(".nav__badge")?.textContent).toBe("3");
+    expect(texts()).toEqual(["—", "—", "—"]);
   });
 });

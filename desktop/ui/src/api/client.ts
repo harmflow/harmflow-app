@@ -24,6 +24,7 @@ import type {
   Settings,
   SettingsPatch,
   Stats,
+  SystemGauges,
   Task,
   TaskInput,
   TaskSummary,
@@ -82,6 +83,7 @@ export const api = {
   stopDaemon: (force = false) => call<Accepted>("POST", "/daemon/stop", { force }),
   diagnostics: () => call<Diagnostics>("GET", "/diagnostics"),
   stats: () => call<Stats>("GET", "/stats"),
+  system: () => call<SystemGauges>("GET", "/system"),
 
   harnesses: () => call<Harness[]>("GET", "/harnesses"),
   refreshHarnesses: () => call<Harness[]>("POST", "/harnesses/refresh"),
