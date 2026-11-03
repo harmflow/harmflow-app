@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -122,39 +123,84 @@ func TestDraftWhoseTestsFailedIsResumedOnItsPullRequest(t *testing.T) {
 // the issue with Closes #<issue>, and carries the marking of the task failingTestsTask makes: the label harmflow, and
 // the line naming the task resumeDraftTask. Its branch is named neither as the built-in agent names a work branch nor
 // after the issue, so a session finds it only from the pull request. It returns once GitHub links the pull request to
-// the issue, as the session reads it.
+// the issue, as the only one that links it: the session finds the draft to resume by that link.
 func resumeDraft(t *testing.T, base string, issue int) (restartPR, string) {
 	t.Helper()
-	branch := "add-messages-" + runSuffix()
+	return openFixturePR(t, base, issue, fixturePR{
+		Branch:  "add-messages-" + runSuffix(),
+		File:    resumeDraftDir + "/welcome.txt",
+		Content: "Welcome aboard.\n",
+		Message: "Add the welcome message",
+		Title:   "Add the welcome and farewell messages",
+		Body: fmt.Sprintf("Adds `%s/welcome.txt`. The farewell message is still to do.\n\nCloses #%d\n\n"+
+			"Managed by HarmFlow task %s.\n", resumeDraftDir, issue, resumeDraftTask),
+		Draft:  true,
+		Labels: []string{"harmflow"},
+		Alone:  true,
+	})
+}
+
+// fixturePR is a pull request of a fixture set that openFixturePR opens: from Branch, which it creates at the base
+// branch, with one commit that adds File with Content and the commit message Message, under Title and Body. It is a
+// draft when Draft is set, and carries Labels. Its zero values open a ready pull request with no label, and wait until
+// GitHub lists it among the pull requests that link the issue; Alone waits until it is the only one.
+type fixturePR struct {
+	Branch, File, Content, Message, Title, Body string
+	Draft                                       bool
+	Labels                                      []string
+	Alone                                       bool
+}
+
+// openFixturePR opens the pull request spec describes in queueRepo into base, for the fixture issue its body closes,
+// and returns it with the one commit its branch holds beyond base. When that commit fails, it deletes the branch: with
+// no fixture file on it, nothing would lead a cleanup to it. It returns once GitHub links the pull request to the
+// issue, as a session reads it.
+func openFixturePR(t *testing.T, base string, issue int, spec fixturePR) (restartPR, string) {
+	t.Helper()
 	sha := newWorkAPI(t, "repos/"+queueRepo+"/git/ref/heads/"+base, "--jq", ".object.sha")
-	newWorkAPI(t, "repos/"+queueRepo+"/git/refs", "-f", "ref=refs/heads/"+branch, "-f", "sha="+sha)
-	commit, err := newWorkGh("repos/"+queueRepo+"/contents/"+resumeDraftDir+"/welcome.txt", "-X", "PUT",
-		"-f", "branch="+branch, "-f", "message=Add the welcome message",
-		"-f", "content="+base64.StdEncoding.EncodeToString([]byte("Welcome aboard.\n")), "--jq", ".commit.sha")
+	newWorkAPI(t, "repos/"+queueRepo+"/git/refs", "-f", "ref=refs/heads/"+spec.Branch, "-f", "sha="+sha)
+	commit, err := newWorkGh("repos/"+queueRepo+"/contents/"+spec.File, "-X", "PUT", "-f", "branch="+spec.Branch,
+		"-f", "message="+spec.Message, "-f", "content="+base64.StdEncoding.EncodeToString([]byte(spec.Content)),
+		"--jq", ".commit.sha")
 	if err != nil {
-		// With no file of resumeDraftDir, nothing leads the cleanup to the branch.
-		_, _ = newWorkGh("repos/"+queueRepo+"/git/refs/heads/"+branch, "-X", "DELETE")
-		t.Fatalf("commit the first file on %s: %v", branch, err)
+		_, _ = newWorkGh("repos/"+queueRepo+"/git/refs/heads/"+spec.Branch, "-X", "DELETE")
+		t.Fatalf("commit %s on %s: %v", spec.File, spec.Branch, err)
 	}
-	body := fmt.Sprintf("Adds `%s/welcome.txt`. The farewell message is still to do.\n\nCloses #%d\n\n"+
-		"Managed by HarmFlow task %s.\n", resumeDraftDir, issue, resumeDraftTask)
-	out := newWorkAPI(t, "repos/"+queueRepo+"/pulls", "-f", "title=Add the welcome and farewell messages",
-		"-f", "head="+branch, "-f", "base="+base, "-F", "draft=true", "-f", "body="+body, "--jq", "{number, url: .html_url}")
-	pr := restartPR{Head: branch, State: "OPEN", Draft: true}
+	out := newWorkAPI(t, "repos/"+queueRepo+"/pulls", "-f", "title="+spec.Title, "-f", "head="+spec.Branch,
+		"-f", "base="+base, "-F", "draft="+strconv.FormatBool(spec.Draft), "-f", "body="+spec.Body,
+		"--jq", "{number, url: .html_url}")
+	pr := restartPR{Head: spec.Branch, State: "OPEN", Draft: spec.Draft}
 	if err := json.Unmarshal([]byte(out), &pr); err != nil || pr.Number == 0 || pr.URL == "" {
-		t.Fatalf("open the draft pull request from %s: %q, %v", branch, out, err)
+		t.Fatalf("open the pull request from %s: %q, %v", spec.Branch, out, err)
 	}
-	newWorkAPI(t, fmt.Sprintf("repos/%s/issues/%d/labels", queueRepo, pr.Number), "-f", "labels[]=harmflow")
-	// GitHub links a pull request to the issue it closes some seconds after it opens it, and the session finds the
-	// draft to resume by that link.
+	if len(spec.Labels) > 0 {
+		args := []string{fmt.Sprintf("repos/%s/issues/%d/labels", queueRepo, pr.Number)}
+		for _, label := range spec.Labels {
+			args = append(args, "-f", "labels[]="+label)
+		}
+		newWorkAPI(t, args...)
+	}
+	want := "among them"
+	if spec.Alone {
+		want = "alone"
+	}
+	// GitHub links a pull request to the issue it closes some seconds after it opens it.
 	var linked []linkedPR
 	for deadline := time.Now().Add(time.Minute); time.Now().Before(deadline); time.Sleep(time.Second) {
-		if linked, err = linkingPullRequests(issue); err == nil && len(linked) == 1 && linked[0].Number == pr.Number {
+		if linked, err = linkingPullRequests(issue); err == nil && links(linked, pr.Number, spec.Alone) {
 			return pr, commit
 		}
 	}
-	t.Fatalf("after a minute, the pull requests linking #%d are %+v (%v), want %s alone", issue, linked, err, pr.URL)
+	t.Fatalf("after a minute, the pull requests linking #%d are %+v (%v), want %s %s", issue, linked, err, pr.URL, want)
 	return restartPR{}, ""
+}
+
+// links reports whether the pull request number is among the linked pull requests, or, when alone is set, the only one.
+func links(linked []linkedPR, number int, alone bool) bool {
+	if alone {
+		return len(linked) == 1 && linked[0].Number == number
+	}
+	return slices.ContainsFunc(linked, func(l linkedPR) bool { return l.Number == number })
 }
 
 // failedDraftReport is the report.json of an execution that opened the draft pull request for the issue and whose
