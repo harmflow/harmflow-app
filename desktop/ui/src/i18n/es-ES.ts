@@ -881,7 +881,7 @@ export const esES: Resources = {
       view: "Mostrar el gasto en",
       cost: "Coste",
       tokens: "Tokens",
-      totalCost: "este mes, estimado a precios de API",
+      totalCost: "este mes, una estimación a precios de lista de la API",
       totalTokens: "tokens este mes",
       noExecution: "Ninguna ejecución este mes",
       undercounts: "subestimado",
