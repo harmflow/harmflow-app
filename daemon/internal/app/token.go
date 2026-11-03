@@ -126,11 +126,12 @@ func (a *App) SetHarnessToken(ctx context.Context, id, token string) (ports.Harn
 		return ports.HarnessInfo{}, newError(CodeConflict, domain.T("harness_token_store_failed",
 			"the credential store could not keep the token; see the daemon's log"))
 	}
+	// The harness takes the token before its record is kept, so a check that sees the record runs with the token.
+	t.UseToken(token)
 	a.mu.Lock()
 	a.tokens[id] = &tokenRecord{SavedAt: a.now(), Noticed: []int{}}
 	a.mu.Unlock()
 	a.saveTokens()
-	t.UseToken(token)
 	return a.detect(ctx, id), nil
 }
 
@@ -185,13 +186,22 @@ func (a *App) tokenInUse(id string) bool {
 // token was in use. The token stays in the credential store, marked rejected, until the user saves another or removes
 // it.
 func (a *App) rejectToken(id string) bool {
+	a.mu.Lock()
+	r := a.tokens[id]
+	a.mu.Unlock()
+	return a.rejectCheckedToken(id, r)
+}
+
+// rejectCheckedToken is rejectToken for a check that ran with checked, the token saved when it began, or nil for none:
+// a token saved while it ran is not the one the harness rejected, and stays in use.
+func (a *App) rejectCheckedToken(id string, checked *tokenRecord) bool {
 	t, _, ok := a.tokenTaker(id)
-	if !ok {
+	if !ok || checked == nil {
 		return false
 	}
 	a.mu.Lock()
 	r := a.tokens[id]
-	if r == nil || r.Rejected {
+	if r != checked || r.Rejected {
 		a.mu.Unlock()
 		return false
 	}
