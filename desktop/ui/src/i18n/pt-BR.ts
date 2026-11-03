@@ -884,6 +884,9 @@ export const ptBR: Resources = {
   harness: {
     names: { "claude-code": "Claude Code", codex: "Codex" },
     scriptLabel: "Programa",
+    effort: "Esforço: {{value}}",
+    configuredModel: "Modelo configurado: {{value}}. O harness não informou o modelo que usou.",
+    configuredEffort: "Esforço configurado: {{value}}. O harness não informou o esforço que usou.",
     readiness: {
       checking: "Verificando…",
       not_installed: "Não instalado",

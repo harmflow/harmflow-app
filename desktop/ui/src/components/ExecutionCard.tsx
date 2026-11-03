@@ -96,7 +96,14 @@ export function ExecutionCard({
         <div>
           <dt>{t("executions.card.agent")}</dt>
           <dd>
-            <HarnessLabel harness={execution.harness} model={execution.model} taskType={execution.taskType} />
+            <HarnessLabel
+              harness={execution.harness}
+              model={execution.model}
+              taskType={execution.taskType}
+              effort={execution.effort}
+              configuredModel={execution.configuredModel}
+              configuredEffort={execution.configuredEffort}
+            />
           </dd>
         </div>
         <div>

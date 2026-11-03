@@ -1219,6 +1219,12 @@ export interface components {
             harness: string;
             /** @description The model the current or last attempt's harness reported using; absent when it reported none. */
             model?: string;
+            /** @description The effort the current or last attempt's harness reported using; absent when it reported none, or with no attempt. */
+            effort?: string;
+            /** @description The model the current or last attempt's task asked for, default when it set none; absent with no attempt, or for a script task. Never the one used. */
+            configuredModel?: string;
+            /** @description The effort the current or last attempt's task asked for, default when it set none; absent with no attempt, or for a script task. Never the one used. */
+            configuredEffort?: string;
             attemptCount?: number;
             /** @description The latest step; no percentage is invented. The daemon's own step is in en-US, beside its currentStepKey; the agent's and a tool's have none. */
             currentStep?: string;

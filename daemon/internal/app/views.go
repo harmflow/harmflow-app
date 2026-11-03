@@ -22,6 +22,9 @@ type ExecutionSummary struct {
 	EndedAt           *time.Time             `json:"endedAt,omitempty"`
 	Harness           string                 `json:"harness"`
 	Model             string                 `json:"model,omitempty"`
+	Effort            string                 `json:"effort,omitempty"`
+	ConfiguredModel   string                 `json:"configuredModel,omitempty"`
+	ConfiguredEffort  string                 `json:"configuredEffort,omitempty"`
 	AttemptCount      int                    `json:"attemptCount"`
 	CurrentStep       string                 `json:"currentStep,omitempty"`
 	CurrentStepKey    string                 `json:"currentStepKey,omitempty"`
@@ -44,6 +47,7 @@ func row(s *domain.ExecutionSummary) ExecutionSummary {
 	return ExecutionSummary{
 		ID: s.ID, TaskID: s.TaskID, TaskName: s.TaskName, TaskType: s.TaskType, Status: s.Status, Trigger: s.Trigger,
 		CreatedAt: s.CreatedAt, StartedAt: s.StartedAt, EndedAt: s.EndedAt, Harness: s.Harness, Model: s.Model,
+		Effort: s.Effort, ConfiguredModel: s.ConfiguredModel, ConfiguredEffort: s.ConfiguredEffort,
 		AttemptCount: s.AttemptCount, CurrentStep: s.CurrentStep, CurrentStepKey: s.CurrentStepKey,
 		CurrentStepParams: s.CurrentStepParams, Repository: s.Repository, WorkItem: s.WorkItem,
 		PullRequestURL: s.PullRequestURL, TestsStatus: s.TestsStatus, Summary: trimTo(s.Summary, 300),

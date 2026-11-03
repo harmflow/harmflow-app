@@ -1213,6 +1213,14 @@ body:has([aria-modal="true"]) .tooltip {
   font-size: var(--hf-font-size-2xs);
 }
 
+/* A value the task configured, standing where the harness reported none: outlined, never filled like a used one. */
+.harness__model--configured {
+  padding: 0 5px;
+  border: 1px dashed currentColor;
+  background: transparent;
+  font-style: italic;
+}
+
 /* ---------- Execution cards ---------- */
 
 .exec-cards {

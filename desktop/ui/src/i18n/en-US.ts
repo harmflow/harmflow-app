@@ -859,6 +859,9 @@ export const enUS = {
   harness: {
     names: { "claude-code": "Claude Code", codex: "Codex" },
     scriptLabel: "Program",
+    effort: "Effort: {{value}}",
+    configuredModel: "Configured model: {{value}}. The harness did not report the model it used.",
+    configuredEffort: "Configured effort: {{value}}. The harness did not report the effort it used.",
     readiness: {
       checking: "Checking…",
       not_installed: "Not installed",
