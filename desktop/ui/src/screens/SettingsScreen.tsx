@@ -304,7 +304,6 @@ function AgentsSection({ report }: { report: DraftReport }) {
           </Button>
         }
       >
-        <p className="field__hint">{t("harness.noCredentials")}</p>
         <div className="inventory-grid">
           {harnesses.map((h) => (
             <HarnessInventory key={h.id} harness={h} locale={i18n.language} onDraft={report} />
