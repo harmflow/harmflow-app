@@ -15,6 +15,7 @@ import type {
   Notification,
   Queue,
   Settings,
+  Spend,
   Stats,
   SystemGauges,
   TaskSummary,
@@ -29,6 +30,8 @@ export interface State {
   health?: Health;
   lastUpdate?: number;
   stats?: Stats;
+  /** The current month's spend per day, for the Overview's band; undefined until read. */
+  spend?: Spend;
   /** The gauges of the sidebar foot, read only while it shows them; undefined from a daemon without /system. */
   system?: SystemGauges;
   active: ExecutionSummary[];
@@ -159,6 +162,11 @@ export const actions = {
     if (stats) setState({ stats });
   },
 
+  async refreshSpend() {
+    const spend = await settle(api.spend());
+    if (spend) setState({ spend });
+  },
+
   // An older daemon answers /system with 404: its gauges are unknown. Any other failure leaves them as they were.
   async refreshSystem() {
     try {
@@ -242,6 +250,7 @@ export const actions = {
     await Promise.all([
       actions.refreshHealth(),
       actions.refreshExecutions(),
+      actions.refreshSpend(),
       actions.refreshTasks(),
       actions.refreshSettings(),
       actions.refreshHarnesses(),
@@ -363,6 +372,10 @@ function handleEvent(e: HarmflowEvent) {
   if (family === "execution" || family === "firing" || e.type === "harness.switched") {
     debounce("executions", () => void actions.refreshExecutions());
   }
+  // An attempt ended, its cost stamped, or an execution ended: the month's spend changed.
+  if (e.type === "harness.exited" || (family === "execution" && e.type !== "execution.status_changed")) {
+    debounce("spend", () => void actions.refreshSpend(), 500);
+  }
   if (family === "task" || (family === "execution" && e.type !== "execution.status_changed")) {
     debounce("tasks", () => void actions.refreshTasks(), 400);
   }
@@ -409,5 +422,7 @@ export function startSync() {
   setInterval(() => void actions.refreshStats(), 5000);
   setInterval(() => void actions.refreshHealth(), 10000);
   setInterval(() => void actions.refreshExecutions(), 30000);
+  // Past midnight, today is a new day of the band, or of a new month.
+  setInterval(() => void actions.refreshSpend(), 60000);
   void native.onNavigate((target) => actions.navigate(target));
 }

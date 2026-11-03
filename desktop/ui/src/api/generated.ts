@@ -75,6 +75,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/spend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The current month's spend per day, for the Overview */
+        get: operations["getSpend"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/system": {
         parameters: {
             query?: never;
@@ -779,6 +796,43 @@ export interface components {
                 queued: number[];
                 completed: number[];
                 failed: number[];
+            };
+        };
+        /** @description The current month's spend per day, summed when asked for from each attempt's figures in the summaries of the executions, for every task. Days follow the machine's time zone, and an attempt counts on the day it ended: one still running counts on no day yet. */
+        Spend: {
+            /** @description The month, YYYY-MM. */
+            month: string;
+            /** @description The days of the month */
+            daysInMonth: number;
+            /** @description Each day from the first of the month to today, oldest first. */
+            days: components["schemas"]["SpendDay"][];
+            /** @description The month's total in both units. */
+            total: {
+                /** @description The estimated cost in US dollars */
+                costUsd: number;
+                /** @description Every token class summed. */
+                tokens: number;
+            };
+        };
+        /** @description One day's own totals, never a running sum, and the attempts behind each reason they undercount. */
+        SpendDay: {
+            /** Format: date */
+            date: string;
+            /** @description The estimated cost in US dollars */
+            costUsd: number;
+            /** @description Every token class summed. */
+            tokens: number;
+            /** @description The attempts that ended that day. */
+            attempts: number;
+            undercount: {
+                /** @description Attempts whose model has no price: tokens, and no cost. */
+                unpriced: number;
+                /** @description Attempts whose harness reported no usage. */
+                notReported: number;
+                /** @description Attempts that ended with only a partial count */
+                partial: number;
+                /** @description Today only */
+                running: number;
             };
         };
         /** @description Gauges of the machine and of HarmFlow's own directory, for the sidebar foot. A gauge that cannot be read, or has not been sampled yet, is left out. */
@@ -1578,6 +1632,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Stats"];
+                };
+            };
+        };
+    };
+    getSpend: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Each day of the month so far, and the month's total. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Spend"];
                 };
             };
         };

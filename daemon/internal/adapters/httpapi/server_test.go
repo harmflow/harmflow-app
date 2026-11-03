@@ -274,6 +274,32 @@ func TestSystemGaugesHaveTheirOwnRoute(t *testing.T) {
 	}
 }
 
+// GET /api/v1/spend answers the month's spend per day, from the first of the month to today, with its total in both
+// units.
+func TestSpendRouteAnswersTheMonthPerDay(t *testing.T) {
+	s := &Server{App: startedApp(t)}
+	s.SetToken(validToken)
+	got := get(t, s, "/api/v1/spend")
+	for _, k := range []string{"month", "daysInMonth", "days", "total"} {
+		if _, ok := got[k]; !ok {
+			t.Errorf("GET /api/v1/spend = %v, want %s", got, k)
+		}
+	}
+	days, _ := got["days"].([]any)
+	if len(days) == 0 {
+		t.Fatalf("GET /api/v1/spend days = %v, want today at least", got["days"])
+	}
+	day, _ := days[0].(map[string]any)
+	for _, k := range []string{"date", "costUsd", "tokens", "attempts", "undercount"} {
+		if _, ok := day[k]; !ok {
+			t.Errorf("GET /api/v1/spend days[0] = %v, want %s", day, k)
+		}
+	}
+	if total, _ := got["total"].(map[string]any); total["costUsd"] != 0.0 || total["tokens"] != 0.0 {
+		t.Errorf("GET /api/v1/spend total = %v, want zero in both units with no execution", got["total"])
+	}
+}
+
 // With no SystemInfo, GET /api/v1/system answers an empty object: every gauge left out.
 func TestSystemRouteWithoutAReaderLeavesOutEveryGauge(t *testing.T) {
 	s := &Server{App: startedApp(t)}

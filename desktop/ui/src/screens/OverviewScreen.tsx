@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Counters } from "../components/Aside";
 import { HarnessRow, ToolRow } from "../components/Harnesses";
 import { HarnessLabel, noticeText } from "../components/Shell";
+import { SpendBand } from "../components/SpendBand";
 import { Button, Chip, EmptyState, Panel, StatusMark } from "../components/ui";
 import { fieldText } from "../lib/daemonText";
 import { formatDuration, formatRelative } from "../lib/format";
@@ -49,6 +50,7 @@ export function OverviewScreen({
   return (
     <div className="screen">
       <Counters />
+      <SpendBand />
       <div className="overview-grid">
         <Panel title={t("overview.daemon")} icon="power">
           {/* Running now and autostart enabled are two different states. */}

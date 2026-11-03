@@ -100,6 +100,7 @@ func (s *Server) Handler() http.Handler {
 	h("POST /api/v1/daemon/stop", s.stop)
 	h("GET /api/v1/diagnostics", s.diagnostics)
 	h("GET /api/v1/stats", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.App.Stats()) })
+	h("GET /api/v1/spend", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.App.Spend()) })
 	h("GET /api/v1/system", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.App.System()) })
 	h("GET /api/v1/harnesses", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.App.Harnesses()) })
 	h("POST /api/v1/harnesses/refresh", func(w http.ResponseWriter, r *http.Request) {
