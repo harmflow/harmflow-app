@@ -882,6 +882,9 @@ export const esES: Resources = {
   harness: {
     names: { "claude-code": "Claude Code", codex: "Codex" },
     scriptLabel: "Programa",
+    effort: "Esfuerzo: {{value}}",
+    configuredModel: "Modelo configurado: {{value}}. El harness no informó el modelo que usó.",
+    configuredEffort: "Esfuerzo configurado: {{value}}. El harness no informó el esfuerzo que usó.",
     readiness: {
       checking: "Comprobando…",
       not_installed: "No instalado",

@@ -464,8 +464,26 @@ function MenuItem({ icon, children, onClick, tone }: { icon: IconName; children:
   );
 }
 
-/** The harness a task or an execution runs on; a script task runs a program instead, and says so. */
-export function HarnessLabel({ harness, model, taskType }: { harness?: string; model?: string; taskType?: string }) {
+/**
+ * The harness a task or an execution runs on; a script task runs a program instead, and says so. The effort and the
+ * configured model and effort are shown only where they are passed: a configured value stands where the harness
+ * reported none, marked as configured, never as the one used.
+ */
+export function HarnessLabel({
+  harness,
+  model,
+  taskType,
+  effort,
+  configuredModel,
+  configuredEffort,
+}: {
+  harness?: string;
+  model?: string;
+  taskType?: string;
+  effort?: string;
+  configuredModel?: string;
+  configuredEffort?: string;
+}) {
   const { t } = useTranslation();
   if (!harness && taskType === "script") {
     return (
@@ -481,7 +499,37 @@ export function HarnessLabel({ harness, model, taskType }: { harness?: string; m
     <span className={cx("harness", `harness--${harness}`)}>
       <HarnessMark harness={harness} size={15} />
       <span>{name}</span>
-      {model && model !== "default" ? <span className="harness__model">{model}</span> : null}
+      <UsedBadge kind="model" used={model} configured={configuredModel} />
+      <UsedBadge kind="effort" used={effort} configured={configuredEffort} />
+    </span>
+  );
+}
+
+/**
+ * A model or an effort beside the harness: the one the harness reported, or else the configured one, marked as
+ * configured in its style and tooltip. `default` shows nothing.
+ */
+function UsedBadge({ kind, used, configured }: { kind: "model" | "effort"; used?: string; configured?: string }) {
+  const { t } = useTranslation();
+  const value = used || configured;
+  if (!value || value === "default") return null;
+  if (used) {
+    return (
+      <span
+        className={cx("harness__model", kind === "effort" && "harness__effort")}
+        title={kind === "effort" ? t("harness.effort", { value }) : undefined}
+      >
+        {value}
+      </span>
+    );
+  }
+  return (
+    <span
+      className={cx("harness__model", "harness__model--configured", kind === "effort" && "harness__effort")}
+      title={kind === "effort" ? t("harness.configuredEffort", { value }) : t("harness.configuredModel", { value })}
+      data-configured="true"
+    >
+      {value}
     </span>
   );
 }

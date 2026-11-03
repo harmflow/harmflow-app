@@ -554,6 +554,70 @@ describe("the executions screen's cards", () => {
     expect(runBy).toEqual(["Claude Code", "Programa"]);
   });
 
+  describe("its effort beside the model", () => {
+    /** Renders the cards and reads each one's badges: the text, whether it is marked configured, and its tooltip. */
+    async function badgesOf(executions: ExecutionSummary[]) {
+      await render(
+        <>
+          {executions.map((execution) => (
+            <ExecutionCard key={execution.id} execution={execution} selected={false} onSelect={() => {}} onCancel={() => {}} cancelling={false} />
+          ))}
+        </>,
+      );
+      return [...host!.querySelectorAll(".exec-card")].map((card) =>
+        [...card.querySelectorAll<HTMLElement>(".harness__model")].map((badge) => ({
+          text: badge.textContent,
+          effort: badge.classList.contains("harness__effort"),
+          configured: badge.classList.contains("harness__model--configured"),
+          title: badge.title,
+        })),
+      );
+    }
+
+    it("shows the effort the harness reported beside its model, unmarked", async () => {
+      const reported = { ...running, model: "claude-opus-5-5", effort: "xhigh", configuredModel: "claude-opus-5-5", configuredEffort: "xhigh" };
+      expect(await badgesOf([reported])).toEqual([
+        [
+          { text: "claude-opus-5-5", effort: false, configured: false, title: "" },
+          { text: "xhigh", effort: true, configured: false, title: "Esforço: xhigh" },
+        ],
+      ]);
+    });
+
+    it("shows the configured effort, marked as configured, when the harness reported none", async () => {
+      const configured = { ...running, model: "claude-opus-5-5", configuredModel: "claude-opus-5-5", configuredEffort: "high" };
+      expect(await badgesOf([configured])).toEqual([
+        [
+          { text: "claude-opus-5-5", effort: false, configured: false, title: "" },
+          { text: "high", effort: true, configured: true, title: "Esforço configurado: high. O harness não informou o esforço que usou." },
+        ],
+      ]);
+    });
+
+    it("shows nothing for an effort of default, reported or configured", async () => {
+      const configuredDefault = { ...running, id: "exec-a", model: "claude-opus-5-5", configuredModel: "default", configuredEffort: "default" };
+      const reportedDefault = { ...running, id: "exec-b", model: "claude-opus-5-5", effort: "default", configuredModel: "default", configuredEffort: "high" };
+      const onlyModel = [{ text: "claude-opus-5-5", effort: false, configured: false, title: "" }];
+      expect(await badgesOf([configuredDefault, reportedDefault])).toEqual([onlyModel, onlyModel]);
+    });
+
+    it("shows the configured model, marked as configured, when the harness reported none", async () => {
+      const codex = { ...running, harness: "codex", model: undefined, configuredModel: "gpt-5.5-codex", configuredEffort: "medium" };
+      expect(await badgesOf([codex])).toEqual([
+        [
+          { text: "gpt-5.5-codex", effort: false, configured: true, title: "Modelo configurado: gpt-5.5-codex. O harness não informou o modelo que usou." },
+          { text: "medium", effort: true, configured: true, title: "Esforço configurado: medium. O harness não informou o esforço que usou." },
+        ],
+      ]);
+    });
+
+    it("shows no effort on a script task's card", async () => {
+      const script = { ...running, id: "exec-script", taskType: "script", harness: "", model: undefined };
+      expect(await badgesOf([script])).toEqual([[]]);
+      expect(host!.querySelector(".exec-card .harness--script")!.textContent).toBe("Programa");
+    });
+  });
+
   it("shows each task type's glyph and tone on the card, the New task dialog's, never the settings gear", async () => {
     const types = ["github", "general", "script", "webhook"];
     await render(

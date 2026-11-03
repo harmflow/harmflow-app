@@ -1751,6 +1751,9 @@ components:
         endedAt: { type: string, format: date-time }
         harness: { type: string, description: "The harness of the current or last attempt; empty for a script task." }
         model: { type: string, description: "The model the current or last attempt's harness reported using; absent when it reported none." }
+        effort: { type: string, description: "The effort the current or last attempt's harness reported using; absent when it reported none, or with no attempt." }
+        configuredModel: { type: string, description: "The model the current or last attempt's task asked for, default when it set none; absent with no attempt, or for a script task. Never the one used." }
+        configuredEffort: { type: string, description: "The effort the current or last attempt's task asked for, default when it set none; absent with no attempt, or for a script task. Never the one used." }
         attemptCount: { type: integer }
         currentStep:
           type: string

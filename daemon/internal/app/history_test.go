@@ -237,6 +237,66 @@ func TestListExecutionsWithinAPeriod(t *testing.T) {
 	}
 }
 
+// An execution's row carries its current attempt's reported effort and its configured model and effort, kept apart:
+// none of them with no attempt or for a script's attempt, and the reported effort absent when the harness reported
+// none. After a harness switch, they are the new attempt's. A restart reads them from the index.
+func TestExecutionRowCarriesTheCurrentAttemptsEffort(t *testing.T) {
+	e := newEnv(t)
+	e.create("effort", "")
+	now := e.clock.Now()
+	type want struct{ effort, configuredModel, configuredEffort string }
+	cases := []struct {
+		name     string
+		attempts []domain.Attempt
+		want     want
+	}{
+		{"no attempt yet", nil, want{}},
+		{"an effort the harness reported", []domain.Attempt{{Number: 1, Harness: domain.HarnessClaudeCode,
+			Model: "claude-opus-5-5", Effort: "xhigh", ConfiguredModel: "claude-opus-5-5", ConfiguredEffort: "xhigh"}},
+			want{"xhigh", "claude-opus-5-5", "xhigh"}},
+		{"no effort reported", []domain.Attempt{{Number: 1, Harness: domain.HarnessClaudeCode, Model: "claude-opus-5-5",
+			ConfiguredModel: "default", ConfiguredEffort: "high"}}, want{"", "default", "high"}},
+		{"a harness switch", []domain.Attempt{
+			{Number: 1, Harness: domain.HarnessClaudeCode, Effort: "low", ConfiguredModel: "default", ConfiguredEffort: "low"},
+			{Number: 2, Harness: domain.HarnessCodex, ConfiguredModel: "gpt-5.5-codex", ConfiguredEffort: "medium"},
+		}, want{"", "gpt-5.5-codex", "medium"}},
+		{"a script's attempt", []domain.Attempt{{Number: 1}}, want{}},
+	}
+	ids := make([]string, len(cases))
+	for i, c := range cases {
+		created := now.Add(time.Duration(i-len(cases)) * time.Minute)
+		x := domain.NewExecution(domain.TaskDocument{Metadata: domain.TaskMetadata{ID: "effort"}}, domain.TriggerManual, nil,
+			created)
+		x.Status, x.StartedAt, x.EndedAt = domain.StatusCompleted, &created, &created
+		for _, at := range c.attempts {
+			at.StartedAt = created
+			x.Attempts = append(x.Attempts, at)
+		}
+		e.app.mu.Lock()
+		e.app.addExecutionLocked(x)
+		e.app.mu.Unlock()
+		e.app.persistExecution(x)
+		ids[i] = x.ID
+	}
+	check := func(t *testing.T) {
+		rows := map[string]ExecutionSummary{}
+		for _, s := range e.app.ListExecutions(ExecutionFilter{TaskID: "effort"}) {
+			rows[s.ID] = s
+		}
+		for i, c := range cases {
+			t.Run(c.name, func(t *testing.T) {
+				s := rows[ids[i]]
+				if got := (want{s.Effort, s.ConfiguredModel, s.ConfiguredEffort}); got != c.want {
+					t.Errorf("ListExecutions() row = %+v, want %+v", got, c.want)
+				}
+			})
+		}
+	}
+	t.Run("as added", check)
+	e = e.restart(t)
+	t.Run("after a restart", check)
+}
+
 // The full record of an execution that ended is read from its file when it is asked for: GetExecution, its output,
 // its events, and a cancel that finds it ended all know it.
 func TestEndedExecutionReadWhenAskedFor(t *testing.T) {

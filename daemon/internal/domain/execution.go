@@ -442,7 +442,8 @@ func (x *Execution) CurrentAttempt() *Attempt {
 
 // ExecutionSummary is what the daemon holds of an execution that has ended, and what the index of the execution records
 // keeps of each one: the fields the lists, the counters, a task's history, and the clean-up of worktrees read. The full
-// record is read when it is asked for.
+// record is read when it is asked for. Effort, ConfiguredModel, and ConfiguredEffort are the current attempt's, kept
+// apart as Attempt keeps them: all three empty with no attempt, and Effort alone when its harness reported none.
 type ExecutionSummary struct {
 	SchemaVersion     string            `json:"schemaVersion"`
 	ID                string            `json:"id"`
@@ -457,6 +458,9 @@ type ExecutionSummary struct {
 	WorkspacePath     string            `json:"workspacePath,omitempty"`
 	Harness           string            `json:"harness"`
 	Model             string            `json:"model,omitempty"`
+	Effort            string            `json:"effort,omitempty"`
+	ConfiguredModel   string            `json:"configuredModel,omitempty"`
+	ConfiguredEffort  string            `json:"configuredEffort,omitempty"`
 	AttemptCount      int               `json:"attemptCount"`
 	CurrentStep       string            `json:"currentStep,omitempty"`
 	CurrentStepKey    string            `json:"currentStepKey,omitempty"`
@@ -499,6 +503,9 @@ func (x *Execution) Summarize() *ExecutionSummary {
 		Repository: x.Repository, WorkItem: x.WorkItem, PullRequestURL: x.PullRequestURL, TestsStatus: x.TestsStatus,
 		Summary: x.Summary, ErrorMessage: x.ErrorMessage, ErrorKey: x.ErrorKey, ErrorParams: x.ErrorParams,
 		LastOperation: x.LastOperation, WarningCount: len(x.Warnings), LogExpired: x.LogExpired, Script: x.Script != nil,
+	}
+	if at := x.CurrentAttempt(); at != nil {
+		s.Effort, s.ConfiguredModel, s.ConfiguredEffort = at.Effort, at.ConfiguredModel, at.ConfiguredEffort
 	}
 	for _, w := range x.WorkItems {
 		s.WorkItems = append(s.WorkItems, WorkItemRef{Key: w.Key, Outcome: w.Outcome, WorktreePath: w.WorktreePath})
