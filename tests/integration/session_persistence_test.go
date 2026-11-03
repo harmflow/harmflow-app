@@ -13,8 +13,8 @@ import (
 )
 
 // The variables that sign each CLI in on a home of the test's own, so that what a run writes is told apart from what
-// the user's own home already holds: Claude Code's long-lived token, the one `claude setup-token` prints, and an API key
-// Codex's exec takes in CODEX_API_KEY. The person running the test provides them; the repository never holds them.
+// the user's own home already holds: Claude Code's long-lived token, the one `claude setup-token` prints, and an API
+// key Codex's exec takes in CODEX_API_KEY. The person running the test provides them; the repository never holds them.
 const (
 	persistenceClaudeTokenEnv = "HARMFLOW_TEST_CLAUDE_TOKEN"
 	persistenceCodexKeyEnv    = "HARMFLOW_TEST_CODEX_API_KEY"
