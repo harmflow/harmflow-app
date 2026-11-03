@@ -15,6 +15,7 @@ import { ValidationPanel } from "../components/TaskEditor";
 import { TaskForm } from "../components/TaskForm";
 import i18n from "../i18n";
 import { formatBytes, formatDateTime } from "../lib/format";
+import { SHORTCUT_GROUPS, shortcutsByGroup } from "../lib/shortcuts";
 import { slugify, type Doc } from "../lib/taskForm";
 import { actions, getState, patchStateForTests } from "../state/store";
 import { ExecutionsScreen } from "./ExecutionsScreen";
@@ -939,7 +940,7 @@ describe("settings sections", () => {
       sections: [...g.querySelectorAll(".settings-nav__item")].map((b) => b.textContent),
     }));
     expect(groups).toEqual([
-      { heading: "Interface", sections: ["Geral", "Notificações"] },
+      { heading: "Interface", sections: ["Geral", "Notificações", "Atalhos"] },
       { heading: "Execução", sections: ["Ferramentas de IA", "Caminhos"] },
       { heading: "Este computador", sections: ["Daemon", "Armazenamento", "Segurança"] },
     ]);
@@ -968,6 +969,11 @@ describe("settings sections", () => {
   it.each([
     ["general", ["Idioma", "Barra de menus"], ["Mostrar o HarmFlow na barra de menus", "Manter o HarmFlow na barra de menus ao sair com ⌘Q"]],
     ["notifications", ["Avisos"], ["Nível de notificação"]],
+    [
+      "shortcuts",
+      ["Em todo o painel", "Zoom, também nos diálogos", "Editor de tarefas", "Tela de tarefas", "Tela de execuções", "Linha do tempo da execução", "Diálogos e menus"],
+      ["Nova tarefa", "Salvar a tarefa", "Evento anterior", "Fechar o diálogo ou o menu"],
+    ],
     ["agents", ["Ferramentas de IA", "Ferramentas de linha de comando"], ["Detectar de novo", "Claude Code", "Definir caminho"]],
     ["paths", ["Variáveis de caminho", "Pastas permitidas"], ["PROJECTS_ROOT", "/srv/repos", "Adicionar variável", "Adicionar pasta"]],
     ["daemon", ["Estado", "Inicialização"], ["Em execução agora", "Parar o daemon", "Iniciar o daemon automaticamente com o sistema"]],
@@ -980,6 +986,48 @@ describe("settings sections", () => {
     expect(titles).toEqual(panels);
     for (const text of shown) expect(html).toContain(text);
     if (section !== "general") expect(html).not.toContain("Mostrar o HarmFlow na barra de menus");
+  });
+
+  // Every shortcut of the table, in its group, as keycaps, in the interface's language; none it does not hold.
+  it.each([
+    ["en-US", "Anywhere in the dashboard", "New task", "Quit HarmFlow, or hide the window when it is kept in the menu bar"],
+    ["pt-BR", "Em todo o painel", "Nova tarefa", "Encerrar o HarmFlow, ou ocultar a janela quando ele fica na barra de menus"],
+    ["es-ES", "En todo el panel", "Nueva tarea", "Salir de HarmFlow, u ocultar la ventana cuando se mantiene en la barra de menús"],
+  ])("lists every shortcut in its group with its keycaps, in %s", async (language, dashboard, newTask, quit) => {
+    await act(async () => void i18n.changeLanguage(language));
+    try {
+      await render(<SettingsScreen section="shortcuts" />);
+      const panels = [...host!.querySelectorAll("section.panel")];
+      const listed = shortcutsByGroup().map(({ group }, i) => {
+        const panel = panels[i];
+        expect(panel.querySelector(".panel__title")!.textContent).toBe(i18n.t(`settings.shortcuts.groups.${group}`));
+        return [...panel.querySelectorAll<HTMLElement>("[data-shortcut]")].map((row) => row.dataset.shortcut);
+      });
+      expect(panels).toHaveLength(SHORTCUT_GROUPS.length);
+      expect(listed).toEqual(shortcutsByGroup().map(({ ids }) => ids));
+
+      const row = (id: string) => host!.querySelector(`[data-shortcut="${id}"]`)!.closest(".setting-row")!;
+      const caps = (id: string) => [...row(id).querySelectorAll("kbd.keycap")].map((k) => k.textContent);
+      expect(panels[0].querySelector(".panel__title")!.textContent).toBe(dashboard);
+      expect(row("newTask").querySelector(".setting-row__label")!.textContent).toBe(newTask);
+      expect(row("quit").querySelector(".setting-row__label")!.textContent).toBe(quit);
+      expect(caps("newTask")).toEqual(["⌘", "N"]);
+      expect(caps("settings")).toEqual(["⌘", ","]);
+      expect(caps("zoomIn")).toEqual(["⌘", "+", "⌘", "="]);
+      expect(caps("zoomOut")).toEqual(["⌘", "−"]);
+      expect(caps("previousEvent")).toEqual(["↑"]);
+      expect(caps("lastEvent")).toEqual(["End"]);
+      expect(caps("close")).toEqual(["Esc"]);
+
+      // Read-only: the section holds nothing to press or type in.
+      const section = host!.querySelector(".settings__section")!;
+      expect([...section.querySelectorAll("button, input, select, textarea, a")]).toEqual([]);
+      // No macOS standard key of the Edit or Window menus.
+      const text = section.textContent!;
+      for (const key of ["⌘C", "⌘V", "⌘Z", "⌘M", "⌘W"]) expect(text.replace(/\s/g, "")).not.toContain(key);
+    } finally {
+      await act(async () => void i18n.changeLanguage("pt-BR"));
+    }
   });
 
   // The local API's address changes with every start of the daemon and is nothing the user calls, so Security shows

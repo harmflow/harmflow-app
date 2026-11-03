@@ -6,6 +6,7 @@ import type { ExecutionSummary } from "../api/types";
 import { isActive } from "../api/types";
 import { fieldText } from "../lib/daemonText";
 import { formatTime } from "../lib/format";
+import { controlKey } from "../lib/shortcuts";
 import { toneClass, typeGlyph } from "../lib/taskType";
 import { buildTimeline } from "../lib/timeline";
 import { useStore } from "../state/store";
@@ -73,7 +74,7 @@ export function ExecutionCard({
     <article
       className={cx("exec-card", selected && "exec-card--selected")}
       onClick={onSelect}
-      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onSelect()}
+      onKeyDown={(e) => controlKey(e, "activate") && onSelect()}
       tabIndex={0}
       aria-pressed={selected}
     >

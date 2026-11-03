@@ -2,10 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { native } from "./api/native";
 import { RootBoundary, ScreenBoundary } from "./components/ErrorBoundary";
-import { Header, NAV, Sidebar, navDigit, noticeText, type Screen } from "./components/Shell";
+import { Header, NAV, Sidebar, noticeText, type Screen } from "./components/Shell";
 import type { LeaveCheck } from "./components/TaskEditor";
 import { Toasts } from "./components/toast";
 import { applyLanguage } from "./i18n";
+import { matches, matching } from "./lib/shortcuts";
 import { storeZoom, storedZoom, zoomKey, zoomed } from "./lib/zoom";
 import { ExecutionsScreen } from "./screens/ExecutionsScreen";
 import { HistoryScreen } from "./screens/HistoryScreen";
@@ -120,7 +121,7 @@ export function App() {
     }
   }, [executionsAsideHidden]);
 
-  // The tray and the app menu's Settings… speak the interface's language too. A count given as a string reads the key
+  // The tray, the app menu's Settings…, and the Help menu's Keyboard Shortcuts speak the interface's language too. A count given as a string reads the key
   // as written, so both forms of the stop confirmation go with their `{{count}}` left in, for the tray to choose.
   useEffect(() => {
     void native.setTrayLabels({
@@ -138,6 +139,7 @@ export function App() {
       stopFailedOk: t("settings.stopFailedOk"),
       cancel: t("common.cancel"),
       settings: t("menu.settings"),
+      shortcuts: t("menu.shortcuts"),
     });
   }, [t]);
 
@@ -195,7 +197,8 @@ export function App() {
   const daemonDown = !onboarding && native.available && daemonRunning === false && !restarting;
   const shell = !onboarding && !daemonDown;
 
-  // A target from the tray or a notice shows its execution. A screen from the app menu (⌘,) acts where ⌘N does: in
+  // A target from the tray or a notice shows its execution. A screen from the app menu (⌘,), or the Help menu's
+  // Keyboard Shortcuts with its Settings section, acts where ⌘N does: in
   // the shell, with no modal dialog open. A native menu shortcut never reaches the keydown handler below, which keeps
   // ⌘B and ⌘N off the other screens, so the check is here. Taken or ignored, the target is dropped: one ignored on the
   // onboarding screen never changes the screen once the shell returns.
@@ -215,22 +218,21 @@ export function App() {
   }, [navigation]);
 
   // ⌘B collapses and expands the sidebar, ⌘N opens the template picker as the topbar's New task does, ⌘E hides and
-  // shows the Executions screen's aside, and ⌘1 to ⌘9 open the sidebar's items in its order, as a click on each does,
+  // shows the Executions screen's aside, and ⌘1 to ⌘5 open the sidebar's items in its order, as a click on each does,
   // from any focus, a text field or the YAML editor included. ⌘E acts on the Executions screen alone: elsewhere it is
   // left to the system and the saved state stays as it was. The onboarding and daemon-down screens have no shell, and a
-  // modal dialog, the picker included, keeps the keyboard. Linux and Windows would check ctrlKey.
+  // modal dialog, the picker included, keeps the keyboard. The keys are the shortcut table's.
   useEffect(() => {
     if (!shell) return;
     const onKey = (e: KeyboardEvent) => {
-      if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat) return;
-      const key = e.key.toLowerCase();
-      const item = NAV.find((_, index) => navDigit(index) === key);
-      if (key !== "b" && key !== "n" && !(key === "e" && screen === "executions") && !item) return;
+      const item = NAV.find((nav) => matches(e, nav.shortcut));
+      const key = matching(e, screen === "executions" ? ["toggleSidebar", "newTask", "toggleExecutionsAside"] : ["toggleSidebar", "newTask"]);
+      if (!key && !item) return;
       if (document.querySelector('[aria-modal="true"]')) return;
       e.preventDefault();
       if (item) navigateRef.current(item.key);
-      else if (key === "b") setSidebarCollapsed((collapsed) => !collapsed);
-      else if (key === "e") setExecutionsAsideHidden((hidden) => !hidden);
+      else if (key === "toggleSidebar") setSidebarCollapsed((collapsed) => !collapsed);
+      else if (key === "toggleExecutionsAside") setExecutionsAsideHidden((hidden) => !hidden);
       else setPicker(true);
     };
     window.addEventListener("keydown", onKey);

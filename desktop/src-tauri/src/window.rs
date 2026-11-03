@@ -56,11 +56,20 @@ pub fn show_execution<R: Runtime>(app: &AppHandle<R>, execution_id: &str) {
     let _ = app.emit("harmflow://navigate", serde_json::json!({ "executionId": execution_id }));
 }
 
-/// Shows the window on one of the dashboard's screens: from the app menu's Settings…. The interface decides whether
-/// the screen may change now, as it does for ⌘B and ⌘N.
-pub fn show_screen<R: Runtime>(app: &AppHandle<R>, screen: &str) {
+/// Shows the window on one of the dashboard's screens, and on one of its sections when given: from the app menu's
+/// Settings…, and from the Help menu's Keyboard Shortcuts. The interface decides whether the screen may change now, as
+/// it does for ⌘B and ⌘N.
+pub fn show_screen<R: Runtime>(app: &AppHandle<R>, screen: &str, section: Option<&str>) {
     show_main(app);
-    let _ = app.emit("harmflow://navigate", serde_json::json!({ "screen": screen }));
+    let _ = app.emit("harmflow://navigate", navigation(screen, section));
+}
+
+/// What `show_screen` sends the interface: the screen, and the section only when there is one.
+fn navigation(screen: &str, section: Option<&str>) -> serde_json::Value {
+    match section {
+        Some(section) => serde_json::json!({ "screen": screen, "section": section }),
+        None => serde_json::json!({ "screen": screen }),
+    }
 }
 
 pub fn hide_main<R: Runtime>(app: &AppHandle<R>) {
@@ -97,6 +106,15 @@ mod tests {
     fn an_already_visible_window_is_left_alone() {
         assert!(!should_show(false, true, false, true, false));
         assert!(!should_show(false, true, false, false, true));
+    }
+
+    #[test]
+    fn a_navigation_names_its_section_only_when_given() {
+        assert_eq!(navigation("settings", None), serde_json::json!({ "screen": "settings" }));
+        assert_eq!(
+            navigation("settings", Some("shortcuts")),
+            serde_json::json!({ "screen": "settings", "section": "shortcuts" })
+        );
     }
 
     #[test]

@@ -1,5 +1,6 @@
 // The dashboard's zoom: its fixed steps, the keys that move it, and the level kept between launches. The
 // desktop keeps the level, not the daemon's settings: it belongs to the window and its display.
+import { matching } from "./shortcuts";
 
 /** The steps, in percent. 150 is the cap until the layout is checked at narrower widths. */
 export const ZOOM_STEPS = [80, 90, 100, 110, 125, 150] as const;
@@ -13,15 +14,11 @@ const ZOOM_STORAGE_KEY = "harmflow.zoom";
 /**
  * The zoom key pressed, if any: ⌘+ or ⌘= zooms in, ⌘− out, and ⌘0 returns to 100%, the keypad's + and − included. ⌘+
  * is Shift with = on the US and ABNT2 layouts, so Shift is allowed on that key alone; Control and Option are not. A
- * held key keeps zooming, as in Safari, up to the end of the range. Linux and Windows would check ctrlKey.
+ * held key keeps zooming, as in Safari, up to the end of the range. The keys are the shortcut table's.
  */
 export function zoomKey(e: KeyboardEvent): ZoomKey | null {
-  if (!e.metaKey || e.ctrlKey || e.altKey) return null;
-  if (e.key === "+" || e.key === "=") return "in";
-  if (e.shiftKey) return null;
-  if (e.key === "-") return "out";
-  if (e.key === "0") return "reset";
-  return null;
+  const key = matching(e, ["zoomIn", "zoomOut", "zoomReset"]);
+  return key === "zoomIn" ? "in" : key === "zoomOut" ? "out" : key === "zoomReset" ? "reset" : null;
 }
 
 /** The level after a key: one step in or out, stopping at either end without wrapping, or back to 100%. */

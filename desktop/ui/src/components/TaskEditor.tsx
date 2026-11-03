@@ -7,6 +7,7 @@ import { native } from "../api/native";
 import type { Catalog, Task, TaskInput, ValidationResult } from "../api/types";
 import { daemonText } from "../lib/daemonText";
 import { useDebounced } from "../lib/hooks";
+import { matches, shortcutText } from "../lib/shortcuts";
 import { addedFolders, type Doc } from "../lib/taskForm";
 import { actions, getState, useStore } from "../state/store";
 import { Icon } from "./Icon";
@@ -17,8 +18,6 @@ import { Banner, Button, Chip, Tabs, cx } from "./ui";
 import { YamlEditor } from "./YamlEditor";
 
 type EditorTab = "form" | "yaml";
-
-const SAVE_SHORTCUT = "⌘S";
 
 /** Asks whether the editor may be left, discarding its unsaved changes; resolves true to leave. */
 export type LeaveCheck = () => Promise<boolean>;
@@ -182,13 +181,12 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
 
   // ⌘S saves as the Save button does, from either tab and any focus, the YAML editor included, whose keymap lets the
   // key through. A modal dialog keeps the keyboard. The listener lives as long as the editor, and calls the latest save,
-  // with the document and revision of the last render. Linux and Windows would check ctrlKey.
+  // with the document and revision of the last render. The keys are the shortcut table's.
   const saveRef = useRef(save);
   saveRef.current = save;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat) return;
-      if (e.key.toLowerCase() !== "s") return;
+      if (!matches(e, "save")) return;
       if (document.querySelector('[aria-modal="true"]')) return;
       e.preventDefault();
       void saveRef.current();
@@ -244,7 +242,7 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
             disabled={saving}
             aria-keyshortcuts="Meta+S"
             onClick={() => void save()}
-            {...tipped(t("common.save"), SAVE_SHORTCUT)}
+            {...tipped(t("common.save"), shortcutText("save"))}
           >
             {saving ? t("common.saving") : t("common.save")}
           </Button>

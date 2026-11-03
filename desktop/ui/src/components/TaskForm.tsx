@@ -24,6 +24,7 @@ import {
   type RepeatKind,
 } from "../lib/schedule";
 import { HARNESS_PROVIDERS, NOTIFIABLE_EVENTS, schemaDefault, schemaEnum, schemaRange } from "../lib/schema";
+import { controlKey } from "../lib/shortcuts";
 import {
   envToLines,
   getIn,
@@ -676,7 +677,7 @@ function NamePicker({
             else setDraft(v);
           }}
           onKeyDown={(e) => {
-            if (e.key === "Enter") {
+            if (controlKey(e, "commit")) {
               e.preventDefault();
               add(draft);
             }

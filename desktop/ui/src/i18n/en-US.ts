@@ -1184,6 +1184,7 @@ export const enUS = {
     sections: {
       general: "General",
       notifications: "Notifications",
+      shortcuts: "Shortcuts",
       agents: "AI tools",
       paths: "Paths",
       daemon: "Daemon",
@@ -1193,6 +1194,39 @@ export const enUS = {
     },
     sectionList: "Settings sections",
     groups: { interface: "Interface", agents: "Execution", computer: "This computer" },
+    shortcuts: {
+      groups: {
+        dashboard: "Anywhere in the dashboard",
+        zoom: "Zoom, dialogs included",
+        editor: "Task editor",
+        tasks: "Tasks screen",
+        executions: "Executions screen",
+        timeline: "Execution timeline",
+        dialogs: "Dialogs and menus",
+      },
+      labels: {
+        newTask: "New task",
+        toggleSidebar: "Collapse or expand the sidebar",
+        openOverview: "Open Overview",
+        openExecutions: "Open Executions",
+        openTasks: "Open Tasks",
+        openHistory: "Open History",
+        openSettings: "Open Settings",
+        settings: "Settings",
+        quit: "Quit HarmFlow, or hide the window when it is kept in the menu bar",
+        zoomIn: "Zoom in",
+        zoomOut: "Zoom out",
+        zoomReset: "Actual size",
+        save: "Save the task",
+        cancelMove: "Cancel moving a task or group",
+        toggleExecutionsAside: "Hide or show the aside",
+        previousEvent: "Previous event",
+        nextEvent: "Next event",
+        firstEvent: "First event",
+        lastEvent: "Last event",
+        close: "Close the dialog or menu",
+      },
+    },
     subheads: {
       language: "Language",
       menuBar: "Menu bar",
@@ -1346,6 +1380,7 @@ export const enUS = {
   // HarmFlow's own items in the macOS app menu; the rest of Tauri's default menu stays in English.
   menu: {
     settings: "Settings…",
+    shortcuts: "Keyboard Shortcuts",
   },
   gauges: {
     cpu: "CPU",

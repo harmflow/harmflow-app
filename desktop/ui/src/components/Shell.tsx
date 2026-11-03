@@ -8,6 +8,7 @@ import { translateNested } from "../lib/daemonText";
 import { errorMessage } from "../lib/errorMessage";
 import { formatBytes, formatNumber, formatRelative, formatTime } from "../lib/format";
 import { useNow } from "../lib/hooks";
+import { ariaKeys, shortcutText, type ShortcutId } from "../lib/shortcuts";
 import { actions, useStore } from "../state/store";
 import { HarnessMark, Icon, Logo, type IconName } from "./Icon";
 import { toast } from "./toast";
@@ -15,22 +16,14 @@ import { Banner, Button, Gauge, IconButton, cx } from "./ui";
 
 export type Screen = "overview" | "executions" | "tasks" | "history" | "settings";
 
-/** The sidebar's items, in the order it shows them; ⌘1 opens the first, and so on to ⌘9. */
-export const NAV: Array<{ key: Screen; icon: IconName }> = [
-  { key: "overview", icon: "grid" },
-  { key: "executions", icon: "playFilled" },
-  { key: "tasks", icon: "list" },
-  { key: "history", icon: "history" },
-  { key: "settings", icon: "settings" },
+/** The sidebar's items, in the order it shows them, each with the shortcut that opens it: ⌘1 the first, and so on. */
+export const NAV: Array<{ key: Screen; icon: IconName; shortcut: ShortcutId }> = [
+  { key: "overview", icon: "grid", shortcut: "openOverview" },
+  { key: "executions", icon: "playFilled", shortcut: "openExecutions" },
+  { key: "tasks", icon: "list", shortcut: "openTasks" },
+  { key: "history", icon: "history", shortcut: "openHistory" },
+  { key: "settings", icon: "settings", shortcut: "openSettings" },
 ];
-
-/** The digit of the sidebar item at index, from 1; the items past the ninth get none. */
-export function navDigit(index: number): string | undefined {
-  return index < 9 ? String(index + 1) : undefined;
-}
-
-const TOGGLE_SHORTCUT = "⌘B";
-const NEW_TASK_SHORTCUT = "⌘N";
 
 /** How often the expanded sidebar reads its gauges again. */
 const GAUGES_EVERY_MS = 5000;
@@ -131,17 +124,16 @@ export function Sidebar({
       </div>
 
       <nav className="nav" aria-label="HarmFlow">
-        {NAV.map((item, index) => {
-          const digit = navDigit(index);
+        {NAV.map((item) => {
           return (
             <button
               key={item.key}
               type="button"
               className={cx("nav__item", screen === item.key && "nav__item--active")}
               aria-current={screen === item.key ? "page" : undefined}
-              aria-keyshortcuts={digit ? `Meta+${digit}` : undefined}
+              aria-keyshortcuts={ariaKeys(item.shortcut)}
               onClick={() => onNavigate(item.key)}
-              {...(collapsed ? tipped(t(`nav.${item.key}`), digit ? `⌘${digit}` : undefined) : {})}
+              {...(collapsed ? tipped(t(`nav.${item.key}`), shortcutText(item.shortcut)) : {})}
             >
               <Icon name={item.icon} size={19} />
               <span className={cx("nav__label", collapsed && "sr-only")}>{t(`nav.${item.key}`)}</span>
@@ -190,9 +182,9 @@ export function Sidebar({
             type="button"
             className="icon-btn sidebar__toggle"
             aria-label={toggleLabel}
-            aria-keyshortcuts="Meta+B"
+            aria-keyshortcuts={ariaKeys("toggleSidebar")}
             onClick={onToggle}
-            {...tipped(toggleLabel, TOGGLE_SHORTCUT)}
+            {...tipped(toggleLabel, shortcutText("toggleSidebar"))}
           >
             <Icon name={collapsed ? "sidebarExpand" : "sidebarCollapse"} size={18} />
           </button>
@@ -278,12 +270,12 @@ export function Header({
           variant="primary"
           size="lg"
           icon="plus"
-          aria-keyshortcuts="Meta+N"
+          aria-keyshortcuts={ariaKeys("newTask")}
           onClick={() => {
             hide(); // the picker covers the button, which may get no mouseleave until the pointer moves
             onNewTask();
           }}
-          {...tipped(t("header.newTask"), NEW_TASK_SHORTCUT)}
+          {...tipped(t("header.newTask"), shortcutText("newTask"))}
         >
           {t("header.newTask")}
         </Button>

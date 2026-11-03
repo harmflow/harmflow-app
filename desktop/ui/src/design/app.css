@@ -351,6 +351,35 @@ body:has([aria-modal="true"]) .tooltip {
   font-size: var(--hf-font-size-2xs);
 }
 
+/* Settings → Shortcuts: each key a keycap, a shortcut's other chords after a slash */
+.keycaps,
+.keycaps__chord {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--hf-space-1);
+}
+
+.keycaps {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.keycaps__or {
+  color: var(--hf-color-text-muted);
+}
+
+.keycap {
+  min-width: 22px;
+  padding: 1px 6px;
+  border: 1px solid var(--hf-color-border);
+  border-bottom-width: 2px;
+  border-radius: var(--hf-radius-sm);
+  color: var(--hf-color-text);
+  font-family: var(--hf-font-mono);
+  font-size: var(--hf-font-size-xs);
+  text-align: center;
+}
+
 .dot {
   width: 9px;
   height: 9px;

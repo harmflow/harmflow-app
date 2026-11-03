@@ -16,6 +16,7 @@ import { daemonText } from "../lib/daemonText";
 import { errorMessage } from "../lib/errorMessage";
 import { formatRelative } from "../lib/format";
 import { useNow } from "../lib/hooks";
+import { controlKey, matches } from "../lib/shortcuts";
 import {
   addGroup,
   arrange,
@@ -297,7 +298,7 @@ function TaskList({ onView, onOpenExecution }: { onView: (v: TaskView) => void; 
     };
     const onKey = (ev: KeyboardEvent) => {
       const d = dragRef.current;
-      if (ev.key !== "Escape" || !d?.moved) return;
+      if (!matches(ev, "cancelMove") || !d?.moved) return;
       ev.preventDefault();
       d.cancelled = true;
       dropRef.current = null;
@@ -650,7 +651,7 @@ function MoveMenu({ items, onClose }: { items: MenuChoice[]; onClose: () => void
       className="popover popover--start"
       role="menu"
       onKeyDown={(e) => {
-        if (e.key === "Escape") {
+        if (matches(e, "close")) {
           e.stopPropagation();
           onClose();
         }
@@ -692,8 +693,8 @@ function GroupName({ name, label, onDone }: { name: string; label: string; onDon
       value={value}
       onChange={(e) => setValue(e.target.value)}
       onKeyDown={(e) => {
-        if (e.key === "Enter") finish(value);
-        if (e.key === "Escape") finish(name);
+        if (controlKey(e, "commit")) finish(value);
+        if (controlKey(e, "revert")) finish(name);
       }}
       onBlur={() => finish(value)}
     />
