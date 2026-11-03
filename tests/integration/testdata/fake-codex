@@ -1,6 +1,7 @@
 #!/bin/bash
 # A stand-in for the Codex CLI that speaks the JSONL of `codex exec --json`. CODEX=quota in the prompt fails the turn;
-# CODEX=slow starts a command and waits until it is ended, with a child the test finds in child.pid.
+# CODEX=slow starts a command and waits until it is ended, with a child the test finds in child.pid; CODEX=record first
+# copies the execution's record, as it is on disk when the attempt starts, to record-at-start.json.
 case "$1" in
   --version) echo "codex-cli 0.163.0"; exit 0 ;;
   login) echo "Logged in using ChatGPT"; exit 0 ;;
@@ -12,6 +13,12 @@ case "$1" in
 esac
 # The read builtin, not cat: on a loaded host, each process the stand-in starts can take seconds.
 IFS= read -r -d '' PROMPT
+if [[ "$PROMPT" == *"CODEX=record"* ]]; then
+  # The daemon keeps each execution's record in state/executions, beside the runs directory that holds the execution's.
+  RUNS=${HARMFLOW_EXECUTION_DIR%/*}
+  IFS= read -r -d '' RECORD < "${RUNS%/*}/state/executions/$HARMFLOW_EXECUTION_ID.json"
+  printf '%s' "$RECORD" > "$HARMFLOW_EXECUTION_DIR/record-at-start.json"
+fi
 echo '{"type":"thread.started","thread_id":"fake-thread"}'
 echo '{"type":"turn.started"}'
 if [[ "$PROMPT" == *"CODEX=quota"* ]]; then

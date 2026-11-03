@@ -2543,6 +2543,78 @@ func TestCheckpointListsAShellWrittenFileOutsideGit(t *testing.T) {
 	}
 }
 
+// harmflow-app#609: the attempt prints a message longer than the summary keeps and writes a file from a shell command
+// before its quota ends. Before Codex starts, the first attempt's checkpoint holds the file and the attempt's partial
+// output, its last message cut to 1,500 characters, the same text Codex's summary quotes.
+func TestCheckpointKeepsThePartialOutput(t *testing.T) {
+	e := newEnv(t)
+	e.create("output", codexFallback)
+	message := "Wrote half of partial.txt " + strings.Repeat("x", 1600)
+	c, sent := e.checkpointBeforeCodex("output", "echo half > partial.txt; echo '"+message+"'")
+	if c == nil {
+		t.Fatalf("no checkpoint on the first attempt before Codex started; Codex's context:\n%s", sent)
+	}
+	want := []domain.CheckpointFile{{Path: "partial.txt", Status: domain.FileModified}}
+	if !slices.Equal(c.Files, want) {
+		t.Errorf("checkpoint files %+v, want %+v", c.Files, want)
+	}
+	if got, want := c.LastMessage, trimTo(message, 1500); got != want {
+		t.Errorf("checkpoint last message = %q (%d bytes), want the message cut to 1,500 characters, %q", got, len(got), want)
+	}
+	if !strings.Contains(sent, "Its last message: "+c.LastMessage) {
+		t.Errorf("Codex's context does not quote the checkpoint's last message %q:\n%s", c.LastMessage, sent)
+	}
+}
+
+// harmflow-app#609: a token the attempt printed in its last message reads [REDACTED] in its checkpoint, on the record
+// and on disk, as it does in the raw output.
+func TestCheckpointPartialOutputRedacted(t *testing.T) {
+	e := newEnv(t)
+	e.create("leaky-output", codexFallback)
+	token := "ghp_" + strings.Repeat("e", 36)
+	c, sent := e.checkpointBeforeCodex("leaky-output", "echo half > partial.txt; echo 'Pushed with "+token+"'")
+	if c == nil {
+		t.Fatalf("no checkpoint on the first attempt before Codex started; Codex's context:\n%s", sent)
+	}
+	if got, want := c.LastMessage, "Pushed with [REDACTED]"; got != want {
+		t.Errorf("checkpoint last message = %q, want %q", got, want)
+	}
+	x := e.executions("leaky-output")
+	if len(x) != 1 {
+		t.Fatalf("%d executions of leaky-output, want 1", len(x))
+	}
+	data, err := os.ReadFile(filepath.Join(e.home, "state", "executions", x[0].ID+".json"))
+	var saved domain.Execution
+	if err == nil {
+		err = json.Unmarshal(data, &saved)
+	}
+	if err != nil || len(saved.Attempts) != 2 || saved.Attempts[0].Checkpoint == nil ||
+		saved.Attempts[0].Checkpoint.LastMessage != "Pushed with [REDACTED]" {
+		t.Errorf("the record on disk lacks the redacted last message in the first attempt's checkpoint (%v):\n%s", err, data)
+	}
+	if strings.Contains(string(data), "ghp_") {
+		t.Errorf("the token survived in the record:\n%s", data)
+	}
+}
+
+// harmflow-app#609: an attempt that prints a message and succeeds, on a task whose fallback could have followed it,
+// keeps no checkpoint: only a switch reads one.
+func TestNoSwitchKeepsNoCheckpoint(t *testing.T) {
+	e := newEnv(t)
+	e.create("no-switch", codexFallback)
+	e.claude.setScript(func(ports.RunRequest) string {
+		return "echo half > partial.txt; echo 'Wrote partial.txt'; echo 'END ok'"
+	})
+	r, _ := e.app.RunTask("no-switch")
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	if len(x.Attempts) != 1 {
+		t.Fatalf("attempts %+v, want one", x.Attempts)
+	}
+	if c := x.Attempts[0].Checkpoint; c != nil {
+		t.Errorf("the only attempt's checkpoint = %+v, want none: no switch followed it", c)
+	}
+}
+
 // harmflow-app#214: the session context names at most the checkpoint's files, counts the rest, and says when the
 // scan stopped at its limit.
 func TestCheckpointText(t *testing.T) {

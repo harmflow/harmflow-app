@@ -558,7 +558,9 @@ func (r *run) attempts(ctx context.Context, start func(harness string) error) (d
 			}
 			if mark != nil {
 				if c := r.readCheckpoint(ctx, *mark); c != nil {
-					eventlog.RedactFields(c) // its paths, kept and sent on like the harness's own text
+					// The partial output is the attempt's last message, as the next attempt's summary carries it.
+					c.LastMessage = prev[len(prev)-1].LastMessage
+					eventlog.RedactFields(c) // its paths and text, kept and sent on like the harness's own text
 					r.keepCheckpoint(c, &prev[len(prev)-1])
 				}
 				r.placeWorkItems(ctx, &prev[len(prev)-1])
