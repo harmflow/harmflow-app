@@ -588,11 +588,8 @@ export const ptBR: Resources = {
   itemSource: {
     builtin: "embutido",
     harness: "na configuração do {{harness}}",
-    harness_workspace: "na configuração do {{harness}} e no workspace {{workspace}}",
     skill_list: "na lista de skills do {{harness}} para {{workspace}}",
     skill_list_errors: "na lista de skills do {{harness}} para {{workspace}}, que não conseguiu carregar {{errors}}",
-    plugin_list: "nos plugins do {{harness}} para {{workspace}}",
-    plugin_list_errors: "nos plugins do {{harness}} para {{workspace}}, que não conseguiram carregar {{errors}}",
   },
   claudeSettings: {
     user: "configurações de usuário",

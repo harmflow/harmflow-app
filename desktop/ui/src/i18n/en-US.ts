@@ -563,11 +563,8 @@ export const enUS = {
   itemSource: {
     builtin: "built in",
     harness: "the {{harness}} configuration",
-    harness_workspace: "the {{harness}} configuration and the workspace {{workspace}}",
     skill_list: "{{harness}}'s skill list for {{workspace}}",
     skill_list_errors: "{{harness}}'s skill list for {{workspace}}, which could not load {{errors}}",
-    plugin_list: "{{harness}}'s plugins for {{workspace}}",
-    plugin_list_errors: "{{harness}}'s plugins for {{workspace}}, which could not load {{errors}}",
   },
   // The Claude Code settings sources whose allow rules widen a task's tool list or its file edits, as
   // restriction_claude_allow_rules and restriction_claude_edit_rules name them.

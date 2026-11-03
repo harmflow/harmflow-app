@@ -16,26 +16,29 @@ describe("daemonText", () => {
     expect(daemonText(text)).toBe('a skill "lint" não foi encontrada para Codex (na configuração do Codex)');
   });
 
-  it("names the workspace a skill was looked for in, beside the harness's configuration", () => {
-    const where = "the Claude Code configuration and the workspace /w";
+  it("names the harness's skill list for the workspace a skill was looked for in", () => {
+    const where = "Claude Code's skill list for /w";
     const text = {
       message: `skill "release-notes" cannot be found for Claude Code (${where})`,
       messageKey: "skill_not_found" as const,
-      params: { name: "release-notes", harness: "Claude Code", where, source: "harness_workspace", workspace: "/w" },
+      params: { name: "release-notes", harness: "Claude Code", where, source: "skill_list", workspace: "/w" },
     };
     expect(daemonText(text)).toBe(
-      'a skill "release-notes" não foi encontrada para Claude Code (na configuração do Claude Code e no workspace /w)',
+      'a skill "release-notes" não foi encontrada para Claude Code (na lista de skills do Claude Code para /w)',
     );
   });
 
-  it("names the plugins a plugin's skill was looked for in", () => {
-    const where = "Claude Code's plugins for /w";
+  it("names the files the harness's skill list could not load", () => {
+    const errors = "/w/.codex/skills/lint/SKILL.md: invalid front matter";
+    const where = `Codex's skill list for /w, which could not load ${errors}`;
     const text = {
-      message: `skill "pdf:pdf" cannot be found for Claude Code (${where})`,
+      message: `skill "lint" cannot be found for Codex (${where})`,
       messageKey: "skill_not_found" as const,
-      params: { name: "pdf:pdf", harness: "Claude Code", where, source: "plugin_list", workspace: "/w" },
+      params: { name: "lint", harness: "Codex", where, source: "skill_list_errors", workspace: "/w", errors },
     };
-    expect(daemonText(text)).toBe('a skill "pdf:pdf" não foi encontrada para Claude Code (nos plugins do Claude Code para /w)');
+    expect(daemonText(text)).toBe(
+      `a skill "lint" não foi encontrada para Codex (na lista de skills do Codex para /w, que não conseguiu carregar ${errors})`,
+    );
   });
 
   it("translates what a text names: a status, a cron field, a screen, the settings that widen a tool list", () => {
