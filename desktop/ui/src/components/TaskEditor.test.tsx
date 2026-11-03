@@ -9,7 +9,8 @@
 // itest › TestOneSchemaForEveryEntryPoint's. ⌘S saves as the Save button does, from any focus in the editor
 // (harmflow-app#230). A save shows the warnings the daemon gives, such as a fallback that cannot load the task's skill
 // (harmflow-app#216) or its agent (harmflow-app#347). The catalog is asked for with the task's ID, so a task with no
-// workspace path is offered the skills of the folder it runs in, which validation reads (harmflow-app#283).
+// workspace path is offered the skills of the folder it runs in, which validation reads (harmflow-app#283), and a task
+// with one is offered its workspace's skills and a plugin's, in place of the catalog loaded before (harmflow-app#807).
 // An editor open on a task warns when the stream delivers a change of its file made outside HarmFlow, and a save from it
 // afterwards reports the conflict and overwrites nothing; each banner's actions load the file or keep the edit
 // (harmflow-app#593). Each later change warns again, after the user kept their edits, loaded the file, or saved past
@@ -21,7 +22,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi, type Mock } from "vitest";
 import type { StreamHandlers } from "../api/transport";
-import type { HarmflowEvent, Task, TaskInput, ValidationIssue, ValidationResult } from "../api/types";
+import type { Catalog, CatalogEntry, HarmflowEvent, Task, TaskInput, ValidationIssue, ValidationResult } from "../api/types";
 import i18n from "../i18n";
 import type { Doc } from "../lib/taskForm";
 import { patchStateForTests, startSync } from "../state/store";
@@ -663,14 +664,117 @@ describe("task editor on a script task declared for another system", () => {
 });
 
 describe("task editor catalog", () => {
+  const catalogs = () => daemon.requests.filter((r) => r.method === "GET" && r.path.startsWith("/catalog")).map((r) => r.path);
+
   it.each(["edit", "create"] as const)(
     "asks in %s mode for the skills of the folder the task runs in when it sets no workspace path, as validation reads it",
     async (mode) => {
       await open(mode);
-      const catalogs = daemon.requests.filter((r) => r.method === "GET" && r.path.startsWith("/catalog")).map((r) => r.path);
-      expect(catalogs).toEqual(["/catalog?task=standup"]);
+      expect(catalogs()).toEqual(["/catalog?task=standup"]);
     },
   );
+
+  // The Skills field offers the skills the catalog lists for the task's workspace, a plugin's by the name Claude Code
+  // reports for it, in place of the catalog loaded before (harmflow-app#807). That the daemon lists them from Claude
+  // Code's own skill list is app › TestClaudeCodeSkillsComeFromItsSkillList's.
+  describe("on a Claude Code task with a workspace path", () => {
+    const NOTES = "/Users/dev/release-notes";
+    const OTHER = "/Users/dev/other";
+    const skill = (name: string, source: CatalogEntry["source"]): CatalogEntry => ({ name, kind: "skill", source, harnesses: ["claude-code"] });
+    const listing = (...skills: CatalogEntry[]): Catalog => ({ agents: [], skills, problems: [], taskTypes: [] });
+    const builtin = skill("hf-github-worktree", "builtin");
+    const workspaceSkill = skill("release-notes", "user");
+    const pluginSkill = skill("pdf:pdf", "user");
+    /** The request the editor sends for the task's workspace, the task's ID with it. */
+    const catalogPath = (workspace: string) => `/catalog?workspace=${encodeURIComponent(workspace)}&task=release`;
+
+    /** The stored Claude Code task, in a workspace, citing the given skills. */
+    const workspaceTask = (workspace: string, skills?: string[]): Task => {
+      const document: Doc = {
+        apiVersion: "harmflow/v1alpha1",
+        kind: "Task",
+        metadata: { id: "release", name: "Release notes" },
+        spec: {
+          type: "general",
+          schedule: { cron: CRON },
+          prompt: "Write the release notes.",
+          harness: { preferred: { provider: "claude-code" } },
+          workspace: { path: workspace },
+          ...(skills ? { skills } : {}),
+        },
+      };
+      return {
+        id: "release",
+        name: "Release notes",
+        type: "general",
+        enabled: true,
+        revision: "r1",
+        harness: "claude-code",
+        warnings: [],
+        document,
+        effective: document,
+        yaml: JSON.stringify(document, null, 2) + "\n",
+        path: "release.yaml",
+        validation: { valid: true, errors: [], warnings: [] },
+      };
+    };
+
+    /** Opens the editor on the task with `loaded` as the app's catalog, the stand-in answering its workspace's with `answer`. */
+    async function openTask(task: Task, loaded: Catalog, answer: Catalog) {
+      patchStateForTests({ catalog: loaded });
+      const workspace = (task.document.spec as { workspace: { path: string } }).workspace.path;
+      daemon.routes.set(`GET ${catalogPath(workspace)}`, () => ({ status: 200, body: answer }));
+      daemon.routes.set("POST /tasks/validate", (input) => {
+        const document = (input as TaskInput).document;
+        return { status: 200, body: { valid: true, errors: [], warnings: [], document, effective: document } };
+      });
+      host = document.body.appendChild(document.createElement("div"));
+      root = createRoot(host);
+      await act(async () => root!.render(<TaskEditor mode="edit" task={task} onClose={() => {}} onSaved={vi.fn()} />));
+      await settle();
+    }
+
+    afterEach(() => patchStateForTests({ catalog: undefined }));
+
+    const skills = () => field("Skills");
+    /** The names the Skills field suggests, as its datalist offers them. */
+    const suggestions = () => [...skills().querySelectorAll("datalist option")].map((o) => (o as HTMLOptionElement).value);
+    /** The Skills field's chips: each name, the source it shows, and whether it is marked not found. */
+    const chips = () =>
+      [...skills().querySelectorAll(".name-chip")].map((chip) => ({
+        name: chip.querySelector(".mono")!.textContent,
+        source: chip.querySelector(".name-chip__source")!.textContent,
+        missing: chip.classList.contains("name-chip--missing"),
+      }));
+
+    it("offers the workspace's skill and a plugin's skill, and adds each as a chip that is found", async () => {
+      await openTask(workspaceTask(NOTES), listing(builtin), listing(builtin, workspaceSkill, pluginSkill));
+      expect(catalogs()).toEqual([catalogPath(NOTES)]);
+      expect(suggestions()).toEqual(["hf-github-worktree", "release-notes", "pdf:pdf"]);
+
+      const input = skills().querySelector("input")!;
+      await type(input, "release-notes");
+      await type(input, "pdf:pdf");
+      expect(chips()).toEqual([
+        { name: "release-notes", source: "Yours", missing: false },
+        { name: "pdf:pdf", source: "Yours", missing: false },
+      ]);
+      expect(suggestions()).toEqual(["hf-github-worktree"]);
+    });
+
+    it("does not offer the skill on a task whose workspace is another folder, and marks a cited one not found", async () => {
+      // The catalog loaded before holds the skill, so only the other folder's answer leaves it out.
+      await openTask(workspaceTask(OTHER), listing(workspaceSkill), listing(builtin, pluginSkill));
+      expect(catalogs()).toEqual([catalogPath(OTHER)]);
+      expect(suggestions()).toEqual(["hf-github-worktree", "pdf:pdf"]);
+      close();
+
+      await openTask(workspaceTask(OTHER, ["release-notes"]), listing(workspaceSkill), listing(builtin, pluginSkill));
+      expect(catalogs()).toEqual([catalogPath(OTHER)]);
+      expect(chips()).toEqual([{ name: "release-notes", source: "Not found", missing: true }]);
+      expect(suggestions()).toEqual(["hf-github-worktree", "pdf:pdf"]);
+    });
+  });
 });
 
 describe("task editor ⌘S", () => {
