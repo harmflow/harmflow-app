@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 // Drives the dashboard's shell in a DOM: ⌘B and the sidebar's own control collapse the sidebar to its icons and expand
 // it again, the choice outlives a restart, and the daemon's connection state is the topbar's alone. ⌘N opens the
-// template picker as the topbar's New task does (harmflow-app#169). ⌘S saves only in a task editor (harmflow-app#230).
+// template picker as the topbar's New task does (harmflow-app#169). ⌘1 to ⌘5 open the sidebar's screens in its order,
+// as a click on each does (harmflow-app#647). ⌘S saves only in a task editor (harmflow-app#230).
 // Every way out of a task editor with unsaved changes asks first, and each template pick opens an editor of its own
 // (harmflow-app#170); a new GitHub task starts as the copy of the agent its type selects (harmflow-app#280). Every
 // place a task is created offers the daemon's templates, and a pick has the daemon draft the task (harmflow-app#177).
@@ -261,19 +262,19 @@ describe("sidebar", () => {
     expect(layout()).toBe("expanded");
   });
 
-  it("names each collapsed icon in a tooltip on hover and on keyboard focus", async () => {
+  it("names each collapsed icon and its shortcut in a tooltip on hover and on keyboard focus", async () => {
     await launch();
     await act(async () => void navButton("Tasks").dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
     expect(tooltip()).toBeNull(); // expanded, the label is in view
 
     await press();
     await act(async () => void navButton("Tasks").dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
-    expect(tooltip()).toBe("Tasks");
+    expect(tooltip()).toBe("Tasks⌘3");
     await act(async () => void navButton("Tasks").dispatchEvent(new MouseEvent("mouseout", { bubbles: true })));
     expect(tooltip()).toBeNull();
 
     await act(async () => navButton("Settings").focus());
-    expect(tooltip()).toBe("Settings");
+    expect(tooltip()).toBe("Settings⌘5");
     await act(async () => navButton("Settings").blur());
     expect(tooltip()).toBeNull();
   });
@@ -602,6 +603,186 @@ describe("new task", () => {
     expect(tooltip()).toBe("New task⌘N");
     await act(async () => newTaskButton().click());
     expect(tooltip()).toBeNull(); // the picker covers the button
+  });
+});
+
+describe("screen shortcuts", () => {
+  const screens = ["Overview", "Executions", "Tasks", "History", "Settings"];
+  const digit = (n: number) => ({ key: String(n) });
+  const current = () => sidebar().querySelector('.nav__item[aria-current="page"] .nav__label')?.textContent;
+  const editor = () => host!.querySelector(".editor");
+  const openSection = () => host!.querySelector(".settings__title")?.textContent ?? null;
+  const newTaskButton = () => host!.querySelector<HTMLButtonElement>('.topbar__actions button[aria-keyshortcuts="Meta+N"]')!;
+  const pick = (label: string) =>
+    act(async () => [...host!.querySelectorAll<HTMLButtonElement>(".template")].find((b) => b.textContent?.includes(label))!.click());
+
+  it("opens the sidebar's screens in its order with ⌘1 to ⌘5, from every screen and from a text field", async () => {
+    await launch();
+    for (const from of screens) {
+      for (const [index, to] of screens.entries()) {
+        await act(async () => navButton(from).click());
+        expect(await press(undefined, digit(index + 1))).toBe(true);
+        expect(current()).toBe(to);
+      }
+    }
+
+    await act(async () => navButton("History").click());
+    const search = host!.querySelector<HTMLInputElement>("input")!;
+    search.focus();
+    expect(await press(search, digit(3))).toBe(true);
+    expect(current()).toBe("Tasks");
+  });
+
+  it("takes the keys from the YAML editor, whose keymap lets them through", async () => {
+    await launch();
+    const editorHost = host!.querySelector(".app__content")!.appendChild(document.createElement("div"));
+    const editorRoot = createRoot(editorHost);
+    await act(async () => editorRoot.render(<YamlEditor value={"name: Core\n"} onChange={() => {}} />));
+    try {
+      const content = editorHost.querySelector<HTMLElement>(".cm-content")!;
+      for (const [index, to] of screens.entries()) {
+        content.focus();
+        expect(await press(content, digit(index + 1))).toBe(true);
+        expect(current()).toBe(to);
+      }
+    } finally {
+      act(() => editorRoot.unmount());
+    }
+  });
+
+  it("names each item's key, Meta and its digit from 1, as the sidebar orders them", async () => {
+    await launch();
+    expect([...sidebar().querySelectorAll(".nav__item")].map((b) => b.getAttribute("aria-keyshortcuts"))).toEqual([
+      "Meta+1",
+      "Meta+2",
+      "Meta+3",
+      "Meta+4",
+      "Meta+5",
+    ]);
+  });
+
+  it("opens Settings with ⌘5 as ⌘, does, on the section last open", async () => {
+    await launch();
+    expect(await press(undefined, digit(5))).toBe(true);
+    expect(openSection()).toBe("General");
+    await act(async () => [...host!.querySelectorAll<HTMLButtonElement>(".settings-nav__item")].find((b) => b.textContent === "Storage")!.click());
+
+    await press(undefined, digit(4));
+    expect(await press(undefined, digit(5))).toBe(true);
+    expect(current()).toBe("Settings");
+    expect(openSection()).toBe("Storage");
+
+    await press(undefined, digit(4));
+    await act(async () => actions.navigate({ screen: "settings" }));
+    expect(current()).toBe("Settings");
+    expect(openSection()).toBe("Storage");
+  });
+
+  it("shows the Tasks list with ⌘3 from a task's editor, and the key of the open screen changes nothing", async () => {
+    await launch();
+    await act(async () => newTaskButton().click());
+    await pick("General task");
+    expect(editor()).not.toBeNull();
+    expect(await press(undefined, digit(3))).toBe(true);
+    expect(current()).toBe("Tasks");
+    expect(editor()).toBeNull();
+
+    await press(undefined, digit(4));
+    const search = host!.querySelector<HTMLInputElement>("input")!;
+    expect(await press(undefined, digit(4))).toBe(true);
+    expect(current()).toBe("History");
+    expect(host!.querySelector("input")).toBe(search); // the screen was not mounted again
+  });
+
+  it("asks before leaving an editor with unsaved changes, stays on Cancel, and leaves on Discard", async () => {
+    const confirm = vi.spyOn(native, "confirm");
+    try {
+      await launch();
+      await act(async () => newTaskButton().click());
+      await pick("General task");
+      const name = host!.querySelector<HTMLInputElement>(".editor input")!;
+      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      await act(async () => {
+        setValue.call(name, "Release notes");
+        name.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      const settle = () => act(() => new Promise<void>((resolve) => setImmediate(resolve)));
+
+      confirm.mockResolvedValue(false);
+      expect(await press(name, digit(2))).toBe(true);
+      await settle();
+      expect(confirm).toHaveBeenLastCalledWith("Leaving the editor discards the changes that were not saved.", "Discard unsaved changes?", "Discard", "Cancel");
+      expect(current()).toBe("Tasks");
+      expect(host!.querySelector<HTMLInputElement>(".editor input")!.value).toBe("Release notes");
+
+      confirm.mockResolvedValue(true);
+      expect(await press(undefined, digit(2))).toBe(true);
+      await settle();
+      expect(confirm).toHaveBeenCalledTimes(2);
+      expect(current()).toBe("Executions");
+      expect(editor()).toBeNull();
+    } finally {
+      confirm.mockRestore();
+    }
+  });
+
+  it("does nothing while a modal dialog is open, on the onboarding screen, or on the daemon-down screen", async () => {
+    await launch();
+    await act(async () => newTaskButton().click());
+    expect(host!.querySelector('[aria-modal="true"]')).not.toBeNull();
+    expect(await press(undefined, digit(3))).toBe(false);
+    expect(current()).toBe("Executions");
+    quit();
+
+    patchStateForTests({ settings: { ...settings, onboardingCompleted: false } });
+    await launch();
+    expect(host!.querySelector(".sidebar")).toBeNull();
+    expect(await press(undefined, digit(3))).toBe(false);
+    await act(async () => patchStateForTests({ settings }));
+    expect(current()).toBe("Executions");
+    quit();
+
+    native.available = true;
+    localStorage.setItem("harmflow.onboarded", "1");
+    patchStateForTests({ daemonRunning: false });
+    try {
+      await launch();
+      expect(host!.querySelector(".daemon-down")).not.toBeNull();
+      expect(await press(undefined, digit(3))).toBe(false);
+      await act(async () => patchStateForTests({ daemonRunning: true }));
+      expect(current()).toBe("Executions");
+    } finally {
+      native.available = false;
+    }
+  });
+
+  it("takes ⌘ and a digit alone, not with another modifier or as a held key, and no digit past the last item", async () => {
+    await launch();
+    expect(await press(undefined, { ...digit(3), shiftKey: true })).toBe(false);
+    expect(await press(undefined, { ...digit(3), altKey: true })).toBe(false);
+    expect(await press(undefined, { ...digit(3), ctrlKey: true })).toBe(false);
+    expect(await press(undefined, { ...digit(3), repeat: true })).toBe(false);
+    expect(await press(undefined, { ...digit(3), metaKey: false })).toBe(false);
+    for (const n of [6, 7, 8, 9]) expect(await press(undefined, digit(n))).toBe(false);
+    expect(current()).toBe("Executions");
+  });
+
+  it("names its key in the collapsed sidebar's tooltip, in each language, and the expanded sidebar shows none", async () => {
+    await launch();
+    await act(async () => void navButton("History").dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
+    expect(tooltip()).toBeNull();
+    await press();
+    for (const language of LANGUAGES) {
+      await act(async () => void i18n.changeLanguage(language));
+      const text = resources[language].translation.nav;
+      for (const [index, key] of (["overview", "executions", "tasks", "history", "settings"] as const).entries()) {
+        const item = sidebar().querySelectorAll<HTMLButtonElement>(".nav__item")[index];
+        await act(async () => void item.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
+        expect(tooltip()).toBe(`${text[key]}⌘${index + 1}`);
+        await act(async () => void item.dispatchEvent(new MouseEvent("mouseout", { bubbles: true })));
+      }
+    }
+    await act(async () => void i18n.changeLanguage("en-US"));
   });
 });
 
