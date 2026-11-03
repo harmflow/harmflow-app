@@ -121,8 +121,8 @@ type Attempt struct {
 	// a crash ends it and what it started, and nothing else; absent when no harness process started, or when its start
 	// time could not be read.
 	Process *HarnessProcess `json:"process,omitempty"`
-	// Checkpoint is what the attempt left in the workspace, read before the switch it ended in; absent on an attempt no
-	// switch followed, and on older records.
+	// Checkpoint is what the attempt left in the workspace, read before the switch it ended in, and its partial output;
+	// absent on an attempt no switch followed, and on older records.
 	Checkpoint *Checkpoint `json:"checkpoint,omitempty"`
 }
 
@@ -142,10 +142,14 @@ const (
 )
 
 // Checkpoint is the files an attempt changed in its workspace, read from the workspace itself whatever wrote them, as
-// paths with their status, never their content. Inside a Git repository at the workspace's root or directly under it,
-// they are what Git reports; outside one, the files modified since the attempt started, found by a scan.
+// paths with their status, never their content, and the attempt's partial output. Inside a Git repository at the
+// workspace's root or directly under it, the files are what Git reports; outside one, the files modified since the
+// attempt started, found by a scan.
 type Checkpoint struct {
 	Files []CheckpointFile `json:"files"`
+	// LastMessage is the attempt's partial output: its last message, cut to 1,500 characters and redacted, the text the
+	// next attempt's summary carries; absent when the attempt left none.
+	LastMessage string `json:"lastMessage,omitempty"`
 	// More counts the changed files past the first MaxCheckpointFiles, which Files leaves out.
 	More int `json:"more,omitempty"`
 	// Scanned is set when part of the workspace is outside any Git repository, so its files were found by their

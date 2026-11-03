@@ -6,7 +6,8 @@
 # half second for five seconds, then success), SCENARIO=push (commits on a branch of the workspace's repository, pushes
 # it, reports the push, and waits), SCENARIO=pullrequest (reports a pull request and waits). A session of push or
 # pullrequest whose context.json lists an interrupted execution repeats nothing and ends at once. With PARTIAL=1 in the
-# prompt, it first leaves partial work, in any scenario: a file in its workspace and a step in progress.jsonl.
+# prompt, it first leaves partial work, in any scenario: a file in its workspace and a step in progress.jsonl. With
+# MESSAGE=1, SCENARIO=quota first prints a message that holds a token, its partial output.
 # ITEM=<key> in the prompt makes any scenario select that work item first, and go on once the daemon has logged the
 # selection.
 case "$1" in
@@ -85,6 +86,9 @@ if [[ "$PROMPT" =~ ITEM=([^[:space:]]+) ]]; then
 fi
 case "$SCENARIO" in
   quota)
+    if [[ "$PROMPT" == *"MESSAGE=1"* ]]; then
+      echo '{"type":"assistant","message":{"content":[{"type":"text","text":"Wrote half of partial.txt with ghp_mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm"}]}}'
+    fi
     # A message's usage, repeated on each of its lines as the CLI does, and no result line to settle it.
     for block in thinking tool_use; do
       echo '{"type":"assistant","message":{"id":"msg_q1","model":"claude-haiku-4-5-20251001","content":[{"type":"'"$block"'"}],"usage":{"input_tokens":9,"cache_creation_input_tokens":11511,"cache_read_input_tokens":14129,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":11511},"output_tokens":3}}}'

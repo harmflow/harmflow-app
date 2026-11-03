@@ -2939,6 +2939,58 @@ func TestFailoverCheckpointListsAShellWrittenFile(t *testing.T) {
 	}
 }
 
+// harmflow-app#609: Claude Code prints a message that holds a token, writes partial.txt from the shell, then exhausts
+// its quota. The record on disk, as Codex's attempt starts, has the first attempt's checkpoint with the file and the
+// partial output, its last message with the token redacted. The attempt on Codex, which no switch follows, has none.
+func TestFailoverCheckpointKeepsThePartialOutput(t *testing.T) {
+	t.Parallel()
+	d := startDaemon(t, t.TempDir())
+	d.call("POST", "/tasks", map[string]any{"yaml": task("partial-output", "SCENARIO=quota PARTIAL=1 MESSAGE=1 CODEX=record",
+		"    fallback:\n      candidates:\n        - provider: codex\n")}, 201)
+	id := d.call("POST", "/tasks/partial-output/run", nil, 202)["executionId"].(string)
+	x := d.waitStatus(id, "completed", "failed")
+	attempts, _ := x["attempts"].([]any)
+	if x["status"] != "completed" || len(attempts) != 2 {
+		t.Fatalf("status %v attempts %v error %v", x["status"], attempts, x["errorMessage"])
+	}
+	data, err := os.ReadFile(filepath.Join(d.home, "runs", id, "record-at-start.json"))
+	if err != nil {
+		t.Fatalf("Codex's attempt kept no copy of the record on disk as it started: %v", err)
+	}
+	var atStart struct {
+		Attempts []struct {
+			Checkpoint *struct {
+				Files []struct {
+					Path   string `json:"path"`
+					Status string `json:"status"`
+				} `json:"files"`
+				LastMessage string `json:"lastMessage"`
+			} `json:"checkpoint"`
+		} `json:"attempts"`
+	}
+	if err := json.Unmarshal(data, &atStart); err != nil || len(atStart.Attempts) == 0 || atStart.Attempts[0].Checkpoint == nil {
+		t.Fatalf("the record on disk as Codex's attempt started has no checkpoint on the first attempt (%v):\n%s", err, data)
+	}
+	cp := atStart.Attempts[0].Checkpoint
+	if len(cp.Files) != 1 || cp.Files[0].Path != "partial.txt" || cp.Files[0].Status != "modified" {
+		t.Errorf("the checkpoint's files on disk = %+v, want partial.txt modified", cp.Files)
+	}
+	const want = "Wrote half of partial.txt with [REDACTED]"
+	if cp.LastMessage != want {
+		t.Errorf("the checkpoint's last message on disk = %q, want %q", cp.LastMessage, want)
+	}
+	if strings.Contains(string(data), "ghp_") {
+		t.Errorf("the token survived in the record on disk:\n%s", data)
+	}
+	a1, a2 := attempts[0].(map[string]any), attempts[1].(map[string]any)
+	if c, _ := a1["checkpoint"].(map[string]any); c["lastMessage"] != want {
+		t.Errorf("GET /executions/%s gives the first attempt's checkpoint %v, want its last message %q", id, c, want)
+	}
+	if a2["checkpoint"] != nil {
+		t.Errorf("the last attempt's checkpoint = %v, want none: no switch followed it", a2["checkpoint"])
+	}
+}
+
 // A failover whose attempts both reported their usage. Claude Code's cost is the one its CLI printed; Codex's, at the
 // model its configuration sets, is estimated from the price table and stamped on the attempt.
 func TestFailoverCostsReportedAndEstimated(t *testing.T) {
