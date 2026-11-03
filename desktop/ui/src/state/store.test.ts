@@ -1,6 +1,7 @@
 // Follows the daemon's event stream as the dashboard does, against a stand-in for the daemon's local API: when a
 // harness's check ends, the inventory is read again, once for a burst of checks, and never detected again, which
-// would announce another check. And the execution lists are shown as their own answers arrive, whatever /stats takes.
+// would announce another check. And the execution lists are shown as their own answers arrive, whatever /stats takes,
+// and their refresh never reads the sidebar's gauges.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StreamHandlers } from "../api/transport";
 import type { ExecutionSummary, HarmflowEvent, Harness, Queue } from "../api/types";
@@ -98,5 +99,18 @@ describe("execution lists", () => {
     expect(getState().active).toEqual([running]);
     expect(getState().recent).toEqual([done]);
     expect(getState().stats).toBeUndefined();
+  });
+
+  it("reads the counters from /stats and never the gauges, which /system alone answers", async () => {
+    const stats = { running: 1, queued: 0, completedToday: 0, failedToday: 0, activity: { running: [], queued: [], completed: [], failed: [] } };
+    daemon.answers.set("/stats", stats);
+    daemon.requests.length = 0;
+
+    await actions.refreshExecutions();
+    await actions.refreshStats();
+
+    expect(getState().stats).toEqual(stats);
+    expect(daemon.requests).toContain("GET /stats");
+    expect(daemon.requests.filter((r) => r.startsWith("GET /system"))).toEqual([]);
   });
 });

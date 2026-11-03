@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
+	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
 // ExecutionSummary is the row of an execution in lists; no progress percentage is invented.
@@ -193,15 +194,14 @@ type Activity struct {
 	Failed    []int `json:"failed"`
 }
 
-// Stats is the counters of the executions screen: executions running and queued now, those that completed or failed
-// since midnight, the system gauges, and the activity of the last hours.
+// Stats is the execution counters: executions running and queued now, those that completed or failed since midnight,
+// and their activity over the last hours.
 type Stats struct {
-	Running        int            `json:"running"`
-	Queued         int            `json:"queued"`
-	CompletedToday int            `json:"completedToday"`
-	FailedToday    int            `json:"failedToday"`
-	System         map[string]any `json:"system,omitempty"`
-	Activity       Activity       `json:"activity"`
+	Running        int      `json:"running"`
+	Queued         int      `json:"queued"`
+	CompletedToday int      `json:"completedToday"`
+	FailedToday    int      `json:"failedToday"`
+	Activity       Activity `json:"activity"`
 }
 
 // Stats counts executions for the counters of the executions screen, with per-hour activity for the last 12 hours.
@@ -267,10 +267,16 @@ func (a *App) Stats() Stats {
 		}
 	}
 	a.mu.Unlock()
-	if a.d.System != nil {
-		s.System = a.d.System.Snapshot(a.d.Paths.Home)
-	}
 	return s
+}
+
+// System is the last sample of the machine's gauges and of the size of HarmFlow's data directory; with no SystemInfo,
+// every gauge is left out.
+func (a *App) System() ports.SystemGauges {
+	if a.d.System == nil {
+		return ports.SystemGauges{}
+	}
+	return a.d.System.Snapshot(a.d.Paths.Home)
 }
 
 // Upcoming is a task's next scheduled firing.

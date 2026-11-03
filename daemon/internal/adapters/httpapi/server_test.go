@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/schema"
 	"github.com/harmflow/harmflow-app/daemon/internal/app"
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
+	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
 // busyTask is a script task whose program runs until the execution is stopped; it needs no harness.
@@ -35,6 +37,12 @@ spec:
 
 // startedApp starts the daemon's use cases over a new installation, with no harness, and stops them when the test ends.
 func startedApp(t *testing.T) *app.App {
+	t.Helper()
+	return startedAppWith(t, nil)
+}
+
+// startedAppWith is startedApp with system as the reader of the machine's gauges; nil reads none.
+func startedAppWith(t *testing.T, system ports.SystemInfo) *app.App {
 	t.Helper()
 	paths := app.NewPaths(t.TempDir(), t.TempDir(), t.TempDir())
 	tasks, err := fsstore.NewTasks(paths.Tasks)
@@ -58,7 +66,8 @@ func startedApp(t *testing.T) *app.App {
 		t.Fatal(err)
 	}
 	a, err := app.New(app.Deps{Paths: paths, Version: "test", Location: time.UTC, Tasks: tasks, State: state,
-		Executions: execs, Events: events, Validator: v, TickInterval: time.Hour, Logger: log.New(io.Discard, "", 0)})
+		Executions: execs, Events: events, Validator: v, TickInterval: time.Hour, Logger: log.New(io.Discard, "", 0),
+		System: system})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,5 +196,89 @@ func TestListExecutionsReadsThePeriod(t *testing.T) {
 				t.Errorf("GET %s = %v, want %v", path, got, c.want)
 			}
 		})
+	}
+}
+
+// fakeSystem is a SystemInfo that answers gauges, and sends each directory it is asked about to dirs while it has room.
+type fakeSystem struct {
+	gauges ports.SystemGauges
+	dirs   chan string
+}
+
+func (f *fakeSystem) Snapshot(dir string) ports.SystemGauges {
+	select {
+	case f.dirs <- dir:
+	default:
+	}
+	return f.gauges
+}
+
+// get serves GET path through the handler the daemon serves and decodes its 200 answer into keys.
+func get(t *testing.T, s *Server, path string) map[string]any {
+	t.Helper()
+	r := httptest.NewRequest("GET", path, nil)
+	r.Host = "127.0.0.1:7000"
+	r.Header.Set("Authorization", "Bearer "+validToken)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Fatalf("GET %s: status %d, want 200", path, w.Code)
+	}
+	var keys map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &keys); err != nil {
+		t.Fatalf("GET %s: body %q: %v", path, w.Body.String(), err)
+	}
+	return keys
+}
+
+// GET /api/v1/system answers the machine's gauges, each under its key, a gauge not read yet left out and one read as
+// 0 kept; GET /api/v1/stats answers the execution counters alone.
+func TestSystemGaugesHaveTheirOwnRoute(t *testing.T) {
+	system := &fakeSystem{
+		gauges: ports.SystemGauges{CPUPercent: new(12.5), MemoryUsedBytes: new(int64(0)), MemoryTotalBytes: new(int64(16e9)),
+			DiskUsedBytes: new(int64(48e9)), DiskTotalBytes: new(int64(500e9))},
+		dirs: make(chan string, 1),
+	}
+	a := startedAppWith(t, system)
+	s := &Server{App: a}
+	s.SetToken(validToken)
+
+	got := get(t, s, "/api/v1/system")
+	want := map[string]any{"cpuPercent": 12.5, "memoryUsedBytes": 0.0, "memoryTotalBytes": 16e9, "diskUsedBytes": 48e9,
+		"diskTotalBytes": 500e9}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("GET /api/v1/system = %v, want %v", got, want)
+	}
+	select {
+	case dir := <-system.dirs:
+		if home := a.Paths().Home; dir != home {
+			t.Errorf("GET /api/v1/system read the disk of %q, want HarmFlow's directory %q", dir, home)
+		}
+	default:
+		t.Error("GET /api/v1/system read no gauges, want the SystemInfo's snapshot")
+	}
+
+	stats := get(t, s, "/api/v1/stats")
+	if _, ok := stats["system"]; ok {
+		t.Errorf("GET /api/v1/stats = %v, want no system field", stats)
+	}
+	for _, k := range []string{"running", "queued", "completedToday", "failedToday", "activity"} {
+		if _, ok := stats[k]; !ok {
+			t.Errorf("GET /api/v1/stats = %v, want %s", stats, k)
+		}
+	}
+	select {
+	case <-system.dirs:
+		t.Error("GET /api/v1/stats read the gauges, want only the execution counters")
+	default:
+	}
+}
+
+// With no SystemInfo, GET /api/v1/system answers an empty object: every gauge left out.
+func TestSystemRouteWithoutAReaderLeavesOutEveryGauge(t *testing.T) {
+	s := &Server{App: startedApp(t)}
+	s.SetToken(validToken)
+	if got := get(t, s, "/api/v1/system"); len(got) != 0 {
+		t.Errorf("GET /api/v1/system with no SystemInfo = %v, want {}", got)
 	}
 }

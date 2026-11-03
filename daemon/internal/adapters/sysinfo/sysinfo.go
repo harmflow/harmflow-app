@@ -112,25 +112,25 @@ func (r *Reader) sample(ctx context.Context, every time.Duration, take func(cont
 }
 
 // Snapshot implements ports.SystemInfo: CPU use, memory, the disk that holds dir, and the size of the Reader's
-// directory, each under its key. A gauge it cannot read, or has not sampled yet, is left out.
-func (r *Reader) Snapshot(dir string) map[string]any {
-	out := map[string]any{}
+// directory. A gauge it cannot read, or has not sampled yet, is left nil.
+func (r *Reader) Snapshot(dir string) ports.SystemGauges {
+	var out ports.SystemGauges
 	if cpu := r.cpu.Load(); cpu != nil {
-		out["cpuPercent"] = *cpu
+		out.CPUPercent = new(*cpu)
 	}
 	if mem := r.mem.Load(); mem != nil {
-		out["memoryTotalBytes"] = mem.total
-		out["memoryUsedBytes"] = mem.used
+		out.MemoryTotalBytes = new(mem.total)
+		out.MemoryUsedBytes = new(mem.used)
 	}
 	var st syscall.Statfs_t
 	if syscall.Statfs(dir, &st) == nil {
 		total := int64(st.Blocks) * int64(st.Bsize)
 		free := int64(st.Bavail) * int64(st.Bsize)
-		out["diskTotalBytes"] = total
-		out["diskUsedBytes"] = total - free
+		out.DiskTotalBytes = new(total)
+		out.DiskUsedBytes = new(total - free)
 	}
 	if size := r.size.Load(); size != nil {
-		out["harmflowDirBytes"] = *size
+		out.HarmflowDirBytes = new(*size)
 	}
 	return out
 }

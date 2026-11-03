@@ -7,6 +7,7 @@ type S = components["schemas"];
 export type Health = S["Health"];
 export type Diagnostics = S["Diagnostics"];
 export type Stats = S["Stats"];
+export type SystemGauges = S["SystemGauges"];
 export type Harness = S["Harness"];
 export type HarnessId = Harness["id"];
 export type Tool = S["Tool"];

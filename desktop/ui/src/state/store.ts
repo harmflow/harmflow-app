@@ -16,6 +16,7 @@ import type {
   Queue,
   Settings,
   Stats,
+  SystemGauges,
   TaskSummary,
   Template,
   Tool,
@@ -28,6 +29,8 @@ export interface State {
   health?: Health;
   lastUpdate?: number;
   stats?: Stats;
+  /** The gauges of the sidebar foot, read only while it shows them; undefined from a daemon without /system. */
+  system?: SystemGauges;
   active: ExecutionSummary[];
   recent: ExecutionSummary[];
   queue?: Queue;
@@ -151,6 +154,15 @@ export const actions = {
   async refreshStats() {
     const stats = await settle(api.stats());
     if (stats) setState({ stats });
+  },
+
+  // An older daemon answers /system with 404: its gauges are unknown. Any other failure leaves them as they were.
+  async refreshSystem() {
+    try {
+      setState({ system: await api.system() });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) setState({ system: undefined });
+    }
   },
 
   async refreshHealth() {

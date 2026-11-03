@@ -474,7 +474,6 @@ describe("the Daemon section's Stop daemon control", () => {
     completedToday: 0,
     failedToday: 0,
     activity: { running: [], queued: [], completed: [], failed: [] },
-    system: { cpuPercent: 0, memoryUsedBytes: 0, memoryTotalBytes: 0, diskUsedBytes: 0, diskTotalBytes: 0 },
   });
   const stopButton = () => [...host!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Stop daemon")!;
 

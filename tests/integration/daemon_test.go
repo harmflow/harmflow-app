@@ -532,6 +532,7 @@ func TestAPIGuardOnEveryRoute(t *testing.T) {
 		{"GET /health", "/health", nil},
 		{"GET /diagnostics", "/diagnostics", nil},
 		{"GET /stats", "/stats", nil},
+		{"GET /system", "/system", nil},
 		{"GET /harnesses", "/harnesses", nil},
 		{"GET /tools", "/tools", nil},
 		{"GET /catalog", "/catalog", nil},
