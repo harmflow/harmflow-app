@@ -338,10 +338,10 @@ describe("execution detail", () => {
       tone: /tl-item--([a-z]+)/.exec(b.className)?.[1],
     }));
     expect(items).toEqual([
-      { title: "Harness started", detail: "Claude Code 2.1.239 started", tone: "violet" },
-      { title: "Harness quota exhausted", detail: "Claude Code exhausted its quota", tone: "warning" },
-      { title: "Switching harness", detail: "switching from Claude Code to Codex", tone: "magenta" },
-      { title: "Harness started#2", detail: "Codex 0.163.0 started", tone: "violet" },
+      { title: "AI tool started", detail: "Claude Code 2.1.239 started", tone: "violet" },
+      { title: "AI tool quota exhausted", detail: "Claude Code exhausted its quota", tone: "warning" },
+      { title: "Switching AI tool", detail: "switching from Claude Code to Codex", tone: "magenta" },
+      { title: "AI tool started#2", detail: "Codex 0.163.0 started", tone: "violet" },
     ]);
   });
 
@@ -404,7 +404,7 @@ describe("execution detail", () => {
 
     // Before Codex starts: the switch's banner, and its item in the timeline.
     expect(alerts()).toEqual([expect.stringContaining("switching from Claude Code to Codex")]);
-    expect(titles()).toEqual(["Harness started", "Harness quota exhausted", "Switching harness"]);
+    expect(titles()).toEqual(["AI tool started", "AI tool quota exhausted", "Switching AI tool"]);
 
     await deliver(
       event(4, "harness.started", {
@@ -416,7 +416,7 @@ describe("execution detail", () => {
         params: { harness: "Codex", version: "0.163.0" },
       }),
     );
-    expect(titles()).toEqual(["Harness started", "Harness quota exhausted", "Switching harness", "Harness started#2"]);
+    expect(titles()).toEqual(["AI tool started", "AI tool quota exhausted", "Switching AI tool", "AI tool started#2"]);
     expect(alerts()).toEqual([expect.stringContaining("switching from Claude Code to Codex")]);
 
     // The reads the store schedules on these events run once their debounce ends: the record, never the events.
@@ -477,13 +477,20 @@ describe("execution detail", () => {
       const timeline = await choose("Eventos");
       expect(timeline).toContain("trocando de Claude Code para Codex");
       expect(timeline).toContain("I could not finish the change.");
-      expect(timeline).toContain("Codex não pode continuar (cota esgotada) e nenhum harness alternativo está disponível: You've hit your usage limit");
+      expect(timeline).toContain(
+        "Codex não pode continuar (cota esgotada) e nenhuma ferramenta de IA alternativa está disponível: You've hit your usage limit",
+      );
 
       expect(await choose("Resultados")).toContain(
-        "Codex não pode continuar (cota esgotada) e nenhum harness alternativo está disponível: You've hit your usage limit",
+        "Codex não pode continuar (cota esgotada) e nenhuma ferramenta de IA alternativa está disponível: You've hit your usage limit",
       );
       const attempts = await choose("Tentativas");
-      for (const shown of ["primeira tentativa", "o tempo limite da execução se esgotou", "troca de harness após cota esgotada", "You've hit your usage limit"]) {
+      for (const shown of [
+        "primeira tentativa",
+        "o tempo limite da execução se esgotou",
+        "troca de ferramenta de IA após cota esgotada",
+        "You've hit your usage limit",
+      ]) {
         expect(attempts).toContain(shown);
       }
       expect(attempts).not.toContain("first attempt");

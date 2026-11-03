@@ -200,7 +200,7 @@ describe("screens", () => {
     const html = renderToString(<ExecutionsScreen selectedId={null} onSelect={() => {}} onGoToTasks={() => {}} onSeeHistory={() => {}} />);
     expect(html).toContain("Execuções ativas (1)");
     expect(html).toContain("org/core-banking");
-    expect(html).toContain("Trocando de harness");
+    expect(html).toContain("Trocando de ferramenta de IA");
     expect(html).toContain("Fila de execução (4)");
     expect(html).not.toMatch(/\d+%/); // no invented progress percentage
   });
@@ -423,7 +423,7 @@ describe("screens", () => {
     for (const shown of ["Programa e argumentos", "Diretório de trabalho", "Variáveis de ambiente", "Executa em", "macOS", "Windows"]) {
       expect(html).toContain(shown);
     }
-    for (const hidden of ["O que a tarefa faz vive aqui", "Agentes", "Harness preferido", "Cadeia de fallback", "Novas tentativas por limite de taxa"]) {
+    for (const hidden of ["O que a tarefa faz vive aqui", "Agentes", "Ferramenta de IA preferida", "Cadeia de fallback", "Novas tentativas por limite de taxa"]) {
       expect(html).not.toContain(hidden);
     }
   });
@@ -470,7 +470,7 @@ describe("the executions screen's cards", () => {
     const shown = [
       { title: "Core issues · core-banking#123", task: "core-issues", runBy: "Claude Code", repository: "org/core-banking", elapsed: "8 min 32 s", state: "Executando" },
       { title: "Payments fixes · payments#45", task: "payments-fixes", runBy: "Codex", repository: "org/payments", elapsed: "5 s", state: "Preparando" },
-      { title: "Handbook docs · handbook#7", task: "handbook-docs", runBy: "Codex", repository: "org/handbook", elapsed: "1 h 15 min", state: "Trocando de harness" },
+      { title: "Handbook docs · handbook#7", task: "handbook-docs", runBy: "Codex", repository: "org/handbook", elapsed: "1 h 15 min", state: "Trocando de ferramenta de IA" },
     ];
     for (const e of three) daemon.answers.set(`/executions/${e.id}/events`, { events: [], logExpired: false });
     daemon.answers.set(`/executions/${three[0].id}`, { ...detail, ...three[0] });
