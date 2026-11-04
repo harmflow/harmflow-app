@@ -1,6 +1,6 @@
 // Every execution, newest first, kept with no time limit. Opening one replays its stored
 // events, or says its log expired.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, type ExecutionQuery } from "../api/client";
 import type { ExecutionStatus, ExecutionSummary, Trigger } from "../api/types";
@@ -46,6 +46,11 @@ function period(from: string, to: string): Pick<ExecutionQuery, "createdFrom" | 
   };
 }
 
+/** The executions held, then a page's, leaving out the ones already held. */
+function append(held: ExecutionSummary[], page: ExecutionSummary[]): ExecutionSummary[] {
+  return [...held, ...page.filter((p) => !held.some((r) => r.id === p.id))];
+}
+
 export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpen: (id: string | null) => void }) {
   const { t, i18n } = useTranslation();
   const tasks = useStore((s) => s.tasks);
@@ -62,6 +67,14 @@ export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpe
   const refreshKey = useDebounced(lastEventId, 1500);
   const bounds = useMemo(() => period(from, to), [from, to]);
 
+  // How many executions are shown, which the automatic refresh fetches again, and the filters' generation, which a
+  // change of a filter moves on so that a refresh begun under the old filters drops its result.
+  const loaded = useRef(0);
+  useEffect(() => {
+    loaded.current = rows.length;
+  }, [rows]);
+  const generation = useRef(0);
+
   const load = useCallback(
     async (before?: string) => {
       // An invalid period is not sent: the screen says so and keeps what is shown.
@@ -69,7 +82,7 @@ export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpe
       setLoading(true);
       try {
         const page = await api.executions({ status: status || undefined, taskId: taskId || undefined, limit: PAGE, before, ...bounds });
-        setRows((prev) => (before ? [...prev, ...page.filter((p) => !prev.some((r) => r.id === p.id))] : page));
+        setRows((prev) => (before ? append(prev, page) : page));
         setExhausted(page.length < PAGE);
       } catch {
         // The connection banner tells the user; keep what is shown.
@@ -80,9 +93,45 @@ export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpe
     [status, taskId, bounds],
   );
 
+  // The automatic refresh fetches again, page by page, as many executions as are shown, and at least one page, then
+  // replaces the rows with them: the rows take their new state, new executions come in at the top, and the pages added
+  // with Load more stay. One request for all of them is not made, since the daemon caps a page.
+  const refresh = useCallback(async () => {
+    if (!bounds) return;
+    const wanted = loaded.current;
+    const begun = generation.current;
+    setLoading(true);
+    try {
+      let held: ExecutionSummary[] = [];
+      let page: ExecutionSummary[];
+      do {
+        const before = held[held.length - 1]?.createdAt;
+        page = await api.executions({ status: status || undefined, taskId: taskId || undefined, limit: PAGE, before, ...bounds });
+        held = append(held, page);
+      } while (page.length === PAGE && held.length < wanted);
+      if (generation.current !== begun) return;
+      setRows(held);
+      setExhausted(page.length < PAGE);
+    } catch {
+      // The connection banner tells the user; keep what is shown.
+    } finally {
+      setLoading(false);
+    }
+  }, [status, taskId, bounds]);
+
+  // A change of a filter starts again from the first page, since what was loaded belongs to the old filters; an
+  // execution event, once debounced, refreshes what is shown.
+  const seen = useRef({ load, refreshKey });
   useEffect(() => {
+    const prev = seen.current;
+    seen.current = { load, refreshKey };
+    if (prev.load === load && prev.refreshKey !== refreshKey) {
+      void refresh();
+      return;
+    }
+    generation.current++;
     void load();
-  }, [load, refreshKey]);
+  }, [load, refresh, refreshKey]);
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();

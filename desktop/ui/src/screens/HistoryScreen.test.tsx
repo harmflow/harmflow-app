@@ -14,7 +14,8 @@ import { patchStateForTests } from "../state/store";
 import { HistoryScreen } from "./HistoryScreen";
 
 // The daemon as the client sees it: `GET /executions` lists the executions it holds, of one task when the query names
-// it, newest first; every other route has its answer; and every request it received.
+// it, newest first, a page of at most `limit` created before `before`; every other route has its answer; and every
+// request it received.
 const daemon = vi.hoisted(() => ({
   executions: [] as ExecutionSummary[],
   answers: new Map<string, unknown>(),
@@ -29,8 +30,11 @@ vi.mock("../api/transport", () => ({
       daemon.requests.push(`${method} ${path}`);
       const [route, search] = path.split("?");
       if (method === "GET" && route === "/executions") {
-        const taskId = new URLSearchParams(search).get("taskId");
-        return { status: 200, body: daemon.executions.filter((x) => !taskId || x.taskId === taskId) };
+        const params = new URLSearchParams(search);
+        const taskId = params.get("taskId");
+        const before = params.get("before");
+        const listed = daemon.executions.filter((x) => (!taskId || x.taskId === taskId) && (!before || x.createdAt < before));
+        return { status: 200, body: listed.slice(0, Number(params.get("limit") ?? listed.length)) };
       }
       return daemon.answers.has(route) ? { status: 200, body: daemon.answers.get(route) } : { status: 404, body: null };
     },
@@ -132,6 +136,7 @@ beforeAll(async () => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   act(() => root?.unmount());
   host?.remove();
   root = host = undefined;
@@ -255,6 +260,53 @@ describe("the task's history, after an execution's log expired", () => {
     await act(async () => pr.click());
     expect(openUrl.mock.calls).toEqual([[pullRequestUrl]]);
     expect(banners()).toEqual([expired]);
+  });
+});
+
+describe("the automatic refresh, after Load more", () => {
+  /** The instant `minutes` after 09:00, as the daemon writes it. */
+  const at = (minutes: number) => new Date(Date.UTC(2026, 6, 1, 9, minutes)).toISOString();
+  /** The standup's nth execution counting back from the newest: 80 of them make a full page and part of a second. */
+  const nth = (n: number): ExecutionSummary => ({ ...other, id: `exec-${String(n).padStart(3, "0")}`, createdAt: at(100 - n), startedAt: at(100 - n), endedAt: at(100 - n) });
+
+  it("keeps the pages Load more added, shows a changed row's new state, and adds the new execution at the top", async () => {
+    const running: ExecutionSummary = { ...nth(60), status: "running", endedAt: undefined };
+    daemon.executions = Array.from({ length: 80 }, (_, n) => (n === 60 ? running : nth(n)));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    await open();
+    expect(rows()).toHaveLength(50);
+
+    // Load more: the second page, the last one.
+    const more = [...host!.querySelectorAll<HTMLButtonElement>(".table__footer button")].find((b) => b.textContent === "Load older executions")!;
+    await act(async () => more.click());
+    await settle();
+    expect(rows()).toHaveLength(80);
+    expect(cell(rowOf(running.id)!, 1).textContent).toBe("Running");
+
+    // Meanwhile the running execution ends, and a new one starts: an event reaches the app.
+    const fresh: ExecutionSummary = { ...other, id: "exec-new", createdAt: at(101), startedAt: at(101), endedAt: undefined, status: "running" };
+    daemon.executions = [fresh, ...daemon.executions.map((x) => (x.id === running.id ? nth(60) : x))];
+    daemon.requests.length = 0;
+    act(() => patchStateForTests({ lastEventId: 1 }));
+    await act(() => vi.advanceTimersByTimeAsync(1500));
+    await settle();
+
+    // The refresh fetches again, page by page, as many as were shown: the first page, then the rest from its last row.
+    expect(daemon.requests.map((r) => Object.fromEntries(new URLSearchParams(r.split("?")[1])))).toEqual([
+      { limit: "50" },
+      { limit: "50", before: nth(48).createdAt },
+    ]);
+    expect(rows()).toHaveLength(81);
+    expect(rows()[0]).toBe(rowOf(fresh.id));
+    expect(rowOf(nth(79).id)).toBeDefined();
+    expect(cell(rowOf(running.id)!, 1).textContent).toBe("Completed");
+    expect(host!.querySelector(".table__footer")!.textContent).toBe("No older executions.");
+
+    // A change of a filter still starts again from the first page.
+    daemon.requests.length = 0;
+    await choose("Task", standup.id);
+    expect(daemon.requests).toEqual([`GET /executions?taskId=${standup.id}&limit=50`]);
+    expect(rows()).toHaveLength(50);
   });
 });
 
