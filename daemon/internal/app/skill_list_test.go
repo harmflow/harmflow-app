@@ -719,8 +719,8 @@ func TestClaudeCodeSkillListUnavailableWarns(t *testing.T) {
 // printing no init line within the listing's timeout — the attempt starts with the task's skills: a user's skill is
 // passed through by name, unverified, a built-in one as always, and the execution gets the warning validation gives,
 // naming why. The list is asked for once, not again for each skill. A task's execution runs that attempt's session to
-// its end and holds the warning once. A failover to Claude Code does not change: a Claude Code fallback whose list
-// cannot be read is still no valid fallback.
+// its end and holds the warning once. A Claude Code fallback whose list cannot be read stays in the chain, after
+// Codex.
 func TestClaudeCodeAttemptStartsWithUnverifiedSkills(t *testing.T) {
 	for _, c := range []struct {
 		name, onList, wantDetail string
@@ -794,12 +794,44 @@ func TestClaudeCodeAttemptStartsWithUnverifiedSkills(t *testing.T) {
 			}
 			r = &run{a: a, def: *res.doc, eff: res.doc.Effective(), work: t.TempDir()}
 			chain, invalid := r.chain(ctx)
-			if len(chain) != 1 || chain[0].Provider != domain.HarnessCodex || len(invalid) != 1 ||
-				invalid[0].Key != "fallback_skill_list_unreadable" {
-				t.Errorf("chain() = %+v, invalid %+v; want Codex alone, Claude Code invalid as its skill list could not be read",
-					chain, invalid)
+			if len(chain) != 2 || chain[0].Provider != domain.HarnessCodex ||
+				chain[1].Provider != domain.HarnessClaudeCode || len(invalid) != 0 {
+				t.Errorf("chain() = %+v, invalid %+v; want Codex then Claude Code, and none invalid", chain, invalid)
 			}
 		})
+	}
+}
+
+// A Claude Code fallback whose skill list cannot be read stays in the chain, unverified. A task that prefers Codex,
+// falls back to Claude Code, and cites a user's skill Codex finds is valid: validation warns skill_list_unverified
+// under the candidate's path, naming why, and calls the fallback invalid nowhere, and an execution's chain keeps Claude
+// Code after Codex.
+func TestUnverifiedClaudeCodeFallbackStaysInTheChain(t *testing.T) {
+	a := newClaudeAppOn(t, claudeListing("echo 'Not logged in' >&2; exit 1"))
+	ctx := t.Context()
+	// The fake Codex finds every skill named user-skill; the stand-in Claude Code's listing fails.
+	doc := codexTaskYAML("fb", "    fallback:\n      candidates:\n        - provider: claude-code\n  skills: [user-skill]\n")
+
+	res := a.Validate(ctx, TaskInput{YAML: doc})
+	if res.doc == nil {
+		t.Fatalf("Validate(fb) errors = %+v, want none", res.Errors)
+	}
+	const candidate = "/spec/harness/fallback/candidates/0"
+	unverified := slices.ContainsFunc(res.Warnings, func(w schemaIssue) bool {
+		return w.Key == "skill_list_unverified" && w.Code == domain.WarningMissingSkill && w.Path == candidate &&
+			w.Params["detailKey"] == "command_failed"
+	})
+	invalid := slices.ContainsFunc(res.Warnings, func(w schemaIssue) bool { return w.Code == domain.WarningInvalidFallback })
+	if !res.Valid || !unverified || invalid {
+		t.Errorf("Validate(fb) valid = %v, warnings %+v; want valid with skill_list_unverified on %s naming command_failed "+
+			"and no %s", res.Valid, res.Warnings, candidate, domain.WarningInvalidFallback)
+	}
+
+	r := &run{a: a, def: *res.doc, eff: res.doc.Effective(), work: t.TempDir()}
+	chain, invalidTexts := r.chain(ctx)
+	if len(chain) != 2 || chain[0].Provider != domain.HarnessCodex || chain[1].Provider != domain.HarnessClaudeCode ||
+		len(invalidTexts) != 0 {
+		t.Errorf("chain() = %+v, invalid %+v; want Codex then Claude Code, and none invalid", chain, invalidTexts)
 	}
 }
 

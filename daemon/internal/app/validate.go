@@ -227,7 +227,8 @@ func (a *App) semanticChecks(ctx context.Context, r *ValidationResult, doc domai
 			r.addWarning(path+"/provider", domain.WarningHarnessNotReady, domain.T("harness_not_ready",
 				"{{harness}} is not ready: {{detail}}", "harness", ad.Name()).Nest("detail", info.DiagnosticText()))
 		}
-		// Agents and skills must be available to every harness of the chain.
+		// Agents and skills must be available to every harness of the chain. Those a harness loads itself, whose list it
+		// could not give, are unverified on the preferred harness and on a fallback alike.
 		missing := a.missingItems(ctx, doc, p.Provider, a.itemWorkspace(doc), a.addedFolders(doc))
 		for _, m := range missing {
 			code := domain.WarningMissingSkill
@@ -236,8 +237,10 @@ func (a *App) semanticChecks(ctx context.Context, r *ValidationResult, doc domai
 				code, kindPath = domain.WarningMissingAgent, "/spec/agents"
 			}
 			switch {
-			case i == 0 && m.unreadable != nil && m.unverifiable:
+			case i == 0 && m.leftUnverified():
 				r.addWarning(kindPath, code, m.unverified(ad.Name()))
+			case m.leftUnverified():
+				r.addWarning(path, code, m.unverified(ad.Name()))
 			case i == 0 && mode == catalogStrict:
 				r.addError(kindPath, m.notFound(ad.Name()))
 			case i == 0:
@@ -302,6 +305,10 @@ type missingItem struct {
 	// unverified: validation warns instead of refusing.
 	unverifiable bool
 }
+
+// leftUnverified says the harness's list could not be read and the harness loads the items of this kind itself, so the
+// item is not missing but unverified: the harness keeps its place in the chain.
+func (m missingItem) leftUnverified() bool { return m.unreadable != nil && m.unverifiable }
 
 // unverified says a harness could not give the list of skills its installation loads, so the task's skills are not
 // verified, and why.
