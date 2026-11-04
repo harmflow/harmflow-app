@@ -80,12 +80,13 @@ func (c cli) only(t *testing.T, allowed ...string) map[string]int {
 // The probes detection runs, and how a run invokes each CLI. Claude Code's probes include the quota read before an
 // attempt, `claude -p /usage`, which runs no turn and makes no model call. claudeSignIn is the sign-in the daemon
 // starts on a Claude Code that says it is signed out: the CLI with no arguments, its interactive session, which a
-// stand-in's log records as an empty line.
+// stand-in's log records as an empty line. codexSignIn is the one it starts on a Codex that says so, `codex login`.
 var (
 	claudeProbes = []string{"--version", "--help", "auth status", claudeQuota}
 	claudeQuota  = "-p /usage"
 	claudeSignIn = ""
 	codexProbes  = []string{"--version", "exec --help", "--help", "login status"}
+	codexSignIn  = "login"
 	claudeRun    = "-p --output-format"
 	codexRun     = "exec --json"
 )
@@ -268,9 +269,10 @@ func TestSignedOutRealClaudeCodeOnlyProbes(t *testing.T) {
 }
 
 // harmflow-app#327: the same as TestSignedOutRealClaudeCodeOnlyProbes with the real Codex, signed out in the test
-// daemon's own Codex home.
+// daemon's own Codex home, and its `codex login` (harmflow-app#572), which opens the browser at a sign-in nobody
+// approves and ends at the one-second timeout.
 func TestSignedOutRealCodexOnlyProbes(t *testing.T) {
-	signedOutOnlyProbes(t, realCodex(t), "codex", "Codex", "not_signed_in", codexProbes)
+	signedOutOnlyProbes(t, realCodex(t), "codex", "Codex", "not_signed_in", append(codexProbes, codexSignIn))
 }
 
 // signedOutOnlyProbes sets the real CLI at installed, through a wrapper that records each invocation, as the harness
@@ -287,7 +289,8 @@ func signedOutOnlyProbes(t *testing.T, installed, id, name, key string, probes [
 		t.Fatal(err)
 	}
 	// The sign-in the daemon starts on a signed-out Claude Code meets the first-run screen of this empty configuration
-	// directory, which it does not recognize, so it types nothing; it ends at a timeout of one second.
+	// directory, which it does not recognize, so it types nothing; the one on a signed-out Codex waits at the browser's
+	// step. Each ends at a timeout of one second.
 	env := append(signedOutEnv(t.TempDir()), "HARMFLOW_SIGN_IN_TIMEOUT=1s")
 	// The test's own probes run with the environment the daemon runs with, so they read the same state.
 	probeEnv := append(append(os.Environ(), "CODEX_HOME="+codexHome), env...)

@@ -1348,7 +1348,7 @@ export const enUS = {
     scope: {
       title: "Everything runs on this computer",
       body:
-        "HarmFlow schedules, runs, and monitors automations carried out by the AI tools you already installed — Claude Code and Codex. It never installs or updates them, and when Claude Code is signed out it starts Claude Code's own sign-in, which you approve in the browser, or uses a long-lived token you save in Settings.",
+        "HarmFlow schedules, runs, and monitors automations carried out by the AI tools you already installed — Claude Code and Codex. It never installs or updates them. When Claude Code is signed out it starts Claude Code's own sign-in, which you approve in the browser, or uses a long-lived token you save in Settings; when Codex is signed out it starts Codex's own sign-in, which you approve in the browser.",
       points: {
         local: "Tasks, state, and logs stay on this machine.",
         permissions: "Each task declares what its session may touch; HarmFlow applies it through the AI tool's own controls and warns when a restriction can't be enforced.",

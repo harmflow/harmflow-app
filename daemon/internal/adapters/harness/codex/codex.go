@@ -57,6 +57,7 @@ type Adapter struct {
 	reload      bool          // the next skills/list carries forceReload
 	listTimeout time.Duration // a call to the app server; zero is defaultListTimeout
 	helpTimeout time.Duration // each help check, `exec --help` and the top-level --help; zero is the probe's own limit
+	signInStep  time.Duration // the wait for `codex login` to reach its browser's step; zero is defaultSignInStep
 }
 
 var (
@@ -869,10 +870,16 @@ func unwrapShell(cmd string) string {
 	return cmd
 }
 
+// signedOutTexts are the CLI's own words that it is signed out, which its browser sign-in mends. The other texts of
+// Unavailable are not: an API key that failed is not one a browser sign-in mends, and HarmFlow signs in with none.
+const signedOutTexts = `\bnot logged in\b|please log in|codex login|refresh token|token (has )?expired`
+
+var signedOut = regexp.MustCompile(`(?i)(` + signedOutTexts + `)`)
+
 var patterns = classify.Patterns{
 	Quota:       regexp.MustCompile(`(?i)(usage limit|insufficient_quota|exceeded your current quota|purchase more credits|plan limit)`),
 	RateLimit:   regexp.MustCompile(`(?i)(rate[ _-]?limit|too many requests|status 429)`),
-	Unavailable: regexp.MustCompile(`(?i)(\bnot logged in\b|please log in|codex login|authentication failed|invalid api key|401 unauthorized|refresh token|token (has )?expired)`),
+	Unavailable: regexp.MustCompile(`(?i)(` + signedOutTexts + `|authentication failed|invalid api key|401 unauthorized)`),
 	Network:     regexp.MustCompile(`(?i)(stream disconnected|error sending request|connection (refused|reset)|dns error|timed out connecting)`),
 }
 
@@ -927,6 +934,7 @@ func (p *parser) Finish(exitCode int, stderrTail string, timedOut, cancelled boo
 		end.Error = domain.Text{Message: classify.Tail(eventlog.Redact(text), 2000)}
 	}
 	end.Class = patterns.Text(text)
+	end.SignedOut = end.Class == domain.ClassHarnessUnavailable && signedOut.MatchString(text)
 	return end
 }
 

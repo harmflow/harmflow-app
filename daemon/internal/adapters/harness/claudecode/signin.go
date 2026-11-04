@@ -9,7 +9,6 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/harmflow/harmflow-app/daemon/internal/adapters/eventlog"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/procutil"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
@@ -159,7 +158,7 @@ func (s *signInSession) await(ctx context.Context, bound time.Duration, done fun
 		case <-ctx.Done():
 			return "", ports.SignInResult{Outcome: ports.SignInStopped}, false
 		case <-limit:
-			return "", ports.SignInResult{Outcome: ports.SignInUnknownScreen, Screen: maskScreen(screenText(s.screen))}, false
+			return "", ports.SignInResult{Outcome: ports.SignInUnknownScreen, Screen: procutil.MaskOutput(screenText(s.screen))}, false
 		case <-s.term.Exited():
 			if more := s.term.Take(); len(more) > 0 {
 				s.screen = append(s.screen, more...)
@@ -246,33 +245,3 @@ func squeeze(s string) string {
 		return r
 	}, s)
 }
-
-// What a screen masks before it is logged: a URL and the lines the terminal wrapped it onto, which hold no space; an
-// e-mail address; and any long run of a token's characters, wherever the terminal cut it.
-var (
-	wrappedURL = regexp.MustCompile(`https?://\S*(\n\S+)*`)
-	emailText  = regexp.MustCompile(`[\w.+-]+@[\w-]+(\.[\w-]+)+`)
-	tokenRun   = regexp.MustCompile(`[A-Za-z0-9%+=&_~./-]{24,}`)
-	blankLines = regexp.MustCompile(`\n\s*\n+`)
-)
-
-// maxLoggedScreen is the end of a screen that is kept for the log.
-const maxLoggedScreen = 2000
-
-// maskScreen is a screen's text as the log keeps it: its end, without blank lines, its URLs, e-mail addresses, and
-// token-like runs masked, and then what Redact masks.
-func maskScreen(s string) string {
-	s = wrappedURL.ReplaceAllString(s, "[URL]")
-	s = emailText.ReplaceAllString(s, "[EMAIL]")
-	s = tokenRun.ReplaceAllString(s, "[REDACTED]")
-	s = strings.TrimSpace(blankLines.ReplaceAllString(s, "\n"))
-	if len(s) > maxLoggedScreen {
-		s = s[len(s)-maxLoggedScreen:]
-		for len(s) > 0 && !utf8Start(s[0]) {
-			s = s[1:]
-		}
-	}
-	return eventlog.Redact(s)
-}
-
-func utf8Start(b byte) bool { return b&0xC0 != 0x80 }
