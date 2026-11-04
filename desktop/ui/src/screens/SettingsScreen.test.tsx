@@ -83,6 +83,7 @@ const saved: Settings = {
   language: "en-US",
   trayEnabled: true,
   keepTrayOnQuit: false,
+  showRestrictionWarnings: true,
   notificationLevel: "all",
   logRetentionDays: 30,
   theme: "harmflow-dark",

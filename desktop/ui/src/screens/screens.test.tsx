@@ -8,7 +8,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockIn
 import { native } from "../api/native";
 import type { Execution, ExecutionSummary, HarmflowEvent, Harness, Health, Notification, Settings, TaskSummary, WorkItem } from "../api/types";
 import { ExecutionCard } from "../components/ExecutionCard";
-import { RawCaptures } from "../components/ExecutionDetail";
+import { ExecutionDetail, RawCaptures } from "../components/ExecutionDetail";
 import { HarnessInventory } from "../components/Harnesses";
 import { Icon } from "../components/Icon";
 import { ValidationPanel } from "../components/TaskEditor";
@@ -146,6 +146,7 @@ const settings: Settings = {
   language: "pt-BR",
   trayEnabled: true,
   keepTrayOnQuit: false,
+  showRestrictionWarnings: true,
   notificationLevel: "all",
   logRetentionDays: 30,
   theme: "harmflow-dark",
@@ -1018,7 +1019,11 @@ describe("settings sections", () => {
 
   // Everything the single page showed is still there, each in the section that holds it.
   it.each([
-    ["general", ["Idioma", "Barra de menus"], ["Mostrar o HarmFlow na barra de menus", "Manter o HarmFlow na barra de menus ao sair com ⌘Q"]],
+    [
+      "general",
+      ["Idioma", "Barra de menus", "Execuções"],
+      ["Mostrar o HarmFlow na barra de menus", "Manter o HarmFlow na barra de menus ao sair com ⌘Q", "Mostrar avisos de restrição"],
+    ],
     ["notifications", ["Avisos"], ["Nível de notificação"]],
     [
       "shortcuts",
@@ -1366,5 +1371,76 @@ describe("the History screen's period", () => {
     expect(daemon.requests).toEqual([
       `GET /executions?limit=50&before=${encodeURIComponent(page[49].createdAt)}&createdFrom=${midnight(2026, 10, 20)}&createdUntil=${midnight(2026, 10, 23)}`,
     ]);
+  });
+});
+
+// Settings can hide the banner an execution's detail shows for each restriction its harness does not enforce, on by
+// default; the Events tab and the other banners stay.
+describe("the restriction warnings setting", () => {
+  let root: Root | undefined;
+  let host: HTMLElement | undefined;
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    host?.remove();
+    root = host = undefined;
+    daemon.answers.clear();
+    daemon.requests.length = 0;
+    daemon.bodies.length = 0;
+    patchStateForTests({ settings });
+  });
+
+  const settle = () => act(() => new Promise<void>((resolve) => setImmediate(resolve)));
+  const toggle = () => document.getElementById("settings-restriction-warnings") as HTMLInputElement;
+  const alerts = () => [...host!.querySelectorAll(".detail__alerts strong")].map((s) => s.textContent);
+
+  async function render(node: ReactNode) {
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(node));
+    await settle();
+  }
+
+  async function showDetail() {
+    const exec = { ...detail, id: "exec-restrictions" };
+    daemon.answers.set(`/executions/${exec.id}`, exec);
+    daemon.answers.set(`/executions/${exec.id}/events`, {
+      events: [
+        ev("policy.unenforced", { executionId: exec.id, severity: "warning", message: "network: deny" }),
+        ev("repository.unprotected", { executionId: exec.id, severity: "warning", message: "main" }),
+      ],
+      logExpired: false,
+    });
+    await render(<ExecutionDetail executionId={exec.id} />);
+  }
+
+  it("is on by default, and saves once switched off", async () => {
+    expect(settings.showRestrictionWarnings).toBe(true);
+    daemon.answers.set("/settings", settings);
+    await render(<SettingsScreen />);
+    expect(toggle().checked).toBe(true);
+
+    daemon.answers.set("/settings", { ...settings, showRestrictionWarnings: false });
+    daemon.requests.length = 0;
+    daemon.bodies.length = 0;
+    await act(async () => toggle().click());
+    await settle();
+    expect(daemon.requests.filter((r) => !r.startsWith("GET "))).toEqual(["PATCH /settings"]);
+    expect(daemon.bodies[daemon.requests.indexOf("PATCH /settings")]).toEqual({ showRestrictionWarnings: false });
+    expect(toggle().checked).toBe(false);
+  });
+
+  it("shows the restriction banner while on, and hides only it, at once, while off", async () => {
+    await showDetail();
+    expect(alerts()).toEqual(["Restrição não aplicada", "Branch base sem proteção"]);
+
+    act(() => patchStateForTests({ settings: { ...settings, showRestrictionWarnings: false } }));
+    expect(alerts()).toEqual(["Branch base sem proteção"]);
+    expect(host!.textContent).not.toContain("Restrição não aplicada");
+    // The events the store holds keep the restriction: the Events tab still lists it.
+    expect(getState().events["exec-restrictions"]?.some((e) => e.type === "policy.unenforced")).toBe(true);
+
+    act(() => patchStateForTests({ settings }));
+    expect(alerts()).toEqual(["Restrição não aplicada", "Branch base sem proteção"]);
   });
 });

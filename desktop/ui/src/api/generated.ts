@@ -1433,6 +1433,11 @@ export interface components {
              */
             keepTrayOnQuit: boolean;
             /**
+             * @description Shows, in an execution's detail, a banner for each restriction the harness does not enforce. It changes only what the dashboard shows: the execution's events and logs name each restriction whatever it says.
+             * @default true
+             */
+            showRestrictionWarnings: boolean;
+            /**
              * @default all
              * @enum {string}
              */
@@ -1474,6 +1479,7 @@ export interface components {
             language?: "pt-BR" | "en-US" | "es-ES" | "system";
             trayEnabled?: boolean;
             keepTrayOnQuit?: boolean;
+            showRestrictionWarnings?: boolean;
             /** @enum {string} */
             notificationLevel?: "all" | "failures_and_attention" | "none";
             logRetentionDays?: number;

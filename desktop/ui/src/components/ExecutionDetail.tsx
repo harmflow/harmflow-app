@@ -57,7 +57,12 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
     for (const f of changedFilesFromEvents(events ?? [])) if (!merged.includes(f)) merged.push(f);
     return merged;
   }, [detail, events]);
-  const prominent = useMemo(() => (events ?? []).filter((e) => PROMINENT.has(e.type)), [events]);
+  // Settings can hide the banner of each restriction the harness does not enforce; the Events tab still lists them.
+  const showRestrictions = useStore((s) => s.settings?.showRestrictionWarnings ?? true);
+  const prominent = useMemo(
+    () => (events ?? []).filter((e) => PROMINENT.has(e.type) && (showRestrictions || e.type !== "policy.unenforced")),
+    [events, showRestrictions],
+  );
   const outputLines = useMemo(() => (events ?? []).filter((e) => e.type === "script.output"), [events]);
   // The chat lists each session message under its attempt, so it counts only those the daemon stamped with one.
   const agentMessages = useMemo(() => (events ?? []).filter((e) => e.type === "harness.message" && e.attempt), [events]);
@@ -714,7 +719,8 @@ function CommandList({ commands, locale }: { commands: Execution["commands"]; lo
 function Results({ detail, summary }: { detail?: Execution; summary: ExecutionSummary }) {
   const { t } = useTranslation();
   const items = detail?.workItems ?? [];
-  const warnings = detail?.warnings ?? [];
+  const showRestrictions = useStore((s) => s.settings?.showRestrictionWarnings ?? true);
+  const warnings = (detail?.warnings ?? []).filter((w) => showRestrictions || w.code !== "policy_unenforced");
   if (!items.length && !summary.summary && !summary.errorMessage && !summary.pullRequestUrl && !warnings.length && !detail?.lastOperation) {
     return <EmptyState icon="pr" title={t("executions.detail.noResults")} />;
   }

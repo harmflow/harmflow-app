@@ -246,3 +246,30 @@ func TestQuotaShareRefusedOnLoad(t *testing.T) {
 		t.Errorf("quotaShare(codex) = %v, want 80", got)
 	}
 }
+
+// The restriction warnings of an execution's detail show on a fresh data folder and on one saved before the setting
+// existed; a patch turns them off, and that outlives a restart of the daemon.
+func TestShowRestrictionWarningsIsOnByDefaultAndKeepsAPatch(t *testing.T) {
+	e := newEnv(t)
+	if got := e.app.GetSettings().ShowRestrictionWarnings; !got {
+		t.Fatalf("GetSettings().ShowRestrictionWarnings = %v on a fresh data folder, want true", got)
+	}
+
+	// Settings saved by a version without the option.
+	if err := e.app.d.State.Save("settings", map[string]any{"schemaVersion": "1", "language": "en-US", "trayEnabled": true}); err != nil {
+		t.Fatalf("Save(settings): %v", err)
+	}
+	e = e.restart(t)
+	if got := e.app.GetSettings().ShowRestrictionWarnings; !got {
+		t.Fatalf("GetSettings().ShowRestrictionWarnings = %v on settings saved without it, want true", got)
+	}
+
+	off := false
+	if v, err := e.app.UpdateSettings(SettingsPatch{ShowRestrictionWarnings: &off}); err != nil || v.ShowRestrictionWarnings {
+		t.Fatalf("UpdateSettings(showRestrictionWarnings: false) = %v, %v, want false, nil", v.ShowRestrictionWarnings, err)
+	}
+	e = e.restart(t)
+	if got := e.app.GetSettings().ShowRestrictionWarnings; got {
+		t.Errorf("GetSettings().ShowRestrictionWarnings = %v after a restart, want false", got)
+	}
+}

@@ -48,6 +48,7 @@ const fresh: Settings = {
   language: "system",
   trayEnabled: true,
   keepTrayOnQuit: false,
+  showRestrictionWarnings: true,
   notificationLevel: "all",
   logRetentionDays: 30,
   theme: "harmflow-dark",
