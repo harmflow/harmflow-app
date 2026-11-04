@@ -156,9 +156,8 @@ func startDaemonWith(t *testing.T, home string, o daemonOptions, env ...string) 
 		d.token = strings.TrimSpace(string(keychainToken(t, keychain))) // read as a client reads it
 	}
 	if d.base == "" {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		t.Fatalf("the daemon did not start:\n%s", out.String())
+		t.Fatalf("the daemon wrote no runtime file within %v: %s\nit printed:\n%s\nits log ends:\n%s", runtimeWait,
+			endUnstarted(cmd), out.String(), daemonLogTail(home))
 	}
 	t.Cleanup(func() { d.stop() })
 	d.useFakeHarnesses()
@@ -167,6 +166,28 @@ func startDaemonWith(t *testing.T, home string, o daemonOptions, env ...string) 
 
 // runtimeWait is how long a test waits for a daemon it started to write its address and token.
 const runtimeWait = 20 * time.Second
+
+// endUnstarted ends a daemon that wrote no runtime file within runtimeWait, and says whether it was still running then
+// or how it had exited: a daemon still running is killed, so its wait ends on SIGKILL.
+func endUnstarted(cmd *exec.Cmd) string {
+	_ = cmd.Process.Kill()
+	_ = cmd.Wait()
+	if status, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok && status.Signaled() && status.Signal() == syscall.SIGKILL {
+		return "it was still running, and was killed"
+	}
+	return "it had exited by itself, " + cmd.ProcessState.String()
+}
+
+// daemonLogTail is the end of the daemon's log on the home, which the daemon writes there rather than to its output
+// when that is no terminal, as in these tests: what it logged as it started.
+func daemonLogTail(home string) string {
+	const tail = 4096
+	data, err := os.ReadFile(filepath.Join(home, "logs", "daemon.log"))
+	if err != nil {
+		return err.Error()
+	}
+	return string(data[max(0, len(data)-tail):])
+}
 
 // daemonEnv is the test's own environment with env applied in order: an entry NAME=VALUE sets NAME, a later entry
 // winning, and an entry NAME alone removes it.
