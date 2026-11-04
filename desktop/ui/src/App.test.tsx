@@ -91,6 +91,7 @@ const settings: Settings = {
   pathVariables: {},
   allowedFolders: [],
   onboardingCompleted: true,
+  quota: {},
 };
 
 /** A template as GET /templates lists it, valid unless a test says otherwise. */

@@ -3899,6 +3899,23 @@ button.queue-item:hover,
   min-width: 0;
 }
 
+.quota-share {
+  display: flex;
+  align-items: center;
+  gap: var(--hf-space-3);
+}
+
+.quota-share__range {
+  width: 180px;
+  accent-color: var(--hf-color-cyan);
+}
+
+.quota-share__value {
+  min-width: 4ch;
+  font-size: var(--hf-font-size-sm);
+  text-align: right;
+}
+
 .state-pair {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -90,6 +90,7 @@ const saved: Settings = {
   pathVariables: {},
   allowedFolders: [],
   onboardingCompleted: true,
+  quota: {},
 };
 
 let root: Root | undefined;
@@ -443,6 +444,54 @@ describe("the AI tools section", () => {
       ["Git", "2.54.0 · /usr/bin/git", "Detected"],
       ["GitHub CLI (gh)", "2.99.0 · /opt/homebrew/bin/gh", "Authenticated"],
     ]);
+  });
+});
+
+describe("the AI tools section's quota shares", () => {
+  const slider = (id: string) => host!.querySelector<HTMLInputElement>(`#settings-quota-${id}`)!;
+  const shown = (id: string) => text(slider(id).closest(".quota-share")!.querySelector("output"));
+
+  /** Drags the slider to a share, as React sees it, and lets it go. */
+  async function drag(id: string, share: number) {
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => {
+      setValue.call(slider(id), String(share));
+      slider(id).dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(updates()).toEqual([]);
+    expect(shown(id)).toBe(`${share}%`);
+    await act(async () => slider(id).dispatchEvent(new Event("pointerup", { bubbles: true })));
+    await settle();
+  }
+
+  it("shows each AI tool's share, the whole quota when none is set, from 1% to 100%", async () => {
+    daemon.settings = { ...daemon.settings, quota: { codex: { maxPercent: 80 } } };
+    patchStateForTests({ harnesses: [claudeCode, codex], tools });
+    await open("agents");
+
+    expect([slider("claude-code").min, slider("claude-code").max, slider("claude-code").value]).toEqual(["1", "100", "100"]);
+    expect(shown("claude-code")).toBe("100%");
+    expect(slider("codex").value).toBe("80");
+    expect(shown("codex")).toBe("80%");
+  });
+
+  it("saves the share once it is let go, keeping the other tools' shares", async () => {
+    daemon.settings = { ...daemon.settings, quota: { codex: { maxPercent: 80 } } };
+    patchStateForTests({ harnesses: [claudeCode, codex], tools });
+    await open("agents");
+    daemon.requests.length = 0;
+
+    await drag("claude-code", 95);
+
+    expect(updates().map((r) => r.body)).toStrictEqual([{ quota: { codex: { maxPercent: 80 }, "claude-code": { maxPercent: 95 } } }]);
+    expect(daemon.settings.quota).toStrictEqual({ codex: { maxPercent: 80 }, "claude-code": { maxPercent: 95 } });
+    expect(toasts()).toEqual([{ tone: "success", text: "Settings saved." }]);
+    expect(slider("claude-code").value).toBe("95");
+
+    // Leaving the slider after letting it go sends nothing more.
+    await act(async () => slider("claude-code").dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
+    await settle();
+    expect(updates()).toHaveLength(1);
   });
 });
 

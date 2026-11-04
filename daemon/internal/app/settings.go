@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
@@ -24,6 +25,15 @@ type Settings struct {
 	// lead.
 	AllowedFolders      []string `json:"allowedFolders"`
 	OnboardingCompleted bool     `json:"onboardingCompleted"`
+	// Quota is the share of each harness's quota HarmFlow may spend, keyed by the harness's identifier. A harness it
+	// leaves out may spend the whole of each window.
+	Quota map[string]QuotaShare `json:"quota"`
+}
+
+// QuotaShare is the share of each of a harness's quota windows HarmFlow may spend, in percent: above 0 and at most
+// 100. An attempt does not start while a window is used at or above it; a running attempt is never ended by it.
+type QuotaShare struct {
+	MaxPercent float64 `json:"maxPercent"`
 }
 
 // AutostartView is whether the daemon starts with the user's session, by which mechanism, none when the daemon has no
@@ -52,11 +62,14 @@ type SettingsPatch struct {
 	PathVariables       map[string]string `json:"pathVariables"`
 	AllowedFolders      []string          `json:"allowedFolders"`
 	OnboardingCompleted *bool             `json:"onboardingCompleted"`
+	// Quota replaces the whole map of quota shares when it is set.
+	Quota map[string]QuotaShare `json:"quota"`
 }
 
 func defaultSettings() Settings {
 	return Settings{SchemaVersion: "1", Language: "system", TrayEnabled: true, NotificationLevel: "all",
-		LogRetentionDays: 30, Theme: "harmflow-dark", PathVariables: map[string]string{}, AllowedFolders: []string{}}
+		LogRetentionDays: 30, Theme: "harmflow-dark", PathVariables: map[string]string{}, AllowedFolders: []string{},
+		Quota: map[string]QuotaShare{}}
 }
 
 func (a *App) loadSettings() error {
@@ -73,6 +86,16 @@ func (a *App) loadSettings() error {
 	if s.LogRetentionDays <= 0 {
 		s.LogRetentionDays = 30
 	}
+	quota := map[string]QuotaShare{}
+	for _, h := range sortedKeys(s.Quota) {
+		if err := checkQuotaShare(h, s.Quota[h]); err != nil {
+			// A share edited by hand outside the bounds is refused, and its harness may spend the whole of each window.
+			a.log.Printf("loading the settings, the share is refused: %s", err.Text.Message)
+			continue
+		}
+		quota[h] = s.Quota[h]
+	}
+	s.Quota = quota
 	a.mu.Lock()
 	a.settings = s
 	a.mu.Unlock()
@@ -89,6 +112,7 @@ func (a *App) GetSettings() SettingsView {
 	}
 	s.PathVariables = vars
 	s.AllowedFolders = append([]string{}, s.AllowedFolders...)
+	s.Quota = maps.Clone(s.Quota)
 	a.mu.Unlock()
 	v := SettingsView{Settings: s, Autostart: AutostartView{Mechanism: "none"}}
 	if a.d.Service != nil {
@@ -118,6 +142,11 @@ func (a *App) UpdateSettings(p SettingsPatch) (SettingsView, error) {
 		if !varName.MatchString(k) {
 			return SettingsView{}, newError(CodeValidationFailed, domain.T("settings_path_variable_invalid",
 				`path variable "{{name}}" must be uppercase letters, digits, and _`, "name", k))
+		}
+	}
+	for _, h := range sortedKeys(p.Quota) {
+		if err := checkQuotaShare(h, p.Quota[h]); err != nil {
+			return SettingsView{}, err
 		}
 	}
 	if err := a.checkPathSettings(p); err != nil {
@@ -167,12 +196,43 @@ func (a *App) UpdateSettings(p SettingsPatch) (SettingsView, error) {
 	if p.OnboardingCompleted != nil {
 		s.OnboardingCompleted = *p.OnboardingCompleted
 	}
+	if p.Quota != nil {
+		s.Quota = maps.Clone(p.Quota)
+	}
 	saved := *s
 	a.mu.Unlock()
 	if err := a.d.State.Save("settings", saved); err != nil {
 		return SettingsView{}, err
 	}
 	return a.GetSettings(), nil
+}
+
+// quotaShare is the share of the harness's quota HarmFlow may spend: the one the settings give it, or the whole of each
+// window.
+func (a *App) quotaShare(harness string) float64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if q, ok := a.settings.Quota[harness]; ok {
+		return q.MaxPercent
+	}
+	return domain.FullShare
+}
+
+// checkQuotaShare refuses a share of a harness HarmFlow does not run, and one that is not above 0 and at most 100,
+// naming it by its harness.
+func checkQuotaShare(harness string, q QuotaShare) *Error {
+	field := fmt.Sprintf("/quota/%s/maxPercent", harness)
+	if harness != domain.HarnessClaudeCode && harness != domain.HarnessCodex {
+		text := domain.T("settings_quota_harness_unknown", "quota.{{harness}} names no AI tool HarmFlow runs",
+			"harness", harness)
+		return &Error{Code: CodeValidationFailed, Text: text, Validation: fieldIssue(fmt.Sprintf("/quota/%s", harness), text)}
+	}
+	if !domain.ValidShare(q.MaxPercent) {
+		text := domain.T("settings_quota_share_invalid", "quota.{{harness}}.maxPercent must be above 0 and at most 100",
+			"harness", harness)
+		return &Error{Code: CodeValidationFailed, Text: text, Validation: fieldIssue(field, text)}
+	}
+	return nil
 }
 
 // checkPathSettings refuses an allowed folder in a place no harness may write, and a change to the path variables or

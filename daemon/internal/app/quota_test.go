@@ -224,3 +224,127 @@ spec:
 		t.Errorf("a script task that sets allowExtraUsage: valid %v, errors %+v; want it rejected", res.Valid, res.Errors)
 	}
 }
+
+// sessionAt is a Claude Code quota whose session window is used at percent until a known time.
+func sessionAt(percent float64) func() (domain.Quota, error) {
+	return func() (domain.Quota, error) {
+		return domain.Quota{Windows: []domain.QuotaWindow{{Name: "Current session", UsedPercent: percent,
+			ResetsAt: time.Date(2026, 10, 20, 13, 0, 0, 0, time.UTC)}}}, nil
+	}
+}
+
+// setShare sets the share of Claude Code's quota HarmFlow may spend, through the settings.
+func setShare(t *testing.T, e *env, share float64) {
+	t.Helper()
+	if _, err := e.app.UpdateSettings(SettingsPatch{Quota: map[string]QuotaShare{
+		domain.HarnessClaudeCode: {MaxPercent: share}}}); err != nil {
+		t.Fatalf("UpdateSettings(quota.claude-code.maxPercent = %v) = %v, want no error", share, err)
+	}
+}
+
+// With a share of 95, a reading below it starts the attempt on Claude Code, and a reading at it moves the execution to
+// its fallback before the session opens, with an event that names Claude Code, the share, and when the window resets.
+// With no fallback, the execution fails with that reason.
+func TestQuotaShareHoldsTheAttemptBack(t *testing.T) {
+	cases := []struct {
+		name      string
+		used      float64
+		wantCodex bool
+	}{
+		{"a reading below the share starts", 94, false},
+		{"a reading at the share does not start", 95, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t)
+			setShare(t, e, 95)
+			e.create("shared", codexFallback)
+			e.claude.setQuota(sessionAt(c.used))
+			r, _ := e.app.RunTask("shared")
+			x := e.wait(r.ExecutionID, domain.StatusCompleted)
+			want := domain.HarnessClaudeCode
+			if c.wantCodex {
+				want = domain.HarnessCodex
+			}
+			if len(x.Attempts) != 1 || x.Attempts[0].Harness != want {
+				t.Fatalf("attempts %+v, want one on %s", x.Attempts, want)
+			}
+			if !c.wantCodex {
+				return
+			}
+			if n := e.claude.promptCount(); n != 0 {
+				t.Errorf("Claude Code got %d prompts, want 0", n)
+			}
+			_, last := e.eventCounts(r.ExecutionID)
+			exhausted := last[domain.EventHarnessQuotaExhausted]
+			text, _ := exhausted.Payload["error"].(string)
+			if exhausted.Harness != domain.HarnessClaudeCode || !strings.Contains(text, "95%") ||
+				!strings.Contains(text, "2026-10-20 13:00 UTC") {
+				t.Errorf("%s = %+v, want it to name Claude Code, the share of 95%%, and the reset",
+					domain.EventHarnessQuotaExhausted, exhausted)
+			}
+		})
+	}
+
+	e := newEnv(t)
+	setShare(t, e, 95)
+	e.create("alone", "")
+	e.claude.setQuota(sessionAt(95))
+	r, _ := e.app.RunTask("alone")
+	x := e.wait(r.ExecutionID, domain.StatusFailed)
+	if len(x.Attempts) != 0 || x.ErrorParams["detailKey"] != "quota_share_reached_until" {
+		t.Errorf("attempts %+v, error %q (%s %v); want no attempt and the share as the reason", x.Attempts, x.ErrorMessage,
+			x.ErrorKey, x.ErrorParams)
+	}
+}
+
+// With no share set, a harness may spend the whole of each window: a reading at 99.9% starts, as before the share.
+func TestQuotaShareDefaultKeepsTheWholeWindow(t *testing.T) {
+	e := newEnv(t)
+	e.create("default", codexFallback)
+	e.claude.setQuota(sessionAt(99.9))
+	r, _ := e.app.RunTask("default")
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	if len(x.Attempts) != 1 || x.Attempts[0].Harness != domain.HarnessClaudeCode {
+		t.Errorf("attempts %+v, want one on Claude Code", x.Attempts)
+	}
+	if got := e.app.GetSettings().Quota; len(got) != 0 {
+		t.Errorf("GetSettings().Quota = %v, want no share set", got)
+	}
+}
+
+// A window that reaches the share while an attempt runs does not end it: the attempt runs to its end, and the reading
+// it reported holds the next attempt back, within five minutes, with no read.
+func TestQuotaShareNeverEndsARunningAttempt(t *testing.T) {
+	e := newEnv(t)
+	setShare(t, e, 95)
+	e.create("running", codexFallback)
+	e.claude.setQuota(sessionAt(10))
+	e.claude.setScript(func(ports.RunRequest) string { return "echo 'WINDOW 96'; sleep 1; echo 'END ok'" })
+	r, _ := e.app.RunTask("running")
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	if len(x.Attempts) != 1 || x.Attempts[0].Harness != domain.HarnessClaudeCode ||
+		x.Attempts[0].Outcome != domain.AttemptSucceeded || x.HarnessSwitches != 0 {
+		t.Fatalf("attempts %+v, %d switches; want the Claude Code attempt to run to its end", x.Attempts, x.HarnessSwitches)
+	}
+	reads := e.claude.reads()
+	r, _ = e.app.RunTask("running")
+	x = e.wait(r.ExecutionID, domain.StatusCompleted)
+	if len(x.Attempts) != 1 || x.Attempts[0].Harness != domain.HarnessCodex || e.claude.reads() != reads {
+		t.Errorf("attempts %+v, %d new reads; want Codex, held back on the reading the attempt reported", x.Attempts,
+			e.claude.reads()-reads)
+	}
+}
+
+// A task that allows extra usage is not held back by the share.
+func TestQuotaShareIgnoredWithExtraUsage(t *testing.T) {
+	e := newEnv(t)
+	setShare(t, e, 95)
+	e.create("generous", codexFallback+"  execution:\n    allowExtraUsage: true\n")
+	e.claude.setQuota(sessionAt(95))
+	r, _ := e.app.RunTask("generous")
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	if len(x.Attempts) != 1 || x.Attempts[0].Harness != domain.HarnessClaudeCode || x.HarnessSwitches != 0 {
+		t.Errorf("attempts %+v, %d switches; want one Claude Code attempt", x.Attempts, x.HarnessSwitches)
+	}
+}

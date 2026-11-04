@@ -72,9 +72,9 @@ func (w *fakeWake) woke(at time.Time) {
 
 // fakeHarness runs /bin/sh with a script the test chooses. The script prints the outcome on its last line:
 // "END ok", "END quota", "END rate", "END network", "END unavailable" (signed out), or "END error"; "STARTED <model>
-// <effort>" reports what the session runs with. Its user configuration holds the skill user-skill and the agent
-// user-agent, each at a path of its own harness, and the skill review-notes and the agent review-agent for Claude Code
-// only.
+// <effort>" reports what the session runs with, and "WINDOW <percent>" a plan window used that much. Its user
+// configuration holds the skill user-skill and the agent user-agent, each at a path of its own harness, and the skill
+// review-notes and the agent review-agent for Claude Code only.
 type fakeHarness struct {
 	id          string
 	mu          sync.Mutex
@@ -279,6 +279,12 @@ func (p *fakeParser) Line(b []byte) []ports.HarnessEvent {
 		// A plan window used up and the session going on with extra usage, as Claude Code reports it.
 		return []ports.HarnessEvent{{Kind: ports.HarnessQuota, Quota: &domain.Quota{UsingExtraUsage: true,
 			Windows: []domain.QuotaWindow{{Name: "five_hour", UsedPercent: 100}}}}}
+	}
+	if n, ok := strings.CutPrefix(s, "WINDOW "); ok {
+		// A plan window used at n%, with no extra usage, as a rate-limit report of a running Claude Code attempt says.
+		used, _ := strconv.ParseFloat(n, 64)
+		return []ports.HarnessEvent{{Kind: ports.HarnessQuota, Quota: &domain.Quota{
+			Windows: []domain.QuotaWindow{{Name: "five_hour", UsedPercent: used}}}}}
 	}
 	if n, ok := strings.CutPrefix(s, "USAGE "); ok {
 		p.input, _ = strconv.ParseInt(n, 10, 64)

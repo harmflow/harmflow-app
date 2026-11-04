@@ -917,6 +917,8 @@ components:
         - settings_path_variable_invalid
         - settings_allowed_folder_invalid
         - settings_change_breaks_task
+        - settings_quota_harness_unknown
+        - settings_quota_share_invalid
         - harness_not_identified
         - template_not_found
         - template_read_only
@@ -1079,6 +1081,8 @@ components:
         - harness_quota_exhausted
         - quota_exhausted
         - quota_exhausted_until
+        - quota_share_reached
+        - quota_share_reached_until
         - extra_usage_stopped
         - harness_switched
         - no_alternative_harness
@@ -1976,7 +1980,7 @@ components:
     Settings:
       type: object
       required: [language, trayEnabled, keepTrayOnQuit, notificationLevel, logRetentionDays, autostart, pathVariables,
-        allowedFolders, onboardingCompleted]
+        allowedFolders, onboardingCompleted, quota]
       properties:
         language: { type: string, enum: [pt-BR, en-US, es-ES, system] }
         trayEnabled: { type: boolean, default: true }
@@ -2009,6 +2013,25 @@ components:
           type: array
           items: { type: string }
         onboardingCompleted: { type: boolean }
+        quota:
+          description: >-
+            The share of each AI tool's quota HarmFlow may spend, keyed by the tool's identifier. An attempt does not
+            start while one of the tool's plan windows is used at or above its share, unless its task allows extra
+            usage; a running attempt is never ended by it. A tool left out may spend the whole of each window.
+          type: object
+          propertyNames: { enum: [claude-code, codex] }
+          additionalProperties: { $ref: "#/components/schemas/QuotaShare" }
+
+    QuotaShare:
+      type: object
+      required: [maxPercent]
+      properties:
+        maxPercent:
+          description: The share of each plan window HarmFlow may spend, in percent.
+          type: number
+          exclusiveMinimum: 0
+          maximum: 100
+          default: 100
 
     SettingsPatch:
       type: object
@@ -2027,6 +2050,11 @@ components:
           type: array
           items: { type: string }
         onboardingCompleted: { type: boolean }
+        quota:
+          description: Replaces the whole map of shares. A share outside the bounds is refused, naming its tool.
+          type: object
+          propertyNames: { enum: [claude-code, codex] }
+          additionalProperties: { $ref: "#/components/schemas/QuotaShare" }
 
     CleanResult:
       type: object
