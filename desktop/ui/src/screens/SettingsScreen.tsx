@@ -17,9 +17,13 @@ import { errorMessage } from "../lib/errorMessage";
 import { formatBytes, formatDateTime, formatDuration } from "../lib/format";
 import { useDraft, useNow, type DraftReport } from "../lib/hooks";
 import { SHORTCUTS, keycaps, shortcutsByGroup } from "../lib/shortcuts";
+import { dynamicText, useRegistered } from "../registrations";
 import { actions, useStore } from "../state/store";
 
 export type SettingsSection = "general" | "notifications" | "shortcuts" | "agents" | "paths" | "daemon" | "storage" | "security" | "about";
+
+/** A built-in section, or the key of a section a registration added. */
+export type SettingsSectionKey = SettingsSection | (string & {});
 
 /** The section list's groups, in order; About follows them alone, under a divider. */
 export const SECTION_GROUPS: ReadonlyArray<{ key: "interface" | "agents" | "computer"; sections: SettingsSection[] }> = [
@@ -40,6 +44,7 @@ const SECTION_ICONS: Record<SettingsSection, IconName> = {
   about: "sparkle",
 };
 
+/** Whether the value is a built-in section; a registered section is in the registrations instead. */
 export function isSettingsSection(value: unknown): value is SettingsSection {
   return typeof value === "string" && Object.hasOwn(SECTION_ICONS, value);
 }
@@ -65,13 +70,15 @@ export function SettingsScreen({
   onSection,
   onLeaveCheck,
 }: {
-  section?: SettingsSection;
+  section?: SettingsSectionKey;
   /** Opens another section; the shell asks first while a draft is held. */
-  onSection?: (s: SettingsSection) => void;
+  onSection?: (s: SettingsSectionKey) => void;
   /** Receives the question to ask before leaving while a section holds a draft, and null once it holds none. */
   onLeaveCheck?: (check: LeaveCheck | null) => void;
 }) {
   const { t } = useTranslation();
+  const registered = useRegistered();
+  const RegisteredSection = registered.settingsSections.find((s) => s.key === section)?.component;
   const screen = useRef<HTMLDivElement>(null);
   const iconsOnly = useNarrowerThan(screen, ICONS_ONLY_BELOW);
   const { tipped, tooltip, hide } = useTooltip(tipBeside);
@@ -106,8 +113,8 @@ export function SettingsScreen({
     return () => onLeaveCheck(null);
   }, [holding, onLeaveCheck, t]);
 
-  const item = (s: SettingsSection) => {
-    const name = t(`settings.sections.${s}`);
+  const item = (s: SettingsSectionKey, icon: IconName = SECTION_ICONS[s as SettingsSection]) => {
+    const name = dynamicText(t, `settings.sections.${s}`);
     const open = s === section;
     return (
       <button
@@ -118,7 +125,7 @@ export function SettingsScreen({
         onClick={() => onSection?.(s)}
         {...(iconsOnly ? tipped(name) : {})}
       >
-        <Icon name={SECTION_ICONS[s]} size={17} />
+        <Icon name={icon} size={17} />
         <span className={cx("nav__label", iconsOnly && "sr-only")}>{name}</span>
       </button>
     );
@@ -132,7 +139,8 @@ export function SettingsScreen({
             <span id={`settings-group-${group.key}`} className={cx("settings-nav__heading", iconsOnly && "sr-only")}>
               {t(`settings.groups.${group.key}`)}
             </span>
-            {group.sections.map(item)}
+            {group.sections.map((s) => item(s))}
+            {registered.settingsSections.filter((s) => s.group === group.key).map((s) => item(s.key, s.icon))}
           </div>
         ))}
         <hr className="settings-nav__divider" />
@@ -140,7 +148,7 @@ export function SettingsScreen({
       </nav>
       <section className="settings__section" aria-labelledby="settings-section-title">
         <h2 id="settings-section-title" className="settings__title">
-          {t(`settings.sections.${section}`)}
+          {dynamicText(t, `settings.sections.${section}`)}
         </h2>
         {section === "general" ? <GeneralSection /> : null}
         {section === "notifications" ? <NotificationsSection /> : null}
@@ -151,6 +159,7 @@ export function SettingsScreen({
         {section === "storage" ? <StorageSection report={report} /> : null}
         {section === "security" ? <SecuritySection /> : null}
         {section === "about" ? <AboutSection /> : null}
+        {RegisteredSection ? <RegisteredSection /> : null}
       </section>
       {tooltip}
     </div>

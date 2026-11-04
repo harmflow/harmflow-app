@@ -4,6 +4,7 @@
 mod daemon;
 mod menu;
 mod notice;
+mod registration;
 mod sse;
 mod state;
 #[cfg(all(debug_assertions, target_os = "macos"))]
@@ -21,7 +22,10 @@ use tauri::{Manager, RunEvent, State, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
 
 use daemon::{ApiResponse, DaemonStatus};
+use registration::app_commands;
 use state::AppState;
+
+pub use registration::Registration;
 
 type Shared<'a> = State<'a, Arc<AppState>>;
 
@@ -151,11 +155,22 @@ fn open_url(url: String) -> Result<(), String> {
     std::process::Command::new("/usr/bin/open").arg(&url).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
+/// Builds and runs the app with nothing registered.
 pub fn run() {
+    run_with(Vec::new());
+}
+
+/// Builds and runs the app with what each registration adds: its plugins, after the app's own, and its commands,
+/// beside the app's own. With none, the app is the one [`run`] starts. A registration the app cannot take, such as a
+/// command the app or another registration already has, stops the start before the app is built, as a plugin whose
+/// setup fails stops it while it is built: HarmFlow reports that it could not start, and exits.
+///
+/// This is public API: changing it, or what a [`Registration`] can add, is a breaking change.
+pub fn run_with(registrations: Vec<Registration>) {
     let start_hidden = std::env::args().any(|a| a == "--hidden");
     let state = Arc::new(AppState::new(start_hidden));
 
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
@@ -188,22 +203,23 @@ pub fn run() {
                     window::hide_main(window.app_handle());
                 }
             }
-        })
-        .invoke_handler(tauri::generate_handler![
-            api_request,
-            api_request_text,
-            connection_state,
-            daemon_status,
-            daemon_start,
-            set_tray_enabled,
-            set_keep_tray_on_quit,
-            set_tray_labels,
-            interface_ready,
-            write_text_file,
-            open_path,
-            open_url,
-        ])
-        .build(tauri::generate_context!());
+        });
+    let commands = app_commands![
+        api_request,
+        api_request_text,
+        connection_state,
+        daemon_status,
+        daemon_start,
+        set_tray_enabled,
+        set_keep_tray_on_quit,
+        set_tray_labels,
+        interface_ready,
+        write_text_file,
+        open_path,
+        open_url,
+    ];
+    let app = registration::assemble(builder, commands, registrations)
+        .and_then(|builder| builder.build(tauri::generate_context!()).map_err(|err| err.to_string()));
 
     let app = match app {
         Ok(app) => app,

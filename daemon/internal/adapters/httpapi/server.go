@@ -35,13 +35,23 @@ type Server struct {
 	Clock ports.Clock
 	// RejectionWindow is the least time between two log entries for the same reason of rejection, a minute when zero.
 	RejectionWindow time.Duration
+	// Routes are added to the API's own routes, behind the same checks; Prepare refuses one that cannot be added.
+	Routes []Route
 
 	mu       sync.RWMutex
 	token    string
 	listener net.Listener
 	port     int
 	srv      *http.Server
+	handler  http.Handler
 	rejected rejections
+}
+
+// Route is a route added to the local API beside its own: Handler serves the requests that Pattern, an http.ServeMux
+// pattern under /api/v1/ such as "GET /api/v1/example/{id}", matches.
+type Route struct {
+	Pattern string
+	Handler http.Handler
 }
 
 // allowedOrigins are the desktop's own webview origins; any other Origin is a web page.
@@ -71,9 +81,50 @@ func (s *Server) SetToken(t string) {
 	s.mu.Unlock()
 }
 
+// Prepare builds the handler Serve serves, and returns an error instead when a route of Routes has no handler, a
+// pattern outside /api/v1/, a pattern http.ServeMux refuses, or one that conflicts with another route. Serve builds the
+// handler itself when Prepare was not called.
+func (s *Server) Prepare() (err error) {
+	for _, rt := range s.Routes {
+		if rt.Handler == nil {
+			return fmt.Errorf("adding the route %q to the local API: it has no handler", rt.Pattern)
+		}
+		if !underAPI(rt.Pattern) {
+			return fmt.Errorf("adding the route %q to the local API: its path is not under /api/v1/", rt.Pattern)
+		}
+	}
+	// http.ServeMux panics on a pattern it refuses or one that conflicts with a route it holds; that is a failure to
+	// start, returned as one.
+	defer func() {
+		switch r := recover().(type) {
+		case nil:
+		case error:
+			err = fmt.Errorf("adding a route to the local API: %w", r)
+		default:
+			err = fmt.Errorf("adding a route to the local API: %v", r)
+		}
+	}()
+	s.handler = s.Handler()
+	return nil
+}
+
+// underAPI reports whether the path of an http.ServeMux pattern, which may follow a method and a space, is under
+// /api/v1/. A pattern with a host is not: the API answers only on the loopback, whatever the host.
+func underAPI(pattern string) bool {
+	path := pattern
+	if i := strings.IndexAny(pattern, " \t"); i >= 0 {
+		path = strings.TrimLeft(pattern[i:], " \t")
+	}
+	return strings.HasPrefix(path, "/api/v1/")
+}
+
 // Serve serves the API on the listener of Listen until Shutdown, which returns nil.
 func (s *Server) Serve() error {
-	s.srv = &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	handler := s.handler
+	if handler == nil {
+		handler = s.Handler()
+	}
+	s.srv = &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	err := s.srv.Serve(s.listener)
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
@@ -91,7 +142,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return err
 }
 
-// Handler routes the API's requests, every one through the Host, Origin, and token checks.
+// Handler routes the API's requests, Routes' included, every one through the Host, Origin, and token checks. Like
+// http.ServeMux, it panics on a route of Routes it cannot add; Prepare returns that as an error instead.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	h := func(pattern string, fn func(w http.ResponseWriter, r *http.Request)) { mux.HandleFunc(pattern, fn) }
@@ -154,6 +206,9 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, 200, s.App.Notifications(r.URL.Query().Get("unread") == "true"))
 	})
 	h("POST /api/v1/notifications/read", s.markRead)
+	for _, rt := range s.Routes {
+		mux.Handle(rt.Pattern, rt.Handler)
+	}
 	return s.guard(mux)
 }
 

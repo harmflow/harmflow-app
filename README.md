@@ -245,6 +245,37 @@ hand, or when that branch reaches the default one.
 
 HarmFlow itself implements no task behavior: the harness, its agents, and its skills do the work.
 
+## Registration points
+
+Each part has one registration point, where a build that takes this code as a library adds to it without patching it.
+This repository's own entry points use each one with nothing registered, so what it builds is the app described above.
+Nothing here imports, links, or fetches code from outside this repository.
+
+| Part | Registration point | What a registration can add |
+|---|---|---|
+| Daemon | `harmflowd.Run(cfg, registrations...)`, in the Go package `github.com/harmflow/harmflow-app/daemon/harmflowd`. A `harmflowd.Registration` is a `func(*harmflowd.Daemon) error`. `cmd/harmflowd` calls `Run` with none | HTTP handlers on the local API, under `/api/v1/` and behind the same Host, Origin, and token checks as every other route (`Daemon.Handle`). It is given the installation's directories (`Daemon.Paths`), the daemon's version (`Daemon.Version`), and its event stream (`Daemon.Subscribe`) |
+| Dashboard | Its entry file, `desktop/ui/src/dashboard.tsx`: `renderDashboard(element, ...registrations)`, where each `Registration` is an object whose fields are all optional. `main.tsx` calls it with none | Screens, each with its route and its entry in the sidebar, after the built-in ones (`screens`); sections at the end of a group of Settings (`settingsSections`); and their texts per language, which go through the dashboard's i18n (`strings`) |
+| Desktop crate | `harmflow_desktop_lib::run_with(registrations)`, which takes a `Vec<harmflow_desktop_lib::Registration>`. `run()`, which `main.rs` calls, passes none | Tauri plugins, after the app's own (`Registration::plugin`), and commands the dashboard calls as it calls the app's own (`Registration::commands`) |
+
+A registration that fails stops its part's start as the part's own start-up errors do, before the part runs anything:
+
+- **Daemon.** A registration's error, or a route outside `/api/v1/` or in conflict with another, makes `Run` return it
+  before the local API listens or the scheduler starts.
+- **Dashboard.** The registrations are checked before anything renders. A route or a key that a built-in screen or
+  section already has, or that two registrations share, shows the dashboard's failure screen, and the dashboard never
+  connects to the daemon. So does a text that could be read in place of one of the dashboard's own, in any language:
+  one of its keys, or a plural or context form of one, such as `count_zero` beside `count_one`. A route, a section's
+  key, and every key of `strings` is a plain key: no `.` or `:`, which i18next reads as a path or a namespace, and no
+  `_` in a route or a section's key, which it reads as the start of a plural's or a context's suffix.
+- **Desktop crate.** A command name that the app or another registration already has stops the start before the app
+  is built, and a plugin whose setup fails stops it while it is built. Either way HarmFlow reports that it could not
+  start, and exits.
+
+The app's capabilities grant a registered plugin's own commands nothing: a registration grants what they need, such as
+with a capability its plugin adds as it is set up. A daemon's route is added only while its registration runs.
+
+The registration points are public API. Changing one, or what a registration can add through it, is a breaking change.
+
 ## Part of HarmFlow
 
 - **Product overview** — the [HarmFlow organization](https://github.com/harmflow) page.

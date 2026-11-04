@@ -25,6 +25,11 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"
 futures-util = "0.3"
 dirs = "7"
 
+# The tests run the registration point on Tauri's mock runtime (src/registration.rs). The feature adds no crate, and
+# only the test builds take it.
+[dev-dependencies]
+tauri = { version = "2.12", features = ["tray-icon", "image-png", "test"] }
+
 # The debug build's test control channel reads the app menu macOS shows, quits as the Dock does, and reads back the
 # notices macOS delivered (src/test_control.rs). All three are already in the lockfile through Tauri.
 [target.'cfg(target_os = "macos")'.dependencies]
