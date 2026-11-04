@@ -11,7 +11,7 @@ import { storeZoom, storedZoom, zoomKey, zoomed } from "./lib/zoom";
 import { ExecutionsScreen } from "./screens/ExecutionsScreen";
 import { HistoryScreen } from "./screens/HistoryScreen";
 import { ImportDialog } from "./screens/ImportDialog";
-import { DaemonDownScreen, OnboardingScreen } from "./screens/OnboardingScreen";
+import { DaemonDownScreen, LAST_STEP, OnboardingScreen, type FirstUse } from "./screens/OnboardingScreen";
 import { OverviewScreen } from "./screens/OverviewScreen";
 import { SettingsScreen, isSettingsSection, type SettingsSection } from "./screens/SettingsScreen";
 import { TemplatePicker } from "./components/Templates";
@@ -67,6 +67,10 @@ export function App() {
   const [picker, setPicker] = useState(false);
   const [importing, setImporting] = useState(false);
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
+  // First use hands its first task to the Tasks screen, in the task's editor or the import dialog: `firstTask` says the
+  // hand-over is on, and `firstUse` where first use comes back to, with the autostart choice it had.
+  const [firstTask, setFirstTask] = useState(false);
+  const [firstUse, setFirstUse] = useState<FirstUse | undefined>(undefined);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(wasSidebarCollapsed);
   const [executionsAsideHidden, setExecutionsAsideHidden] = useState(wasExecutionsAsideHidden);
   const [zoom, setZoom] = useState(storedZoom);
@@ -191,8 +195,18 @@ export function App() {
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
 
+  // The shell shows first use's first task while its editor or the import dialog is open. Leaving them without saving,
+  // by any way out, brings first use back on its first-task step; saving brings it back on its last step, whose button
+  // alone finishes onboarding and opens the Executions screen.
+  const firstTaskOpen = firstTask && screen === "tasks" && (taskView.kind === "new" || importing);
+  const firstTaskSaved = () => {
+    setFirstTask(false);
+    setFirstUse((at) => ({ step: LAST_STEP, autostart: at?.autostart ?? false }));
+  };
   const onboarding =
-    !onboardingDismissed && ((settings && !settings.onboardingCompleted) || (daemonRunning === false && !wasOnboarded()));
+    !onboardingDismissed &&
+    !firstTaskOpen &&
+    ((settings && !settings.onboardingCompleted) || (daemonRunning === false && !wasOnboarded()));
   // A daemon being restarted is down for a moment: the shell stays, with the topbar saying so.
   const daemonDown = !onboarding && native.available && daemonRunning === false && !restarting;
   const shell = !onboarding && !daemonDown;
@@ -256,18 +270,23 @@ export function App() {
     return (
       <>
         <OnboardingScreen
+          resume={firstUse}
           onFinish={() => {
             setOnboardingDismissed(true);
+            setFirstTask(false);
             setScreen("executions");
           }}
-          onCreateTask={(k) => {
-            setOnboardingDismissed(true);
+          onCreateTask={(k, at) => {
+            setFirstUse(at);
+            setFirstTask(true);
             setScreen("tasks");
             setTaskView({ kind: "new", template: k });
           }}
-          onImport={() => {
-            setOnboardingDismissed(true);
+          onImport={(at) => {
+            setFirstUse(at);
+            setFirstTask(true);
             setScreen("tasks");
+            setTaskView({ kind: "list" });
             setImporting(true);
           }}
         />
@@ -318,7 +337,20 @@ export function App() {
             />
           ) : null}
           {screen === "tasks" ? (
-            <TasksScreen view={taskView} onView={setTaskView} onOpenExecution={openExecution} onLeaveCheck={holdLeaveCheck} />
+            <TasksScreen
+              view={taskView}
+              onView={setTaskView}
+              onOpenExecution={openExecution}
+              onLeaveCheck={holdLeaveCheck}
+              onCreated={
+                firstTaskOpen
+                  ? () => {
+                      setTaskView({ kind: "list" });
+                      firstTaskSaved();
+                    }
+                  : undefined
+              }
+            />
           ) : null}
           {screen === "history" ? <HistoryScreen openId={historyOpen} onOpen={setHistoryOpen} /> : null}
           {screen === "settings" ? <SettingsScreen section={settingsSection} onSection={openSettings} onLeaveCheck={holdLeaveCheck} /> : null}
@@ -341,7 +373,8 @@ export function App() {
           onClose={() => setImporting(false)}
           onImported={(task) => {
             setImporting(false);
-            setTaskView({ kind: "edit", id: task.id });
+            if (firstTaskOpen) firstTaskSaved();
+            else setTaskView({ kind: "edit", id: task.id });
           }}
         />
       ) : null}

@@ -55,11 +55,14 @@ export function TasksScreen({
   onView,
   onOpenExecution,
   onLeaveCheck,
+  onCreated,
 }: {
   view: TaskView;
   onView: (v: TaskView) => void;
   onOpenExecution: (id: string) => void;
   onLeaveCheck?: (check: LeaveCheck | null) => void;
+  /** A new task was saved; with none, its editor goes on editing it. */
+  onCreated?: (task: Task) => void;
 }) {
   if (view.kind === "new")
     return (
@@ -67,7 +70,7 @@ export function TasksScreen({
         key={`${view.template}-${view.pick ?? 0}`}
         template={view.template}
         onDone={() => onView({ kind: "list" })}
-        onSaved={(task) => onView({ kind: "edit", id: task.id })}
+        onSaved={(task) => (onCreated ? onCreated(task) : onView({ kind: "edit", id: task.id }))}
         onLeaveCheck={onLeaveCheck}
       />
     );

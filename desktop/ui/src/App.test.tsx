@@ -12,7 +12,9 @@
 // A first launch opens in the system's language when it is official, and in en-US otherwise (harmflow-app#633).
 // Notices the daemon held while no dashboard ran show as unread once it starts (harmflow-app#522).
 // ⌘E hides and shows the Executions screen's aside, on that screen alone, and the choice outlives a restart
-// (harmflow-app#505).
+// (harmflow-app#505). A first task saved from first use, drafted or imported, brings first use back to its last step,
+// whose button alone finishes onboarding and opens the Executions screen; one left unsaved brings it back to the
+// first-task step (harmflow-app#809).
 import { EditorView } from "@codemirror/view";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -55,7 +57,8 @@ vi.mock("./components/Shell", async (importOriginal) => {
   };
 });
 
-// The daemon answers the paths a test sets here, and nothing else, and keeps every request it was sent.
+// The daemon answers the paths a test sets here, and nothing else, and keeps every request it was sent. An answer that
+// is a function answers by the request's method, for a path two methods share.
 const daemon = vi.hoisted(() => ({ answers: new Map<string, unknown>(), sent: [] as { method: string; path: string; body: unknown }[] }));
 
 vi.mock("./api/transport", () => ({
@@ -65,7 +68,9 @@ vi.mock("./api/transport", () => ({
     mode: "http",
     request: async (method: string, path: string, body?: unknown) => {
       daemon.sent.push({ method, path, body });
-      return daemon.answers.has(path) ? { status: 200, body: daemon.answers.get(path) } : { status: 404, body: null };
+      if (!daemon.answers.has(path)) return { status: 404, body: null };
+      const answer = daemon.answers.get(path);
+      return { status: 200, body: typeof answer === "function" ? answer(method) : answer };
     },
     requestText: async () => ({ status: 404, text: "" }),
     stream: () => () => {},
@@ -499,6 +504,105 @@ describe("new task", () => {
     expect(daemon.sent.filter((r) => r.path.endsWith("/draft"))).toEqual([
       { method: "POST", path: "/templates/hf-script/draft", body: { language: "en-US" } },
     ]);
+  });
+
+  describe("first use's first task", () => {
+    const summary: TaskSummary = { id: "script-task", name: "Script task", type: "script", enabled: true, revision: "r1", harness: "", warnings: [] };
+    const document = { apiVersion: "harmflow/v1alpha1", kind: "Task", metadata: { id: "script-task", name: "Script task" }, spec: { type: "script" } };
+    const saved = { ...summary, document, effective: document, yaml: "", path: "script-task.yaml" } satisfies Task;
+
+    const step = () => host!.querySelector(".onboarding__header .mono")?.textContent ?? null;
+    const completions = () => daemon.sent.filter((r) => r.method === "PATCH" && r.path === "/settings").map((r) => r.body);
+    const dialogButton = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((b) => b.textContent === label)!;
+    const editorButton = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>(".editor button")].find((b) => b.textContent === label)!;
+    /** Lets a save or an import that was answered reach the screen. */
+    const settle = () => act(() => new Promise<void>((resolve) => setImmediate(resolve)));
+    const click = async (target: HTMLElement) => {
+      await act(async () => target.click());
+      await settle();
+    };
+
+    /** Walks first use to its first-task step, checking autostart on the way when asked. */
+    async function firstTaskStep(autostart = false) {
+      patchStateForTests({ settings: { ...settings, onboardingCompleted: false } });
+      daemon.answers.set("/settings", { ...settings, onboardingCompleted: true });
+      await launch();
+      for (let at = 1; at < 4; at++) {
+        if (at === 3 && autostart) await act(async () => host!.querySelector<HTMLInputElement>('.onboarding input[type="checkbox"]')!.click());
+        await act(async () => contentOrCard("Next").click());
+      }
+      expect(step()).toBe("Step 4 of 5");
+    }
+
+    /** Finishes first use with its last step's button. */
+    async function finish() {
+      expect(step()).toBe("Step 5 of 5");
+      await click(contentOrCard("Go to live executions"));
+      expect(host!.querySelector(".onboarding")).toBeNull();
+      expect(title()).toBe("Live executions");
+    }
+
+    it("comes back to its last step once a task drafted from a template is saved, the autostart choice kept", async () => {
+      await firstTaskStep(true);
+      daemon.answers.set("/tasks", (method: string) => (method === "POST" ? saved : [summary]));
+      await pick("Script task");
+      expect(title()).toBe("Tasks");
+      await click(host!.querySelector<HTMLButtonElement>('.editor button[aria-keyshortcuts="Meta+S"]')!);
+      expect(daemon.sent.filter((r) => r.method === "POST" && r.path === "/tasks")).toHaveLength(1);
+      expect(host!.querySelector(".editor")).toBeNull();
+      expect(completions()).toEqual([]); // the save finishes nothing
+      await finish();
+      expect(completions()).toEqual([{ onboardingCompleted: true, autostart: true }]);
+      expect(getState().tasks).toEqual([summary]);
+    });
+
+    it("comes back to its last step once a task is imported", async () => {
+      await firstTaskStep();
+      const general = { ...document, spec: { type: "general" } };
+      daemon.answers.set("/tasks/validate", { valid: true, errors: [], warnings: [], document: general });
+      daemon.answers.set("/tasks/import", { ...saved, type: "general", document: general, effective: general });
+      daemon.answers.set("/tasks", [summary]);
+      await click(contentOrCard("Import"));
+      expect(title()).toBe("Tasks");
+      const yaml = host!.querySelector<HTMLTextAreaElement>('[role="dialog"] textarea')!;
+      const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+      await act(async () => {
+        setValue.call(yaml, "metadata:\n  name: Script task\n");
+        yaml.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await click(dialogButton("Import"));
+      expect(daemon.sent.filter((r) => r.path === "/tasks/import")).toHaveLength(1);
+      expect(host!.querySelector('[role="dialog"]')).toBeNull();
+      expect(completions()).toEqual([]);
+      // The imported task has a schedule; the Executions screen lists it once first use finishes.
+      daemon.answers.set("/queue", { waiting: [], upcoming: [{ taskId: "script-task", taskName: "Script task", nextFireAt: "2099-01-01T10:00:00Z" }], workItems: [] });
+      await finish();
+      expect(completions()).toEqual([{ onboardingCompleted: true }]);
+      expect(getState().tasks).toEqual([summary]);
+      expect(host!.querySelector(".queue-item__title")?.textContent).toBe("Script task");
+    });
+
+    it("comes back to the first-task step when the editor or the import dialog is left unsaved, and Later still leads on", async () => {
+      await firstTaskStep();
+      await pick("General task");
+      await click(editorButton("Close"));
+      expect(step()).toBe("Step 4 of 5");
+
+      await pick("General task");
+      expect(title()).toBe("Tasks");
+      await click(navButton("History"));
+      expect(step()).toBe("Step 4 of 5");
+
+      await click(contentOrCard("Import"));
+      await click(dialogButton("Cancel"));
+      expect(step()).toBe("Step 4 of 5");
+      expect(daemon.sent.filter((r) => r.method === "POST" && r.path === "/tasks")).toEqual([]);
+      expect(completions()).toEqual([]);
+
+      await act(async () => contentOrCard("Later").click());
+      await finish();
+      expect(completions()).toEqual([{ onboardingCompleted: true }]);
+    });
   });
 
   it("names the templates in the interface's language, switching with it, and has the task drafted in that language", async () => {
