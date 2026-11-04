@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -473,19 +474,25 @@ func ensureLabel(t *testing.T, name string) {
 }
 
 // restartFixture opens a fixture issue labelled restartLabel, which asks for one new file, unique to the run, and
-// returns its number and the file. When the test ends, failed or not, it closes the pull requests linking the issue or
-// coming from a branch that holds the file, deletes those branches, and closes the issue: what the sessions made is
-// found by the issue and its file, never by the branch names they chose.
+// returns its number and the file. A gh issue create that fails is retried as retryGH retries it, once no issue with
+// the run's title is found, so a call that failed after GitHub opened the issue opens no second one. When the test
+// ends, failed or not, it closes the pull requests linking the issue or coming from a branch that holds the file,
+// deletes those branches, and closes the issue: what the sessions made is found by the issue and its file, never by
+// the branch names they chose.
 func restartFixture(t *testing.T) (issue int, file string) {
 	t.Helper()
 	run := runSuffix()
 	file = "restart-test/" + run + ".txt"
+	title := "Add the note " + file
 	body := fmt.Sprintf("Add the file `%s` with the single line `%s`, and change nothing else. The repository has no "+
 		"tests.\n", file, run)
-	out, err := exec.Command("gh", "issue", "create", "--repo", queueRepo, "--label", restartLabel,
-		"--title", "Add the note "+file, "--body", body).Output()
+	args := []string{"issue", "create", "--repo", queueRepo, "--label", restartLabel, "--title", title, "--body", body}
+	out, err := retryGH(ghRetryWait, func() ([]byte, bool, error) { return fixtureIssue(title) }, func() ([]byte, error) {
+		out, stderr, err := runGH(args...)
+		return out, ghError(args, stderr, err)
+	})
 	if err != nil {
-		t.Fatalf("gh issue create: %v", err)
+		t.Fatalf("open the fixture issue: %v", err)
 	}
 	url := strings.TrimSpace(string(out))
 	issue, err = strconv.Atoi(url[strings.LastIndex(url, "/")+1:])
@@ -519,6 +526,23 @@ func restartFixture(t *testing.T) (issue int, file string) {
 		}
 	})
 	return issue, file
+}
+
+// fixtureIssue is the URL of the issue of queueRepo labelled restartLabel with the title, followed by a newline as gh
+// issue create prints it, and whether there is one. It reads the repository's list of issues, which shows an issue
+// GitHub just opened, rather than its search, whose index may not have it yet.
+func fixtureIssue(title string) ([]byte, bool, error) {
+	out, err := gh("api", "repos/"+queueRepo+"/issues?labels="+restartLabel+"&state=all&sort=created&direction=desc&per_page=100",
+		"--jq", ".[] | select(.pull_request == null) | [.title, .html_url] | @tsv")
+	if err != nil {
+		return nil, false, fmt.Errorf("list the issues labelled %s: %w", restartLabel, err)
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if t, url, ok := strings.Cut(line, "\t"); ok && t == title {
+			return []byte(url + "\n"), true, nil
+		}
+	}
+	return nil, false, nil
 }
 
 // pushableClone is the repository the task targets, cloned as shallowClone does, but with its push URL: the sessions
@@ -585,6 +609,9 @@ spec:
         "Bash(gh pr edit:*)", "Bash(gh pr create:*)", "Bash(gh label:*)", "Bash(gh api:*)"]%[5]s
   execution:
     timeoutMinutes: 12
+    # A restarted daemon ends what the killed session left before it writes its runtime file, waiting up to this
+    # grace for it to exit: the default, 30 seconds, is longer than the runtimeWait a restart gets.
+    cancelGraceSeconds: 5
   github:
     repositories:
       - name: %[1]s
@@ -678,24 +705,193 @@ func commandsOf(d *daemon, id string) string {
 }
 
 // issueBranches lists the branches of queueRepo that hold the fixture's file: those the sessions pushed for its issue.
+// Only GitHub's 404 for a branch's read of the file says that the branch does not hold it (fileRead); any other failure
+// of that read, or of the branch listing, is retried as retryGH retries it, then returned.
 func issueBranches(file string) ([]string, error) {
-	out, err := exec.Command("gh", "api", "--paginate", "repos/"+queueRepo+"/branches?per_page=100", "--jq", ".[].name").Output()
+	out, err := gh("api", "--paginate", "repos/"+queueRepo+"/branches?per_page=100", "--jq", ".[].name")
 	if err != nil {
 		return nil, fmt.Errorf("list the branches of %s: %w", queueRepo, err)
 	}
 	var branches []string
 	for _, b := range strings.Fields(string(out)) {
-		cmd := exec.Command("gh", "api", "repos/"+queueRepo+"/contents/"+file+"?ref="+b, "--silent")
-		err := cmd.Run()
-		var exit *exec.ExitError
-		switch {
-		case err == nil:
-			branches = append(branches, b)
-		case !errors.As(err, &exit):
+		var holds bool
+		_, err := retryGH(ghRetryWait, nil, func() ([]byte, error) {
+			out, stderr, err := runGH("api", "repos/"+queueRepo+"/contents/"+file+"?ref="+b, "--jq", ".path")
+			holds, err = fileRead(file, out, stderr, err)
+			return nil, err
+		})
+		if err != nil {
 			return nil, fmt.Errorf("read %s on %s: %w", file, b, err)
+		}
+		if holds {
+			branches = append(branches, b)
 		}
 	}
 	return branches, nil
+}
+
+// The GitHub calls of these tests are made up to ghAttempts times, ghRetryWait apart, while they fail with anything but
+// GitHub's 404: few enough to keep a real-session test's time near what it takes when GitHub answers at once.
+const (
+	ghAttempts  = 3
+	ghRetryWait = 3 * time.Second
+)
+
+// errNotFound is GitHub's 404 for a gh call: an answer, such as a branch that does not hold a file, which is never
+// retried.
+var errNotFound = errors.New("GitHub answered 404")
+
+// gh runs gh with args as retryGH retries it, ghRetryWait apart, and returns the standard output of its last call. A
+// 404 is an error here too, wrapping errNotFound.
+func gh(args ...string) ([]byte, error) {
+	return retryGH(ghRetryWait, nil, func() ([]byte, error) {
+		out, stderr, err := runGH(args...)
+		return out, ghError(args, stderr, err)
+	})
+}
+
+// runGH runs gh once with args, and returns its standard output and standard error, and the error running it returned.
+func runGH(args ...string) (out, stderr []byte, err error) {
+	var errOut bytes.Buffer
+	cmd := exec.Command("gh", args...)
+	cmd.Stderr = &errOut
+	out, err = cmd.Output()
+	return out, errOut.Bytes(), err
+}
+
+// ghError reads how a gh call with args ended from its standard error and the error running it returned: nil when it
+// succeeded; an error wrapping errNotFound when it failed and gh named GitHub's HTTP 404; otherwise an error carrying
+// its standard error — GitHub's 5xx or rate limit, a body that is not JSON, a gh that could not run.
+func ghError(args []string, stderr []byte, err error) error {
+	if err == nil {
+		return nil
+	}
+	call := "gh " + strings.Join(args[:min(len(args), 2)], " ")
+	if bytes.Contains(stderr, []byte("(HTTP 404)")) {
+		return fmt.Errorf("%s: %w", call, errNotFound)
+	}
+	return fmt.Errorf("%s, standard error %q: %w", call, bytes.TrimSpace(stderr), err)
+}
+
+// fileRead reads a gh api read of the file's contents on a branch, with --jq .path, from its standard output and
+// error and the error running it returned. The branch holds the file when the call succeeded and printed the file's
+// path, and does not when GitHub answered 404. Anything else is an error: a failure ghError does not read as a 404, or
+// an answer that is not the file's.
+func fileRead(file string, out, stderr []byte, err error) (holds bool, _ error) {
+	err = ghError([]string{"api", "contents/" + file}, stderr, err)
+	switch {
+	case errors.Is(err, errNotFound):
+		return false, nil
+	case err != nil:
+		return false, err
+	case strings.TrimSpace(string(out)) != file:
+		return false, fmt.Errorf("gh api contents/%s printed %q, not the file's path", file, out)
+	}
+	return true, nil
+}
+
+// retryGH makes call until it returns no error or one wrapping errNotFound, ghAttempts calls at most, wait apart, and
+// returns what the last call returned, its error wrapped once every attempt failed. Before each retry, settled, when
+// not nil, reads whether the failed call took effect all the same, as a create that failed after GitHub made what it
+// asked for: when it says so, its output is the call's, and an error of its own ends the retries.
+func retryGH(wait time.Duration, settled func() ([]byte, bool, error), call func() ([]byte, error)) ([]byte, error) {
+	for attempt := 1; ; attempt++ {
+		out, err := call()
+		if err == nil || errors.Is(err, errNotFound) {
+			return out, err
+		}
+		if attempt == ghAttempts {
+			return out, fmt.Errorf("%d attempts, the last: %w", ghAttempts, err)
+		}
+		time.Sleep(wait)
+		if settled == nil {
+			continue
+		}
+		out, done, serr := settled()
+		if serr != nil {
+			return nil, fmt.Errorf("after %v, looking for what the call made: %w", err, serr)
+		}
+		if done {
+			return out, nil
+		}
+	}
+}
+
+// A branch's read of the fixture's file tells GitHub's answer from an error: only a 404 says that the branch does not
+// hold the file, and a 5xx, a rate limit, a body that is not JSON, a gh that cannot run, or an answer that is not the
+// file's is an error, which retryGH retries.
+func TestFileReadTellsGitHubsAnswerFromAnError(t *testing.T) {
+	t.Parallel()
+	const file = "restart-test/run.txt"
+	exit := errors.New("exit status 1")
+	for _, c := range []struct {
+		name        string
+		out, stderr string
+		err         error
+		holds       bool
+		failed      bool
+	}{
+		{name: "the file", out: file + "\n", holds: true},
+		{name: "GitHub's 404", stderr: "gh: Not Found (HTTP 404)\n", err: exit},
+		{name: "GitHub's 5xx", stderr: "gh: Server Error (HTTP 502)\n", err: exit, failed: true},
+		{name: "a rate limit", stderr: "gh: API rate limit exceeded for user (HTTP 403)\n", err: exit, failed: true},
+		{name: "a body that is not JSON", stderr: "invalid character '<' looking for beginning of value\n", err: exit,
+			failed: true},
+		{name: "an answer that is not the file's", out: "<html>\n", failed: true},
+		{name: "a gh that cannot run", err: &exec.Error{Name: "gh", Err: exec.ErrNotFound}, failed: true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			holds, err := fileRead(file, []byte(c.out), []byte(c.stderr), c.err)
+			if holds != c.holds || (err != nil) != c.failed || errors.Is(err, errNotFound) {
+				t.Errorf("fileRead(%q, %q, %v) = %v, %v; want %v, an error %v and no errNotFound", c.out, c.stderr, c.err,
+					holds, err, c.holds, c.failed)
+			}
+			if c.stderr != "" && err != nil && !strings.Contains(err.Error(), strings.TrimSpace(c.stderr)) {
+				t.Errorf("fileRead(%q, %q, %v) = %v, want an error carrying the standard error", c.out, c.stderr, c.err, err)
+			}
+		})
+	}
+}
+
+// retryGH makes a failing call ghAttempts times, then returns its last error; it makes a call GitHub answered or
+// answered 404 once; and before a retry it reads what the failed call made, which ends the retries.
+func TestRetryGHRetriesOnlyAnError(t *testing.T) {
+	t.Parallel()
+	failure := errors.New(`gh api, standard error "gh: Server Error (HTTP 502)": exit status 1`)
+	for _, c := range []struct {
+		name    string
+		results []error
+		settled bool
+		calls   int
+		want    error
+	}{
+		{name: "answered", results: []error{nil}, calls: 1},
+		{name: "a 404", results: []error{fmt.Errorf("gh api: %w", errNotFound)}, calls: 1, want: errNotFound},
+		{name: "answered on a retry", results: []error{failure, failure, nil}, calls: 3},
+		{name: "failing every time", results: []error{failure, failure, failure}, calls: ghAttempts, want: failure},
+		{name: "made though it failed", results: []error{failure, failure, failure}, settled: true, calls: 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			calls := 0
+			var settled func() ([]byte, bool, error)
+			if c.settled {
+				settled = func() ([]byte, bool, error) { return []byte("made"), true, nil }
+			}
+			out, err := retryGH(0, settled, func() ([]byte, error) {
+				calls++
+				return []byte("call"), c.results[calls-1]
+			})
+			if calls != c.calls || (c.want == nil) != (err == nil) || (c.want != nil && !errors.Is(err, c.want)) {
+				t.Errorf("retryGH made %d calls and returned %q, %v; want %d calls and the error %v", calls, out, err,
+					c.calls, c.want)
+			}
+			if c.settled && string(out) != "made" {
+				t.Errorf("retryGH returned %q, want %q, what settled found", out, "made")
+			}
+		})
+	}
 }
 
 // issueWork is what queueRepo holds for the fixture issue: the branches that hold its file, and the pull requests that
