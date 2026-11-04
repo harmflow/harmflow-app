@@ -285,13 +285,12 @@ func (a *App) semanticChecks(ctx context.Context, r *ValidationResult, doc domai
 			r.addWarning("/spec/workspace/path", domain.WarningOther, domain.TextOf(err))
 		}
 	}
-	// A read path that does not expand yet, as a variable Settings does not define, is checked once it does; an execution
-	// refuses to start on it.
+	// A read path that does not expand, as one whose variable Settings does not define, is refused: the paths the rule
+	// refuses are among the errors above, and this one cannot be checked against it.
 	if p := doc.Spec.Permissions; p != nil && p.Custom != nil {
 		for i, rp := range p.Custom.ReadablePaths {
 			if _, err := a.expand(rp); err != nil {
-				r.addWarning(fmt.Sprintf("/spec/permissions/custom/readablePaths/%d", i), domain.WarningOther,
-					domain.TextOf(err))
+				r.addError(fmt.Sprintf("/spec/permissions/custom/readablePaths/%d", i), domain.TextOf(err))
 			}
 		}
 	}
