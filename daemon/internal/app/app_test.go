@@ -6046,6 +6046,74 @@ spec:
 	}
 }
 
+// A custom profile's program lists load, save, export, and import as the file writes them, and a task without them
+// reads with none. A program is a name: a path, a command with arguments, or a tool rule is refused at its entry.
+func TestProgramListsSurviveSaveExportAndImport(t *testing.T) {
+	e := newEnv(t)
+	task := func(id, custom string) string {
+		return taskYAML(id, "  permissions:\n    profile: custom\n    custom:\n"+custom)
+	}
+	lists := func(id string) (allowed, denied []string) {
+		t.Helper()
+		v, err := e.app.GetTask(id)
+		if err != nil {
+			t.Fatalf("GetTask(%s) = %v, want no error", id, err)
+		}
+		js, err := json.Marshal(v.Document)
+		if err != nil {
+			t.Fatalf("json.Marshal(GetTask(%s) document) = %v, want no error", id, err)
+		}
+		var doc domain.TaskDocument
+		if err := json.Unmarshal(js, &doc); err != nil {
+			t.Fatalf("json.Unmarshal(GetTask(%s) document) = %v, want no error", id, err)
+		}
+		if p := doc.Spec.Permissions; p != nil && p.Custom != nil {
+			return p.Custom.AllowedPrograms, p.Custom.DeniedPrograms
+		}
+		return nil, nil
+	}
+	wantAllowed, wantDenied := []string{"git", "python3", "clang++"}, []string{"curl"}
+	check := func(when string) {
+		t.Helper()
+		if allowed, denied := lists("programs"); !slices.Equal(allowed, wantAllowed) || !slices.Equal(denied, wantDenied) {
+			t.Errorf("GetTask(programs) %s: programs = %v and %v, want %v and %v", when, allowed, denied, wantAllowed,
+				wantDenied)
+		}
+	}
+	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: task("programs",
+		"      allowedPrograms: [git, python3, clang++]\n      deniedPrograms: [curl]\n")}); err != nil {
+		t.Fatalf("CreateTask(programs) = %v, want no error", err)
+	}
+	check("after CreateTask")
+	exported, err := e.app.ExportTask("programs")
+	if err != nil {
+		t.Fatalf("ExportTask(programs) = %v, want no error", err)
+	}
+	if !strings.Contains(string(exported), "allowedPrograms") || !strings.Contains(string(exported), "deniedPrograms") {
+		t.Errorf("ExportTask(programs) = %s, want both program lists", exported)
+	}
+	if _, err := e.app.ImportTask(t.Context(), string(exported), true); err != nil {
+		t.Fatalf("ImportTask(export of programs) = %v, want no error", err)
+	}
+	check("after ImportTask")
+	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: task("no-programs", "      allowedTools: [Read]\n")}); err != nil {
+		t.Fatalf("CreateTask(no-programs) = %v, want no error", err)
+	}
+	if allowed, denied := lists("no-programs"); allowed != nil || denied != nil {
+		t.Errorf("GetTask(no-programs) programs = %v and %v, want none", allowed, denied)
+	}
+	// A program is named, never given by a path or with arguments, which would not be a rule of one program.
+	for _, name := range []string{"/usr/bin/git", "git status", "Bash(git:*)", "-rf"} {
+		r := e.app.Validate(t.Context(), TaskInput{YAML: task("bad", "      allowedPrograms: ['"+name+"']\n")})
+		if r.Valid || !slices.ContainsFunc(r.Errors, func(i schema.Issue) bool {
+			return i.Path == "/spec/permissions/custom/allowedPrograms/0"
+		}) {
+			t.Errorf("Validate(allowedPrograms: [%s]) = %+v, want an error at /spec/permissions/custom/allowedPrograms/0",
+				name, r.Errors)
+		}
+	}
+}
+
 // An export masks a password, a cookie, and a session value wherever the file holds one — the prompt, the description,
 // or a comment — leaves the words around them, and still validates.
 func TestExportMasksCredentials(t *testing.T) {

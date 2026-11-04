@@ -669,6 +669,91 @@ func TestPrepareChecksAllowRulesOnlyForTheCustomProfile(t *testing.T) {
 	}
 }
 
+// A custom profile's program lists become rules of the shell tool: each allowed program an allow rule, added after the
+// task's own tools without changing the permission mode they set, and each denied program a deny rule, which Claude
+// Code applies before any allow rule. A program the shell starts may start others, so with a shell tool the lists are
+// not enforced; a shell tool the task allows whole is named apart when programs are allowed. With no shell tool, the
+// denied programs hold. With no lists, nothing changes and no restriction names them.
+func TestPrepareTranslatesProgramLists(t *testing.T) {
+	defaults := "Read,Glob,Grep,Skill,Task,TodoWrite"
+	cases := []struct {
+		name            string
+		tools           []string
+		allowed, denied []string
+		wantAllowed     string
+		wantDenied      string // the --disallowedTools list; "" for none
+		wantMode        string
+		want            []string // the keys of the program_lists restrictions not enforced; nil for one enforced
+		none            bool     // no program_lists restriction at all
+	}{
+		{name: "allowed programs with the default tools", allowed: []string{"git", "gh"},
+			wantAllowed: defaults + ",Bash(git:*),Bash(gh:*)", wantMode: "dontAsk",
+			want: []string{"restriction_claude_program_children"}},
+		{name: "a program both allowed and denied", allowed: []string{"git", "curl"}, denied: []string{"curl"},
+			wantAllowed: defaults + ",Bash(git:*),Bash(curl:*)", wantDenied: "Bash(curl:*)", wantMode: "dontAsk",
+			want: []string{"restriction_claude_program_children"}},
+		{name: "denied programs beside the whole shell", tools: []string{"Bash"}, denied: []string{"curl"},
+			wantAllowed: "Bash", wantDenied: "Bash(curl:*)", wantMode: "acceptEdits",
+			want: []string{"restriction_claude_program_children"}},
+		{name: "allowed programs beside the whole shell", tools: []string{"Read", "Bash"}, allowed: []string{"git"},
+			wantAllowed: "Read,Bash,Bash(git:*)", wantMode: "acceptEdits",
+			want: []string{"restriction_claude_shell_programs", "restriction_claude_program_children"}},
+		{name: "denied programs without a shell tool", denied: []string{"curl"},
+			wantAllowed: defaults, wantDenied: "Bash(curl:*)", wantMode: "dontAsk"},
+		{name: "no program lists", tools: []string{"Read", "Bash(jq:*)"},
+			wantAllowed: "Read,Bash(jq:*)", wantMode: "acceptEdits", none: true},
+	}
+	info := ports.HarnessInfo{Path: "/bin/claude", Features: map[string]bool{}}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+			perm := *domain.TaskDocument{}.Effective().Spec.Permissions
+			perm.Profile = domain.ProfileCustom
+			perm.Custom.AllowedTools, perm.Custom.AllowedPrograms, perm.Custom.DeniedPrograms = c.tools, c.allowed, c.denied
+			a := &Adapter{Home: t.TempDir()}
+			inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: t.TempDir(), Permissions: perm})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, _ := flagValue(inv.Args, "--allowedTools"); got != c.wantAllowed {
+				t.Errorf("Prepare --allowedTools = %q, want %q", got, c.wantAllowed)
+			}
+			if got, _ := flagValue(inv.Args, "--disallowedTools"); got != c.wantDenied {
+				t.Errorf("Prepare --disallowedTools = %q, want %q", got, c.wantDenied)
+			}
+			if got, _ := flagValue(inv.Args, "--permission-mode"); got != c.wantMode {
+				t.Errorf("Prepare --permission-mode = %q, want %q", got, c.wantMode)
+			}
+			var got []string
+			enforced := 0
+			for _, r := range inv.Restrictions {
+				switch {
+				case r.Name != "program_lists":
+				case r.Enforced:
+					enforced++
+				default:
+					got = append(got, r.Text.Key)
+				}
+			}
+			switch {
+			case c.none:
+				if enforced > 0 || got != nil {
+					t.Errorf("Prepare restrictions = %+v, want none named program_lists", inv.Restrictions)
+				}
+			case c.want == nil:
+				if enforced != 1 || got != nil {
+					t.Errorf("Prepare restrictions = %+v, want one program_lists, enforced", inv.Restrictions)
+				}
+			case enforced > 0 || !slices.Equal(got, c.want):
+				t.Errorf("Prepare program_lists not enforced = %v (and %d enforced), want %v", got, enforced, c.want)
+			}
+			if _, ok := restriction(inv.Restrictions, "tool_allowlist"); !ok {
+				t.Errorf("Prepare restrictions = %+v, want the tool_allowlist one still there", inv.Restrictions)
+			}
+		})
+	}
+}
+
 func restriction(rs []ports.Restriction, name string) (ports.Restriction, bool) {
 	for _, r := range rs {
 		if r.Name == name {

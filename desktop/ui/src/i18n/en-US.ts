@@ -381,7 +381,13 @@ export const enUS = {
       "Claude Code adds the allow rules of its $t(claudeSettings.{{sources}}) to the task's tool list, and they allow more than the list or could not be read; managed settings are not checked",
     restriction_claude_edit_rules:
       "Claude Code adds the allow rules and additional directories of its $t(claudeSettings.{{sources}}) to the task's permissions, and they allow file edits outside the workspace and the added directories or could not be read; managed settings are not checked",
+    restriction_claude_shell_programs:
+      "the task's allowed tools allow every shell command, so Claude Code's session may start programs the allowed programs leave out",
+    restriction_claude_program_children:
+      "Claude Code checks only the command its shell tool runs, so a program it starts may start others; the custom program lists are not enforced",
     restriction_codex_tool_lists: "Codex has no per-tool allow or deny list; the custom tool lists are not enforced",
+    restriction_codex_program_lists:
+      "Codex's sandbox does not limit the programs its shell starts; the custom program lists are not enforced",
     restriction_codex_read_only:
       "Codex's managed requirements do not allow its read-only sandbox with approvals off, or could not be read, so Codex may approve a change to a file of the workspace; the session may change files in its workspace",
     restriction_codex_ephemeral_missing:
@@ -1142,6 +1148,8 @@ export const enUS = {
       allowedTools: "Allowed tools",
       deniedTools: "Denied tools",
       writablePaths: "Writable paths",
+      allowedPrograms: "Allowed programs",
+      deniedPrograms: "Denied programs",
       listHint: "One per line.",
       timeoutMinutes: "Timeout (minutes), shared by all attempts",
       cancelGraceSeconds: "Grace before a cancellation is forced (seconds)",

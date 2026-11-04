@@ -388,8 +388,14 @@ export const esES: Resources = {
       "Claude Code suma las reglas de permiso de su $t(claudeSettings.{{sources}}) a la lista de herramientas de la tarea, y permiten más que la lista o no se pudieron leer; la configuración administrada no se comprueba",
     restriction_claude_edit_rules:
       "Claude Code suma las reglas de permiso y las carpetas adicionales de su $t(claudeSettings.{{sources}}) a los permisos de la tarea, y permiten editar archivos fuera del espacio de trabajo y de las carpetas añadidas o no se pudieron leer; la configuración administrada no se comprueba",
+    restriction_claude_shell_programs:
+      "las herramientas permitidas de la tarea permiten cualquier comando de shell, así que la sesión de Claude Code puede iniciar programas que los programas permitidos dejan fuera",
+    restriction_claude_program_children:
+      "Claude Code solo comprueba el comando que ejecuta su herramienta de shell, así que un programa que inicia puede iniciar otros; las listas de programas personalizadas no se aplican",
     restriction_codex_tool_lists:
       "Codex no tiene listas de herramientas permitidas o denegadas; las listas personalizadas no se aplican",
+    restriction_codex_program_lists:
+      "el sandbox de Codex no limita los programas que inicia su shell; las listas de programas personalizadas no se aplican",
     restriction_codex_read_only:
       "los requisitos administrados de Codex no permiten su sandbox de solo lectura con las aprobaciones desactivadas, o no se pudieron leer, así que Codex puede aprobar un cambio en un archivo del espacio de trabajo; la sesión puede cambiar archivos de su espacio de trabajo",
     restriction_codex_ephemeral_missing:
@@ -1165,6 +1171,8 @@ export const esES: Resources = {
       allowedTools: "Herramientas permitidas",
       deniedTools: "Herramientas denegadas",
       writablePaths: "Rutas con escritura",
+      allowedPrograms: "Programas permitidos",
+      deniedPrograms: "Programas denegados",
       listHint: "Una por línea.",
       timeoutMinutes: "Tiempo límite (minutos), compartido por los intentos",
       cancelGraceSeconds: "Gracia antes de forzar una cancelación (segundos)",

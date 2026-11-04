@@ -720,13 +720,17 @@ describe("task form document", () => {
     await enter(control<HTMLSelectElement>("Missed runs"), "skip");
     await enter(control<HTMLSelectElement>("Overlapping firings"), "skip");
 
-    // Permissions: the custom profile's lists show once it is chosen.
+    // Permissions: the custom profile's lists show once it is chosen, its subprocess controls among them.
+    expect(field("Allowed programs")).toBeUndefined();
+    expect(field("Denied programs")).toBeUndefined();
     await enter(control<HTMLSelectElement>("Profile"), "custom");
     await enter(control<HTMLSelectElement>("Network"), "deny");
     await click(toggle("Restrict writes to the workspace"));
     await enter(control<HTMLTextAreaElement>("Allowed tools"), "Read\nGrep");
     await enter(control<HTMLTextAreaElement>("Denied tools"), "WebFetch");
     await enter(control<HTMLTextAreaElement>("Writable paths"), "${FORM_REPO}");
+    await enter(control<HTMLTextAreaElement>("Allowed programs"), "git\ngh");
+    await enter(control<HTMLTextAreaElement>("Denied programs"), "curl");
 
     // Execution.
     await enter(control("Timeout (minutes), shared by all attempts"), "45");
@@ -766,7 +770,11 @@ describe("task form document", () => {
       ),
       harness: [preferred, fallback, checked("Fail over on"), control("Maximum switches").value],
       schedule: [...values("Repeats", "Time"), control("Cron expression (5 fields)").textContent, ...values("Time zone", "Missed runs", "Overlapping firings")],
-      permissions: [...values("Profile", "Network"), toggle("Restrict writes to the workspace").checked, ...values("Allowed tools", "Denied tools", "Writable paths")],
+      permissions: [
+        ...values("Profile", "Network"),
+        toggle("Restrict writes to the workspace").checked,
+        ...values("Allowed tools", "Denied tools", "Writable paths", "Allowed programs", "Denied programs"),
+      ],
       execution: values(
         "Timeout (minutes), shared by all attempts",
         "Grace before a cancellation is forced (seconds)",
@@ -787,7 +795,7 @@ describe("task form document", () => {
       queue: ["newest_first", "5", "2", "alternate", "1", "0", "0"],
       harness: [["codex", "gpt-5.6-terra", "high"], ["claude-code", "sonnet", "high"], ["AI tool unavailable"], "2"],
       schedule: ["weekdays", "06:30", "30 6 * * 1-5", "America/Sao_Paulo", "skip", "skip"],
-      permissions: ["custom", "deny", false, "Read\nGrep", "WebFetch", "${FORM_REPO}"],
+      permissions: ["custom", "deny", false, "Read\nGrep", "WebFetch", "${FORM_REPO}", "git\ngh", "curl"],
       execution: ["45", "10", "2", "30", "600"],
       notifications: [false, ["Operational failure", "Tests failed"]],
     });
@@ -800,6 +808,7 @@ describe("task form document", () => {
     expect(checked("Fail over on")).toEqual(["Quota exhausted", "AI tool unavailable"]);
     await enter(control("Time zone"), "");
     await enter(control<HTMLSelectElement>("Network"), "");
+    await enter(control<HTMLTextAreaElement>("Denied programs"), "");
     await enter(control("Timeout (minutes), shared by all attempts"), "");
     for (const event of ["Operational failure", "Tests failed"]) await tick("Notify me about", event);
     expect(checked("Notify me about")).toEqual(["Execution completed", "Operational failure", "Needs attention", "Draft PR created", "No alternative AI tool"]);
@@ -815,6 +824,7 @@ describe("task form document", () => {
       ["spec", "harness", "fallback", "on"],
       ["spec", "schedule", "timezone"],
       ["spec", "permissions", "network"],
+      ["spec", "permissions", "custom", "deniedPrograms"],
       ["spec", "execution", "timeoutMinutes"],
       ["spec", "notifications", "native", "events"],
     ]) {

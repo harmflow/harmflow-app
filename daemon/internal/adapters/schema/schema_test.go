@@ -492,6 +492,8 @@ spec:
       allowedTools: [Read]
       deniedTools: [Bash]
       writablePaths: [~/work/out]
+      allowedPrograms: [git, python3]
+      deniedPrograms: [curl]
   execution:
     timeoutMinutes: 90
     cancelGraceSeconds: 10
@@ -544,6 +546,8 @@ spec:
       allowedTools: [Read]
       deniedTools: [Bash]
       writablePaths: [~/work/out]
+      allowedPrograms: [git, python3]
+      deniedPrograms: [curl]
   execution:
     timeoutMinutes: 5
     cancelGraceSeconds: 10

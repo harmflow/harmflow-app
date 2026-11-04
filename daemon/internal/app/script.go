@@ -150,6 +150,9 @@ func scriptRestrictions(p domain.Permissions) []domain.Warning {
 		if c := p.Custom; c != nil && len(c.WritablePaths) > 0 {
 			names = append(names, "writablePaths")
 		}
+		if p.Custom.HasProgramLists() {
+			names = append(names, "program_lists")
+		}
 		if p.RestrictToWorkspace != nil && *p.RestrictToWorkspace {
 			names = append(names, "restrictToWorkspace")
 		}

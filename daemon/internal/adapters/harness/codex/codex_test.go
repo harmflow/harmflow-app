@@ -509,6 +509,48 @@ func TestPrepareSandbox(t *testing.T) {
 	}
 }
 
+// Codex takes a custom profile's program lists and reports them as a restriction not enforced, with a key of its own,
+// whichever of the two lists is set; nothing of them reaches its arguments. With neither, no restriction names them.
+func TestPrepareReportsProgramListsNotEnforced(t *testing.T) {
+	a := &Adapter{Home: t.TempDir()}
+	info := ports.HarnessInfo{Path: "/bin/codex", Features: map[string]bool{"--add-dir": true, "--ephemeral": true}}
+	perm := *domain.TaskDocument{}.Effective().Spec.Permissions
+	perm.Profile = domain.ProfileCustom
+	for _, c := range []struct {
+		name            string
+		allowed, denied []string
+	}{
+		{"allowed programs", []string{"git"}, nil},
+		{"denied programs", nil, []string{"curl"}},
+		{"both lists", []string{"git"}, []string{"curl"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			perm := perm
+			perm.Custom = &domain.CustomPermissions{AllowedPrograms: c.allowed, DeniedPrograms: c.denied}
+			inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, ExecutionDir: "/x"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			i := slices.IndexFunc(inv.Restrictions, func(r ports.Restriction) bool { return r.Name == "program_lists" })
+			if i < 0 || inv.Restrictions[i].Enforced || inv.Restrictions[i].Text.Key != "restriction_codex_program_lists" {
+				t.Errorf("Prepare(%s) restrictions = %+v, want program_lists not enforced, restriction_codex_program_lists",
+					c.name, inv.Restrictions)
+			}
+			if slices.Contains(inv.Args, "git") || slices.Contains(inv.Args, "curl") {
+				t.Errorf("Prepare(%s) args = %s, want no program of the lists", c.name, strings.Join(inv.Args, " "))
+			}
+		})
+	}
+	perm.Custom = &domain.CustomPermissions{AllowedTools: []string{"Read"}}
+	inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, ExecutionDir: "/x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.ContainsFunc(inv.Restrictions, func(r ports.Restriction) bool { return r.Name == "program_lists" }) {
+		t.Errorf("Prepare(no program lists) restrictions = %+v, want none named program_lists", inv.Restrictions)
+	}
+}
+
 // A read_only task runs in Codex's read-only sandbox, forced with a -c override as approvals off are, with the
 // execution's folder added and its network blocked. The profile is enforced when Codex's managed requirements, as
 // read, allow the read-only sandbox and approvals off, or manage nothing. When they leave one out, or could not be
