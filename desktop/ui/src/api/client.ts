@@ -98,8 +98,9 @@ export const api = {
   removeHarnessToken: (id: HarnessId) => call<Harness>("DELETE", `/harnesses/${id}/token`),
   tools: () => call<Tool[]>("GET", "/tools"),
   /**
-   * What a task can cite; a harness that finds the user's items per workspace, as Codex and Claude Code their skills,
-   * lists the ones of the task's workspace path, or of the folder HarmFlow runs the task in when it sets none.
+   * What a task can cite. Claude Code's and Codex's skills are the installation's, the same for every workspace; a
+   * harness that finds the user's items per workspace lists the ones of the task's workspace path, or of the folder
+   * HarmFlow runs the task in when it sets none.
    */
   catalog: (workspace?: string, task?: string, addDir?: string[]) =>
     call<Catalog>("GET", `/catalog${query({ workspace, task, addDir })}`),
