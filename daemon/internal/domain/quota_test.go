@@ -49,3 +49,39 @@ func TestQuotaExhausted(t *testing.T) {
 		})
 	}
 }
+
+// A share of the quota counts a plan window as exhausted once it is used at or above the share: a reading below it
+// starts, one at it does not. A share outside (0, 100] counts as the whole window, which keeps the check at 100%.
+func TestQuotaExhaustedAtAShare(t *testing.T) {
+	cases := []struct {
+		name  string
+		used  float64
+		share float64
+		want  bool
+	}{
+		{"below the share", 94, 95, false},
+		{"at the share", 95, 95, true},
+		{"above the share", 96.5, 95, true},
+		{"the default share below 100%", 99.9, FullShare, false},
+		{"the default share at 100%", 100, FullShare, true},
+		{"a share of 0 counts as the whole window", 50, 0, false},
+		{"a share above 100 counts as the whole window", 100, 150, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			q := Quota{Windows: []QuotaWindow{{Name: "session", UsedPercent: c.used}}}
+			if _, got := q.ExhaustedAt(c.share); got != c.want {
+				t.Errorf("ExhaustedAt(%v) with %v%% used = %v, want %v", c.share, c.used, got, c.want)
+			}
+		})
+	}
+}
+
+// A share is valid above 0 and at most 100.
+func TestValidShare(t *testing.T) {
+	for share, want := range map[float64]bool{-1: false, 0: false, 0.5: true, 95: true, 100: true, 100.1: false} {
+		if got := ValidShare(share); got != want {
+			t.Errorf("ValidShare(%v) = %v, want %v", share, got, want)
+		}
+	}
+}

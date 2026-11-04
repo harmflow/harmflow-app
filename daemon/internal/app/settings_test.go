@@ -1,7 +1,9 @@
 package app
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
@@ -176,5 +178,71 @@ func TestErrorTextFindsAWrappedError(t *testing.T) {
 	err := fmt.Errorf("firing: %w", newError(CodeNotFound, want))
 	if got := errorText(err); got.Key != want.Key || got.Message != want.Message {
 		t.Errorf("errorText(%v) = %+v, want %+v", err, got, want)
+	}
+}
+
+// A share of a harness's quota is kept and returned with the settings; a share that is not above 0 and at most 100 is
+// refused, naming it by its harness, and so is a share of a harness HarmFlow does not run. A refused change keeps the
+// shares as they were.
+func TestQuotaShareSettings(t *testing.T) {
+	e := newEnv(t)
+	v, err := e.app.UpdateSettings(SettingsPatch{Quota: map[string]QuotaShare{domain.HarnessClaudeCode: {MaxPercent: 95}}})
+	if err != nil {
+		t.Fatalf("UpdateSettings(claude-code at 95) = %v, want no error", err)
+	}
+	if got := v.Quota[domain.HarnessClaudeCode].MaxPercent; got != 95 || len(v.Quota) != 1 {
+		t.Errorf("UpdateSettings(claude-code at 95).Quota = %v, want claude-code at 95 alone", v.Quota)
+	}
+	if got := e.app.quotaShare(domain.HarnessCodex); got != domain.FullShare {
+		t.Errorf("quotaShare(codex) = %v, want %v for a harness left out", got, domain.FullShare)
+	}
+	cases := []struct {
+		name    string
+		harness string
+		share   float64
+		key     string
+		path    string
+	}{
+		{"zero", domain.HarnessClaudeCode, 0, "settings_quota_share_invalid", "/quota/claude-code/maxPercent"},
+		{"negative", domain.HarnessCodex, -5, "settings_quota_share_invalid", "/quota/codex/maxPercent"},
+		{"above 100", domain.HarnessClaudeCode, 101, "settings_quota_share_invalid", "/quota/claude-code/maxPercent"},
+		{"an unknown harness", "ollama", 50, "settings_quota_harness_unknown", "/quota/ollama"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := e.app.UpdateSettings(SettingsPatch{Quota: map[string]QuotaShare{c.harness: {MaxPercent: c.share}}})
+			var ae *Error
+			if !errors.As(err, &ae) || ae.Code != CodeValidationFailed || ae.Key != c.key || ae.Validation == nil ||
+				len(ae.Validation.Errors) != 1 || ae.Validation.Errors[0].Path != c.path {
+				t.Fatalf("UpdateSettings(%s at %v) = %v, want %s at %s", c.harness, c.share, err, c.key, c.path)
+			}
+			if !strings.Contains(ae.Message, "quota."+c.harness) {
+				t.Errorf("UpdateSettings(%s at %v) says %q, want it to name quota.%s", c.harness, c.share, ae.Message,
+					c.harness)
+			}
+			if got := e.app.quotaShare(domain.HarnessClaudeCode); got != 95 {
+				t.Errorf("after a refused change, quotaShare(claude-code) = %v, want 95", got)
+			}
+		})
+	}
+}
+
+// A share outside the bounds in the settings file, edited by hand, is refused when the settings load: its harness may
+// spend the whole of each window, and the other shares load.
+func TestQuotaShareRefusedOnLoad(t *testing.T) {
+	e := newEnv(t)
+	s := defaultSettings()
+	s.Quota = map[string]QuotaShare{domain.HarnessClaudeCode: {MaxPercent: 150}, domain.HarnessCodex: {MaxPercent: 80}}
+	if err := e.app.d.State.Save("settings", s); err != nil {
+		t.Fatalf("Save(settings) = %v", err)
+	}
+	if err := e.app.loadSettings(); err != nil {
+		t.Fatalf("loadSettings() = %v, want no error", err)
+	}
+	if got := e.app.quotaShare(domain.HarnessClaudeCode); got != domain.FullShare {
+		t.Errorf("quotaShare(claude-code) = %v, want %v for a share refused on load", got, domain.FullShare)
+	}
+	if got := e.app.quotaShare(domain.HarnessCodex); got != 80 {
+		t.Errorf("quotaShare(codex) = %v, want 80", got)
 	}
 }

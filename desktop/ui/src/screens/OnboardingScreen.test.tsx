@@ -55,6 +55,7 @@ const fresh: Settings = {
   pathVariables: {},
   allowedFolders: [],
   onboardingCompleted: false,
+  quota: {},
 };
 
 let root: Root | undefined;

@@ -24,11 +24,29 @@ type Quota struct {
 // SpendControl names the account's spend control when it is what exhausts a quota.
 const SpendControl = "spendControlReached"
 
-// Exhausted reports the first limit that leaves the quota exhausted: a plan window at 100%, a rate limit reported as
-// reached, or the account's spend control reached. An attempt that does not allow extra usage does not start on it.
+// FullShare is the share of a harness's quota HarmFlow may spend when the user sets none: the whole of each window.
+const FullShare = 100.0
+
+// ValidShare reports whether maxPercent is a share of a quota window HarmFlow may spend: above 0 and at most 100.
+func ValidShare(maxPercent float64) bool {
+	return maxPercent > 0 && maxPercent <= FullShare
+}
+
+// Exhausted reports the first limit that leaves the quota exhausted: a plan window at the whole of it, a rate limit
+// reported as reached, or the account's spend control reached. An attempt that does not allow extra usage does not
+// start on it.
 func (q Quota) Exhausted() (QuotaWindow, bool) {
+	return q.ExhaustedAt(FullShare)
+}
+
+// ExhaustedAt is Exhausted with a plan window counted as exhausted once it is used at or above maxPercent, the share of
+// it HarmFlow may spend. A share outside ValidShare counts as the whole window.
+func (q Quota) ExhaustedAt(maxPercent float64) (QuotaWindow, bool) {
+	if !ValidShare(maxPercent) {
+		maxPercent = FullShare
+	}
 	for _, w := range q.Windows {
-		if w.UsedPercent >= 100 {
+		if w.UsedPercent >= maxPercent {
 			return w, true
 		}
 	}
