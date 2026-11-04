@@ -24,14 +24,14 @@ func TestExportedNamesAreDocumented(t *testing.T) {
 	}
 }
 
-// undocumented parses every production .go file under root/internal and root/cmd, root being the module directory,
+// undocumented parses every production .go file under each of tops in root, root being the module directory,
 // except those of internal/contracts, and returns each exported name with no doc comment as "file:line: Name", file
 // relative to root. The names counted are functions, methods on exported types, types, and each name of a var or const
 // spec; a comment on the declaration, on its group, on the spec, or at the end of the spec's line documents a name.
 func undocumented(root string) ([]string, error) {
 	var missing []string
 	fset := token.NewFileSet()
-	for _, top := range []string{"internal", "cmd"} {
+	for _, top := range tops {
 		err := filepath.WalkDir(filepath.Join(root, top), func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err

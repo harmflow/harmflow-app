@@ -9,6 +9,7 @@ import { errorMessage } from "../lib/errorMessage";
 import { formatBytes, formatNumber, formatRelative, formatTime } from "../lib/format";
 import { useNow } from "../lib/hooks";
 import { ariaKeys, shortcutText, type ShortcutId } from "../lib/shortcuts";
+import { dynamicText, useRegistered } from "../registrations";
 import { actions, useStore } from "../state/store";
 import { HarnessMark, Icon, Logo, type IconName } from "./Icon";
 import { toast } from "./toast";
@@ -16,7 +17,10 @@ import { Banner, Button, Gauge, IconButton, cx } from "./ui";
 
 export type Screen = "overview" | "executions" | "tasks" | "history" | "settings";
 
-/** The sidebar's items, in the order it shows them, each with the shortcut that opens it: ⌘1 the first, and so on. */
+/** A built-in screen, or the route of a screen a registration added. */
+export type ScreenRoute = Screen | (string & {});
+
+/** The sidebar's built-in items, in the order it shows them, each with the shortcut that opens it: ⌘1 the first, and so on. */
 export const NAV: Array<{ key: Screen; icon: IconName; shortcut: ShortcutId }> = [
   { key: "overview", icon: "grid", shortcut: "openOverview" },
   { key: "executions", icon: "playFilled", shortcut: "openExecutions" },
@@ -86,12 +90,13 @@ export function Sidebar({
   collapsed,
   onToggle,
 }: {
-  screen: Screen;
-  onNavigate: (s: Screen) => void;
+  screen: ScreenRoute;
+  onNavigate: (s: ScreenRoute) => void;
   collapsed: boolean;
   onToggle: () => void;
 }) {
   const { t, i18n } = useTranslation();
+  const registered = useRegistered();
   const system = useStore((s) => s.system);
   const version = useStore((s) => s.appVersion);
   const running = useStore((s) => s.stats?.running ?? 0);
@@ -110,6 +115,11 @@ export function Sidebar({
   }, [collapsed]);
 
   const toggleLabel = collapsed ? t("sidebar.expand") : t("sidebar.collapse");
+  // The registered screens follow the built-in ones, with no shortcut of their own.
+  const items: Array<{ key: ScreenRoute; icon: IconName; shortcut?: ShortcutId }> = [
+    ...NAV,
+    ...registered.screens.map((s) => ({ key: s.route, icon: s.icon })),
+  ];
 
   return (
     <aside className="sidebar">
@@ -124,19 +134,20 @@ export function Sidebar({
       </div>
 
       <nav className="nav" aria-label="HarmFlow">
-        {NAV.map((item) => {
+        {items.map((item) => {
+          const label = dynamicText(t, `nav.${item.key}`);
           return (
             <button
               key={item.key}
               type="button"
               className={cx("nav__item", screen === item.key && "nav__item--active")}
               aria-current={screen === item.key ? "page" : undefined}
-              aria-keyshortcuts={ariaKeys(item.shortcut)}
+              aria-keyshortcuts={item.shortcut ? ariaKeys(item.shortcut) : undefined}
               onClick={() => onNavigate(item.key)}
-              {...(collapsed ? tipped(t(`nav.${item.key}`), shortcutText(item.shortcut)) : {})}
+              {...(collapsed ? tipped(label, item.shortcut ? shortcutText(item.shortcut) : undefined) : {})}
             >
               <Icon name={item.icon} size={19} />
-              <span className={cx("nav__label", collapsed && "sr-only")}>{t(`nav.${item.key}`)}</span>
+              <span className={cx("nav__label", collapsed && "sr-only")}>{label}</span>
               {item.key === "executions" && running > 0 ? <span className="nav__badge">{running}</span> : null}
             </button>
           );
@@ -218,11 +229,11 @@ export function Header({
   onNavigate,
   onOpenExecution,
 }: {
-  screen: Screen;
+  screen: ScreenRoute;
   /** What the breadcrumb adds after the screen's own: Settings' open section. */
   crumb?: string;
   onNewTask: () => void;
-  onNavigate: (s: Screen) => void;
+  onNavigate: (s: ScreenRoute) => void;
   onOpenExecution: (id: string) => void;
 }) {
   const { t, i18n } = useTranslation();
@@ -249,11 +260,11 @@ export function Header({
     <header className="topbar" data-tauri-drag-region>
       <div className="topbar__titles">
         <span className="breadcrumb">
-          <span className="breadcrumb__prompt">&gt;_</span> {t(`screens.${screen}.breadcrumb`)}
+          <span className="breadcrumb__prompt">&gt;_</span> {dynamicText(t, `screens.${screen}.breadcrumb`)}
           {crumb ? ` / ${crumb}` : null}
         </span>
-        <h1 className="topbar__title">{t(`screens.${screen}.title`)}</h1>
-        <p className="topbar__subtitle">{t(`screens.${screen}.subtitle`)}</p>
+        <h1 className="topbar__title">{dynamicText(t, `screens.${screen}.title`)}</h1>
+        <p className="topbar__subtitle">{dynamicText(t, `screens.${screen}.subtitle`)}</p>
       </div>
       <div className="topbar__status">
         <div className={cx("conn-pill", `conn-pill--${connection}`)} role="status">
@@ -413,7 +424,7 @@ export function noticeText(t: TFn, n: Notification): { title: string; body: stri
   return { title, body };
 }
 
-function MoreMenu({ onNavigate }: { onNavigate: (s: Screen) => void }) {
+function MoreMenu({ onNavigate }: { onNavigate: (s: ScreenRoute) => void }) {
   const { t } = useTranslation();
   const [open, setOpen, ref] = usePopover();
   const running = useStore((s) => s.stats?.running ?? 0);

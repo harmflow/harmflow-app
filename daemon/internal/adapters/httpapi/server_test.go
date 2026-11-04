@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -306,5 +308,91 @@ func TestSystemRouteWithoutAReaderLeavesOutEveryGauge(t *testing.T) {
 	s.SetToken(validToken)
 	if got := get(t, s, "/api/v1/system"); len(got) != 0 {
 		t.Errorf("GET /api/v1/system with no SystemInfo = %v, want {}", got)
+	}
+}
+
+// A route added through Routes is served by the handler Prepare builds, behind the same checks as the API's own: a
+// request without the token is refused, and one with it reaches the route. The API's own routes still answer beside it.
+func TestAddedRouteIsServedBehindTheToken(t *testing.T) {
+	added := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]any{"added": true}) })
+	s := &Server{App: startedApp(t), Routes: []Route{{Pattern: "GET /api/v1/added", Handler: added}}}
+	s.SetToken(validToken)
+	if err := s.Prepare(); err != nil {
+		t.Fatalf("Prepare() = %v, want nil", err)
+	}
+	serve := func(path, token string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", path, nil)
+		r.Host = "127.0.0.1:7000"
+		if token != "" {
+			r.Header.Set("Authorization", "Bearer "+token)
+		}
+		w := httptest.NewRecorder()
+		s.handler.ServeHTTP(w, r)
+		return w
+	}
+	if w := serve("/api/v1/added", ""); w.Code != 401 {
+		t.Errorf("GET /api/v1/added without a token: status %d, want 401", w.Code)
+	}
+	if w := serve("/api/v1/added", "not-the-token"); w.Code != 401 {
+		t.Errorf("GET /api/v1/added with a wrong token: status %d, want 401", w.Code)
+	}
+	if w := serve("/api/v1/added", validToken); w.Code != 200 || !strings.Contains(w.Body.String(), `"added":true`) {
+		t.Errorf("GET /api/v1/added with the token: status %d, body %q, want 200 from the added route", w.Code, w.Body.String())
+	}
+	if w := serve("/api/v1/health", validToken); w.Code != 200 {
+		t.Errorf("GET /api/v1/health beside an added route: status %d, want 200", w.Code)
+	}
+}
+
+// Prepare refuses a route it cannot add, rather than serve without it or panic, and builds no handler: one with no
+// handler, a path outside /api/v1/, a host, a pattern http.ServeMux refuses, or one that conflicts with the API's own
+// routes or with another added route.
+func TestPrepareRefusesARouteItCannotAdd(t *testing.T) {
+	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+	cases := []struct {
+		name   string
+		routes []Route
+	}{
+		{"no handler", []Route{{Pattern: "GET /api/v1/added"}}},
+		{"outside the API", []Route{{Pattern: "GET /added", Handler: ok}}},
+		{"another version", []Route{{Pattern: "GET /api/v2/added", Handler: ok}}},
+		{"with a host", []Route{{Pattern: "example.com/api/v1/added", Handler: ok}}},
+		{"not a pattern", []Route{{Pattern: "GET /api/v1/{added", Handler: ok}}},
+		{"the API's own route", []Route{{Pattern: "GET /api/v1/health", Handler: ok}}},
+		{"twice", []Route{{Pattern: "GET /api/v1/added", Handler: ok}, {Pattern: "GET /api/v1/added", Handler: ok}}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := &Server{App: startedApp(t), Routes: c.routes}
+			err := s.Prepare()
+			if last := c.routes[len(c.routes)-1].Pattern; err == nil || !strings.Contains(err.Error(), strconv.Quote(last)) {
+				t.Errorf("Prepare() with %v = %v, want an error naming %q", c.routes, err, last)
+			}
+			if s.handler != nil {
+				t.Errorf("Prepare() with %v built a handler, want none", c.routes)
+			}
+		})
+	}
+}
+
+// With no route added, Prepare builds the API's own routes alone, as Handler does.
+func TestPrepareWithNoAddedRoute(t *testing.T) {
+	s := &Server{App: startedApp(t)}
+	s.SetToken(validToken)
+	if err := s.Prepare(); err != nil {
+		t.Fatalf("Prepare() = %v, want nil", err)
+	}
+	for _, c := range []struct {
+		path string
+		want int
+	}{{"/api/v1/health", 200}, {"/api/v1/added", 404}} {
+		r := httptest.NewRequest("GET", c.path, nil)
+		r.Host = "127.0.0.1:7000"
+		r.Header.Set("Authorization", "Bearer "+validToken)
+		w := httptest.NewRecorder()
+		s.handler.ServeHTTP(w, r)
+		if w.Code != c.want {
+			t.Errorf("GET %s: status %d, want %d", c.path, w.Code, c.want)
+		}
 	}
 }

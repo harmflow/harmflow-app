@@ -143,6 +143,9 @@ describe("i18n resources", () => {
     expect(i18n.services.backendConnector.backend).toBeFalsy();
   });
 
+  // The one change to the resources after they ship is the dashboard's registrations': registrations.tsx merges their
+  // texts into the languages above before the first render, adding no language and replacing no text, as
+  // dashboard.test.tsx proves.
   it("adds or loads no resource at run time", () => {
     const calls: string[] = [];
     for (const file of interfaceFiles(join(__dirname, ".."))) {

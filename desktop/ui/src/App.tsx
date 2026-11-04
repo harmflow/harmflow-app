@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { native } from "./api/native";
 import { RootBoundary, ScreenBoundary } from "./components/ErrorBoundary";
-import { Header, NAV, Sidebar, noticeText, type Screen } from "./components/Shell";
+import { Header, NAV, Sidebar, noticeText, type ScreenRoute } from "./components/Shell";
 import type { LeaveCheck } from "./components/TaskEditor";
 import { Toasts } from "./components/toast";
 import { applyLanguage } from "./i18n";
@@ -13,7 +13,8 @@ import { HistoryScreen } from "./screens/HistoryScreen";
 import { ImportDialog } from "./screens/ImportDialog";
 import { DaemonDownScreen, OnboardingScreen } from "./screens/OnboardingScreen";
 import { OverviewScreen } from "./screens/OverviewScreen";
-import { SettingsScreen, isSettingsSection, type SettingsSection } from "./screens/SettingsScreen";
+import { NOTHING_REGISTERED, RegisteredProvider, dynamicText, useRegistered, type Registered } from "./registrations";
+import { SettingsScreen, isSettingsSection, type SettingsSectionKey } from "./screens/SettingsScreen";
 import { TemplatePicker } from "./components/Templates";
 import { TasksScreen, type TaskView } from "./screens/TasksScreen";
 import { actions, setNotificationHandler, startSync, useStore } from "./state/store";
@@ -47,20 +48,26 @@ function wasExecutionsAsideHidden(): boolean {
   }
 }
 
-/** What `main.tsx` renders: the interface inside the boundary that keeps the root from ending up empty. */
-export function Root() {
+/**
+ * What the entry file, `dashboard.tsx`, renders: the interface inside the boundary that keeps the root from ending up
+ * empty, with what the registrations add, checked; nothing without them.
+ */
+export function Root({ registered = NOTHING_REGISTERED }: { registered?: Registered } = {}) {
   return (
     <RootBoundary>
-      <App />
+      <RegisteredProvider value={registered}>
+        <App />
+      </RegisteredProvider>
     </RootBoundary>
   );
 }
 
 export function App() {
   const { t, i18n } = useTranslation();
-  const [screen, setScreen] = useState<Screen>("executions");
+  const registered = useRegistered();
+  const [screen, setScreen] = useState<ScreenRoute>("executions");
   // Settings opens on General the first time after a launch, and later on the section last open; never kept longer.
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionKey>("general");
   const [selectedExecution, setSelectedExecution] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState<string | null>(null);
   const [taskView, setTaskView] = useState<TaskView>({ kind: "list" });
@@ -171,7 +178,7 @@ export function App() {
 
   // Settings, on the section asked for, or the one last open. Opening what is already open changes nothing, so it asks
   // nothing either.
-  const openSettings = (section: SettingsSection = settingsSection) => {
+  const openSettings = (section: SettingsSectionKey = settingsSection) => {
     if (screen === "settings" && section === settingsSection) return;
     leave(() => {
       setScreen("settings");
@@ -179,7 +186,7 @@ export function App() {
     });
   };
 
-  const navigate = (s: Screen) => {
+  const navigate = (s: ScreenRoute) => {
     if (s === "settings") return openSettings();
     leave(() => {
       setScreen(s);
@@ -196,6 +203,7 @@ export function App() {
   // A daemon being restarted is down for a moment: the shell stays, with the topbar saying so.
   const daemonDown = !onboarding && native.available && daemonRunning === false && !restarting;
   const shell = !onboarding && !daemonDown;
+  const RegisteredScreen = registered.screens.find((s) => s.route === screen)?.component;
 
   // A target from the tray or a notice shows its execution. A screen from the app menu (⌘,), or the Help menu's
   // Keyboard Shortcuts with its Settings section, acts where ⌘N does: in
@@ -212,8 +220,9 @@ export function App() {
         setSelectedExecution(executionId);
       });
     } else if (target && shell && !document.querySelector('[aria-modal="true"]')) {
-      if (target === "settings") openSettings(isSettingsSection(section) ? section : undefined);
-      else leave(() => setScreen(target as Screen));
+      const known = isSettingsSection(section) || registered.settingsSections.some((s) => s.key === section);
+      if (target === "settings") openSettings(known ? section : undefined);
+      else leave(() => setScreen(target));
     }
   }, [navigation]);
 
@@ -292,7 +301,7 @@ export function App() {
       <main className="app__content">
         <Header
           screen={screen}
-          crumb={screen === "settings" ? t(`settings.sections.${settingsSection}`).toLocaleLowerCase(i18n.language) : undefined}
+          crumb={screen === "settings" ? dynamicText(t, `settings.sections.${settingsSection}`).toLocaleLowerCase(i18n.language) : undefined}
           onNewTask={() => setPicker(true)}
           onNavigate={navigate}
           onOpenExecution={openExecution}
@@ -322,6 +331,7 @@ export function App() {
           ) : null}
           {screen === "history" ? <HistoryScreen openId={historyOpen} onOpen={setHistoryOpen} /> : null}
           {screen === "settings" ? <SettingsScreen section={settingsSection} onSection={openSettings} onLeaveCheck={holdLeaveCheck} /> : null}
+          {RegisteredScreen ? <RegisteredScreen /> : null}
         </ScreenBoundary>
       </main>
       {picker ? (

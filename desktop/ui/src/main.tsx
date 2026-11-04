@@ -1,18 +1,5 @@
-import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import { Root } from "./App";
-import { rootOptions } from "./components/ErrorBoundary";
-import "./i18n";
-import "./design/fonts.css";
-import "./design/tokens.css";
-import "./design/app.css";
+import { renderDashboard } from "./dashboard";
 
 const root = document.getElementById("root");
-if (root) {
-  // The first render replaces the placeholder of index.html.
-  createRoot(root, rootOptions).render(
-    <StrictMode>
-      <Root />
-    </StrictMode>,
-  );
-}
+// This build registers nothing: the dashboard is the one this repository builds.
+if (root) renderDashboard(root);

@@ -1,6 +1,6 @@
 // Package archtest holds the daemon's import rules as a test, in the spirit of ArchUnit: the hexagonal layers and the
-// daemon structure's constraints, checked over every production file of daemon/internal/ and daemon/cmd/. It has no
-// production file, so it is a package no rule needs to cover.
+// daemon structure's constraints, checked over every production file of daemon/internal/, daemon/cmd/, and
+// daemon/harmflowd/. It has no production file, so it is a package no rule needs to cover.
 package archtest
 
 import (
@@ -49,7 +49,12 @@ var rules = []rule{
 	{"internal/adapters/httpapi", "", func(string, bool) bool { return true }},
 	{"internal/adapters", ruleOutbound, func(imp string, in bool) bool { return !in || !under(imp, "internal/app") }},
 	{"cmd/harmflowd", "", func(string, bool) bool { return true }},
+	{"harmflowd", "", func(string, bool) bool { return true }},
 }
+
+// tops are the module's directories that hold production code: internal/, cmd/, and harmflowd/, the importable package
+// that starts the daemon.
+var tops = []string{"internal", "cmd", "harmflowd"}
 
 // allowance is a violation on record, with why it is there. Each entry is removed when its violation is resolved; an
 // entry that matches no violating import fails the test.
@@ -82,15 +87,15 @@ type violation struct {
 	msg       string
 }
 
-// check parses the imports of every production .go file under root/internal and root/cmd, root being the directory of
-// the module named module, and returns the violations not in allowed, then the entries of allowed that match none,
+// check parses the imports of every production .go file under each of tops in root, root being the directory of the
+// module named module, and returns the violations not in allowed, then the entries of allowed that match none,
 // sorted by file and import.
 func check(root, module string, allowed []allowance) ([]violation, error) {
 	used := make([]bool, len(allowed))
 	uncovered := map[string]bool{}
 	var vs []violation
 	fset := token.NewFileSet()
-	for _, top := range []string{"internal", "cmd"} {
+	for _, top := range tops {
 		err := filepath.WalkDir(filepath.Join(root, top), func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
