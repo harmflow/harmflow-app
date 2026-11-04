@@ -95,6 +95,8 @@ func TestTaskPathsAreChecked(t *testing.T) {
 		{"a read path of /", readable("/"), rp, "path_forbidden_home"},
 		{"a read path through a symlink out of the allowed area", readable(home + "/Developer/elsewhere"), rp,
 			"path_outside_allowed_area"},
+		{"a read path whose variable is undefined", readable(`"${HF_TEST_UNDEFINED_READ}/docs"`), rp,
+			"path_variable_undefined"},
 		{"a local path inside home", issueTask("t", repo, ""), lp, ""},
 		{"a local path outside", issueTask("t", outside, ""), lp, "path_outside_allowed_area"},
 	}
@@ -237,6 +239,53 @@ func TestSavedTaskOutsideTheRuleDoesNotRun(t *testing.T) {
 	x := e.wait(r.ExecutionID, domain.StatusFailed)
 	if x.ErrorKey != "task_path_refused" || !strings.Contains(x.ErrorMessage, "/spec/workspace/path") {
 		t.Errorf("the execution failed with %s: %s", x.ErrorKey, x.ErrorMessage)
+	}
+	e.claude.mu.Lock()
+	defer e.claude.mu.Unlock()
+	if len(e.claude.prompts) != 0 {
+		t.Errorf("the harness started: %v", e.claude.prompts)
+	}
+}
+
+// A read path is checked again when an execution starts, as a workspace is: one retargeted out of the allowed area, or
+// one whose variable Settings no longer defines, fails the execution before its harness starts, naming its field.
+func TestSavedReadPathOutsideTheRuleDoesNotRun(t *testing.T) {
+	e := newEnv(t)
+	home := e.app.Paths().UserHome
+	target := mkdir(t, filepath.Join(home, "Developer", "docs"))
+	link := filepath.Join(home, "Developer", "current-docs")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.app.UpdateSettings(SettingsPatch{PathVariables: map[string]string{"DOCS": target}}); err != nil {
+		t.Fatal(err)
+	}
+	reads := func(p string) string {
+		return "  permissions:\n    profile: custom\n    custom:\n      readablePaths:\n        - \"" + p + "\"\n"
+	}
+	e.create("linked-reads", reads(link))
+	e.create("variable-reads", reads("${DOCS}"))
+
+	etc := mkdir(t, filepath.Join(t.TempDir(), "etc"))
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(etc, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.app.UpdateSettings(SettingsPatch{PathVariables: map[string]string{}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"linked-reads", "variable-reads"} {
+		r, err := e.app.RunTask(id)
+		if err != nil {
+			t.Fatalf("RunTask(%s) = %v, want no error", id, err)
+		}
+		x := e.wait(r.ExecutionID, domain.StatusFailed)
+		if x.ErrorKey != "task_path_refused" || !strings.Contains(x.ErrorMessage, "/spec/permissions/custom/readablePaths/0") {
+			t.Errorf("RunTask(%s) failed with %s: %s, want task_path_refused naming the read path", id, x.ErrorKey,
+				x.ErrorMessage)
+		}
 	}
 	e.claude.mu.Lock()
 	defer e.claude.mu.Unlock()
