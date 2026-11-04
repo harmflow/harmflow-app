@@ -301,13 +301,20 @@ func sweepSuiteFixtures(t *testing.T, label, base string, own ...int) {
 }
 
 // sweepFailingTestsFixtures removes from queueRepo what the test's runs left: what sweepSuiteFixtures finds by the
-// fixture issues and their label, and then every branch but base that holds the package.json of sandboxSuite, such as
-// one whose pull request went into a base other than the default branch, where GitHub links it to no issue. Every work
-// branch of a run holds that file, which only the clone's base branch adds, and no other fixture set's branch holds it.
-// Deleting a branch closes the pull request still open from it.
+// fixture issues and their label, and then the branches sweepSuiteBranches finds, such as one whose pull request went
+// into a base other than the default branch, where GitHub links it to no issue.
 func sweepFailingTestsFixtures(t *testing.T, base string, own ...int) {
 	t.Helper()
 	sweepSuiteFixtures(t, retryLimitLabel, base, own...)
+	sweepSuiteBranches(t, base)
+}
+
+// sweepSuiteBranches deletes every branch of queueRepo but base that holds the package.json of sandboxSuite. Every work
+// branch of a run on the clone cloneWithSuite makes holds that file, which only the clone's base branch adds, and the
+// base branch on GitHub never holds it. The opt-in tests run one at a time, so a branch another test's run left holding
+// it is one that run left behind. Deleting a branch closes the pull request still open from it.
+func sweepSuiteBranches(t *testing.T, base string) {
+	t.Helper()
 	branches, err := branchesHoldingSuiteFile(sandboxSuite, "package.json")
 	if err != nil {
 		t.Errorf("cleanup: %v", err)

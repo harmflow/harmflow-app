@@ -166,6 +166,14 @@ func openFixturePR(t *testing.T, base string, issue int, spec fixturePR) (restar
 		_, _ = newWorkGh("repos/"+queueRepo+"/git/refs/heads/"+spec.Branch, "-X", "DELETE")
 		t.Fatalf("commit %s on %s: %v", spec.File, spec.Branch, err)
 	}
+	return openFixturePRFrom(t, base, issue, spec), commit
+}
+
+// openFixturePRFrom opens the pull request spec describes in queueRepo into base, from its Branch, which already holds
+// its commits, for the fixture issue its body closes. It returns once GitHub links the pull request to the issue, as a
+// session reads it. It uses neither File, Content, nor Message of spec.
+func openFixturePRFrom(t *testing.T, base string, issue int, spec fixturePR) restartPR {
+	t.Helper()
 	out := newWorkAPI(t, "repos/"+queueRepo+"/pulls", "-f", "title="+spec.Title, "-f", "head="+spec.Branch,
 		"-f", "base="+base, "-F", "draft="+strconv.FormatBool(spec.Draft), "-f", "body="+spec.Body,
 		"--jq", "{number, url: .html_url}")
@@ -186,13 +194,14 @@ func openFixturePR(t *testing.T, base string, issue int, spec fixturePR) (restar
 	}
 	// GitHub links a pull request to the issue it closes some seconds after it opens it.
 	var linked []linkedPR
+	var err error
 	for deadline := time.Now().Add(time.Minute); time.Now().Before(deadline); time.Sleep(time.Second) {
 		if linked, err = linkingPullRequests(issue); err == nil && links(linked, pr.Number, spec.Alone) {
-			return pr, commit
+			return pr
 		}
 	}
 	t.Fatalf("after a minute, the pull requests linking #%d are %+v (%v), want %s %s", issue, linked, err, pr.URL, want)
-	return restartPR{}, ""
+	return restartPR{}
 }
 
 // links reports whether the pull request number is among the linked pull requests, or, when alone is set, the only one.
