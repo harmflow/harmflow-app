@@ -3,9 +3,11 @@ package integration
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"net/url"
 	"os"
 	"os/exec"
@@ -192,16 +194,8 @@ func TestRealClaudeCodeListsInstalledSkills(t *testing.T) {
 	saved := d.call("POST", "/tasks", map[string]any{"document": map[string]any{"apiVersion": "harmflow/v1alpha1",
 		"kind": "Task", "metadata": map[string]any{"id": "listed-skills", "name": "Listed skills"},
 		"spec": spec(configSkill)}}, 201)
-	// The validator's warnings are in the saved task's validation; the task's own, in its warnings.
-	warnings, _ := saved["warnings"].([]any)
-	if v, _ := saved["validation"].(map[string]any); v != nil {
-		checked, _ := v["warnings"].([]any)
-		warnings = append(warnings, checked...)
-	}
-	for _, x := range warnings {
-		if w, _ := x.(map[string]any); w["messageKey"] == "skill_list_unverified" || w["code"] == "missing_skill" {
-			t.Errorf("POST /tasks listed-skills warns %v, want no skill_list_unverified and no missing skill", w)
-		}
+	for _, w := range skillListWarnings(saved) {
+		t.Errorf("POST /tasks listed-skills warns %v, want no skill_list_unverified and no missing skill", w)
 	}
 
 	for _, skill := range []string{workSkill, addedSkill} {
@@ -222,6 +216,158 @@ func TestRealClaudeCodeListsInstalledSkills(t *testing.T) {
 				errs, skill)
 		}
 	}
+}
+
+// A plugin's skill is one of the user's skills on Claude Code, under the name the installed Claude Code reports for it,
+// <plugin>:<skill>. The test installs, enables, and writes no plugin: it takes a skill of one the signed-in Claude Code
+// already has, installed for the user and enabled, and the name expected for it from the plugin's own files in Claude
+// Code's configuration directory, not from the daemon. GET /catalog offers that skill on Claude Code, as the user's,
+// and a task citing it saves with no skill_list_unverified warning and no missing skill. A failure prints what the
+// daemon says of Claude Code's skill list and daemon.log, so a change in how the init line names a plugin's skill can
+// be read from it.
+func TestRealClaudeCodeOffersAnInstalledPluginsSkill(t *testing.T) {
+	claude := realClaude(t)
+	// Before the daemon starts, so that a machine with no such plugin starts no session.
+	skill := installedPluginSkill(t, claudeConfigDir(t))
+	work := resolvedTempDir(t)
+
+	d := startDaemon(t, t.TempDir())
+	d.call("PUT", "/harnesses/claude-code", map[string]any{"path": claude}, 200)
+	d.call("PATCH", "/settings", map[string]any{"allowedFolders": []any{work}}, 200)
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("what the daemon says of Claude Code's skill list:\n%s", d.skillListLog([][]string{{work}}))
+		}
+	})
+
+	if offered := d.claudeCodeSkillsOffered(work); !slices.Contains(offered, skill.name) {
+		t.Errorf("GET /catalog for the workspace %s offers %q on Claude Code, want %s among them, the skill of %s%s",
+			work, offered, skill.name, skill.file, skill.declaredOther())
+	}
+
+	saved := d.call("POST", "/tasks", map[string]any{"document": map[string]any{"apiVersion": "harmflow/v1alpha1",
+		"kind": "Task", "metadata": map[string]any{"id": "plugin-skill", "name": "Plugin skill"},
+		"spec": map[string]any{
+			"type":      "general",
+			"prompt":    "Reply with OK.",
+			"skills":    []any{skill.name},
+			"harness":   map[string]any{"preferred": map[string]any{"provider": "claude-code", "model": "haiku", "effort": "low"}},
+			"workspace": map[string]any{"path": work},
+		}}}, 201)
+	for _, w := range skillListWarnings(saved) {
+		t.Errorf("POST /tasks citing %s warns %v, want no skill_list_unverified and no missing skill", skill.name, w)
+	}
+}
+
+// skillListWarnings are the warnings of a saved task that say Claude Code's skill list could not be read or that a
+// skill is missing. The validator's warnings are in the saved task's validation; the task's own, in its warnings.
+func skillListWarnings(saved map[string]any) []map[string]any {
+	warnings, _ := saved["warnings"].([]any)
+	if v, _ := saved["validation"].(map[string]any); v != nil {
+		checked, _ := v["warnings"].([]any)
+		warnings = append(warnings, checked...)
+	}
+	var found []map[string]any
+	for _, x := range warnings {
+		if w, _ := x.(map[string]any); w["messageKey"] == "skill_list_unverified" || w["code"] == "missing_skill" {
+			found = append(found, w)
+		}
+	}
+	return found
+}
+
+// pluginSkill is a skill an installed plugin brings, as the plugin's own files name it.
+type pluginSkill struct {
+	name     string // <plugin>:<the skill's folder>, the name Claude Code is expected to report
+	declared string // the name the skill's front matter declares, if any
+	file     string // the skill's SKILL.md
+}
+
+// declaredOther says, for a failure message, the name the skill's front matter declares when it is not its folder's.
+func (s pluginSkill) declaredOther() string {
+	if _, folder, _ := strings.Cut(s.name, ":"); s.declared != "" && s.declared != folder {
+		return fmt.Sprintf(", whose front matter names it %s", s.declared)
+	}
+	return ""
+}
+
+// installedPluginSkill is the first skill, by the plugin's key and the skill's folder, of a plugin installed for the
+// user in Claude Code's configuration directory config and enabled in its settings.json. It reads the plugins' own
+// files: installed_plugins.json, each plugin's .claude-plugin/plugin.json, and its skills/<skill>/SKILL.md, so it
+// starts no process and writes nothing. It skips the test when no such plugin brings a skill.
+func installedPluginSkill(t *testing.T, config string) pluginSkill {
+	t.Helper()
+	const need = "needs a plugin that brings a skill, installed for the user and enabled in the signed-in Claude Code; " +
+		"the test installs none"
+	var installed struct {
+		Plugins map[string][]struct {
+			Scope       string `json:"scope"`
+			InstallPath string `json:"installPath"`
+		} `json:"plugins"`
+	}
+	var settings struct {
+		EnabledPlugins map[string]bool `json:"enabledPlugins"`
+	}
+	for _, f := range []struct {
+		path string
+		into any
+	}{
+		{filepath.Join(config, "plugins", "installed_plugins.json"), &installed},
+		{filepath.Join(config, "settings.json"), &settings},
+	} {
+		data, err := os.ReadFile(f.path)
+		if err != nil {
+			t.Skipf("%s: %v", need, err)
+		}
+		if err := json.Unmarshal(data, f.into); err != nil {
+			t.Skipf("%s: reading %s: %v", need, f.path, err)
+		}
+	}
+	for _, key := range slices.Sorted(maps.Keys(installed.Plugins)) {
+		if !settings.EnabledPlugins[key] {
+			continue
+		}
+		for _, p := range installed.Plugins[key] {
+			if p.Scope != "user" {
+				continue
+			}
+			plugin, _, _ := strings.Cut(key, "@")
+			var manifest struct {
+				Name string `json:"name"`
+			}
+			if data, err := os.ReadFile(filepath.Join(p.InstallPath, ".claude-plugin", "plugin.json")); err == nil &&
+				json.Unmarshal(data, &manifest) == nil && manifest.Name != "" {
+				plugin = manifest.Name
+			}
+			// Glob returns the files sorted, so the first is the first skill by its folder.
+			if files, _ := filepath.Glob(filepath.Join(p.InstallPath, "skills", "*", "SKILL.md")); len(files) > 0 {
+				return pluginSkill{name: plugin + ":" + filepath.Base(filepath.Dir(files[0])),
+					declared: declaredName(files[0]), file: files[0]}
+			}
+		}
+	}
+	t.Skipf("%s: none of the plugins %q in %s is installed for the user, enabled in settings.json, and brings a skill",
+		need, slices.Sorted(maps.Keys(installed.Plugins)), filepath.Join(config, "plugins", "installed_plugins.json"))
+	return pluginSkill{}
+}
+
+// declaredName is the name the front matter of the Markdown file at path declares, or "" when it declares none.
+func declaredName(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	front, ok := strings.CutPrefix(string(data), "---\n")
+	if !ok {
+		return ""
+	}
+	front, _, _ = strings.Cut(front, "\n---")
+	for line := range strings.Lines(front) {
+		if v, ok := strings.CutPrefix(line, "name:"); ok {
+			return strings.Trim(strings.TrimSpace(v), `"'`)
+		}
+	}
+	return ""
 }
 
 // resolvedTempDir is a temporary folder with its symbolic links resolved, as the daemon resolves a task's paths.
