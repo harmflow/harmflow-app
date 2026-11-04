@@ -432,6 +432,70 @@ describe("screens", () => {
   });
 });
 
+// An execution that found no work is no failure: the recent history marks it No work, in the neutral tone and with the
+// circle, beside a failed one's danger mark and cross, and the Overview leaves it out of what needs attention. The
+// labels are read in en-US, which these tests switch to from pt-BR, as the History screen's tests render.
+describe("an execution that found no work", () => {
+  const noWork: ExecutionSummary = { ...finished, id: "exec-no-work", taskName: "Look for new issues", status: "no_work", workItem: undefined, pullRequestUrl: undefined, testsStatus: undefined };
+  const failed: ExecutionSummary = { ...finished, id: "exec-failed", taskName: "Write release notes", status: "failed", workItem: undefined, pullRequestUrl: undefined, testsStatus: undefined };
+
+  /** The screen rendered in en-US from a recent history holding both executions, as a DOM to query. */
+  async function show(node: ReactNode) {
+    const { recent } = getState();
+    await i18n.changeLanguage("en-US");
+    patchStateForTests({ recent: [noWork, failed] });
+    try {
+      const host = document.createElement("div");
+      host.innerHTML = renderToString(node);
+      return host;
+    } finally {
+      patchStateForTests({ recent });
+      await i18n.changeLanguage("pt-BR");
+    }
+  }
+
+  /** The icon as the DOM writes it, to compare with the one a mark holds. */
+  const icon = (name: "circle" | "x") => {
+    const holder = document.createElement("div");
+    holder.innerHTML = renderToString(<Icon name={name} size={16} />);
+    return holder.innerHTML;
+  };
+
+  /** A status mark's tone, label, and icon. */
+  const mark = (row: Element) => {
+    const m = row.querySelector(".status-mark")!;
+    const tones = [...m.classList].filter((c) => c.startsWith("status-mark--"));
+    return { tones, title: m.getAttribute("title"), label: m.querySelector(".sr-only")!.textContent, icon: m.querySelector("svg")!.outerHTML };
+  };
+
+  it("lists the waiting work items in the queue, and marks the execution No work in the recent history, apart from a failed one", async () => {
+    const host = await show(<ExecutionsScreen selectedId={null} onSelect={() => {}} onGoToTasks={() => {}} onSeeHistory={() => {}} />);
+    const text = host.textContent!;
+    expect(text).toContain("Draft PR with failing tests");
+    expect(text).toContain("Issue to retry");
+    expect(text).not.toContain("Completed issue");
+
+    const rows = [...host.querySelectorAll(".history-item")];
+    const row = (name: string) => rows.find((r) => r.querySelector(".history-item__title")!.textContent === name)!;
+    expect(rows.map((r) => r.querySelector(".history-item__title")!.textContent)).toEqual([noWork.taskName, failed.taskName]);
+
+    expect(mark(row(noWork.taskName))).toEqual({ tones: ["status-mark--neutral"], title: "No work", label: "No work", icon: icon("circle") });
+    expect(row(noWork.taskName).textContent).not.toContain("Failed");
+    expect(mark(row(failed.taskName))).toEqual({ tones: ["status-mark--danger"], title: "Failed", label: "Failed", icon: icon("x") });
+  });
+
+  it("leaves it out of the Overview's executions that need attention, which hold the failed one", async () => {
+    const host = await show(<OverviewScreen onOpenExecution={() => {}} onNewTask={() => {}} onOpenTask={() => {}} />);
+    const panel = [...host.querySelectorAll("section.panel")].find((p) => p.querySelector(".panel__title")?.textContent === "Needs your attention")!;
+    expect(panel).toBeDefined();
+    const rows = [...panel.querySelectorAll("li")];
+    expect(rows.map((r) => r.querySelector("strong")!.textContent)).toEqual([failed.taskName]);
+    expect(mark(rows[0])).toEqual({ tones: ["status-mark--danger"], title: "Failed", label: "Failed", icon: icon("x") });
+    expect(panel.textContent).not.toContain(noWork.taskName);
+    expect(panel.textContent).not.toContain("No work");
+  });
+});
+
 // Every active execution has its own card, with its own fields and Cancel. The card's Cancel sends the same single
 // cancel as the detail's, and a finished execution's card cannot cancel it.
 describe("the executions screen's cards", () => {

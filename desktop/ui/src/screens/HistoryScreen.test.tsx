@@ -2,8 +2,8 @@
 // Drives the History screen, the task's history, in a DOM against a stand-in for the daemon's local API: an execution
 // whose log expired under the retention period is still listed for its task, with its whole record, and opening it says
 // its log is gone. That the daemon keeps the record and serves it so is app › TestRetentionDeletesOnlyExpiredLogs's and
-// itest › TestRetentionExpiresTheLogAtStart's. Its filter bar gives the date fields the class that keeps them on the
-// filters' line.
+// itest › TestRetentionExpiresTheLogAtStart's. An execution that found no work is listed as No work, in the neutral
+// tone, not as a failure. Its filter bar gives the date fields the class that keeps them on the filters' line.
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -260,6 +260,23 @@ describe("the task's history, after an execution's log expired", () => {
     await act(async () => pr.click());
     expect(openUrl.mock.calls).toEqual([[pullRequestUrl]]);
     expect(banners()).toEqual([expired]);
+  });
+});
+
+describe("an execution that found no work", () => {
+  it("shows its row with the No work chip in the neutral tone, apart from a failed one's", async () => {
+    const noWork: ExecutionSummary = { ...other, id: "exec-no-work", status: "no_work" };
+    const failed: ExecutionSummary = { ...aged, id: "exec-failed", status: "failed", pullRequestUrl: undefined, testsStatus: undefined };
+    daemon.executions = [noWork, failed];
+    await open();
+    expect(rows()).toHaveLength(2);
+
+    const status = (id: string) => {
+      const chip = cell(rowOf(id)!, 1).querySelector(".chip")!;
+      return { label: cell(rowOf(id)!, 1).textContent, tones: [...chip.classList].filter((c) => /^chip--(neutral|success|danger|warning|blue|magenta)$/.test(c)) };
+    };
+    expect(status(noWork.id)).toEqual({ label: "No work", tones: ["chip--neutral"] });
+    expect(status(failed.id)).toEqual({ label: "Failed", tones: ["chip--danger"] });
   });
 });
 
