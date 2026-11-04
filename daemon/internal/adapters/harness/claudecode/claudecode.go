@@ -450,6 +450,12 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 		// session start approves no file edit.
 		taskTools := allowed
 		allowed = append(append([]string{}, allowed...), shellRules(perm.Custom.AllowedPrograms)...)
+		var readRoots []string
+		if len(perm.Custom.ReadablePaths) > 0 {
+			readRoots = resolvedRoots(append(append(append([]string{req.ExecutionDir, req.WorkDir}, req.AdditionalDirs...),
+				perm.Custom.WritablePaths...), perm.Custom.ReadablePaths...))
+			allowed = scopedReads(allowed, readRoots)
+		}
 		args = append(args, "--permission-mode", mode, "--allowedTools", strings.Join(allowed, ","))
 		denied := append(append([]string{}, perm.Custom.DeniedTools...), shellRules(perm.Custom.DeniedPrograms)...)
 		if !network {
@@ -463,6 +469,9 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 		restrictions = append(restrictions, shellRestrictions(hasShell(allowed), network, *perm.RestrictToWorkspace)...)
 		if perm.Custom.HasProgramLists() {
 			restrictions = append(restrictions, programRestrictions(taskTools, allowed, perm.Custom.AllowedPrograms)...)
+		}
+		if len(perm.Custom.ReadablePaths) > 0 {
+			restrictions = append(restrictions, a.readRestrictions(req, allowed, readRoots)...)
 		}
 	default: // workspace_write
 		// The editing tools get no allow rule: a bare one allows them on any path, and acceptEdits alone approves their
@@ -566,6 +575,85 @@ func (a *Adapter) editRestriction(req ports.RunRequest) ports.Restriction {
 		Text: domain.T("restriction_claude_edit_rules",
 			"Claude Code adds the allow rules and additional directories of its {{where}} to the task's permissions, and they allow file edits outside the workspace and the added directories or could not be read; managed settings are not checked",
 			"where", settingsPhrase(widening), "sources", strings.Join(widening, "_"))}
+}
+
+// readingTools are the built-in tools that read files, which Claude Code's Read rules govern.
+var readingTools = []string{"Read", "Glob", "Grep"}
+
+// resolvedRoots are the directories of dirs that resolve, resolved, in their order and without repeats: those a
+// custom profile's read paths let the session read, compared as Claude Code compares its rules' paths.
+func resolvedRoots(dirs []string) []string {
+	var out []string
+	for _, d := range dirs {
+		if d == "" {
+			continue
+		}
+		if real, err := domain.ResolvePath(d); err == nil && !slices.Contains(out, real) {
+			out = append(out, real)
+		}
+	}
+	return out
+}
+
+// scopedReads is the allowed list with each bare reading tool, which would let the session read any file, replaced by
+// one Read rule for each of roots, in Claude Code's //path form from the filesystem root. Claude Code applies Read
+// rules to every tool that reads files, Glob and Grep included. A list with no bare reading tool is kept as it is.
+func scopedReads(allowed, roots []string) []string {
+	var out []string
+	bare := false
+	for _, t := range allowed {
+		if containsStr(readingTools, t) {
+			bare = true
+			continue
+		}
+		out = append(out, t)
+	}
+	if !bare {
+		return allowed
+	}
+	for _, r := range roots {
+		out = append(out, "Read(/"+filepath.ToSlash(r)+"/**)")
+	}
+	return out
+}
+
+// readRestrictions say whether a custom profile's read paths hold: the session reads only its workspace, its
+// writable paths, and the read paths, the roots. The session runs without Claude Code's sandbox, so a shell tool reads
+// anywhere; a reading rule of the task's list whose path may lie outside the roots reads there; and Claude Code adds
+// the allow rules and additional directories of every settings source it loads, where a reading rule or a directory
+// that may lie outside the roots does too. Each that applies is named; with none, the read paths are enforced.
+func (a *Adapter) readRestrictions(req ports.RunRequest, allowed, roots []string) []ports.Restriction {
+	var out []ports.Restriction
+	if hasShell(allowed) {
+		out = append(out, ports.Restriction{Name: "readablePaths", Enforced: false,
+			Text: domain.T("restriction_claude_shell_reads",
+				"Claude Code runs without its sandbox, so shell commands may read outside the workspace, the writable paths, and the read paths; only its reading tools are confined")})
+	}
+	if slices.ContainsFunc(allowed, func(r string) bool {
+		return containsStr(readingTools, toolName(r)) && !a.editRuleInside(r, true, roots)
+	}) {
+		out = append(out, ports.Restriction{Name: "readablePaths", Enforced: false,
+			Text: domain.T("restriction_claude_read_tools",
+				"the task's allowed tools let Claude Code's reading tools read outside the workspace, the writable paths, and the read paths")})
+	}
+	widening := a.wideningSources(req, func(source string, s claudeSettings) bool {
+		dirs, ok := s.additionalDirs()
+		return !ok || slices.ContainsFunc(dirs, func(d string) bool { return !dirInside(d, roots) }) ||
+			slices.ContainsFunc(s.Permissions.Allow, func(r string) bool {
+				return containsStr(readingTools, toolName(r)) && !a.editRuleInside(r, source != "user", roots)
+			})
+	})
+	if len(widening) > 0 {
+		out = append(out, ports.Restriction{Name: "readablePaths", Enforced: false,
+			Text: domain.T("restriction_claude_read_rules",
+				"Claude Code adds the allow rules and additional directories of its {{where}} to the task's permissions, and they allow reads outside the workspace, the writable paths, and the read paths or could not be read; managed settings are not checked",
+				"where", settingsPhrase(widening), "sources", strings.Join(widening, "_"))})
+	}
+	if len(out) == 0 {
+		out = append(out, ports.Restriction{Name: "readablePaths", Enforced: true,
+			Text: domain.Text{Message: "Claude Code's reading tools read only the workspace, the writable paths, and the read paths"}})
+	}
+	return out
 }
 
 // dirInside reports whether an additional directory of a settings file lies within one of roots, resolved as they

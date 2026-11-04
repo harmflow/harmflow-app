@@ -492,6 +492,7 @@ spec:
       allowedTools: [Read]
       deniedTools: [Bash]
       writablePaths: [~/work/out]
+      readablePaths: [~/work/docs]
       allowedPrograms: [git, python3]
       deniedPrograms: [curl]
   execution:
@@ -546,6 +547,7 @@ spec:
       allowedTools: [Read]
       deniedTools: [Bash]
       writablePaths: [~/work/out]
+      readablePaths: [~/work/docs]
       allowedPrograms: [git, python3]
       deniedPrograms: [curl]
   execution:

@@ -389,12 +389,20 @@ export const ptBR: Resources = {
       "o Claude Code soma as regras de permissão das suas $t(claudeSettings.{{sources}}) à lista de ferramentas da tarefa, e elas permitem mais que a lista ou não puderam ser lidas; as configurações gerenciadas não são verificadas",
     restriction_claude_edit_rules:
       "o Claude Code soma as regras de permissão e as pastas adicionais das suas $t(claudeSettings.{{sources}}) às permissões da tarefa, e elas permitem editar arquivos fora do workspace e das pastas adicionadas ou não puderam ser lidas; as configurações gerenciadas não são verificadas",
+    restriction_claude_shell_reads:
+      "o Claude Code roda sem o seu sandbox, então os comandos de shell podem ler fora do workspace, dos caminhos com escrita e dos caminhos de leitura; só as ferramentas de leitura são confinadas",
+    restriction_claude_read_tools:
+      "as ferramentas permitidas da tarefa deixam as ferramentas de leitura do Claude Code ler fora do workspace, dos caminhos com escrita e dos caminhos de leitura",
+    restriction_claude_read_rules:
+      "o Claude Code soma as regras de permissão e as pastas adicionais das suas $t(claudeSettings.{{sources}}) às permissões da tarefa, e elas permitem ler fora do workspace, dos caminhos com escrita e dos caminhos de leitura ou não puderam ser lidas; as configurações gerenciadas não são verificadas",
     restriction_claude_shell_programs:
       "as ferramentas permitidas da tarefa permitem qualquer comando de shell, então a sessão do Claude Code pode iniciar programas que os programas permitidos deixam de fora",
     restriction_claude_program_children:
       "o Claude Code só verifica o comando que a sua ferramenta de shell executa, então um programa que ele inicia pode iniciar outros; as listas de programas personalizadas não são aplicadas",
     restriction_codex_tool_lists:
       "o Codex não tem lista de ferramentas permitidas ou negadas; as listas personalizadas não são aplicadas",
+    restriction_codex_read_paths:
+      "o sandbox do Codex deixa a sessão ler qualquer arquivo; os caminhos de leitura personalizados não são aplicados",
     restriction_codex_program_lists:
       "o sandbox do Codex não limita os programas que o seu shell inicia; as listas de programas personalizadas não são aplicadas",
     restriction_codex_read_only:
@@ -1177,6 +1185,7 @@ export const ptBR: Resources = {
       allowedTools: "Ferramentas permitidas",
       deniedTools: "Ferramentas negadas",
       writablePaths: "Caminhos com escrita",
+      readablePaths: "Caminhos de leitura",
       allowedPrograms: "Programas permitidos",
       deniedPrograms: "Programas negados",
       listHint: "Um por linha.",

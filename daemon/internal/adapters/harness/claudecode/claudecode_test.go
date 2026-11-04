@@ -754,6 +754,105 @@ func TestPrepareTranslatesProgramLists(t *testing.T) {
 	}
 }
 
+// A custom profile's read paths are a limit: each bare reading tool of the allowed list, the default one included,
+// becomes a Read rule for each folder the session may read — the execution's folder, the workspace, the repositories,
+// the writable paths, and the read paths — and a read path is never an added directory, where acceptEdits would
+// approve edits. The limit is enforced when nothing reads past it; a shell tool, a reading rule of the task's list
+// outside those folders, or a settings source that allows such reads is each named, not enforced. With no read paths,
+// the list and the restrictions are as before.
+func TestPrepareConfinesReadsToTheReadPaths(t *testing.T) {
+	real := func(p string) string {
+		t.Helper()
+		r, err := domain.ResolvePath(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	exec, work, repo, out, docs := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+	rules := []string{}
+	for _, d := range []string{exec, work, repo, out, docs} {
+		rules = append(rules, "Read(/"+real(d)+"/**)")
+	}
+	cases := []struct {
+		name      string
+		user      string // the user's settings; "" for no file
+		allowed   []string
+		readable  []string
+		wantTools []string // the --allowedTools list
+		want      []string // the keys of the readablePaths restrictions not enforced; nil for one enforced
+		none      bool     // no readablePaths restriction at all
+	}{
+		{name: "the default list", readable: []string{docs},
+			wantTools: append([]string{"Skill", "Task", "TodoWrite"}, rules...)},
+		{name: "bare reading tools of the task's list", allowed: []string{"Grep", "Read", "Edit"}, readable: []string{docs},
+			wantTools: append([]string{"Edit"}, rules...)},
+		{name: "a reading rule inside a read path", allowed: []string{"Read(/" + real(docs) + "/notes/**)"},
+			readable: []string{docs}, wantTools: []string{"Read(/" + real(docs) + "/notes/**)"}},
+		{name: "a shell tool", allowed: []string{"Read", "Bash(jq:*)"}, readable: []string{docs},
+			wantTools: append([]string{"Bash(jq:*)"}, rules...), want: []string{"restriction_claude_shell_reads"}},
+		{name: "a reading rule outside", allowed: []string{"Read(//etc/**)"}, readable: []string{docs},
+			wantTools: []string{"Read(//etc/**)"}, want: []string{"restriction_claude_read_tools"}},
+		{name: "a bare reading rule in the user's settings", user: `{"permissions":{"allow":["Read"]}}`,
+			readable: []string{docs}, wantTools: append([]string{"Skill", "Task", "TodoWrite"}, rules...),
+			want: []string{"restriction_claude_read_rules"}},
+		{name: "an additional directory outside in the user's settings",
+			user: `{"permissions":{"additionalDirectories":["/etc"]}}`, readable: []string{docs},
+			wantTools: append([]string{"Skill", "Task", "TodoWrite"}, rules...), want: []string{"restriction_claude_read_rules"}},
+		{name: "a reading rule inside in the user's settings", user: `{"permissions":{"allow":["Read(/` + real(out) + `/**)"]}}`,
+			readable: []string{docs}, wantTools: append([]string{"Skill", "Task", "TodoWrite"}, rules...)},
+		{name: "no read paths", allowed: []string{"Read", "Bash(jq:*)"}, wantTools: []string{"Read", "Bash(jq:*)"}, none: true},
+	}
+	info := ports.HarnessInfo{Path: "/bin/claude", Features: map[string]bool{}}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			config := t.TempDir()
+			t.Setenv("CLAUDE_CONFIG_DIR", config)
+			writeSettings(t, filepath.Join(config, "settings.json"), c.user)
+			perm := *domain.TaskDocument{}.Effective().Spec.Permissions
+			perm.Profile = domain.ProfileCustom
+			perm.Custom.AllowedTools, perm.Custom.WritablePaths, perm.Custom.ReadablePaths = c.allowed, []string{out}, c.readable
+			a := &Adapter{Home: t.TempDir()}
+			inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: work, AdditionalDirs: []string{repo}, Permissions: perm,
+				ExecutionDir: exec})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tools, _ := flagValue(inv.Args, "--allowedTools"); tools != strings.Join(c.wantTools, ",") {
+				t.Errorf("Prepare --allowedTools = %q, want %q", tools, strings.Join(c.wantTools, ","))
+			}
+			for i, arg := range inv.Args {
+				if arg == "--add-dir" && i+1 < len(inv.Args) && inv.Args[i+1] == docs {
+					t.Errorf("Prepare args = %s, want no --add-dir %s", strings.Join(inv.Args, " "), docs)
+				}
+			}
+			var got []string
+			enforced := 0
+			for _, r := range inv.Restrictions {
+				switch {
+				case r.Name != "readablePaths":
+				case r.Enforced:
+					enforced++
+				default:
+					got = append(got, r.Text.Key)
+				}
+			}
+			switch {
+			case c.none:
+				if enforced > 0 || got != nil {
+					t.Errorf("Prepare restrictions = %+v, want none named readablePaths", inv.Restrictions)
+				}
+			case c.want == nil:
+				if enforced != 1 || got != nil {
+					t.Errorf("Prepare restrictions = %+v, want one readablePaths, enforced", inv.Restrictions)
+				}
+			case enforced > 0 || !slices.Equal(got, c.want):
+				t.Errorf("Prepare readablePaths not enforced = %v (and %d enforced), want %v", got, enforced, c.want)
+			}
+		})
+	}
+}
+
 func restriction(rs []ports.Restriction, name string) (ports.Restriction, bool) {
 	for _, r := range rs {
 		if r.Name == name {

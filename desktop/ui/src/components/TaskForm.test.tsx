@@ -720,7 +720,11 @@ describe("task form document", () => {
     await enter(control<HTMLSelectElement>("Missed runs"), "skip");
     await enter(control<HTMLSelectElement>("Overlapping firings"), "skip");
 
-    // Permissions: the custom profile's lists show once it is chosen, its subprocess controls among them.
+    // Permissions: a new task's Profile control offers exactly the three profiles, after its first option, which leaves
+    // the default. The custom profile's lists show once it is chosen, its read paths and subprocess controls among them.
+    const profileOptions = [...control<HTMLSelectElement>("Profile").options].map((o) => o.value);
+    expect(profileOptions).toEqual(["", "read_only", "workspace_write", "custom"]);
+    expect(field("Read paths")).toBeUndefined();
     expect(field("Allowed programs")).toBeUndefined();
     expect(field("Denied programs")).toBeUndefined();
     await enter(control<HTMLSelectElement>("Profile"), "custom");
@@ -729,6 +733,7 @@ describe("task form document", () => {
     await enter(control<HTMLTextAreaElement>("Allowed tools"), "Read\nGrep");
     await enter(control<HTMLTextAreaElement>("Denied tools"), "WebFetch");
     await enter(control<HTMLTextAreaElement>("Writable paths"), "${FORM_REPO}");
+    await enter(control<HTMLTextAreaElement>("Read paths"), "${FORM_REPO}");
     await enter(control<HTMLTextAreaElement>("Allowed programs"), "git\ngh");
     await enter(control<HTMLTextAreaElement>("Denied programs"), "curl");
 
@@ -773,7 +778,7 @@ describe("task form document", () => {
       permissions: [
         ...values("Profile", "Network"),
         toggle("Restrict writes to the workspace").checked,
-        ...values("Allowed tools", "Denied tools", "Writable paths", "Allowed programs", "Denied programs"),
+        ...values("Allowed tools", "Denied tools", "Writable paths", "Read paths", "Allowed programs", "Denied programs"),
       ],
       execution: values(
         "Timeout (minutes), shared by all attempts",
@@ -795,7 +800,7 @@ describe("task form document", () => {
       queue: ["newest_first", "5", "2", "alternate", "1", "0", "0"],
       harness: [["codex", "gpt-5.6-terra", "high"], ["claude-code", "sonnet", "high"], ["AI tool unavailable"], "2"],
       schedule: ["weekdays", "06:30", "30 6 * * 1-5", "America/Sao_Paulo", "skip", "skip"],
-      permissions: ["custom", "deny", false, "Read\nGrep", "WebFetch", "${FORM_REPO}", "git\ngh", "curl"],
+      permissions: ["custom", "deny", false, "Read\nGrep", "WebFetch", "${FORM_REPO}", "${FORM_REPO}", "git\ngh", "curl"],
       execution: ["45", "10", "2", "30", "600"],
       notifications: [false, ["Operational failure", "Tests failed"]],
     });
@@ -808,6 +813,7 @@ describe("task form document", () => {
     expect(checked("Fail over on")).toEqual(["Quota exhausted", "AI tool unavailable"]);
     await enter(control("Time zone"), "");
     await enter(control<HTMLSelectElement>("Network"), "");
+    await enter(control<HTMLTextAreaElement>("Read paths"), "");
     await enter(control<HTMLTextAreaElement>("Denied programs"), "");
     await enter(control("Timeout (minutes), shared by all attempts"), "");
     for (const event of ["Operational failure", "Tests failed"]) await tick("Notify me about", event);
@@ -824,6 +830,7 @@ describe("task form document", () => {
       ["spec", "harness", "fallback", "on"],
       ["spec", "schedule", "timezone"],
       ["spec", "permissions", "network"],
+      ["spec", "permissions", "custom", "readablePaths"],
       ["spec", "permissions", "custom", "deniedPrograms"],
       ["spec", "execution", "timeoutMinutes"],
       ["spec", "notifications", "native", "events"],
@@ -916,6 +923,7 @@ describe("script task form document", () => {
     await enter(control<HTMLTextAreaElement>("Allowed tools"), "Read\nGrep");
     await enter(control<HTMLTextAreaElement>("Denied tools"), "WebFetch");
     await enter(control<HTMLTextAreaElement>("Writable paths"), "${FORM_REPO}");
+    await enter(control<HTMLTextAreaElement>("Read paths"), "${FORM_REPO}");
 
     // Execution: a script task has no rate-limit retries and no extra usage.
     expect(field("Rate-limit retries")).toBeUndefined();
@@ -972,14 +980,14 @@ describe("script task form document", () => {
         control("Environment variables").value,
       ],
       schedule: [...values("Repeats", "Time"), control("Cron expression (5 fields)").textContent, ...values("Time zone", "Missed runs", "Overlapping firings")],
-      permissions: [...values("Profile", "Network"), toggle("Restrict writes to the workspace").checked, ...values("Allowed tools", "Denied tools", "Writable paths")],
+      permissions: [...values("Profile", "Network"), toggle("Restrict writes to the workspace").checked, ...values("Allowed tools", "Denied tools", "Writable paths", "Read paths")],
       execution: values("Timeout (minutes), shared by all attempts", "Grace before a cancellation is forced (seconds)"),
       notifications: [toggle("Native notifications").checked, checked("Notify me about")],
     }).toEqual({
       general: ["Every script section", "script-complete", "Script", "Every section of the script form, set.", false],
       script: ["true", COMMAND, "${FORM_REPO}", ["macOS", "Linux"], "AUDIT_LABEL=Daily audit\nAUDIT_LEVEL=full"],
       schedule: ["weekdays", "06:30", "30 6 * * 1-5", "America/Sao_Paulo", "skip", "skip"],
-      permissions: ["custom", "deny", false, "Read\nGrep", "WebFetch", "${FORM_REPO}"],
+      permissions: ["custom", "deny", false, "Read\nGrep", "WebFetch", "${FORM_REPO}", "${FORM_REPO}"],
       execution: ["45", "10"],
       notifications: [false, ["Operational failure", "Cancellation"]],
     });

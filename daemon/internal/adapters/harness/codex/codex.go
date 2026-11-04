@@ -579,6 +579,12 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 					Text: domain.T("restriction_codex_program_lists",
 						"Codex's sandbox does not limit the programs its shell starts; the custom program lists are not enforced")})
 			}
+			// The read paths are never added directories, where the sandbox would let the session write.
+			if len(perm.Custom.ReadablePaths) > 0 {
+				restrictions = append(restrictions, ports.Restriction{Name: "readablePaths", Enforced: false,
+					Text: domain.T("restriction_codex_read_paths",
+						"Codex's sandbox lets the session read any file; the custom read paths are not enforced")})
+			}
 		}
 	}
 	if req.ExecutionDir != "" {

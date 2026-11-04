@@ -95,10 +95,10 @@ func (a *App) taskFolders(doc domain.TaskDocument, id string, e pathEnv) (work f
 	return work, repos
 }
 
-// taskPathIssues checks the paths of doc that let a harness write, whatever its permission profile, and the form of a
-// script's program and working directory. A path whose variables are undefined is skipped: its
-// own warning says so, and the check runs once it expands. The daemon's own workspace, used when a task sets none, is
-// not checked.
+// taskPathIssues checks the paths of doc that let a harness write, whatever its permission profile, the read paths of
+// a custom profile, and the form of a script's program and working directory. A path whose variables are undefined is
+// skipped: its own warning says so, and the check runs once it expands. The daemon's own workspace, used when a task
+// sets none, is not checked.
 func (a *App) taskPathIssues(doc domain.TaskDocument, e pathEnv) []pathIssue {
 	var out []pathIssue
 	writable := func(field, p string) {
@@ -118,6 +118,10 @@ func (a *App) taskPathIssues(doc domain.TaskDocument, e pathEnv) []pathIssue {
 	if p := doc.Spec.Permissions; p != nil && p.Custom != nil {
 		for i, w := range p.Custom.WritablePaths {
 			writable(fmt.Sprintf("/spec/permissions/custom/writablePaths/%d", i), w)
+		}
+		// A read path passes the writable path's check: a path the rule refuses for a write is refused for a read too.
+		for i, r := range p.Custom.ReadablePaths {
+			writable(fmt.Sprintf("/spec/permissions/custom/readablePaths/%d", i), r)
 		}
 	}
 	if s := doc.Spec.Script; s != nil {

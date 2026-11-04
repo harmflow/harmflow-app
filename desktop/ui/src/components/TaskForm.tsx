@@ -268,7 +268,7 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
         </div>
         {get<string>(["spec", "permissions", "profile"]) === "custom" ? (
           <div className="grid-3">
-            {(["allowedTools", "deniedTools", "writablePaths", "allowedPrograms", "deniedPrograms"] as const).map((key) => (
+            {(["allowedTools", "deniedTools", "writablePaths", "readablePaths", "allowedPrograms", "deniedPrograms"] as const).map((key) => (
               <Field key={key} label={t(`tasks.fields.${key}`)} hint={t("tasks.fields.listHint")}>
                 <ListArea value={get(["spec", "permissions", "custom", key])} onValue={(v) => set(["spec", "permissions", "custom", key], v)} />
               </Field>

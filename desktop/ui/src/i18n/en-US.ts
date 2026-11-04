@@ -383,11 +383,18 @@ export const enUS = {
       "Claude Code adds the allow rules of its $t(claudeSettings.{{sources}}) to the task's tool list, and they allow more than the list or could not be read; managed settings are not checked",
     restriction_claude_edit_rules:
       "Claude Code adds the allow rules and additional directories of its $t(claudeSettings.{{sources}}) to the task's permissions, and they allow file edits outside the workspace and the added directories or could not be read; managed settings are not checked",
+    restriction_claude_shell_reads:
+      "Claude Code runs without its sandbox, so shell commands may read outside the workspace, the writable paths, and the read paths; only its reading tools are confined",
+    restriction_claude_read_tools:
+      "the task's allowed tools let Claude Code's reading tools read outside the workspace, the writable paths, and the read paths",
+    restriction_claude_read_rules:
+      "Claude Code adds the allow rules and additional directories of its $t(claudeSettings.{{sources}}) to the task's permissions, and they allow reads outside the workspace, the writable paths, and the read paths or could not be read; managed settings are not checked",
     restriction_claude_shell_programs:
       "the task's allowed tools allow every shell command, so Claude Code's session may start programs the allowed programs leave out",
     restriction_claude_program_children:
       "Claude Code checks only the command its shell tool runs, so a program it starts may start others; the custom program lists are not enforced",
     restriction_codex_tool_lists: "Codex has no per-tool allow or deny list; the custom tool lists are not enforced",
+    restriction_codex_read_paths: "Codex's sandbox lets the session read any file; the custom read paths are not enforced",
     restriction_codex_program_lists:
       "Codex's sandbox does not limit the programs its shell starts; the custom program lists are not enforced",
     restriction_codex_read_only:
@@ -577,8 +584,8 @@ export const enUS = {
     skill_list: "{{harness}}'s skill list",
     skill_list_errors: "{{harness}}'s skill list, which could not load {{errors}}",
   },
-  // The Claude Code settings sources whose allow rules widen a task's tool list or its file edits, as
-  // restriction_claude_allow_rules and restriction_claude_edit_rules name them.
+  // The Claude Code settings sources whose allow rules widen a task's tool list, its file edits, or its reads, as
+  // restriction_claude_allow_rules, restriction_claude_edit_rules, and restriction_claude_read_rules name them.
   claudeSettings: {
     user: "user settings",
     project: "project settings",
@@ -1152,6 +1159,7 @@ export const enUS = {
       allowedTools: "Allowed tools",
       deniedTools: "Denied tools",
       writablePaths: "Writable paths",
+      readablePaths: "Read paths",
       allowedPrograms: "Allowed programs",
       deniedPrograms: "Denied programs",
       listHint: "One per line.",

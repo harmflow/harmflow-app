@@ -438,6 +438,15 @@
               },
               "uniqueItems": true
             },
+            "readablePaths": {
+              "description": "A limit: when present, the session may read only its workspace, its writable paths, and these. Each takes ~ and ${VARIABLE}, and passes the same check as a writable path. An empty list sets no limit.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
             "allowedPrograms": {
               "description": "The programs the session may start, by name. When present, it is a limit of its own: the session may start only these. An empty list sets no limit.",
               "type": "array",

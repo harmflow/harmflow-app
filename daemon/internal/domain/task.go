@@ -202,11 +202,14 @@ type Permissions struct {
 }
 
 // CustomPermissions is the tools a custom permissions profile allows and denies, the paths it lets the harness write,
-// and the programs it lets the session start and those it does not.
+// the paths it lets the harness read, and the programs it lets the session start and those it does not.
 type CustomPermissions struct {
 	AllowedTools  []string `yaml:"allowedTools,omitempty" json:"allowedTools,omitempty"`
 	DeniedTools   []string `yaml:"deniedTools,omitempty" json:"deniedTools,omitempty"`
 	WritablePaths []string `yaml:"writablePaths,omitempty" json:"writablePaths,omitempty"`
+	// ReadablePaths is a limit when it holds a path: the session may read only its workspace, its writable paths, and
+	// these. Empty, it sets no limit of its own.
+	ReadablePaths []string `yaml:"readablePaths,omitempty" json:"readablePaths,omitempty"`
 	// AllowedPrograms is a limit when it holds a name: the session may start only these programs. Empty, it sets no
 	// limit of its own.
 	AllowedPrograms []string `yaml:"allowedPrograms,omitempty" json:"allowedPrograms,omitempty"`
@@ -618,6 +621,7 @@ func (d TaskDocument) clone() TaskDocument {
 				AllowedTools:    cloneSlice(p.Custom.AllowedTools),
 				DeniedTools:     cloneSlice(p.Custom.DeniedTools),
 				WritablePaths:   cloneSlice(p.Custom.WritablePaths),
+				ReadablePaths:   cloneSlice(p.Custom.ReadablePaths),
 				AllowedPrograms: cloneSlice(p.Custom.AllowedPrograms),
 				DeniedPrograms:  cloneSlice(p.Custom.DeniedPrograms),
 			}
