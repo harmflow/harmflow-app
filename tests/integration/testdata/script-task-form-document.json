@@ -35,7 +35,8 @@
       "custom": {
         "allowedTools": ["Read", "Grep"],
         "deniedTools": ["WebFetch"],
-        "writablePaths": ["${FORM_REPO}"]
+        "writablePaths": ["${FORM_REPO}"],
+        "readablePaths": ["${FORM_REPO}"]
       }
     },
     "execution": {

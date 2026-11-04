@@ -68,7 +68,11 @@ func TestTaskPathsAreChecked(t *testing.T) {
 	writable := func(p string) string {
 		return taskYAML("t", "  permissions:\n    profile: custom\n    custom:\n      writablePaths: ["+p+"]\n")
 	}
+	readable := func(p string) string {
+		return taskYAML("t", "  permissions:\n    profile: custom\n    custom:\n      readablePaths: [~/Developer/app, "+p+"]\n")
+	}
 	const ws, wp = "/spec/workspace/path", "/spec/permissions/custom/writablePaths/0"
+	const rp = "/spec/permissions/custom/readablePaths/1"
 	const lp = "/spec/github/repositories/0/localPath"
 	cases := []struct {
 		name, yaml, path, key string
@@ -85,6 +89,12 @@ func TestTaskPathsAreChecked(t *testing.T) {
 			"path_forbidden_home"},
 		{"a writable path in a hidden folder", writable("~/.ssh"), wp, "path_forbidden_place"},
 		{"a writable path inside home", writable("~/Developer/app"), wp, ""},
+		// A read path passes the writable path's check, and the error names its own entry.
+		{"a read path inside home", readable(home + "/Developer/new"), rp, ""},
+		{"a read path in a hidden folder", readable("~/.ssh"), rp, "path_forbidden_place"},
+		{"a read path of /", readable("/"), rp, "path_forbidden_home"},
+		{"a read path through a symlink out of the allowed area", readable(home + "/Developer/elsewhere"), rp,
+			"path_outside_allowed_area"},
 		{"a local path inside home", issueTask("t", repo, ""), lp, ""},
 		{"a local path outside", issueTask("t", outside, ""), lp, "path_outside_allowed_area"},
 	}

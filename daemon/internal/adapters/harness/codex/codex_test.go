@@ -551,6 +551,41 @@ func TestPrepareReportsProgramListsNotEnforced(t *testing.T) {
 	}
 }
 
+// Codex's sandbox reads anywhere, so a custom profile's read paths are a restriction not enforced, with a key of its
+// own. They are never added directories, where the workspace-write sandbox would let the session write; with none, no
+// restriction names them.
+func TestPrepareReportsReadPathsNotEnforced(t *testing.T) {
+	a := &Adapter{Home: t.TempDir()}
+	info := ports.HarnessInfo{Path: "/bin/codex", Features: map[string]bool{"--add-dir": true, "--ephemeral": true}}
+	perm := *domain.TaskDocument{}.Effective().Spec.Permissions
+	perm.Profile = domain.ProfileCustom
+	perm.Custom = &domain.CustomPermissions{WritablePaths: []string{"/out"}, ReadablePaths: []string{"/docs"}}
+	inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, ExecutionDir: "/x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restriction := func(rs []ports.Restriction, name string) (ports.Restriction, bool) {
+		i := slices.IndexFunc(rs, func(r ports.Restriction) bool { return r.Name == name })
+		if i < 0 {
+			return ports.Restriction{}, false
+		}
+		return rs[i], true
+	}
+	r, ok := restriction(inv.Restrictions, "readablePaths")
+	if !ok || r.Enforced || r.Text.Key != "restriction_codex_read_paths" {
+		t.Errorf("Prepare(read paths) readablePaths = %+v (found %v), want not enforced, restriction_codex_read_paths", r, ok)
+	}
+	args := strings.Join(inv.Args, " ")
+	if strings.Contains(args, "/docs") || !strings.Contains(args, "--add-dir /out") {
+		t.Errorf("Prepare(read paths) args = %s, want --add-dir /out and no /docs", args)
+	}
+	perm.Custom = &domain.CustomPermissions{WritablePaths: []string{"/out"}}
+	inv, _, _ = a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, ExecutionDir: "/x"})
+	if r, ok := restriction(inv.Restrictions, "readablePaths"); ok {
+		t.Errorf("Prepare(no read paths) readablePaths = %+v, want none", r)
+	}
+}
+
 // A read_only task runs in Codex's read-only sandbox, forced with a -c override as approvals off are, with the
 // execution's folder added and its network blocked. The profile is enforced when Codex's managed requirements, as
 // read, allow the read-only sandbox and approvals off, or manage nothing. When they leave one out, or could not be

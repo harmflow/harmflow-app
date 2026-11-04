@@ -285,6 +285,16 @@ func (a *App) semanticChecks(ctx context.Context, r *ValidationResult, doc domai
 			r.addWarning("/spec/workspace/path", domain.WarningOther, domain.TextOf(err))
 		}
 	}
+	// A read path that does not expand yet, as a variable Settings does not define, is checked once it does; an execution
+	// refuses to start on it.
+	if p := doc.Spec.Permissions; p != nil && p.Custom != nil {
+		for i, rp := range p.Custom.ReadablePaths {
+			if _, err := a.expand(rp); err != nil {
+				r.addWarning(fmt.Sprintf("/spec/permissions/custom/readablePaths/%d", i), domain.WarningOther,
+					domain.TextOf(err))
+			}
+		}
+	}
 	a.scriptChecks(r, doc)
 	if mode == catalogStart {
 		return // the restrictions a harness enforces depend on what its detection found

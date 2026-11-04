@@ -71,6 +71,7 @@
         "allowedTools": ["Read", "Grep"],
         "deniedTools": ["WebFetch"],
         "writablePaths": ["${FORM_REPO}"],
+        "readablePaths": ["${FORM_REPO}"],
         "allowedPrograms": ["git", "gh"],
         "deniedPrograms": ["curl"]
       }

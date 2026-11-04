@@ -6126,6 +6126,60 @@ func TestProgramListsSurviveSaveExportAndImport(t *testing.T) {
 	}
 }
 
+// A custom profile's read paths load, save, export, and import as the file writes them, ~ and a path variable kept, and
+// a task without them reads with none.
+func TestReadPathsSurviveSaveExportAndImport(t *testing.T) {
+	e := newEnv(t)
+	mkdir(t, filepath.Join(e.app.Paths().UserHome, "docs"))
+	if _, err := e.app.UpdateSettings(SettingsPatch{PathVariables: map[string]string{
+		"NOTES": filepath.Join(e.app.Paths().UserHome, "notes")}}); err != nil {
+		t.Fatal(err)
+	}
+	task := func(id, custom string) string {
+		return taskYAML(id, "  permissions:\n    profile: custom\n    custom:\n"+custom)
+	}
+	want := []string{"~/docs", "${NOTES}"}
+	readable := func(id string) []string {
+		t.Helper()
+		v, err := e.app.GetTask(id)
+		if err != nil {
+			t.Fatalf("GetTask(%s) = %v, want no error", id, err)
+		}
+		js, _ := json.Marshal(v.Document)
+		var doc domain.TaskDocument
+		if err := json.Unmarshal(js, &doc); err != nil {
+			t.Fatalf("json.Unmarshal(GetTask(%s) document) = %v, want no error", id, err)
+		}
+		if p := doc.Spec.Permissions; p != nil && p.Custom != nil {
+			return p.Custom.ReadablePaths
+		}
+		return nil
+	}
+	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: task("reads",
+		"      readablePaths:\n        - ~/docs\n        - ${NOTES}\n")}); err != nil {
+		t.Fatalf("CreateTask(reads) = %v, want no error", err)
+	}
+	if got := readable("reads"); !slices.Equal(got, want) {
+		t.Errorf("GetTask(reads) read paths = %v, want %v", got, want)
+	}
+	exported, err := e.app.ExportTask("reads")
+	if err != nil {
+		t.Fatalf("ExportTask(reads) = %v, want no error", err)
+	}
+	if _, err := e.app.ImportTask(t.Context(), string(exported), true); err != nil {
+		t.Fatalf("ImportTask(export of reads) = %v, want no error", err)
+	}
+	if got := readable("reads"); !slices.Equal(got, want) {
+		t.Errorf("GetTask(reads) after ImportTask: read paths = %v, want %v", got, want)
+	}
+	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: task("no-reads", "      writablePaths: [~/docs]\n")}); err != nil {
+		t.Fatalf("CreateTask(no-reads) = %v, want no error", err)
+	}
+	if got := readable("no-reads"); got != nil {
+		t.Errorf("GetTask(no-reads) read paths = %v, want none", got)
+	}
+}
+
 // An export masks a password, a cookie, and a session value wherever the file holds one — the prompt, the description,
 // or a comment — leaves the words around them, and still validates.
 func TestExportMasksCredentials(t *testing.T) {

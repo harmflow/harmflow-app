@@ -36,6 +36,7 @@ type run struct {
 	work     string
 	extra    []string
 	writable []string // a custom profile's writable paths, resolved
+	readable []string // a custom profile's read paths, resolved
 	saveMu   sync.Mutex
 	lastSave time.Time
 	// saved is the revision of the record the last save wrote, once written is set; both are guarded by saveMu.
@@ -293,12 +294,17 @@ func (r *run) setStatus(s domain.ExecutionStatus, step domain.Text) bool {
 	return true
 }
 
-// permissions are the task's, with a custom profile's writable paths as prepare resolved them.
+// permissions are the task's, with a custom profile's writable and read paths as prepare resolved them.
 func (r *run) permissions() domain.Permissions {
 	p := *r.eff.Spec.Permissions
-	if p.Custom != nil && len(p.Custom.WritablePaths) > 0 {
+	if p.Custom != nil && (len(p.Custom.WritablePaths) > 0 || len(p.Custom.ReadablePaths) > 0) {
 		c := *p.Custom
-		c.WritablePaths = append([]string{}, r.writable...)
+		if len(c.WritablePaths) > 0 {
+			c.WritablePaths = append([]string{}, r.writable...)
+		}
+		if len(c.ReadablePaths) > 0 {
+			c.ReadablePaths = append([]string{}, r.readable...)
+		}
 		p.Custom = &c
 	}
 	return p
@@ -334,6 +340,14 @@ func (r *run) prepare() error {
 				return err
 			}
 			r.writable = append(r.writable, resolved)
+		}
+		for i, rp := range c.ReadablePaths {
+			resolved, err := pe.writablePath(a, rp)
+			if err != nil {
+				return &domain.TextError{Text: refusedPath(pathIssue{
+					fmt.Sprintf("/spec/permissions/custom/readablePaths/%d", i), domain.TextOf(err)})}
+			}
+			r.readable = append(r.readable, resolved)
 		}
 	}
 	for i, repo := range r.eff.Repositories() {

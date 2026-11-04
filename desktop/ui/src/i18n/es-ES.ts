@@ -390,12 +390,20 @@ export const esES: Resources = {
       "Claude Code suma las reglas de permiso de su $t(claudeSettings.{{sources}}) a la lista de herramientas de la tarea, y permiten más que la lista o no se pudieron leer; la configuración administrada no se comprueba",
     restriction_claude_edit_rules:
       "Claude Code suma las reglas de permiso y las carpetas adicionales de su $t(claudeSettings.{{sources}}) a los permisos de la tarea, y permiten editar archivos fuera del espacio de trabajo y de las carpetas añadidas o no se pudieron leer; la configuración administrada no se comprueba",
+    restriction_claude_shell_reads:
+      "Claude Code se ejecuta sin su sandbox, así que los comandos de shell pueden leer fuera del espacio de trabajo, de las rutas con escritura y de las rutas de lectura; solo limita sus herramientas de lectura",
+    restriction_claude_read_tools:
+      "las herramientas permitidas de la tarea dejan que las herramientas de lectura de Claude Code lean fuera del espacio de trabajo, de las rutas con escritura y de las rutas de lectura",
+    restriction_claude_read_rules:
+      "Claude Code suma las reglas de permiso y las carpetas adicionales de su $t(claudeSettings.{{sources}}) a los permisos de la tarea, y permiten leer fuera del espacio de trabajo, de las rutas con escritura y de las rutas de lectura o no se pudieron leer; la configuración administrada no se comprueba",
     restriction_claude_shell_programs:
       "las herramientas permitidas de la tarea permiten cualquier comando de shell, así que la sesión de Claude Code puede iniciar programas que los programas permitidos dejan fuera",
     restriction_claude_program_children:
       "Claude Code solo comprueba el comando que ejecuta su herramienta de shell, así que un programa que inicia puede iniciar otros; las listas de programas personalizadas no se aplican",
     restriction_codex_tool_lists:
       "Codex no tiene listas de herramientas permitidas o denegadas; las listas personalizadas no se aplican",
+    restriction_codex_read_paths:
+      "el sandbox de Codex deja que la sesión lea cualquier archivo; las rutas de lectura personalizadas no se aplican",
     restriction_codex_program_lists:
       "el sandbox de Codex no limita los programas que inicia su shell; las listas de programas personalizadas no se aplican",
     restriction_codex_read_only:
@@ -1175,6 +1183,7 @@ export const esES: Resources = {
       allowedTools: "Herramientas permitidas",
       deniedTools: "Herramientas denegadas",
       writablePaths: "Rutas con escritura",
+      readablePaths: "Rutas de lectura",
       allowedPrograms: "Programas permitidos",
       deniedPrograms: "Programas denegados",
       listHint: "Una por línea.",
