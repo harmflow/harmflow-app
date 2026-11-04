@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 
+	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/procutil"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
@@ -183,20 +183,14 @@ func TestScreenTextAndMask(t *testing.T) {
 	if !strings.Contains(text, " Select login method:") || !strings.Contains(squeeze(text), loginMenu) {
 		t.Errorf("screenText = %q, want the words of the menu apart", text)
 	}
-	masked := maskScreen(text)
+	masked := procutil.MaskOutput(text)
 	for _, secret := range []string{"client_id", "create_api_key", "8ptAF", "someone@example.com", "0123456789abcdef"} {
 		if strings.Contains(masked, secret) {
-			t.Errorf("maskScreen = %q, which still holds %q", masked, secret)
+			t.Errorf("MaskOutput = %q, which still holds %q", masked, secret)
 		}
 	}
 	if !strings.Contains(masked, "Use the url below") || !strings.Contains(masked, "Logged in as") {
-		t.Errorf("maskScreen = %q, want the screen's words kept", masked)
-	}
-	// A long screen keeps its end, cut where a character starts.
-	long := maskScreen(strings.Repeat("é ", 1500) + "the end")
-	if len(long) > maxLoggedScreen || !utf8.ValidString(long) || !strings.HasSuffix(long, "the end") {
-		t.Errorf("maskScreen of a long screen = %d bytes, valid %v, ending %q; want its valid end within %d bytes",
-			len(long), utf8.ValidString(long), long[max(0, len(long)-10):], maxLoggedScreen)
+		t.Errorf("MaskOutput = %q, want the screen's words kept", masked)
 	}
 }
 

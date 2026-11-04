@@ -1402,7 +1402,7 @@ export const ptBR: Resources = {
     scope: {
       title: "Tudo roda neste computador",
       body:
-        "O HarmFlow agenda, executa e monitora automações realizadas pelas ferramentas de IA que você já instalou — Claude Code e Codex. Ele nunca as instala nem atualiza, e quando o Claude Code está desconectado inicia a entrada do próprio Claude Code, que você aprova no navegador, ou usa um token de longa duração que você salva em Configurações.",
+        "O HarmFlow agenda, executa e monitora automações realizadas pelas ferramentas de IA que você já instalou — Claude Code e Codex. Ele nunca as instala nem atualiza. Quando o Claude Code está desconectado inicia a entrada do próprio Claude Code, que você aprova no navegador, ou usa um token de longa duração que você salva em Configurações; quando o Codex está desconectado inicia a entrada do próprio Codex, que você aprova no navegador.",
       points: {
         local: "Tarefas, estado e logs ficam nesta máquina.",
         permissions:

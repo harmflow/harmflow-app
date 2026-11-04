@@ -318,3 +318,162 @@ func TestSignInRealClaudeCodeThroughTheBrowser(t *testing.T) {
 			h["authentication"], h["diagnosticKey"])
 	}
 }
+
+// signInCodex is a stand-in Codex that signs in the way the real one does with `codex login`, its input empty and its
+// output on pipes. Its `login status` reads signed in once its sign-in's file exists in its Codex home, CODEX_HOME;
+// everything else runs as fake-codex's. `codex login` records the start in @SESSIONS@ and prints what Codex 0.163.0
+// printed, the URL holding @STATE@. It then waits for the test to approve the sign-in by writing @APPROVED@, writes
+// its sign-in into its Codex home, says the sign-in succeeded, and exits 0. It fails on a terminal and on any input.
+const signInCodex = `#!/bin/bash
+if [ "$*" = "login status" ]; then
+  if [ -f "$CODEX_HOME/auth.json" ]; then echo "Logged in using ChatGPT"; exit 0; fi
+  echo "Not logged in" >&2
+  exit 1
+fi
+if [ "$*" != login ]; then
+  exec '@FAKE@' "$@"
+fi
+echo started >> '@SESSIONS@'
+if IFS= read -r _ || [ -t 1 ]; then exit 3; fi
+echo "Starting local login server on http://localhost:1455."
+echo "If your browser did not open, navigate to this URL to authenticate:"
+echo
+echo "https://auth.openai.com/oauth/authorize?response_type=code&state=@STATE@"
+echo
+until [ -f '@APPROVED@' ]; do sleep 0.1; done
+printf '{"auth_mode":"chatgpt"}' > "$CODEX_HOME/auth.json"
+echo "Successfully logged in." >&2
+`
+
+// newCodexSignInStandIn writes a signInCodex and the empty Codex home of its own the daemon runs it with; the stand-in
+// keeps the sign-in's file there.
+func newCodexSignInStandIn(t *testing.T) (signInStandIn, string) {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	random := make([]byte, 16)
+	if _, err := rand.Read(random); err != nil {
+		t.Fatal(err)
+	}
+	s := signInStandIn{path: filepath.Join(dir, "bin", "codex"), approved: filepath.Join(dir, "approved"),
+		sessions: filepath.Join(dir, "sessions.log"), state: "state" + hex.EncodeToString(random)}
+	home := filepath.Join(dir, "codex-home")
+	src := strings.NewReplacer("@FAKE@", filepath.Join(repoRoot(), "tests", "integration", "testdata", "fake-codex"),
+		"@SESSIONS@", s.sessions, "@APPROVED@", s.approved, "@STATE@", s.state).Replace(signInCodex)
+	for _, d := range []string{filepath.Dir(s.path), home} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(s.path, []byte(src), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return s, home
+}
+
+// harmflow-app#572: a Codex that says it is signed out signs in again through its own `codex login`. The daemon starts
+// it by itself and waits at the browser's step, with a notice saying so; a check and the button meanwhile start no
+// second sign-in. Once the user approves, the CLI says it is signed in, its check agrees, and the harness is ready. The
+// sign-in is in Codex's own home, and no file under the daemon's home holds the URL's state.
+func TestCodexSignInThroughTheBrowser(t *testing.T) {
+	t.Parallel()
+	codex, codexHome := newCodexSignInStandIn(t)
+	home := t.TempDir()
+	d := startDaemon(t, home, "CODEX_HOME="+codexHome)
+	if h := d.setHarness("codex", codex.path); h["authentication"] != "invalid" {
+		t.Fatalf("PUT /harnesses/codex = authentication %v, want invalid", h["authentication"])
+	}
+	d.waitHarness("codex", 30*time.Second, func(h map[string]any) bool { return h["signIn"] == "running" })
+	for deadline := time.Now().Add(30 * time.Second); codex.started(t) == 0 && time.Now().Before(deadline); {
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	d.call("POST", "/harnesses/refresh", nil, 200)
+	if h := d.call("POST", "/harnesses/codex/sign-in", nil, 202); h["signIn"] != "running" {
+		t.Errorf("POST /harnesses/codex/sign-in during a sign-in = %v, want the one running", h["signIn"])
+	}
+	time.Sleep(time.Second)
+	if n := codex.started(t); n != 1 {
+		t.Errorf("%d sign-ins after a check and the button during the sign-in, want one", n)
+	}
+
+	codex.write(t, codex.approved)
+	h := d.waitHarness("codex", 60*time.Second, func(h map[string]any) bool {
+		return h["readiness"] == "ready" && h["signIn"] == "available"
+	})
+	if h["authentication"] != "valid" {
+		t.Errorf("after the sign-in, authentication %v, want valid", h["authentication"])
+	}
+	if got := d.noticeTypes(); !containsAll(got, "harness.sign_in_started", "harness.sign_in_completed") {
+		t.Errorf("notices %v, want the sign-in's start and its end", got)
+	}
+	if _, err := os.Stat(filepath.Join(codexHome, "auth.json")); err != nil {
+		t.Errorf("no sign-in in Codex's own home after the sign-in: %v", err)
+	}
+	d.stop()
+	noLeakInHome(t, homeFiles(t, home), map[string]string{"the sign-in URL's state": codex.state})
+}
+
+// harmflow-app#572: a Codex sign-in nobody approves ends at its timeout. The harness stays not ready, saying the
+// browser sign-in was not completed, and no sign-in starts again by itself, however often the harness is checked; the
+// button starts one.
+func TestCodexSignInTimesOutAndStartsAgainByHand(t *testing.T) {
+	t.Parallel()
+	codex, codexHome := newCodexSignInStandIn(t)
+	d := startDaemon(t, t.TempDir(), "CODEX_HOME="+codexHome, "HARMFLOW_SIGN_IN_TIMEOUT=8s")
+	d.setHarness("codex", codex.path)
+	h := d.waitHarness("codex", 60*time.Second, func(h map[string]any) bool {
+		return h["diagnosticKey"] == "harness_sign_in_not_completed"
+	})
+	if h["readiness"] != "not_ready" || h["signIn"] != "available" {
+		t.Errorf("after the timeout, readiness %v and sign-in %v; want not_ready, available", h["readiness"], h["signIn"])
+	}
+	if got := d.noticeTypes(); !containsAll(got, "harness.sign_in_started", "harness.sign_in_timed_out") {
+		t.Errorf("notices %v, want the sign-in's start and its timeout", got)
+	}
+
+	d.call("POST", "/harnesses/refresh", nil, 200)
+	d.call("POST", "/harnesses/refresh", nil, 200)
+	time.Sleep(time.Second)
+	if n := codex.started(t); n != 1 {
+		t.Fatalf("%d sign-ins after the timeout and two checks, want the first alone", n)
+	}
+	if h := d.call("POST", "/harnesses/codex/sign-in", nil, 202); h["signIn"] != "running" {
+		t.Errorf("POST /harnesses/codex/sign-in = %v, want its sign-in running", h["signIn"])
+	}
+	for deadline := time.Now().Add(30 * time.Second); codex.started(t) < 2 && time.Now().Before(deadline); {
+		time.Sleep(100 * time.Millisecond)
+	}
+	if n := codex.started(t); n != 2 {
+		t.Errorf("%d sign-ins after the button, want a second", n)
+	}
+}
+
+// harmflow-app#572, with the real Codex: signed out in a Codex home of the test's own, it signs in again through its
+// own `codex login`, which a person approves in the browser it opens, within the sign-in's ten minutes. The test then
+// signs that home out, so the user's own sign-in stays as it is.
+func TestSignInRealCodexThroughTheBrowser(t *testing.T) {
+	installed := realCodex(t)
+	codexHome := t.TempDir()
+	env := append([]string{"CODEX_HOME=" + codexHome}, noCredentialEnv()...)
+	t.Cleanup(func() {
+		logout := exec.Command(installed, "logout")
+		logout.Env = daemonEnv(env)
+		if out, err := logout.CombinedOutput(); err != nil {
+			t.Errorf("signing the test's Codex home out: %v\n%s", err, out)
+		}
+	})
+	d := startDaemon(t, t.TempDir(), env...)
+	// The daemon reports the path a link resolves to, and the installed codex is one.
+	d.setHarness("codex", wrap(t, installed).path)
+	t.Log("approve the Codex sign-in in the browser it opens")
+	h := d.waitHarness("codex", 11*time.Minute, func(h map[string]any) bool {
+		return h["readiness"] == "ready" || h["diagnosticKey"] == "harness_sign_in_not_completed"
+	})
+	if h["readiness"] != "ready" || h["authentication"] != "valid" {
+		t.Errorf("after the sign-in, readiness %v, authentication %v, diagnostic %v; want ready, valid", h["readiness"],
+			h["authentication"], h["diagnosticKey"])
+	}
+}

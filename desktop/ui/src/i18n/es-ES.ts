@@ -1402,7 +1402,7 @@ export const esES: Resources = {
     scope: {
       title: "Todo se ejecuta en este ordenador",
       body:
-        "HarmFlow programa, ejecuta y supervisa automatizaciones realizadas por las herramientas de IA que ya instalaste — Claude Code y Codex. Nunca las instala ni actualiza, y cuando Claude Code cerró la sesión inicia el inicio de sesión del propio Claude Code, que apruebas en el navegador, o usa un token de larga duración que guardas en Ajustes.",
+        "HarmFlow programa, ejecuta y supervisa automatizaciones realizadas por las herramientas de IA que ya instalaste — Claude Code y Codex. Nunca las instala ni actualiza. Cuando Claude Code cerró la sesión inicia el inicio de sesión del propio Claude Code, que apruebas en el navegador, o usa un token de larga duración que guardas en Ajustes; cuando Codex cerró la sesión inicia el inicio de sesión del propio Codex, que apruebas en el navegador.",
       points: {
         local: "Las tareas, el estado y los logs se quedan en esta máquina.",
         permissions:
