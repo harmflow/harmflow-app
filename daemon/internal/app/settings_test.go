@@ -3,7 +3,9 @@ package app
 import (
 	"errors"
 	"fmt"
+	"log"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
@@ -244,6 +246,74 @@ func TestQuotaShareRefusedOnLoad(t *testing.T) {
 	}
 	if got := e.app.quotaShare(domain.HarnessCodex); got != 80 {
 		t.Errorf("quotaShare(codex) = %v, want 80", got)
+	}
+}
+
+// logBuffer keeps what an App logs, for a test to read while the App's goroutines may still write to it.
+type logBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *logBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+// lines are the lines logged so far that hold s.
+func (b *logBuffer) lines(s string) []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var got []string
+	for _, l := range strings.Split(b.buf.String(), "\n") {
+		if strings.Contains(l, s) {
+			got = append(got, l)
+		}
+	}
+	return got
+}
+
+// The share refused when the settings load is written to the daemon's log, named by its harness, and the other
+// harness's share, which loads, is not: a message that names no harness, or always the same one, fails a case.
+func TestQuotaShareRefusedOnLoadIsLogged(t *testing.T) {
+	cases := []struct {
+		name    string
+		refused string
+		share   float64
+		kept    string
+		keep    float64
+	}{
+		{"claude-code at 0", domain.HarnessClaudeCode, 0, domain.HarnessCodex, 80},
+		{"claude-code at 101", domain.HarnessClaudeCode, 101, domain.HarnessCodex, 80},
+		{"codex at 101", domain.HarnessCodex, 101, domain.HarnessClaudeCode, 95},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			logged := &logBuffer{}
+			e := newEnv(t, func(e *env) { e.logger = log.New(logged, "", 0) })
+			s := defaultSettings()
+			s.Quota = map[string]QuotaShare{c.refused: {MaxPercent: c.share}, c.kept: {MaxPercent: c.keep}}
+			if err := e.app.d.State.Save("settings", s); err != nil {
+				t.Fatalf("Save(settings) = %v", err)
+			}
+			if err := e.app.loadSettings(); err != nil {
+				t.Fatalf("loadSettings() = %v, want no error", err)
+			}
+			refusals := logged.lines("the share is refused")
+			if len(refusals) != 1 || !strings.Contains(refusals[0], "quota."+c.refused+".maxPercent") {
+				t.Errorf("loadSettings() logged the refusals %q, want one naming quota.%s.maxPercent", refusals, c.refused)
+			}
+			if got := logged.lines("quota." + c.kept); len(got) != 0 {
+				t.Errorf("loadSettings() logged %q, want no refusal of quota.%s", got, c.kept)
+			}
+			if got := e.app.quotaShare(c.refused); got != domain.FullShare {
+				t.Errorf("quotaShare(%s) = %v, want %v for a share refused on load", c.refused, got, domain.FullShare)
+			}
+			if got := e.app.quotaShare(c.kept); got != c.keep {
+				t.Errorf("quotaShare(%s) = %v, want %v", c.kept, got, c.keep)
+			}
+		})
 	}
 }
 

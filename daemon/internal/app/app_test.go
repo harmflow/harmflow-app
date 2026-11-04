@@ -490,6 +490,8 @@ type env struct {
 	harnessTokens func(string) ports.SecretStore
 	// identify reads a script's process identity, when a test sets it; procutil's reading otherwise.
 	identify func(ctx context.Context, pid int) (domain.ProcessIdentity, error)
+	// logger is what the App writes its log to, when a test sets one; the log is discarded otherwise.
+	logger *log.Logger
 }
 
 // newEnv starts an App on fake harnesses; configure sets up the env, its fakes included, before the App starts.
@@ -533,11 +535,15 @@ func (e *env) start(t *testing.T, configure ...func(*env)) {
 	if e.signer != nil {
 		harnesses[0] = e.signer
 	}
+	logger := e.logger
+	if logger == nil {
+		logger = log.New(io.Discard, "", 0)
+	}
 	a, err := New(Deps{Paths: e.paths, Version: "test", Clock: e.clock, Wake: e.wake, Location: time.UTC, Tasks: tasks,
 		State: state, Executions: e.records, Events: e.events, Validator: v, Harnesses: harnesses,
 		Service: e.service, Workspace: &workspace.Reader{}, TickInterval: time.Hour, TimeoutUnit: e.timeoutUnit,
 		SignInTimeout: e.signInTimeout, HarnessTokens: e.harnessTokens, Identify: e.identify,
-		Logger: log.New(io.Discard, "", 0)})
+		Logger: logger})
 	if err != nil {
 		t.Fatal(err)
 	}
