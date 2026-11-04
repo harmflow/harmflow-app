@@ -624,7 +624,8 @@ func (r *run) quotaExhausted(ad ports.HarnessAdapter, harness string, end domain
 		"{{harness}} exhausted its quota", "harness", ad.Name())))
 }
 
-// chain returns the preferred profile and the fallbacks that can load the task's agents and skills.
+// chain returns the preferred profile and the fallbacks that can load the task's agents and skills. A fallback that
+// loads them itself, whose list it could not give, stays, unverified, as validation keeps it.
 func (r *run) chain(ctx context.Context) ([]domain.HarnessProfile, []domain.Text) {
 	profiles := r.def.Profiles()
 	out := []domain.HarnessProfile{profiles[0]}
@@ -634,7 +635,8 @@ func (r *run) chain(ctx context.Context) ([]domain.HarnessProfile, []domain.Text
 		if !ok {
 			continue
 		}
-		if missing := r.a.missingItems(ctx, r.def, p.Provider, r.itemWorkspace(), r.addedFolders()); len(missing) > 0 {
+		missing := r.a.missingItems(ctx, r.def, p.Provider, r.itemWorkspace(), r.addedFolders())
+		if missing = slices.DeleteFunc(missing, missingItem.leftUnverified); len(missing) > 0 {
 			invalid = append(invalid, missing[0].invalidFallback(ad.Name()))
 			continue
 		}
