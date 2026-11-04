@@ -77,10 +77,10 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
   const showExternal = !!task && externalChange !== undefined && externalChange > answeredEvent;
   const answerExternal = () => setAnsweredEvent((seen) => externalChange ?? seen);
 
-  // A harness that finds the user's skills per workspace, as Codex and Claude Code do, offers the ones it has in the
-  // task's workspace: the catalog is asked for it, and the one already loaded stands in until it answers. The task's ID
-  // goes with its workspace path, so that with none the daemon reads the folder it runs the task in, as validation does,
-  // and so do the folders the task adds, where Claude Code finds skills too.
+  // The catalog is asked for the task's workspace, and the one already loaded stands in until it answers. Claude Code's
+  // and Codex's skills are the installation's, the same for every workspace, so for them the answer offers no skill of
+  // the task's own folders. The daemon hands each harness the workspace path with the task's ID, so that with none it is
+  // the folder the task runs in, as validation reads it, and the folders the task adds.
   const spec = doc.spec as { workspace?: { path?: unknown } } | undefined;
   const metadata = doc.metadata as { id?: unknown } | undefined;
   const workspace = useDebounced(typeof spec?.workspace?.path === "string" ? spec.workspace.path : "", 500);

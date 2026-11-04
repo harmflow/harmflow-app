@@ -2,8 +2,10 @@ package integration
 
 import (
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -100,6 +102,72 @@ func TestCitedItemsReachClaudeCodeByName(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The task editor asks GET /catalog for a Claude Code task with the task's workspace and ID. The daemon answers with
+// the skills the installed Claude Code lists, a plugin's by the name the CLI reports, the same as with no workspace: a
+// skill only the workspace's .claude/skills holds is not offered. A task in that workspace citing that skill is
+// refused with skill_not_found naming it, and one citing the plugin's skill saves. The daemon's HOME, where Claude
+// Code's listing runs, is the test's own, so no folder of the user's adds a skill to the list.
+func TestEditorCatalogOffersTheInstallationsSkills(t *testing.T) {
+	t.Parallel()
+	home, work := t.TempDir(), resolvedTempDir(t)
+	claudeConfig := filepath.Join(home, "claude")
+	writeTemp(t, filepath.Join(claudeConfig, "plugins", "pdf", "skills", "pdf", "SKILL.md"),
+		itemFile("pdf", "Reads and writes PDF files.", "Use the PDF tools."))
+	writeTemp(t, filepath.Join(work, ".claude", "skills", "release-notes", "SKILL.md"),
+		itemFile("release-notes", "Writes the release notes.", "Write the release notes."))
+	d := startDaemon(t, home, "CLAUDE_CONFIG_DIR="+claudeConfig, "HOME="+resolvedTempDir(t))
+	d.call("PUT", "/harnesses/claude-code", map[string]any{"path": recordingStandIn(t, "fake-claude", "claude")}, 200)
+	d.call("PATCH", "/settings", map[string]any{"allowedFolders": []any{work}}, 200)
+
+	q := url.Values{"workspace": {work}, "task": {"release"}}
+	edited := d.call("GET", "/catalog?"+q.Encode(), nil, 200)["skills"]
+	offered := claudeCodeUserSkills(edited)
+	if !slices.Contains(offered, "pdf:pdf") || slices.Contains(offered, "release-notes") {
+		t.Errorf("GET /catalog?%s offers %q on Claude Code, want pdf:pdf and not release-notes", q.Encode(), offered)
+	}
+	if none := d.call("GET", "/catalog", nil, 200)["skills"]; !reflect.DeepEqual(edited, none) {
+		t.Errorf("GET /catalog?%s skills = %v, want those of GET /catalog, %v", q.Encode(), edited, none)
+	}
+
+	document := func(id, skill string) map[string]any {
+		return map[string]any{"document": map[string]any{"apiVersion": "harmflow/v1alpha1", "kind": "Task",
+			"metadata": map[string]any{"id": id, "name": "Task " + id},
+			"spec": map[string]any{
+				"type":      "general",
+				"prompt":    "Write the release notes.",
+				"skills":    []any{skill},
+				"harness":   map[string]any{"preferred": map[string]any{"provider": "claude-code"}},
+				"workspace": map[string]any{"path": work},
+			}}}
+	}
+	refused := d.call("POST", "/tasks", document("release", "release-notes"), 422)
+	e, _ := refused["error"].(map[string]any)
+	validation, _ := e["validation"].(map[string]any)
+	errs, _ := validation["errors"].([]any)
+	if !slices.ContainsFunc(errs, func(x any) bool {
+		issue, _ := x.(map[string]any)
+		params, _ := issue["params"].(map[string]any)
+		return issue["messageKey"] == "skill_not_found" && params["name"] == "release-notes"
+	}) {
+		t.Errorf("POST /tasks citing release-notes errors %v, want skill_not_found naming release-notes", errs)
+	}
+	d.call("POST", "/tasks", document("release", "pdf:pdf"), 201)
+}
+
+// claudeCodeUserSkills are the names of the user's skills among the skills of GET /catalog that Claude Code can load.
+func claudeCodeUserSkills(skills any) []string {
+	var names []string
+	all, _ := skills.([]any)
+	for _, x := range all {
+		s, _ := x.(map[string]any)
+		harnesses, _ := s["harnesses"].([]any)
+		if name, _ := s["name"].(string); s["source"] == "user" && slices.Contains(harnesses, any("claude-code")) {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // userItem is the user's agent or skill that GET /catalog lists under the name, which must be found for Claude Code.

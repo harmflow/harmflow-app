@@ -31,13 +31,22 @@ if [ "$1 $2" = "-p /usage" ]; then
 fi
 # The skill list the daemon reads: a session it starts without a permission mode, which every execution sets, and
 # stops at its init line. The line lists a bundled skill and the skills of the configuration directory and of the
-# folder it runs in, as the real CLI lists them for a folder with no repository above it, and nothing follows.
+# folder it runs in, as the real CLI lists them for a folder with no repository above it, and nothing follows. A
+# plugin's skill, in plugins/<plugin>/skills/<skill>/ of the configuration directory, is listed as <plugin>:<skill>, as
+# the real CLI names it; with no such folder, no plugin is installed.
 case " $* " in
   *" --permission-mode "*) ;;
   *)
     SKILLS='"simplify"'
-    for d in "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/skills/*/ .claude/skills/*/; do
+    CONFIG=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
+    for d in "$CONFIG"/skills/*/ .claude/skills/*/; do
       [ -f "${d}SKILL.md" ] && { d=${d%/}; SKILLS="$SKILLS,\"${d##*/}\""; }
+    done
+    for d in "$CONFIG"/plugins/*/skills/*/; do
+      [ -f "${d}SKILL.md" ] || continue
+      d=${d%/}
+      plugin=${d%/skills/*}
+      SKILLS="$SKILLS,\"${plugin##*/}:${d##*/}\""
     done
     echo '{"type":"system","subtype":"init","session_id":"fake-listing","skills":['"$SKILLS"']}'
     exit 0 ;;
