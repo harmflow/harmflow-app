@@ -70,7 +70,9 @@
       "custom": {
         "allowedTools": ["Read", "Grep"],
         "deniedTools": ["WebFetch"],
-        "writablePaths": ["${FORM_REPO}"]
+        "writablePaths": ["${FORM_REPO}"],
+        "allowedPrograms": ["git", "gh"],
+        "deniedPrograms": ["curl"]
       }
     },
     "execution": {

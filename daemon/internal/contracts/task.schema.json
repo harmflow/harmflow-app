@@ -36,6 +36,11 @@
       "type": "string",
       "pattern": "^([a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?|[^\\s:/\\\\]([^:/\\\\]{0,62}[^\\s:/\\\\])?:[^\\s:/\\\\]([^:/\\\\]{0,62}[^\\s:/\\\\])?)$"
     },
+    "programName": {
+      "description": "A program a session starts, by its name and never by a path: letters, digits, dot, underscore, plus, and hyphen, beginning with a letter or a digit, as git, python3, or clang++.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$"
+    },
     "metadata": {
       "type": "object",
       "additionalProperties": false,
@@ -430,6 +435,22 @@
               "items": {
                 "type": "string",
                 "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "allowedPrograms": {
+              "description": "The programs the session may start, by name. When present, it is a limit of its own: the session may start only these. An empty list sets no limit.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/programName"
+              },
+              "uniqueItems": true
+            },
+            "deniedPrograms": {
+              "description": "The programs the session may not start, by name. A denied program is denied even when allowedPrograms lists it.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/programName"
               },
               "uniqueItems": true
             }

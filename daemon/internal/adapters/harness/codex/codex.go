@@ -572,6 +572,13 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 					Text: domain.T("restriction_codex_tool_lists",
 						"Codex has no per-tool allow or deny list; the custom tool lists are not enforced")})
 			}
+			// HarmFlow applies no control of Codex's own to the programs its shell starts, so the lists are accepted and
+			// reported, never passed on.
+			if perm.Custom.HasProgramLists() {
+				restrictions = append(restrictions, ports.Restriction{Name: "program_lists", Enforced: false,
+					Text: domain.T("restriction_codex_program_lists",
+						"Codex's sandbox does not limit the programs its shell starts; the custom program lists are not enforced")})
+			}
 		}
 	}
 	if req.ExecutionDir != "" {

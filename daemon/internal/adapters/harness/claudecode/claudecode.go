@@ -446,8 +446,12 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 				mode = "acceptEdits"
 			}
 		}
+		// The allowed programs are rules of the shell tool, added once the mode is chosen: a program the task lets the
+		// session start approves no file edit.
+		taskTools := allowed
+		allowed = append(append([]string{}, allowed...), shellRules(perm.Custom.AllowedPrograms)...)
 		args = append(args, "--permission-mode", mode, "--allowedTools", strings.Join(allowed, ","))
-		denied := append([]string{}, perm.Custom.DeniedTools...)
+		denied := append(append([]string{}, perm.Custom.DeniedTools...), shellRules(perm.Custom.DeniedPrograms)...)
 		if !network {
 			denied = append(denied, webTools...)
 		}
@@ -456,8 +460,10 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 		}
 		dirs = append(dirs, perm.Custom.WritablePaths...)
 		restrictions = append(restrictions, a.allowlistRestriction(req, append(append([]string{}, allowed...), denied...)))
-		restrictions = append(restrictions, shellRestrictions(mode == "acceptEdits" && hasShell(allowed), network,
-			*perm.RestrictToWorkspace)...)
+		restrictions = append(restrictions, shellRestrictions(hasShell(allowed), network, *perm.RestrictToWorkspace)...)
+		if perm.Custom.HasProgramLists() {
+			restrictions = append(restrictions, programRestrictions(taskTools, allowed, perm.Custom.AllowedPrograms)...)
+		}
 	default: // workspace_write
 		// The editing tools get no allow rule: a bare one allows them on any path, and acceptEdits alone approves their
 		// edits in the working directory and the added directories.
@@ -699,6 +705,42 @@ func shellRestrictions(shell, network, restrict bool) []ports.Restriction {
 				"Claude Code does not block network access from shell commands; only its web tools are removed")})
 	}
 	return out
+}
+
+// shellRules are the rules of Claude Code's shell tool that match a command starting each of programs, by name.
+func shellRules(programs []string) []string {
+	var out []string
+	for _, p := range programs {
+		out = append(out, "Bash("+p+":*)")
+	}
+	return out
+}
+
+// programRestrictions say whether a custom profile's program lists hold. Claude Code applies each as a rule of its
+// shell tool, which it checks against the command the shell tool runs, and a deny rule wins over an allow rule. It does
+// not see the programs a program it started starts in turn, so whenever the session has a shell tool, the lists are not
+// enforced; and a shell tool the task's own list allows whole lets the session start any program the allowed programs
+// leave out, which is named apart. With no shell tool, the session starts no program, so the denied programs hold.
+func programRestrictions(taskTools, allowed, allowedPrograms []string) []ports.Restriction {
+	if !hasShell(allowed) {
+		return []ports.Restriction{{Name: "program_lists", Enforced: true,
+			Text: domain.Text{Message: "Claude Code's session has no shell tool, so it starts no program"}}}
+	}
+	var out []ports.Restriction
+	if len(allowedPrograms) > 0 && slices.ContainsFunc(taskTools, wholeShell) {
+		out = append(out, ports.Restriction{Name: "program_lists", Enforced: false,
+			Text: domain.T("restriction_claude_shell_programs",
+				"the task's allowed tools allow every shell command, so Claude Code's session may start programs the allowed programs leave out")})
+	}
+	return append(out, ports.Restriction{Name: "program_lists", Enforced: false,
+		Text: domain.T("restriction_claude_program_children",
+			"Claude Code checks only the command its shell tool runs, so a program it starts may start others; the custom program lists are not enforced")})
+}
+
+// wholeShell reports whether a tool rule allows every command of the shell tool: the bare tool, or a pattern of
+// nothing but a wildcard.
+func wholeShell(rule string) bool {
+	return rule == "Bash" || rule == "Bash(*)" || rule == "Bash(:*)"
 }
 
 func hasShell(tools []string) bool {

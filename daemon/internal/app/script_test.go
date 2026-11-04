@@ -942,6 +942,11 @@ func TestScriptRestrictionsAreUnenforced(t *testing.T) {
 	if got := scriptRestrictions(domain.Permissions{Profile: domain.ProfileReadOnly, Network: domain.NetworkDeny}); len(got) != 2 {
 		t.Errorf("read-only with no network: %+v", got)
 	}
+	programs := domain.Permissions{Profile: domain.ProfileCustom,
+		Custom: &domain.CustomPermissions{DeniedPrograms: []string{"curl"}}}
+	if got := scriptRestrictions(programs); len(got) != 1 || got[0].Subject != "program_lists" {
+		t.Errorf("scriptRestrictions(denied programs) = %+v, want program_lists alone", got)
+	}
 }
 
 // A script task is caught up, queued, and notified like any task.

@@ -201,12 +201,22 @@ type Permissions struct {
 	Custom              *CustomPermissions `yaml:"custom,omitempty" json:"custom,omitempty"`
 }
 
-// CustomPermissions is the tools a custom permissions profile allows and denies, and the paths it lets the harness
-// write.
+// CustomPermissions is the tools a custom permissions profile allows and denies, the paths it lets the harness write,
+// and the programs it lets the session start and those it does not.
 type CustomPermissions struct {
 	AllowedTools  []string `yaml:"allowedTools,omitempty" json:"allowedTools,omitempty"`
 	DeniedTools   []string `yaml:"deniedTools,omitempty" json:"deniedTools,omitempty"`
 	WritablePaths []string `yaml:"writablePaths,omitempty" json:"writablePaths,omitempty"`
+	// AllowedPrograms is a limit when it holds a name: the session may start only these programs. Empty, it sets no
+	// limit of its own.
+	AllowedPrograms []string `yaml:"allowedPrograms,omitempty" json:"allowedPrograms,omitempty"`
+	// DeniedPrograms are programs the session may not start, matched by name; a denial wins over AllowedPrograms.
+	DeniedPrograms []string `yaml:"deniedPrograms,omitempty" json:"deniedPrograms,omitempty"`
+}
+
+// HasProgramLists reports whether the profile states the programs its session may or may not start.
+func (c *CustomPermissions) HasProgramLists() bool {
+	return c != nil && (len(c.AllowedPrograms) > 0 || len(c.DeniedPrograms) > 0)
 }
 
 // ExecutionLimits bounds an execution: a timeout shared by all its attempts, the grace a process gets to end once it is
@@ -605,9 +615,11 @@ func (d TaskDocument) clone() TaskDocument {
 		pc.RestrictToWorkspace = clonePtr(p.RestrictToWorkspace)
 		if p.Custom != nil {
 			cu := CustomPermissions{
-				AllowedTools:  cloneSlice(p.Custom.AllowedTools),
-				DeniedTools:   cloneSlice(p.Custom.DeniedTools),
-				WritablePaths: cloneSlice(p.Custom.WritablePaths),
+				AllowedTools:    cloneSlice(p.Custom.AllowedTools),
+				DeniedTools:     cloneSlice(p.Custom.DeniedTools),
+				WritablePaths:   cloneSlice(p.Custom.WritablePaths),
+				AllowedPrograms: cloneSlice(p.Custom.AllowedPrograms),
+				DeniedPrograms:  cloneSlice(p.Custom.DeniedPrograms),
 			}
 			pc.Custom = &cu
 		}
