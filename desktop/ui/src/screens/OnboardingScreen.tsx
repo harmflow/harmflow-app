@@ -54,12 +54,14 @@ export function OnboardingScreen({
     }
   };
 
-  // Only the last step's button records onboarding as completed: a first task picked or imported does not.
+  // Only the last step's button records onboarding as completed: a first task picked or imported does not. The
+  // Executions screen it opens reads its queue again, so a first task saved meanwhile shows with its next run.
   const complete = async () => {
     try {
       if (daemonUp) {
         const settings = await api.updateSettings({ onboardingCompleted: true, ...(autostart ? { autostart: true } : {}) });
         if (autostart) await native.setLoginItem(settings.trayEnabled).catch(() => undefined);
+        void actions.refreshExecutions();
         await actions.refreshSettings();
       }
     } catch (err) {

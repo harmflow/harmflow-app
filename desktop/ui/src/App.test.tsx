@@ -551,9 +551,12 @@ describe("new task", () => {
       expect(daemon.sent.filter((r) => r.method === "POST" && r.path === "/tasks")).toHaveLength(1);
       expect(host!.querySelector(".editor")).toBeNull();
       expect(completions()).toEqual([]); // the save finishes nothing
+      // The daemon schedules the saved task; the Executions screen shows it once first use finishes.
+      daemon.answers.set("/queue", { waiting: [], upcoming: [{ taskId: "script-task", taskName: "Script task", nextFireAt: "2099-01-01T10:00:00Z" }], workItems: [] });
       await finish();
       expect(completions()).toEqual([{ onboardingCompleted: true, autostart: true }]);
       expect(getState().tasks).toEqual([summary]);
+      expect(host!.querySelector(".queue-item__title")?.textContent).toBe("Script task");
     });
 
     it("comes back to its last step once a task is imported", async () => {
