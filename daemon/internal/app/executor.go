@@ -676,9 +676,12 @@ func warningEvent(w domain.Warning, eventType string) domain.Event {
 func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info ports.HarnessInfo, p domain.HarnessProfile, reason domain.Text,
 	prev []previousAttempt) (domain.AttemptEnd, bool) {
 	a := r.a
-	agents, skills, err := r.resolve(ctx, ad)
+	agents, skills, warnings, err := r.resolve(ctx, ad)
 	if err != nil {
 		return domain.AttemptEnd{Class: domain.ClassTaskError, Error: domain.TextOf(err)}, false
+	}
+	for _, w := range warnings {
+		r.warn(w, "", false)
 	}
 	now := a.now()
 	a.mu.Lock()
@@ -911,29 +914,45 @@ func attemptOutcome(c domain.ErrorClass) domain.AttemptOutcome {
 }
 
 // resolve finds the task's agents and skills for one harness, as it finds them for the execution's working directory.
-func (r *run) resolve(ctx context.Context, ad ports.HarnessAdapter) ([]ports.ResolvedItem, []ports.ResolvedItem, error) {
-	var agents, skills []ports.ResolvedItem
+// When the harness loads the task's items of a kind itself and could not give its list of them, those items are passed
+// through by name, unverified, and the warning validation gives says so; the list is not asked for again for the rest
+// of them. A list that could not be read fails the attempt for any other harness or kind, as a missing item does.
+func (r *run) resolve(ctx context.Context, ad ports.HarnessAdapter) (agents, skills []ports.ResolvedItem, warnings []domain.Warning,
+	err error) {
 	for _, kind := range []string{"agent", "skill"} {
-		names := r.eff.Spec.Agents
+		names, code, path := r.eff.Spec.Agents, domain.WarningMissingAgent, "/spec/agents"
 		if kind == "skill" {
-			names = r.eff.Spec.Skills
+			names, code, path = r.eff.Spec.Skills, domain.WarningMissingSkill, "/spec/skills"
 		}
+		unverified := false
 		for _, name := range names {
-			l := r.a.resolveItem(ctx, kind, name, ad.ID(), r.itemWorkspace(), r.addedFolders())
-			if l.unreadable != nil {
-				l.missing.unreadable = l.unreadable
-			}
-			if l.unreadable != nil || !l.found {
-				return nil, nil, &domain.TextError{Text: l.missing.notFound(ad.Name())}
+			var it ports.ResolvedItem
+			if unverified && !strings.HasPrefix(name, BuiltinPrefix) {
+				it = ports.ResolvedItem{Name: name, Kind: kind}
+			} else {
+				l := r.a.resolveItem(ctx, kind, name, ad.ID(), r.itemWorkspace(), r.addedFolders())
+				if l.unreadable != nil {
+					l.missing.unreadable = l.unreadable
+				}
+				switch {
+				case l.unreadable != nil && l.missing.unverifiable:
+					unverified = true
+					warnings = append(warnings, domain.Warning{Code: code, Subject: path, Text: l.missing.unverified(ad.Name())})
+					it = ports.ResolvedItem{Name: name, Kind: kind}
+				case l.unreadable != nil || !l.found:
+					return nil, nil, nil, &domain.TextError{Text: l.missing.notFound(ad.Name())}
+				default:
+					it = l.item
+				}
 			}
 			if kind == "agent" {
-				agents = append(agents, l.item)
+				agents = append(agents, it)
 			} else {
-				skills = append(skills, l.item)
+				skills = append(skills, it)
 			}
 		}
 	}
-	return agents, skills, nil
+	return agents, skills, warnings, nil
 }
 
 // itemWorkspace is the folder the execution's agents and skills are looked up for: its working directory, or, before

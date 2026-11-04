@@ -3,11 +3,13 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -149,7 +151,7 @@ func TestCodexSkillsComeFromItsSkillList(t *testing.T) {
 	if len(chain) != 2 || len(invalid) != 0 {
 		t.Errorf("chain() = %v, invalid %v; want Claude Code then Codex", chain, invalid)
 	}
-	_, skills, err := r.resolve(ctx, a.adapters[domain.HarnessCodex])
+	_, skills, _, err := r.resolve(ctx, a.adapters[domain.HarnessCodex])
 	if err != nil || len(skills) != 1 || skills[0].Path != filepath.Dir(skill) {
 		t.Errorf("resolve(codex) = %+v, %v; want review-notes at %s", skills, err, filepath.Dir(skill))
 	}
@@ -268,13 +270,14 @@ func TestCodexPluginSkills(t *testing.T) {
 		t.Fatalf("Validate(plugins) errors = %+v, want none", res.Errors)
 	}
 	r := &run{a: a, def: *res.doc, eff: res.doc.Effective(), work: t.TempDir()}
-	_, skills, err := r.resolve(ctx, a.adapters[domain.HarnessCodex])
+	_, skills, _, err := r.resolve(ctx, a.adapters[domain.HarnessCodex])
 	if err != nil || len(skills) != 1 || skills[0].Name != "presentations:Presentations" || skills[0].Path != "/p/presentations" {
 		t.Errorf("resolve(codex) = %+v, %v; want presentations:Presentations at /p/presentations", skills, err)
 	}
 }
 
-// A skill list that cannot be read is said so, never a missing skill: on save, on import, and for a fallback.
+// A skill list that cannot be read is said so, never a missing skill: on save, on import, for a fallback, and as a
+// Codex attempt starts, which it fails.
 func TestUnreadableSkillListIsNotAMissingSkill(t *testing.T) {
 	received := filepath.Join(t.TempDir(), "received.jsonl")
 	a, _ := newCodexAppOn(t, skillListCodex(received,
@@ -300,6 +303,16 @@ func TestUnreadableSkillListIsNotAMissingSkill(t *testing.T) {
 	}
 	if c := a.Catalog(ctx, "", ""); len(c.Problems) != 1 || c.Problems[0].Key != "skill_list_unreadable" {
 		t.Errorf(`Catalog(ctx, "", "") problems = %+v, want one, skill_list_unreadable`, c.Problems)
+	}
+	res := a.Validate(ctx, TaskInput{YAML: codexTaskYAML("unread", codexSkills)})
+	if res.doc == nil {
+		t.Fatalf("Validate(unread) errors = %+v, want none", res.Errors)
+	}
+	r := &run{a: a, def: *res.doc, eff: res.doc.Effective(), work: t.TempDir()}
+	_, _, _, err = r.resolve(ctx, a.adapters[domain.HarnessCodex])
+	var te *domain.TextError
+	if !errors.As(err, &te) || te.Key != "skill_list_unreadable" {
+		t.Errorf("resolve(codex) = %v, want skill_list_unreadable", err)
 	}
 }
 
@@ -340,6 +353,20 @@ func newClaudeAppOn(t *testing.T, script string) *App {
 	cc := a.adapters[domain.HarnessClaudeCode].(*claudecode.Adapter)
 	cc.PathEnv = bin
 	return a
+}
+
+// newClaudeEnvOn is an env whose Claude Code is the real adapter on a stand-in CLI with this script, whose listing has
+// listTimeout (zero is the adapter's default), with a temporary configuration directory, and whose Codex is the env's
+// fake. As for newClaudeApp, no Claude Code installed on this machine ever runs.
+func newClaudeEnvOn(t *testing.T, script string, listTimeout time.Duration) *env {
+	t.Helper()
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cc := &claudecode.Adapter{Home: t.TempDir(), PathEnv: bin, KnownLocations: []string{}, SkillListTimeout: listTimeout}
+	return newEnv(t, func(e *env) { e.signer = cc })
 }
 
 // initClaude is a stand-in Claude Code that is signed in and, started with -p, appends its folder and arguments to log
@@ -441,7 +468,7 @@ func TestClaudeCodeSkillsComeFromItsSkillList(t *testing.T) {
 	}
 	resolvedExtra, _ := domain.ResolvePath(extra)
 	r := &run{a: a, def: *res.doc, eff: res.doc.Effective(), work: other, writable: []string{resolvedExtra}}
-	if _, skills, err := r.resolve(ctx, a.adapters[domain.HarnessClaudeCode]); err != nil || len(skills) != 1 ||
+	if _, skills, _, err := r.resolve(ctx, a.adapters[domain.HarnessClaudeCode]); err != nil || len(skills) != 1 ||
 		skills[0].Name != "simplify" {
 		t.Errorf("resolve(claude-code) in %s = %+v, %v; want simplify", other, skills, err)
 	}
@@ -624,6 +651,18 @@ func claudeListing(onList string) string {
 		"  auth) echo '{\"loggedIn\": true}' ;;\n  -p) " + onList + " ;;\nesac\n"
 }
 
+// attemptClaude is claudeListing with an attempt's other calls of -p told apart from the listing: its usage report
+// names one plan window, and its session, the one call given a permission mode, appends a line to sessions and ends
+// with a successful result. The listing appends a line to listings and runs onList.
+func attemptClaude(listings, onList, sessions string) string {
+	return claudeListing(`case "$*" in
+    "-p /usage") echo 'Current session: 4% used' ;;
+    *--permission-mode*) echo started >> '` + sessions + `'
+      echo '{"type":"result","subtype":"success","is_error":false,"result":"done"}' ;;
+    *) echo listed >> '` + listings + `'; ` + onList + ` ;;
+  esac`)
+}
+
 // When Claude Code cannot say which skills it loads — absent, failing, or printing no init line within the listing's
 // timeout — a Claude Code task that cites a user's skill is not refused: it saves, and imports as valid, and validation
 // warns that it could not verify the task's skills, naming why. The catalog says the list could not be read.
@@ -671,6 +710,94 @@ func TestClaudeCodeSkillListUnavailableWarns(t *testing.T) {
 			problems := a.Catalog(ctx, "", "unverified").Problems
 			if !slices.ContainsFunc(problems, func(p CatalogProblem) bool { return p.Key == "skill_list_unreadable" }) {
 				t.Errorf(`Catalog(ctx, "", unverified) problems = %+v, want skill_list_unreadable`, problems)
+			}
+		})
+	}
+}
+
+// When Claude Code cannot say which skills it loads as an attempt starts — its listing exiting, printing no list, or
+// printing no init line within the listing's timeout — the attempt starts with the task's skills: a user's skill is
+// passed through by name, unverified, a built-in one as always, and the execution gets the warning validation gives,
+// naming why. The list is asked for once, not again for each skill. A task's execution runs that attempt's session to
+// its end and holds the warning once. A failover to Claude Code does not change: a Claude Code fallback whose list
+// cannot be read is still no valid fallback.
+func TestClaudeCodeAttemptStartsWithUnverifiedSkills(t *testing.T) {
+	for _, c := range []struct {
+		name, onList, wantDetail string
+		timeout                  time.Duration // the listing's; zero is the adapter's default
+	}{
+		{"exits", "echo 'Not logged in' >&2; exit 1", "command_failed", 0},
+		{"prints no list", `echo '{"type":"system","subtype":"init"}'`, "claude_skill_list_unrecognized", 0},
+		{"outruns the timeout", "sleep 30", "claude_skill_list_timed_out", time.Second},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			log, sessions := filepath.Join(t.TempDir(), "listings.log"), filepath.Join(t.TempDir(), "sessions.log")
+			e := newClaudeEnvOn(t, attemptClaude(log, c.onList, sessions), c.timeout)
+			a := e.app
+			cc := a.adapters[domain.HarnessClaudeCode]
+			builtin := filepath.Join(a.d.Paths.Builtins, "skills", "hf-notes")
+			writeSkill(t, builtin)
+			ctx := t.Context()
+			cited := "  skills: [review-notes, hf-notes, pdf:pdf]\n"
+
+			res := a.Validate(ctx, TaskInput{YAML: taskYAML("unverified", cited)})
+			if res.doc == nil {
+				t.Fatalf("Validate(unverified) errors = %+v, want none", res.Errors)
+			}
+			r := &run{a: a, def: *res.doc, eff: res.doc.Effective(), work: t.TempDir()}
+			before := len(listings(t, log))
+			_, skills, warnings, err := r.resolve(ctx, cc)
+			want := []ports.ResolvedItem{{Name: "review-notes", Kind: "skill"},
+				{Name: "hf-notes", Kind: "skill", Builtin: true, Path: builtin, Description: "A skill."},
+				{Name: "pdf:pdf", Kind: "skill"}}
+			if err != nil || !reflect.DeepEqual(skills, want) {
+				t.Errorf("resolve(claude-code) = %+v, %v; want %+v", skills, err, want)
+			}
+			if len(warnings) != 1 || warnings[0].Key != "skill_list_unverified" || warnings[0].Code != domain.WarningMissingSkill ||
+				warnings[0].Subject != "/spec/skills" || warnings[0].Params["detailKey"] != c.wantDetail {
+				t.Errorf("resolve(claude-code) warns %+v, want one skill_list_unverified on /spec/skills naming %s", warnings,
+					c.wantDetail)
+			}
+			if n := len(listings(t, log)) - before; n != 1 {
+				t.Errorf("resolve(claude-code), citing two of the user's skills, ran %d listings, want 1", n)
+			}
+
+			e.create("unverified", cited)
+			started, err := a.RunTask("unverified")
+			if err != nil {
+				t.Fatalf("RunTask(unverified) = %+v, %v; want started", started, err)
+			}
+			x := e.wait(started.ExecutionID, domain.StatusCompleted)
+			if len(x.Attempts) != 1 || x.Attempts[0].Harness != domain.HarnessClaudeCode ||
+				x.Attempts[0].Outcome != domain.AttemptSucceeded {
+				t.Errorf("RunTask(unverified) attempts %+v, want one on Claude Code that succeeded", x.Attempts)
+			}
+			if got := listings(t, sessions); len(got) != 1 {
+				t.Errorf("RunTask(unverified) started %d sessions of the stand-in, want 1", len(got))
+			}
+			var unverified []domain.Warning
+			for _, w := range x.Warnings {
+				if w.Key == "skill_list_unverified" {
+					unverified = append(unverified, w)
+				}
+			}
+			if len(unverified) != 1 || unverified[0].Code != domain.WarningMissingSkill ||
+				unverified[0].Subject != "/spec/skills" || unverified[0].Params["detailKey"] != c.wantDetail {
+				t.Errorf("RunTask(unverified) execution warnings %+v, want one skill_list_unverified on /spec/skills naming %s",
+					x.Warnings, c.wantDetail)
+			}
+
+			res = a.Validate(ctx, TaskInput{YAML: codexTaskYAML("fb", "    fallback:\n      candidates:\n"+
+				"        - provider: claude-code\n  skills: [user-skill]\n")})
+			if res.doc == nil {
+				t.Fatalf("Validate(fb) errors = %+v, want none", res.Errors)
+			}
+			r = &run{a: a, def: *res.doc, eff: res.doc.Effective(), work: t.TempDir()}
+			chain, invalid := r.chain(ctx)
+			if len(chain) != 1 || chain[0].Provider != domain.HarnessCodex || len(invalid) != 1 ||
+				invalid[0].Key != "fallback_skill_list_unreadable" {
+				t.Errorf("chain() = %+v, invalid %+v; want Codex alone, Claude Code invalid as its skill list could not be read",
+					chain, invalid)
 			}
 		})
 	}
