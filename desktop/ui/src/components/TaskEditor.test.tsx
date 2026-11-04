@@ -9,8 +9,9 @@
 // itest › TestOneSchemaForEveryEntryPoint's. ⌘S saves as the Save button does, from any focus in the editor
 // (harmflow-app#230). A save shows the warnings the daemon gives, such as a fallback that cannot load the task's skill
 // (harmflow-app#216) or its agent (harmflow-app#347). The catalog is asked for with the task's ID, so a task with no
-// workspace path is offered the skills of the folder it runs in, which validation reads (harmflow-app#283), and a task
-// with one is offered its workspace's skills and a plugin's, in place of the catalog loaded before (harmflow-app#807).
+// workspace path is offered the skills of the folder it runs in, which validation reads (harmflow-app#283). A Claude Code
+// task with one is offered the installation's skills, a plugin's among them, and not a skill only its workspace holds
+// (harmflow-app#833).
 // An editor open on a task warns when the stream delivers a change of its file made outside HarmFlow, and a save from it
 // afterwards reports the conflict and overwrites nothing; each banner's actions load the file or keep the edit
 // (harmflow-app#593). Each later change warns again, after the user kept their edits, loaded the file, or saved past
@@ -674,17 +675,20 @@ describe("task editor catalog", () => {
     },
   );
 
-  // The Skills field offers the skills the catalog lists for the task's workspace, a plugin's by the name Claude Code
-  // reports for it, in place of the catalog loaded before (harmflow-app#807). That the daemon lists them from Claude
-  // Code's own skill list is app › TestClaudeCodeSkillsComeFromItsSkillList's.
+  // The Skills field offers the skills the catalog lists for the task's workspace, which for Claude Code are the
+  // installation's, a plugin's by the name Claude Code reports for it, the same whatever the workspace: a skill only the
+  // workspace holds is not among them (harmflow-app#833). That the daemon answers the editor's request so is itest ›
+  // TestEditorCatalogOffersTheInstallationsSkills', and that it lists them from Claude Code's own skill list is app ›
+  // TestClaudeCodeSkillsComeFromItsSkillList's.
   describe("on a Claude Code task with a workspace path", () => {
+    /** A workspace whose .claude/skills holds release-notes, which Claude Code's skill list does not report. */
     const NOTES = "/Users/dev/release-notes";
-    const OTHER = "/Users/dev/other";
     const skill = (name: string, source: CatalogEntry["source"]): CatalogEntry => ({ name, kind: "skill", source, harnesses: ["claude-code"] });
     const listing = (...skills: CatalogEntry[]): Catalog => ({ agents: [], skills, problems: [], taskTypes: [] });
     const builtin = skill("hf-github-worktree", "builtin");
-    const workspaceSkill = skill("release-notes", "user");
     const pluginSkill = skill("pdf:pdf", "user");
+    /** The installation's skills, which the daemon lists for every workspace. */
+    const installation = listing(builtin, pluginSkill);
     /** The request the editor sends for the task's workspace, the task's ID with it. */
     const catalogPath = (workspace: string) => `/catalog?workspace=${encodeURIComponent(workspace)}&task=release`;
 
@@ -747,30 +751,18 @@ describe("task editor catalog", () => {
         missing: chip.classList.contains("name-chip--missing"),
       }));
 
-    it("offers the workspace's skill and a plugin's skill, and adds each as a chip that is found", async () => {
-      await openTask(workspaceTask(NOTES), listing(builtin), listing(builtin, workspaceSkill, pluginSkill));
+    it("offers a plugin's skill and not one only the workspace holds, and marks a cited workspace skill not found", async () => {
+      await openTask(workspaceTask(NOTES), installation, installation);
       expect(catalogs()).toEqual([catalogPath(NOTES)]);
-      expect(suggestions()).toEqual(["hf-github-worktree", "release-notes", "pdf:pdf"]);
-
-      const input = skills().querySelector("input")!;
-      await type(input, "release-notes");
-      await type(input, "pdf:pdf");
-      expect(chips()).toEqual([
-        { name: "release-notes", source: "Yours", missing: false },
-        { name: "pdf:pdf", source: "Yours", missing: false },
-      ]);
-      expect(suggestions()).toEqual(["hf-github-worktree"]);
-    });
-
-    it("does not offer the skill on a task whose workspace is another folder, and marks a cited one not found", async () => {
-      // The catalog loaded before holds the skill, so only the other folder's answer leaves it out.
-      await openTask(workspaceTask(OTHER), listing(workspaceSkill), listing(builtin, pluginSkill));
-      expect(catalogs()).toEqual([catalogPath(OTHER)]);
       expect(suggestions()).toEqual(["hf-github-worktree", "pdf:pdf"]);
+
+      await type(skills().querySelector("input")!, "pdf:pdf");
+      expect(chips()).toEqual([{ name: "pdf:pdf", source: "Yours", missing: false }]);
+      expect(suggestions()).toEqual(["hf-github-worktree"]);
       close();
 
-      await openTask(workspaceTask(OTHER, ["release-notes"]), listing(workspaceSkill), listing(builtin, pluginSkill));
-      expect(catalogs()).toEqual([catalogPath(OTHER)]);
+      await openTask(workspaceTask(NOTES, ["release-notes"]), installation, installation);
+      expect(catalogs()).toEqual([catalogPath(NOTES)]);
       expect(chips()).toEqual([{ name: "release-notes", source: "Not found", missing: true }]);
       expect(suggestions()).toEqual(["hf-github-worktree", "pdf:pdf"]);
     });

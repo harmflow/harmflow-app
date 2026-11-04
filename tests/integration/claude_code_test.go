@@ -245,16 +245,7 @@ func (d *daemon) catalogFor(workspace string, added ...string) map[string]any {
 // that adds the folders added.
 func (d *daemon) claudeCodeSkillsOffered(workspace string, added ...string) []string {
 	d.t.Helper()
-	var names []string
-	skills, _ := d.catalogFor(workspace, added...)["skills"].([]any)
-	for _, x := range skills {
-		s, _ := x.(map[string]any)
-		harnesses, _ := s["harnesses"].([]any)
-		if name, _ := s["name"].(string); s["source"] == "user" && slices.Contains(harnesses, any("claude-code")) {
-			names = append(names, name)
-		}
-	}
-	return names
+	return claudeCodeUserSkills(d.catalogFor(workspace, added...)["skills"])
 }
 
 // skillListLog is what the daemon says of Claude Code's skill list for each set of folders, a workspace first and the
