@@ -14,7 +14,8 @@
 // ⌘E hides and shows the Executions screen's aside, on that screen alone, and the choice outlives a restart
 // (harmflow-app#505). A first task saved from first use, drafted or imported, brings first use back to its last step,
 // whose button alone finishes onboarding and opens the Executions screen; one left unsaved brings it back to the
-// first-task step (harmflow-app#809).
+// first-task step (harmflow-app#809). First use, walked from a fresh installation with the daemon stopped, offers each
+// of its steps and ends on the Executions screen with a first task (harmflow-app#626).
 import { EditorView } from "@codemirror/view";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -23,7 +24,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root as ReactRoot } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { native } from "./api/native";
-import type { Harness, LocalizedText, Settings, Task, TaskSummary, Template } from "./api/types";
+import type { Harness, LocalizedText, Settings, Task, TaskSummary, Template, Tool } from "./api/types";
 import { Root } from "./App";
 import { rootOptions } from "./components/ErrorBoundary";
 import { YamlEditor } from "./components/YamlEditor";
@@ -1894,6 +1895,216 @@ describe("startup", () => {
     await launch();
     expect(host.querySelector(".boot")).toBeNull();
     expect(host.querySelector(".app")).not.toBeNull();
+  });
+});
+
+// A fresh installation: settings as a fresh data folder answers them, the daemon stopped, and the desktop's bridge
+// there to start it. Once started, the stand-in daemon has Claude Code detected and ready, Codex absent, and Git and
+// gh detected, gh signed in. Each case walks first use from its first step, by one route to a first task.
+describe("first use", () => {
+  const fresh: Settings = { ...settings, autostart: { enabled: false, mechanism: "launchd" }, onboardingCompleted: false };
+  const checkedAt = "2026-10-20T19:00:00-03:00";
+  const detected: Harness[] = [
+    {
+      id: "claude-code",
+      name: "Claude Code",
+      detected: true,
+      version: "2.1.3",
+      path: "/opt/homebrew/bin/claude",
+      pathSource: "path",
+      installations: ["/opt/homebrew/bin/claude"],
+      authentication: "valid",
+      readiness: "ready",
+      models: [],
+      efforts: [],
+      lastCheckedAt: checkedAt,
+    },
+    { id: "codex", name: "Codex", detected: false, installations: [], authentication: "unknown", readiness: "not_installed", models: [], efforts: [], lastCheckedAt: checkedAt },
+  ];
+  const tools: Tool[] = [
+    { id: "git", detected: true, version: "2.50.1", path: "/usr/bin/git" },
+    { id: "gh", detected: true, version: "2.83.0", path: "/opt/homebrew/bin/gh", authentication: "valid" },
+  ];
+
+  const summary: TaskSummary = {
+    id: "implement-github-issues",
+    name: "Implement GitHub issues",
+    type: "github",
+    enabled: true,
+    revision: "r1",
+    harness: "claude-code",
+    warnings: [],
+  };
+  const document = { apiVersion: "harmflow/v1alpha1", kind: "Task", metadata: { id: summary.id, name: summary.name }, spec: { type: "github" } };
+  const saved = { ...summary, document, effective: document, yaml: "", path: `${summary.id}.yaml` } satisfies Task;
+  const upcoming = { waiting: [], upcoming: [{ taskId: summary.id, taskName: summary.name, nextFireAt: "2099-01-01T10:00:00Z" }], workItems: [] };
+
+  let start: MockInstance<typeof native.startDaemon>;
+
+  beforeEach(() => {
+    // The settings the daemon serves change only with a PATCH, which finishing first use sends.
+    let served = fresh;
+    daemon.answers.set("/settings", (method: string) => (method === "PATCH" ? (served = { ...served, onboardingCompleted: true }) : served));
+    patchStateForTests({ settings: fresh, daemonRunning: false, connection: "daemon_stopped", harnesses: [], tools: [] });
+    native.available = true;
+    // The daemon answers its health, harnesses, and tools only once the bridge started it.
+    start = vi.spyOn(native, "startDaemon").mockImplementation(async () => {
+      daemon.answers.set("/health", { status: "ok", version: "0.1.0", apiVersion: "v1", pid: 4242, startedAt: checkedAt });
+      daemon.answers.set("/harnesses", detected);
+      daemon.answers.set("/tools", tools);
+      return { running: true, pid: 4242 };
+    });
+  });
+
+  afterEach(() => {
+    start.mockRestore();
+    native.available = false;
+    patchStateForTests({ connection: "connected", daemonRunning: true, harnesses: [], tools: [], tasks: [], tasksLoaded: false, health: undefined });
+  });
+
+  const title = () => host!.querySelector(".topbar__title")?.textContent ?? null;
+  const step = () => host!.querySelector(".onboarding__header .mono")?.textContent ?? null;
+  const heading = () => host!.querySelector(".onboarding__step h2")?.textContent ?? null;
+  const templateButtons = () => [...host!.querySelectorAll<HTMLButtonElement>(".onboarding .template")];
+  const rows = () =>
+    [...host!.querySelectorAll(".onboarding .harness-row")].map((row) => [
+      row.querySelector("strong")!.textContent,
+      row.querySelector(".mono")!.textContent,
+      row.querySelector(".chip")!.textContent,
+    ]);
+  const dialogButton = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((b) => b.textContent === label)!;
+  const posts = (path: string) => daemon.sent.filter((r) => r.method === "POST" && r.path === path);
+  const reads = (from: number) => daemon.sent.slice(from).filter((r) => r.method === "GET").map((r) => r.path);
+
+  /** Lets the stand-in daemon's answers reach the screen. */
+  const settle = () => act(() => new Promise<void>((resolve) => setImmediate(resolve)));
+  const click = async (target: HTMLElement) => {
+    await act(async () => target.click());
+    await settle();
+  };
+
+  /** Types into a text field as React sees it. */
+  async function type(input: HTMLInputElement, value: string) {
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => {
+      setValue.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+
+  /** Walks first use from its first step to the first-task step, starting the daemon by hand on the way. */
+  async function toFirstTask() {
+    await launch();
+    expect(step()).toBe("Step 1 of 5");
+    expect(heading()).toBe("Everything runs on this computer");
+    expect([...host!.querySelectorAll(".onboarding__points li")].map((li) => li.textContent)).toEqual([
+      "Tasks, state, and logs stay on this machine.",
+      "Each task declares what its session may touch; HarmFlow applies it through the AI tool's own controls and warns when a restriction can't be enforced.",
+      "GitHub work uses your own gh and Git sign-in. The built-in issue implementer never merges a pull request.",
+      "The dashboard talks to the daemon over an authenticated local API.",
+    ]);
+
+    await click(contentOrCard("Next"));
+    expect(heading()).toBe("AI tools and command-line tools found");
+    expect(host!.querySelector(".onboarding__step .muted")!.textContent).toBe("The daemon is not running yet.");
+    expect(rows()).toEqual([]);
+    const before = daemon.sent.length;
+    await click(contentOrCard("Start the daemon now"));
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(reads(before)).toEqual(expect.arrayContaining(["/health", "/harnesses", "/tools"]));
+    // The event stream connects to the started daemon, as startSync reports it.
+    await act(async () => patchStateForTests({ connection: "connected", daemonRunning: true }));
+    expect(rows()).toEqual([
+      ["Claude Code", "2.1.3 · /opt/homebrew/bin/claude", "Ready"],
+      ["Codex", "Not detected", "Not installed"],
+      ["Git", "2.50.1 · /usr/bin/git", "Detected"],
+      ["GitHub CLI (gh)", "2.83.0 · /opt/homebrew/bin/gh", "Authenticated"],
+    ]);
+    expect(contentOrCard("Start the daemon now")).toBeUndefined();
+
+    await click(contentOrCard("Next"));
+    expect(heading()).toBe("The daemon");
+    expect(host!.querySelector(".onboarding__step .chip")!.textContent).toBe("The daemon is running.");
+    expect(contentOrCard("Start the daemon now")).toBeUndefined();
+    const autostart = host!.querySelector<HTMLInputElement>('.onboarding input[type="checkbox"]')!;
+    expect(autostart.checked).toBe(false);
+    expect(autostart.closest("label")!.textContent).toBe("Start the daemon automatically with the system");
+
+    await click(contentOrCard("Next"));
+    expect(step()).toBe("Step 4 of 5");
+    expect(heading()).toBe("Your first task");
+    expect(templateButtons().map((b) => b.querySelector("strong")!.textContent)).toEqual(["General task", "Implement GitHub issues", "Script task"]);
+    expect(templateButtons().every((b) => !b.disabled)).toBe(true);
+    expect(contentOrCard("Import").disabled).toBe(false);
+  }
+
+  /** Finishes first use from its last step, which a saved first task brings it back to (harmflow-app#809). */
+  async function toExecutions() {
+    expect(step()).toBe("Step 5 of 5");
+    daemon.answers.set("/queue", upcoming);
+    await click(contentOrCard("Go to live executions"));
+    expect(host!.querySelector(".onboarding")).toBeNull();
+    expect(title()).toBe("Live executions");
+    expect(getState().tasks).toEqual([summary]);
+    expect(host!.querySelector(".queue-item__title")?.textContent).toBe(summary.name);
+    expect(start).toHaveBeenCalledTimes(1);
+  }
+
+  it("offers every step, and a task drafted from the GitHub issues template, once saved, leads to the Executions screen", async () => {
+    await toFirstTask();
+    daemon.answers.set("/tasks", (method: string) => (method === "POST" ? saved : [summary]));
+    await click(templateButtons().find((b) => b.textContent?.includes("Implement GitHub issues"))!);
+    expect(title()).toBe("Tasks");
+    expect(daemon.sent.filter((r) => r.path.endsWith("/draft"))).toEqual([
+      { method: "POST", path: "/templates/hf-github-issues/draft", body: { language: "en-US" } },
+    ]);
+
+    // The drafted task's editor asks for its repository, its AI tool, and its schedule.
+    const section = (id: string) => host!.querySelector(`.editor #section-${id}`)!;
+    expect(section("type").querySelector("h3")!.textContent).toBe("Type parameters — GitHub");
+    const repository = section("type").querySelector<HTMLInputElement>('input[placeholder="owner/repo"]')!;
+    expect(repository.value).toBe("");
+    expect(section("harness").querySelector("h3")!.textContent).toBe("AI tool");
+    expect(section("harness").querySelector<HTMLSelectElement>("select")!.value).toBe("claude-code");
+    expect(section("schedule").querySelector("h3")!.textContent).toBe("Schedule");
+    const interval = [...section("schedule").querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((b) => b.textContent === "Interval")!;
+
+    await type(repository, "octo/app");
+    await type(section("type").querySelector<HTMLInputElement>('input[placeholder="${PROJECTS_ROOT}/repo"]')!, "/srv/repos/app");
+    await click(interval);
+    await click(host!.querySelector<HTMLButtonElement>('.editor button[aria-keyshortcuts="Meta+S"]')!);
+    expect(posts("/tasks")).toHaveLength(1);
+    const { spec } = (posts("/tasks")[0].body as { document: { spec: Record<string, unknown> } }).document;
+    expect(spec).toMatchObject({
+      type: "github",
+      github: { repositories: [{ name: "octo/app", localPath: "/srv/repos/app", baseBranch: "main" }] },
+      harness: { preferred: { provider: "claude-code" } },
+      schedule: { interval: "1h" },
+    });
+    expect(host!.querySelector(".editor")).toBeNull();
+
+    await toExecutions();
+  });
+
+  it("offers every step, and Import opens the import dialog, whose task, once imported, leads to the Executions screen", async () => {
+    await toFirstTask();
+    daemon.answers.set("/tasks/validate", { valid: true, errors: [], warnings: [], document });
+    daemon.answers.set("/tasks/import", saved);
+    daemon.answers.set("/tasks", [summary]);
+    await click(contentOrCard("Import"));
+    expect(title()).toBe("Tasks");
+    expect(host!.querySelector('[role="dialog"] h2')!.textContent).toBe("Import a task");
+    const yaml = host!.querySelector<HTMLTextAreaElement>('[role="dialog"] textarea')!;
+    const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+    await act(async () => {
+      setValue.call(yaml, "metadata:\n  name: Implement GitHub issues\n");
+      yaml.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await click(dialogButton("Import"));
+    expect(posts("/tasks/import")).toHaveLength(1);
+    expect(host!.querySelector('[role="dialog"]')).toBeNull();
+
+    await toExecutions();
   });
 });
 
