@@ -1979,8 +1979,8 @@ components:
 
     Settings:
       type: object
-      required: [language, trayEnabled, keepTrayOnQuit, notificationLevel, logRetentionDays, autostart, pathVariables,
-        allowedFolders, onboardingCompleted, quota]
+      required: [language, trayEnabled, keepTrayOnQuit, showRestrictionWarnings, notificationLevel, logRetentionDays,
+        autostart, pathVariables, allowedFolders, onboardingCompleted, quota]
       properties:
         language: { type: string, enum: [pt-BR, en-US, es-ES, system] }
         trayEnabled: { type: boolean, default: true }
@@ -1990,6 +1990,12 @@ components:
             Quit from the Dock, logging out, and the tray's own Quit still end the desktop.
           type: boolean
           default: false
+        showRestrictionWarnings:
+          description: >-
+            Shows, in an execution's detail, a banner for each restriction the harness does not enforce. It changes
+            only what the dashboard shows: the execution's events and logs name each restriction whatever it says.
+          type: boolean
+          default: true
         notificationLevel: { type: string, enum: [all, failures_and_attention, none], default: all }
         logRetentionDays: { type: integer, minimum: 1, maximum: 3650, default: 30 }
         theme: { type: string, enum: [harmflow-dark], default: harmflow-dark }
@@ -2039,6 +2045,7 @@ components:
         language: { type: string, enum: [pt-BR, en-US, es-ES, system] }
         trayEnabled: { type: boolean }
         keepTrayOnQuit: { type: boolean }
+        showRestrictionWarnings: { type: boolean }
         notificationLevel: { type: string, enum: [all, failures_and_attention, none] }
         logRetentionDays: { type: integer, minimum: 1, maximum: 3650 }
         autostart: { type: boolean }

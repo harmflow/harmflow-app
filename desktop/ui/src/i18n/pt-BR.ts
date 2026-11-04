@@ -1292,6 +1292,7 @@ export const ptBR: Resources = {
       },
     },
     subheads: {
+      executions: "Execuções",
       language: "Idioma",
       menuBar: "Barra de menus",
       notices: "Avisos",
@@ -1316,6 +1317,9 @@ export const ptBR: Resources = {
     languages: { system: "Idioma do sistema", "pt-BR": "Português (Brasil)", "en-US": "English (US)", "es-ES": "Español" },
     tray: "Mostrar o HarmFlow na barra de menus",
     trayHint: "Ativado, fechar a janela apenas a oculta. O daemon continua rodando de qualquer forma.",
+    showRestrictionWarnings: "Mostrar avisos de restrição",
+    showRestrictionWarningsHint:
+      "Mostra um aviso no detalhe de uma execução para cada restrição que a ferramenta de IA não aplica. A aba Eventos as lista de qualquer forma.",
     keepTrayOnQuit: "Manter o HarmFlow na barra de menus ao sair com ⌘Q",
     keepTrayOnQuitHint:
       "Ativado, ⌘Q apenas oculta a janela, como fechá-la; Sair da interface, na barra de menus, ainda sai. Desativado, ⌘Q fecha o painel e a barra de menus. O daemon continua rodando de qualquer forma.",

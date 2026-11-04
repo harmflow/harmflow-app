@@ -16,11 +16,15 @@ type Settings struct {
 	TrayEnabled   bool   `json:"trayEnabled"`
 	// KeepTrayOnQuit makes ⌘Q, and Quit in the app menu, only hide the dashboard while the tray is shown, as closing
 	// the window does. Off by default.
-	KeepTrayOnQuit    bool              `json:"keepTrayOnQuit"`
-	NotificationLevel string            `json:"notificationLevel"`
-	LogRetentionDays  int               `json:"logRetentionDays"`
-	Theme             string            `json:"theme"`
-	PathVariables     map[string]string `json:"pathVariables"`
+	KeepTrayOnQuit bool `json:"keepTrayOnQuit"`
+	// ShowRestrictionWarnings shows, in an execution's detail, a banner for each restriction the harness does not
+	// enforce. It changes only what the dashboard shows: the events and the logs name each restriction whatever it
+	// says. On by default.
+	ShowRestrictionWarnings bool              `json:"showRestrictionWarnings"`
+	NotificationLevel       string            `json:"notificationLevel"`
+	LogRetentionDays        int               `json:"logRetentionDays"`
+	Theme                   string            `json:"theme"`
+	PathVariables           map[string]string `json:"pathVariables"`
 	// AllowedFolders are where, beside the home folder and the mounted volumes, a path that lets a harness write may
 	// lead.
 	AllowedFolders      []string `json:"allowedFolders"`
@@ -53,22 +57,24 @@ type SettingsView struct {
 // SettingsPatch is a change to the settings: a nil field leaves its setting as it is, and a path-variable map or a
 // folder list that is set replaces the whole one. Autostart enables or disables the start with the user's session.
 type SettingsPatch struct {
-	Language            *string           `json:"language"`
-	TrayEnabled         *bool             `json:"trayEnabled"`
-	KeepTrayOnQuit      *bool             `json:"keepTrayOnQuit"`
-	NotificationLevel   *string           `json:"notificationLevel"`
-	LogRetentionDays    *int              `json:"logRetentionDays"`
-	Autostart           *bool             `json:"autostart"`
-	PathVariables       map[string]string `json:"pathVariables"`
-	AllowedFolders      []string          `json:"allowedFolders"`
-	OnboardingCompleted *bool             `json:"onboardingCompleted"`
+	Language                *string           `json:"language"`
+	TrayEnabled             *bool             `json:"trayEnabled"`
+	KeepTrayOnQuit          *bool             `json:"keepTrayOnQuit"`
+	ShowRestrictionWarnings *bool             `json:"showRestrictionWarnings"`
+	NotificationLevel       *string           `json:"notificationLevel"`
+	LogRetentionDays        *int              `json:"logRetentionDays"`
+	Autostart               *bool             `json:"autostart"`
+	PathVariables           map[string]string `json:"pathVariables"`
+	AllowedFolders          []string          `json:"allowedFolders"`
+	OnboardingCompleted     *bool             `json:"onboardingCompleted"`
 	// Quota replaces the whole map of quota shares when it is set.
 	Quota map[string]QuotaShare `json:"quota"`
 }
 
 func defaultSettings() Settings {
-	return Settings{SchemaVersion: "1", Language: "system", TrayEnabled: true, NotificationLevel: "all",
-		LogRetentionDays: 30, Theme: "harmflow-dark", PathVariables: map[string]string{}, AllowedFolders: []string{},
+	return Settings{SchemaVersion: "1", Language: "system", TrayEnabled: true, ShowRestrictionWarnings: true,
+		NotificationLevel: "all",
+		LogRetentionDays:  30, Theme: "harmflow-dark", PathVariables: map[string]string{}, AllowedFolders: []string{},
 		Quota: map[string]QuotaShare{}}
 }
 
@@ -177,6 +183,9 @@ func (a *App) UpdateSettings(p SettingsPatch) (SettingsView, error) {
 	}
 	if p.KeepTrayOnQuit != nil {
 		s.KeepTrayOnQuit = *p.KeepTrayOnQuit
+	}
+	if p.ShowRestrictionWarnings != nil {
+		s.ShowRestrictionWarnings = *p.ShowRestrictionWarnings
 	}
 	if p.NotificationLevel != nil {
 		s.NotificationLevel = *p.NotificationLevel

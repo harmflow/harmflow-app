@@ -248,6 +248,19 @@ function GeneralSection() {
           />
         </SettingRow>
       </Panel>
+      <Panel title={t("settings.subheads.executions")}>
+        <SettingRow
+          id="settings-restriction-warnings"
+          label={t("settings.showRestrictionWarnings")}
+          hint={t("settings.showRestrictionWarningsHint")}
+        >
+          <Toggle
+            id="settings-restriction-warnings"
+            checked={settings?.showRestrictionWarnings ?? true}
+            onChange={(v) => void patch({ showRestrictionWarnings: v })}
+          />
+        </SettingRow>
+      </Panel>
     </>
   );
 }
