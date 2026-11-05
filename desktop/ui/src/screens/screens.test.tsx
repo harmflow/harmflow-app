@@ -6,7 +6,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { native } from "../api/native";
-import type { Execution, ExecutionSummary, HarmflowEvent, Harness, Health, Notification, Settings, TaskSummary, WorkItem } from "../api/types";
+import type { Execution, ExecutionSummary, HarmflowEvent, Harness, Health, Notification, Settings, Task, TaskSummary, WorkItem } from "../api/types";
 import { ExecutionCard } from "../components/ExecutionCard";
 import { ExecutionDetail, RawCaptures } from "../components/ExecutionDetail";
 import { HarnessInventory } from "../components/Harnesses";
@@ -1506,5 +1506,115 @@ describe("the restriction warnings setting", () => {
 
     act(() => patchStateForTests({ settings }));
     expect(alerts()).toEqual(["Restrição não aplicada", "Branch base sem proteção"]);
+  });
+});
+
+// The policy_unenforced warning the daemon puts on a task, its validation, and its execution, apart from the
+// policy.unenforced event the banner above is built from: the task's row and its editor show it whatever the setting,
+// and the execution's Results tab only while the setting is on.
+describe("the unenforced-restriction warning", () => {
+  let root: Root | undefined;
+  let host: HTMLElement | undefined;
+
+  const unenforced = { code: "policy_unenforced" as const, message: "network: deny is not enforced for shell commands" };
+  const restricted: TaskSummary = { ...task, id: "restricted", name: "Restricted task", running: false, warnings: [unenforced] };
+  const document_ = {
+    apiVersion: "harmflow/v1alpha1",
+    kind: "Task",
+    metadata: { id: restricted.id, name: restricted.name },
+    spec: { type: "general", schedule: { cron: "0 9 * * 1-5" }, prompt: "Fetch the release notes." },
+  };
+  const restrictedTask: Task = {
+    ...restricted,
+    document: document_,
+    effective: document_,
+    yaml: JSON.stringify(document_, null, 2) + "\n",
+    path: "restricted.yaml",
+    validation: { valid: true, errors: [], warnings: [unenforced] },
+  };
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    host?.remove();
+    root = host = undefined;
+    daemon.answers.clear();
+    daemon.requests.length = 0;
+    daemon.bodies.length = 0;
+    patchStateForTests({ settings, tasks: [task], tasksLoaded: true });
+  });
+
+  const settle = () => act(() => new Promise<void>((resolve) => setImmediate(resolve)));
+
+  async function render(node: ReactNode) {
+    act(() => root?.unmount());
+    host?.remove();
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(node));
+    await settle();
+  }
+
+  /** The tasks screen, its tasks loaded from the stand-in daemon; answers the restricted task's warnings chip. */
+  async function showRow() {
+    daemon.answers.set("/tasks", [restricted]);
+    await act(() => actions.refreshTasks());
+    await render(<TasksScreen view={{ kind: "list" }} onView={() => {}} onOpenExecution={() => {}} />);
+    const chip = host!.querySelector<HTMLElement>(`[data-task="${restricted.id}"] .chip[title]`);
+    return chip && { text: chip.textContent, title: chip.title };
+  }
+
+  /** The editor of the restricted task, as the stand-in daemon serves it; answers the warnings its side panel lists. */
+  async function showEditor() {
+    daemon.answers.set(`/tasks/${restricted.id}`, restrictedTask);
+    await render(<TasksScreen view={{ kind: "edit", id: restricted.id }} onView={() => {}} onOpenExecution={() => {}} />);
+    return [...host!.querySelectorAll(".editor__side .validation")]
+      .filter((panel) => panel.querySelector("h3")?.textContent === "Avisos")
+      .flatMap((panel) => [...panel.querySelectorAll(".validation__item--warning")].map((li) => li.textContent));
+  }
+
+  /** The detail of an execution that holds the warning and no policy.unenforced event, on its Results tab; answers the
+   * warnings listed under its heading. */
+  async function showResults() {
+    const exec: Execution = { ...detail, id: "exec-unenforced-warning", warnings: [unenforced] };
+    daemon.answers.set(`/executions/${exec.id}`, exec);
+    daemon.answers.set(`/executions/${exec.id}/events`, {
+      events: [ev("execution.started", { executionId: exec.id, message: "Loading configuration" })],
+      logExpired: false,
+    });
+    await render(<ExecutionDetail executionId={exec.id} />);
+    const tab = [...host!.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((b) => b.textContent?.startsWith("Resultados"))!;
+    await act(async () => tab.click());
+    await settle();
+    expect(host!.querySelector(".detail__alerts")?.textContent ?? "").not.toContain("Restrição não aplicada");
+    return resultsWarnings();
+  }
+
+  const resultsWarnings = () =>
+    [...host!.querySelectorAll(".results__block")]
+      .filter((block) => block.querySelector("h4")?.textContent === "Avisos")
+      .flatMap((block) => [...block.querySelectorAll(".banner__text")].map((b) => b.textContent));
+
+  it("shows on the task's row a chip that counts it and names it with its message", async () => {
+    expect(await showRow()).toEqual({ text: "1 aviso", title: "Restrição não aplicada: network: deny is not enforced for shell commands" });
+    expect(daemon.requests).toContain("GET /tasks");
+  });
+
+  it("lists it, with its message, among the warnings of the editor's validation", async () => {
+    expect(await showEditor()).toEqual(["Restrição não aplicada: network: deny is not enforced for shell commands"]);
+    expect(daemon.requests).toContain(`GET /tasks/${restricted.id}`);
+  });
+
+  it("shows it on the execution's Results tab under its warnings heading, from the warning and not the event", async () => {
+    expect(await showResults()).toEqual(["Restrição não aplicada — network: deny is not enforced for shell commands"]);
+  });
+
+  it("leaves the execution's Results tab while the setting is off, and stays on the task's row and in its editor", async () => {
+    expect(await showResults()).toHaveLength(1);
+    act(() => patchStateForTests({ settings: { ...settings, showRestrictionWarnings: false } }));
+    expect(resultsWarnings()).toEqual([]);
+    expect(host!.textContent).not.toContain("network: deny is not enforced for shell commands");
+
+    expect(await showRow()).toEqual({ text: "1 aviso", title: "Restrição não aplicada: network: deny is not enforced for shell commands" });
+    expect(await showEditor()).toEqual(["Restrição não aplicada: network: deny is not enforced for shell commands"]);
   });
 });
