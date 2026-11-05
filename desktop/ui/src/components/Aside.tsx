@@ -156,7 +156,7 @@ interface CounterDef {
   sparkTone?: Tone;
 }
 
-const COUNTERS: CounterDef[] = [
+export const COUNTERS: CounterDef[] = [
   { key: "running", activity: "running", icon: "playFilled", tone: "cyan" },
   { key: "queued", activity: "queued", icon: "clock", tone: "warning" },
   { key: "completedToday", activity: "completed", icon: "check", tone: "success" },

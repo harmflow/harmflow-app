@@ -565,6 +565,9 @@ export function RawCaptures({ output }: { output?: ExecutionOutput }) {
   );
 }
 
+/** The streams a script.output event's line comes from; a line that names none is stdout's. */
+export const SCRIPT_STREAMS = ["stdout", "stderr"] as const;
+
 /** A script's output, line by line, each marked with its stream, as the daemon redacted it. */
 function ScriptOutput({ lines }: { lines: HarmflowEvent[] }) {
   const { t } = useTranslation();
@@ -589,7 +592,8 @@ function ScriptOutput({ lines }: { lines: HarmflowEvent[] }) {
         }}
       >
         {lines.map((e) => {
-          const stream = (e.payload as { stream?: string } | undefined)?.stream === "stderr" ? "stderr" : "stdout";
+          const named = (e.payload as { stream?: string } | undefined)?.stream;
+          const stream = SCRIPT_STREAMS.find((s) => s === named) ?? "stdout";
           return (
             <span key={e.id} className={cx("script-line", `script-line--${stream}`)} data-stream={stream}>
               <span className="script-line__stream" aria-label={stream}>
