@@ -72,6 +72,9 @@ export interface ExecutionQuery {
   taskId?: string;
   status?: string;
   active?: boolean;
+  trigger?: string;
+  /** A text the task's name or ID, the repository, the work item, the execution's ID, or the harness holds. */
+  search?: string;
   limit?: number;
   before?: string;
   /** The period, as instants: from createdFrom, inclusive, to createdUntil, exclusive. */
@@ -133,6 +136,12 @@ export const api = {
     call<SchedulePreview>("POST", "/schedules/preview", { schedule, count }),
 
   executions: (q: ExecutionQuery = {}) => call<ExecutionSummary[]>("GET", `/executions${query({ ...q })}`),
+  /** A page of the executions, and how many the query's filters match in all, whatever the page. */
+  executionPage: async (q: ExecutionQuery = {}): Promise<{ rows: ExecutionSummary[]; total?: number }> => {
+    const res = await transport.request("GET", `/executions${query({ ...q })}`);
+    if (res.status === 0 || res.status >= 400) throw new ApiError(res.status, res.body);
+    return { rows: res.body as ExecutionSummary[], total: res.total };
+  },
   execution: (id: string) => call<Execution>("GET", `/executions/${enc(id)}`),
   cancelExecution: (id: string) => call<Accepted>("POST", `/executions/${enc(id)}/cancel`),
   executionEvents: (id: string, after = 0, limit = 5000) =>

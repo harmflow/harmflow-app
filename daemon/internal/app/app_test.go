@@ -695,7 +695,7 @@ func (e *env) prepared(h *fakeHarness) {
 }
 
 func (e *env) executions(task string) []ExecutionSummary {
-	return e.app.ListExecutions(ExecutionFilter{TaskID: task})
+	return e.app.ListExecutions(ExecutionFilter{TaskID: task}).Rows
 }
 
 // idle waits until the task's execution has returned and freed the task.

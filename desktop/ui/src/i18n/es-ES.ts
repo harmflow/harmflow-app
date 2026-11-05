@@ -874,6 +874,7 @@ export const esES: Resources = {
     },
     loadMore: "Cargar ejecuciones anteriores",
     noMore: "No hay ejecuciones anteriores.",
+    count: "Mostrando {{loaded}} / {{total}}",
   },
   overview: {
     daemon: "Daemon",

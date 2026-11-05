@@ -1031,7 +1031,7 @@ func TestScriptTaskInTheQueueAndTheHistory(t *testing.T) {
 	if got := describe(e.executions("listed")); !slices.Equal(got, want) {
 		t.Errorf("the task's history = %q, want %q", got, want)
 	}
-	recent := e.app.ListExecutions(ExecutionFilter{Limit: 10})
+	recent := e.app.ListExecutions(ExecutionFilter{Limit: 10}).Rows
 	if got := describe(recent); !slices.Equal(got, want) {
 		t.Errorf("the recent history = %q, want %q", got, want)
 	}

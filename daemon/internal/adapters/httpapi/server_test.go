@@ -199,6 +199,61 @@ func TestListExecutionsReadsThePeriod(t *testing.T) {
 	}
 }
 
+// GET /api/v1/executions filters by the trigger and the search text of its query, and reports in X-Total-Count how
+// many executions its filters match, past the page, while the body stays the page's bare array.
+func TestListExecutionsReportsTheFilteredTotal(t *testing.T) {
+	a := startedApp(t)
+	if _, err := a.CreateTask(t.Context(), app.TaskInput{YAML: busyTask}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	res, err := a.RunTask("busy")
+	if err != nil {
+		t.Fatalf("RunTask(%q): %v", "busy", err)
+	}
+	s := &Server{App: a}
+	s.SetToken(validToken)
+	for _, c := range []struct {
+		name  string
+		query url.Values
+		want  []string
+		total string
+	}{
+		{"no filter", url.Values{}, []string{res.ExecutionID}, "1"},
+		{"the trigger that fired it", url.Values{"trigger": {"manual"}}, []string{res.ExecutionID}, "1"},
+		{"another trigger", url.Values{"trigger": {"schedule"}}, nil, "0"},
+		{"its task's name, case aside", url.Values{"search": {"BUSY"}}, []string{res.ExecutionID}, "1"},
+		{"a text it does not hold", url.Values{"search": {"standup"}}, nil, "0"},
+		{"both, matching", url.Values{"trigger": {"manual"}, "search": {"busy"}}, []string{res.ExecutionID}, "1"},
+		{"a page past it", url.Values{"limit": {"1"}, "before": {"2000-01-01T00:00:00Z"}}, nil, "1"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			path := "/api/v1/executions?" + c.query.Encode()
+			r := httptest.NewRequest("GET", path, nil)
+			r.Host = "127.0.0.1:7000"
+			r.Header.Set("Authorization", "Bearer "+validToken)
+			w := httptest.NewRecorder()
+			s.Handler().ServeHTTP(w, r)
+			if w.Code != 200 {
+				t.Fatalf("GET %s: status %d, want 200", path, w.Code)
+			}
+			if got := w.Header().Get("X-Total-Count"); got != c.total {
+				t.Errorf("GET %s: X-Total-Count %q, want %q", path, got, c.total)
+			}
+			var rows []app.ExecutionSummary
+			if err := json.Unmarshal(w.Body.Bytes(), &rows); err != nil {
+				t.Fatalf("GET %s: body %q is not an array: %v", path, w.Body.String(), err)
+			}
+			var got []string
+			for _, row := range rows {
+				got = append(got, row.ID)
+			}
+			if !slices.Equal(got, c.want) {
+				t.Errorf("GET %s = %v, want %v", path, got, c.want)
+			}
+		})
+	}
+}
+
 // fakeSystem is a SystemInfo that answers gauges, and sends each directory it is asked about to dirs while it has room.
 type fakeSystem struct {
 	gauges ports.SystemGauges

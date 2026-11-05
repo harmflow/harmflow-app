@@ -2345,6 +2345,10 @@ export interface operations {
                 /** @description Comma-separated statuses. */
                 status?: string;
                 active?: boolean;
+                /** @description Only executions fired by this trigger. */
+                trigger?: components["schemas"]["Trigger"];
+                /** @description Only executions whose task name or ID, repository, work item, ID, or harness holds this text, case aside; the text is trimmed, and an empty one selects all. */
+                search?: string;
                 limit?: number;
                 /** @description Only executions created before this time; the paging cursor. */
                 before?: string;
@@ -2362,6 +2366,8 @@ export interface operations {
             /** @description Executions. */
             200: {
                 headers: {
+                    /** @description How many executions the filters match, the before cursor and the limit aside, so that every page of a list reports the same total. */
+                    "X-Total-Count"?: number;
                     [name: string]: unknown;
                 };
                 content: {

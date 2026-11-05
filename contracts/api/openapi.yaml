@@ -608,6 +608,16 @@ paths:
           description: Comma-separated statuses.
           schema: { type: string }
         - { name: active, in: query, schema: { type: boolean } }
+        - name: trigger
+          in: query
+          description: Only executions fired by this trigger.
+          schema: { $ref: "#/components/schemas/Trigger" }
+        - name: search
+          in: query
+          description: >-
+            Only executions whose task name or ID, repository, work item, ID, or harness holds this text, case aside;
+            the text is trimmed, and an empty one selects all.
+          schema: { type: string }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
         - name: before
           in: query
@@ -624,6 +634,12 @@ paths:
       responses:
         "200":
           description: Executions.
+          headers:
+            X-Total-Count:
+              description: >-
+                How many executions the filters match, the before cursor and the limit aside, so that every page of a
+                list reports the same total.
+              schema: { type: integer, minimum: 0 }
           content:
             application/json:
               schema:
