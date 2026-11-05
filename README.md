@@ -266,7 +266,9 @@ A registration that fails stops its part's start as the part's own start-up erro
   connects to the daemon. So does a text that could be read in place of one of the dashboard's own, in any language:
   one of its keys, or a plural or context form of one, such as `count_zero` beside `count_one`. A route, a section's
   key, and every key of `strings` is a plain key: no `.` or `:`, which i18next reads as a path or a namespace, and no
-  `_` in a route or a section's key, which it reads as the start of a plural's or a context's suffix.
+  `_` in a route or a section's key, which it reads as the start of a plural's or a context's suffix. The checks and
+  the merge read one copy of each registration, so `strings` is plain data, which `structuredClone` copies: a proxy or
+  a function in it stops the start too.
 - **Desktop crate.** A command name that the app or another registration already has stops the start before the app
   is built, and a plugin whose setup fails stops it while it is built. Either way HarmFlow reports that it could not
   start, and exits.

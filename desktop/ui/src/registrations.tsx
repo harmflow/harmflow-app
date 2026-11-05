@@ -33,7 +33,8 @@ export interface RegisteredSettingsSection {
  * What one registration adds to the dashboard. Every field is optional, and so is every field added later. `strings`
  * holds texts per language, added to the dashboard's own translations, so a registered screen or section switches
  * language with the rest of the interface. Each key of `strings` is a plain key, with no `.` or `:`, and none can be
- * read in place of one of the dashboard's own texts (`register`).
+ * read in place of one of the dashboard's own texts (`register`). `register` reads a registration once, into a copy:
+ * `strings` is plain data, which `structuredClone` copies, and a getter is read once.
  */
 export interface Registration {
   screens?: readonly RegisteredScreen[];
@@ -69,7 +70,10 @@ const isKey = (key: string) => KEY.test(key) && !RESERVED.has(key);
  * the dashboard does not have, or a text whose key is not a plain key or that could be read in place of one of the
  * dashboard's own (`clash`). Nothing is added to the translations unless every registration passes.
  */
-export function register(registrations: readonly Registration[]): Registered {
+export function register(given: readonly Registration[]): Registered {
+  // The checks and the merge below read one copy of each registration, so nothing can show the checks one text and the
+  // merge another.
+  const registrations = Array.from(given, copied);
   const screens = registrations.flatMap((r) => r.screens ?? []);
   const settingsSections = registrations.flatMap((r) => r.settingsSections ?? []);
   const builtinScreens = new Set<string>(NAV.map((item) => item.key));
@@ -103,6 +107,27 @@ export function register(registrations: readonly Registration[]): Registered {
     }
   }
   return { screens, settingsSections };
+}
+
+/**
+ * A registration read once: its screens and sections as new arrays of new records, each field read once, and its
+ * strings as a structured clone. `Array.from` builds the arrays, so a list's own `map` or species cannot hand back an
+ * object that reads differently later. Strings that are not plain data, such as a proxy or a function, throw, as any
+ * other failed check does.
+ */
+function copied(registration: Registration): Registration {
+  const { screens, settingsSections, strings } = registration;
+  let texts: Registration["strings"];
+  try {
+    texts = strings === undefined ? undefined : structuredClone(strings);
+  } catch (error) {
+    throw new Error(`A registration's strings are not plain data: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return {
+    screens: screens === undefined ? undefined : Array.from(screens, (screen) => ({ ...screen })),
+    settingsSections: settingsSections === undefined ? undefined : Array.from(settingsSections, (section) => ({ ...section })),
+    strings: texts,
+  };
 }
 
 type Strings = Record<string, unknown>;

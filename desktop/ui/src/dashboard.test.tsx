@@ -10,7 +10,7 @@ import { useTranslation } from "react-i18next";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Settings } from "./api/types";
 import { NAV } from "./components/Shell";
-import { renderDashboard, type Registration } from "./dashboard";
+import { renderDashboard, type RegisteredScreen, type RegisteredSettingsSection, type Registration } from "./dashboard";
 import i18n, { resources } from "./i18n";
 import { SECTION_GROUPS } from "./screens/SettingsScreen";
 import { patchStateForTests } from "./state/store";
@@ -201,6 +201,65 @@ describe("nothing registered", () => {
   });
 });
 
+// The checks and the merge read one copy of a registration, so a getter cannot show the checks one value and the merge
+// another.
+describe("a registration read once", () => {
+  it("checks and merges the same texts, whatever a getter would give later", async () => {
+    let reads = 0;
+    const english: Record<string, unknown> = { nav: { notes: "Notes" } };
+    Object.defineProperty(english, "tasks", {
+      enumerable: true,
+      get: () => (reads++ === 0 ? {} : { groups: { count_zero: "No tasks" } }),
+    });
+    await launch({ screens: stub.screens, strings: { "en-US": english } });
+    expect(host!.querySelector(".app")).not.toBeNull();
+    expect(reads).toBe(1);
+    expect(i18n.t("tasks.groups.count", { count: 0 })).toBe("0 tasks");
+  });
+
+  it("takes a screen's route once, as it was checked", async () => {
+    let reads = 0;
+    const screen = { icon: "list", component: StubScreen } as unknown as RegisteredScreen;
+    Object.defineProperty(screen, "route", { enumerable: true, get: () => (reads++ === 0 ? "notes" : "tasks") });
+    await launch({ screens: [screen], strings: stub.strings });
+    expect(reads).toBe(1);
+    expect(navItems().map((b) => b.textContent)).toEqual([...builtinNav, "Notes"]);
+  });
+
+  it("copies a list of screens whose own map would hand back the list itself", async () => {
+    let reads = 0;
+    const screen = { icon: "list", component: StubScreen } as unknown as RegisteredScreen;
+    Object.defineProperty(screen, "route", { enumerable: true, get: () => (reads++ === 0 ? "notes" : "tasks") });
+    const screens = [screen];
+    Object.defineProperty(screens, "map", { value: () => screens });
+    await launch({ screens, strings: stub.strings });
+    expect(reads).toBe(1);
+    expect(navItems().map((b) => b.textContent)).toEqual([...builtinNav, "Notes"]);
+  });
+
+  it("copies a list of sections whose species would make the copy read differently later", async () => {
+    let reads = 0;
+    const sections: RegisteredSettingsSection[] = [{ key: "stub", group: "agents", icon: "agent", component: StubSection }];
+    // A species whose arrays give back a built-in section's key once their first element has been read.
+    const species = () =>
+      new Proxy([] as RegisteredSettingsSection[], {
+        get: (target, property, receiver) => {
+          const value = Reflect.get(target, property, receiver);
+          return property === "0" && reads++ > 0 ? { ...value, key: "general" } : value;
+        },
+      });
+    Object.defineProperty(sections, "constructor", { value: { [Symbol.species]: species } });
+    await launch({ settingsSections: sections, strings: stub.strings });
+    await act(async () => navButton("Settings").click());
+    const agents = host!.querySelector("#settings-group-agents")!.parentElement!;
+    expect([...agents.querySelectorAll(".settings-nav__item")].map((b) => b.textContent)).toEqual([
+      en.settings.sections.agents,
+      en.settings.sections.paths,
+      "Stub section",
+    ]);
+  });
+});
+
 describe("a registration that fails its check", () => {
   const screen = (route: string) => ({ route, icon: "list" as const, component: StubScreen });
   const section = (key: string, group = "agents") => ({ key, group: group as "agents", icon: "agent" as const, component: StubSection });
@@ -226,6 +285,8 @@ describe("a registration that fails its check", () => {
     // i18next reads a key that holds a dot as the path it spells when that path has no text, a plural form included.
     { name: "a key that spells a built-in text's path", registrations: [{ strings: { "en-US": { "tasks.groups.count_zero": "No tasks" } } }], message: 'not a plain key: en-US "tasks.groups.count_zero"' },
     { name: "a key that spells a path inside a group", registrations: [{ strings: { "en-US": { tasks: { "groups.count_zero": "No tasks" } } } }], message: 'not a plain key: en-US "tasks.groups.count_zero"' },
+    { name: "strings that are a proxy", registrations: [{ strings: new Proxy({ "en-US": { nav: { notes: "Notes" } } }, {}) as Registration["strings"] }], message: "strings are not plain data" },
+    { name: "a text that is a function", registrations: [{ strings: { "en-US": { nav: { notes: (() => "Notes") as unknown as string } } } }], message: "strings are not plain data" },
     { name: "a key that names a namespace", registrations: [{ strings: { "en-US": { "translation:nav": { notes: "Notes" } } } }], message: 'not a plain key: en-US "translation:nav"' },
   ];
 
