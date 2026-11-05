@@ -4975,6 +4975,78 @@ func TestRetentionDeletesOnlyExpiredLogs(t *testing.T) {
 	}
 }
 
+// With logRetentionDays at 7, retention keeps a log 6 days old as the execution wrote it: it neither compacts nor
+// rewrites it. The JSONL log and the raw captures of an ended execution whose output repeats a line are byte-identical
+// before and after a retention pass, and after a restart on the same home and another pass; its events replay as they
+// did before the passes, and neither the replay nor the record reads the log as expired.
+func TestRetentionLeavesAKeptLogByteIdentical(t *testing.T) {
+	const day = 24 * time.Hour
+	e := newEnv(t)
+	week := 7
+	if _, err := e.app.UpdateSettings(SettingsPatch{LogRetentionDays: &week}); err != nil {
+		t.Fatal(err)
+	}
+	e.create("kept", "")
+	e.claude.setScript(func(ports.RunRequest) string {
+		return "echo 'same line'; echo 'same line'; echo 'same line'; echo 'another line'; echo 'END ok'"
+	})
+	x := e.endedRun("kept", domain.StatusCompleted)
+	e.backdateLog(x.ID, 6*day)
+
+	// The bytes compared are the files' own, read before any pass, so the test holds whatever the events come to carry.
+	p := e.app.Paths()
+	captures, err := filepath.Glob(filepath.Join(p.Logs, x.ID, "*.raw"))
+	if err != nil || len(captures) == 0 {
+		t.Fatalf("the execution's raw captures: %v, %v", captures, err)
+	}
+	files := append([]string{filepath.Join(p.Logs, x.ID+".jsonl")}, captures...)
+	written := map[string][]byte{}
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		written[f] = data
+	}
+	events, expired, err := e.app.ExecutionEvents(x.ID, 0, 0)
+	if err != nil || expired {
+		t.Fatalf("ExecutionEvents(%s, 0, 0) before retention = %d events, expired %v, %v", x.ID, len(events), expired, err)
+	}
+	repeated := 0
+	for _, ev := range events {
+		if ev.Message == "same line" {
+			repeated++
+		}
+	}
+	if repeated != 3 {
+		t.Fatalf("the log holds %d events of the repeated line, want 3: %+v", repeated, events)
+	}
+
+	kept := func(when string, e *env) {
+		t.Helper()
+		for _, f := range files {
+			data, err := os.ReadFile(f)
+			if err != nil || !bytes.Equal(data, written[f]) {
+				t.Errorf("%s, %s holds %d bytes, %v; want the %d bytes it was written with", when, filepath.Base(f),
+					len(data), err, len(written[f]))
+			}
+		}
+		got, expired, err := e.app.ExecutionEvents(x.ID, 0, 0)
+		if err != nil || expired || !reflect.DeepEqual(got, events) {
+			t.Errorf("%s, ExecutionEvents(%s, 0, 0) = %d events, expired %v, %v; want the %d events before, expired false",
+				when, x.ID, len(got), expired, err, len(events))
+		}
+		if v, err := e.app.GetExecution(x.ID); err != nil || v.LogExpired {
+			t.Errorf("%s, GetExecution(%s) reads log expired %v, %v; want false", when, x.ID, v.LogExpired, err)
+		}
+	}
+	e.app.ApplyRetention()
+	kept("after a retention pass", e)
+	e = e.restart(t)
+	e.app.ApplyRetention()
+	kept("after a restart and another pass", e)
+}
+
 // A script execution's events replay from its first one. With logRetentionDays at 7, retention deletes the log, the raw
 // capture, and the execution directory, the inline script's file included, of one whose log is 8 days old, and keeps
 // every file of one whose log is 6 days old. The expired execution's record, the program's included, is still listed
