@@ -1,9 +1,12 @@
 package eventlog
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -348,6 +351,82 @@ func TestReplayAfterAnIDStartsAtItsLine(t *testing.T) {
 	for _, after := range append(afters, ids[40], late[0], late[1]) {
 		check(t, fresh, after, 0)
 	}
+}
+
+// A log the retention period keeps is the log the execution wrote. Given more events than the ring of recent events
+// holds, runs of events with the same type and message among them, its file holds, once the execution ended, one line
+// per event appended, in order, each the event Append returned. A replay from the start, a replay after an id, and a
+// log opened afresh over the same directory, as after a restart, return every one of them and leave the file's bytes
+// as they were.
+func TestAKeptLogIsUnchangedByReplayAndReopen(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 10, 20, 8, 0, 0, 0, time.UTC)
+	clock := func() time.Time { now = now.Add(time.Millisecond); return now }
+	l, err := New(dir, clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Each output line comes three times in a row, as a harness may print it.
+	var appended []domain.Event
+	for i := range ringSize + ringSize/2 {
+		appended = append(appended, l.Append(domain.Event{ExecutionID: "e1", Type: domain.EventHarnessOutput,
+			Message: fmt.Sprintf("output line %d", i/3)}))
+	}
+	appended = append(appended, l.Append(domain.Event{ExecutionID: "e1", Type: domain.EventExecutionCompleted}))
+	if l.floor < appended[0].ID {
+		t.Fatalf("the ring still reaches back to the first event (floor %d, first id %d), want it past its size",
+			l.floor, appended[0].ID)
+	}
+	l.Close("e1")
+
+	path := filepath.Join(dir, "e1.jsonl")
+	written, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSuffix(string(written), "\n"), "\n")
+	if len(lines) != len(appended) {
+		t.Fatalf("the log holds %d lines, want one per event appended, %d", len(lines), len(appended))
+	}
+	for i, line := range lines {
+		var e domain.Event
+		if err := json.Unmarshal([]byte(line), &e); err != nil || !reflect.DeepEqual(e, appended[i]) {
+			t.Errorf("line %d of the log = %s, %v; want the event Append returned, %+v", i+1, line, err, appended[i])
+			break
+		}
+	}
+
+	unchanged := func(after string) {
+		t.Helper()
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(data, written) {
+			t.Errorf("after %s, the log's file holds %d bytes that differ from the %d it was written with", after,
+				len(data), len(written))
+		}
+	}
+	replays := func(l *Log, after int64, want []domain.Event) {
+		t.Helper()
+		got, expired, err := l.Replay("e1", after, 0)
+		if err != nil || expired || !reflect.DeepEqual(got, want) {
+			t.Errorf("Replay(e1, %d, 0) = %d events, %v, %v; want the %d appended after it, false, nil", after, len(got),
+				expired, err, len(want))
+		}
+	}
+	replays(l, 0, appended)
+	unchanged("a replay from the start")
+	after := appended[ringSize].ID
+	replays(l, after, appended[ringSize+1:])
+	unchanged("a replay after an id")
+
+	fresh, err := New(dir, clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replays(fresh, 0, appended)
+	unchanged("a log opened afresh replayed it")
 }
 
 // A write that fails may leave part of a line, which runs into the next one, so the file loses its index: a replay
