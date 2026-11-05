@@ -496,6 +496,68 @@ describe("an execution that found no work", () => {
   });
 });
 
+// An execution a daemon stop or a crash ended before it finished is no failure and no success: the recent history marks
+// it Interrupted, in the warning tone and with the alert icon, beside a failed one's danger mark and cross. The labels
+// are read in en-US, as above, and in pt-BR, the language these tests otherwise render in.
+describe("an execution that was interrupted", () => {
+  const interrupted: ExecutionSummary = { ...finished, id: "exec-interrupted", taskName: "Look for new issues", status: "interrupted", workItem: undefined, pullRequestUrl: undefined, testsStatus: undefined };
+  const failed: ExecutionSummary = { ...finished, id: "exec-failed", taskName: "Write release notes", status: "failed", workItem: undefined, pullRequestUrl: undefined, testsStatus: undefined };
+
+  /** The Executions screen rendered in `language` from a recent history holding both executions, as a DOM to query. */
+  async function show(language: string) {
+    const { recent } = getState();
+    await i18n.changeLanguage(language);
+    patchStateForTests({ recent: [interrupted, failed] });
+    try {
+      const host = document.createElement("div");
+      host.innerHTML = renderToString(<ExecutionsScreen selectedId={null} onSelect={() => {}} onGoToTasks={() => {}} onSeeHistory={() => {}} />);
+      return host;
+    } finally {
+      patchStateForTests({ recent });
+      await i18n.changeLanguage("pt-BR");
+    }
+  }
+
+  /** The icon as the DOM writes it, to compare with the one a mark holds. */
+  const icon = (name: "alert" | "x") => {
+    const holder = document.createElement("div");
+    holder.innerHTML = renderToString(<Icon name={name} size={16} />);
+    return holder.innerHTML;
+  };
+
+  /** Each row of the recent history by its task's name, with its status mark's tone, label, and icon. */
+  const marks = (host: HTMLElement) =>
+    [...host.querySelectorAll(".history-item")].map((row) => {
+      const m = row.querySelector(".status-mark")!;
+      return {
+        name: row.querySelector(".history-item__title")!.textContent,
+        tones: [...m.classList].filter((c) => c.startsWith("status-mark--")),
+        title: m.getAttribute("title"),
+        label: m.querySelector(".sr-only")!.textContent,
+        icon: m.querySelector("svg")!.outerHTML,
+      };
+    });
+
+  it("marks it Interrupted in the recent history, in the warning tone with the alert icon, apart from a failed one", async () => {
+    const host = await show("en-US");
+    expect(marks(host)).toEqual([
+      { name: interrupted.taskName, tones: ["status-mark--warning"], title: "Interrupted", label: "Interrupted", icon: icon("alert") },
+      { name: failed.taskName, tones: ["status-mark--danger"], title: "Failed", label: "Failed", icon: icon("x") },
+    ]);
+    const row = [...host.querySelectorAll(".history-item")][0];
+    expect(row.textContent).not.toContain("Failed");
+    expect(row.querySelector(".status-mark--danger")).toBeNull();
+  });
+
+  it("writes its label in the interface's language", async () => {
+    const host = await show("pt-BR");
+    expect(marks(host).map(({ name, title, label }) => ({ name, title, label }))).toEqual([
+      { name: interrupted.taskName, title: "Interrompida", label: "Interrompida" },
+      { name: failed.taskName, title: "Falhou", label: "Falhou" },
+    ]);
+  });
+});
+
 // Every active execution has its own card, with its own fields and Cancel. The card's Cancel sends the same single
 // cancel as the detail's, and a finished execution's card cannot cancel it.
 describe("the executions screen's cards", () => {
