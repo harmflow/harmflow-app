@@ -2145,6 +2145,80 @@ func TestCronMacrosAgreeOnPreviewAndSave(t *testing.T) {
 	}
 }
 
+// Saving a script task accepts each cron macro and a 5-field expression, and refuses a macro in another case with 422,
+// writing no task file, as it does for any task. The tasks are disabled, so none fires while the test runs.
+func TestScriptCronMacrosAgreeOnPreviewAndSave(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	d := startDaemon(t, home)
+	for i, c := range []struct {
+		cron     string
+		accepted bool
+	}{
+		{"@yearly", true}, {"@annually", true}, {"@monthly", true}, {"@weekly", true}, {"@daily", true},
+		{"@midnight", true}, {"@hourly", true}, {"@DAILY", false}, {"0 9 * * 1-5", true},
+	} {
+		t.Run(c.cron, func(t *testing.T) {
+			d := d.in(t)
+
+			id := fmt.Sprintf("script-cron-%d", i)
+			status, body := d.request("POST", "/tasks", map[string]any{"yaml": scriptTask(id,
+				"  enabled: false\n  script:\n    command: [/bin/echo, hi]\n  schedule:\n    cron: \""+c.cron+"\"\n    timezone: UTC\n")}, nil)
+			if want := map[bool]int{true: 201, false: 422}[c.accepted]; status != want {
+				t.Errorf("POST /tasks with cron %q: status %d (%s), want %d", c.cron, status, body, want)
+			}
+			_, err := os.Stat(filepath.Join(home, "tasks", id+".yaml"))
+			if c.accepted && err != nil {
+				t.Errorf("cron %q: the saved task has no file: %v", c.cron, err)
+			}
+			if !c.accepted && !os.IsNotExist(err) {
+				t.Errorf("cron %q: a refused save wrote the task file: Stat = %v, want not exist", c.cron, err)
+			}
+		})
+	}
+}
+
+// A script task whose cron is @daily is saved, imported, and loaded from its file at start, and each fires next at the
+// coming midnight in its time zone, as any task does. An import leaves a script task disabled, and a disabled task has
+// no next firing, so the imported one is enabled before it is read.
+func TestScriptDailyMacroFiresAtMidnight(t *testing.T) {
+	t.Parallel()
+	const zone = "America/Sao_Paulo"
+	loc, err := time.LoadLocation(zone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	daily := "  script:\n    command: [/bin/echo, hi]\n  schedule:\n    cron: \"@daily\"\n    timezone: " + zone + "\n"
+	home := t.TempDir()
+	before := time.Now()
+	d := startDaemon(t, home)
+	d.call("POST", "/tasks", map[string]any{"yaml": scriptTask("saved", daily)}, 201)
+	d.call("POST", "/tasks/import", map[string]any{"yaml": scriptTask("imported", daily)}, 201)
+	d.stop()
+	if err := os.WriteFile(filepath.Join(home, "tasks", "loaded.yaml"), []byte(scriptTask("loaded", daily)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d = startDaemon(t, home)
+	d.call("POST", "/tasks/imported/enable", nil, 200)
+	after := time.Now()
+	// The midnight that follows an instant, in the task's time zone.
+	midnightAfter := func(at time.Time) time.Time {
+		y, m, day := at.In(loc).Date()
+		return time.Date(y, m, day+1, 0, 0, 0, 0, loc)
+	}
+	for _, id := range []string{"saved", "imported", "loaded"} {
+		got := d.call("GET", "/tasks/"+id, nil, 200)
+		if got["type"] != "script" {
+			t.Errorf("GET /tasks/%s: type %v, want script", id, got["type"])
+		}
+		next, err := time.Parse(time.RFC3339, fmt.Sprint(got["nextFireAt"]))
+		// The midnight after the test began, or the one after it if a midnight passed while the test ran.
+		if err != nil || (!next.Equal(midnightAfter(before)) && !next.Equal(midnightAfter(after))) {
+			t.Errorf("GET /tasks/%s: next firing %v (%v), want %v in %s", id, got["nextFireAt"], err, midnightAfter(before), zone)
+		}
+	}
+}
+
 // A task whose cron is @daily is saved, imported, and loaded from its file at start, and each fires next at the coming
 // midnight in its time zone.
 func TestDailyMacroFiresAtMidnight(t *testing.T) {
@@ -2553,6 +2627,52 @@ func TestRunningExecutionShowsStepAndStart(t *testing.T) {
 	}
 	d.call("POST", "/executions/"+id+"/cancel", nil, 202)
 	d.waitStatus(id, "cancelled")
+}
+
+// A running script execution's detail and its row in the list give its current step, the daemon's text naming the
+// program with its key, and when it started, and no field of either speaks of a percentage or of progress. The program
+// runs until the test creates a file, once it has read both views.
+func TestScriptRunningExecutionShowsStepAndStart(t *testing.T) {
+	t.Parallel()
+	d := startDaemon(t, t.TempDir())
+	release := filepath.Join(t.TempDir(), "release")
+	d.call("POST", "/tasks", map[string]any{"yaml": scriptTask("steady", fmt.Sprintf(
+		"  script:\n    command: [/bin/sh, -c, \"while [ ! -e %s ]; do sleep 0.1; done\"]\n", release))}, 201)
+	id := d.call("POST", "/tasks/steady/run", nil, 202)["executionId"].(string)
+	d.waitStatus(id, "running")
+	views := map[string]map[string]any{}
+	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		views["GET /executions/{executionId}"] = d.call("GET", "/executions/"+id, nil, 200)
+		views["its row in GET /executions"] = nil
+		for _, row := range d.list("/executions?taskId=steady") {
+			if row["id"] == id {
+				views["its row in GET /executions"] = row
+			}
+		}
+		if stepOf(views["GET /executions/{executionId}"]) != "" && stepOf(views["its row in GET /executions"]) != "" {
+			break
+		}
+	}
+	for name, view := range views {
+		params, _ := view["currentStepParams"].(map[string]any)
+		if view["status"] != "running" || stepOf(view) != "Running sh" || view["currentStepKey"] != "step_running_program" ||
+			params["program"] != "sh" {
+			t.Errorf("%s: status %v, current step %q, key %v, params %v; want running, %q, step_running_program, program sh",
+				name, view["status"], stepOf(view), view["currentStepKey"], view["currentStepParams"], "Running sh")
+		}
+		if started, _ := view["startedAt"].(string); started == "" {
+			t.Errorf("%s: no startedAt", name)
+		} else if _, err := time.Parse(time.RFC3339Nano, started); err != nil {
+			t.Errorf("%s: startedAt %q: %v", name, started, err)
+		}
+		if keys := progressKeys(view, ""); len(keys) > 0 {
+			t.Errorf("%s has %v", name, keys)
+		}
+	}
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d.waitStatus(id, "completed")
 }
 
 // stepOf is the current step of an execution's view, empty when it has none.
