@@ -4,8 +4,9 @@
 //! the tray's state, and opens the dashboard as the tray's item does, with no Accessibility permission
 //! (harmflow-app#464). It reads the app menu macOS shows, chooses one of its items or one of the tray's, and asks the
 //! app to quit as the Dock's Quit does (harmflow-app#655). It reads the notices macOS delivered for the shell
-//! (harmflow-app#515), and the title and the image of the tray's status item macOS shows (harmflow-app#880). A test
-//! of what else the shell does adds its own command here.
+//! (harmflow-app#515), and the title and the image of the tray's status item macOS shows (harmflow-app#880). It reads
+//! what the window's page shows and clicks in it, as a user's click does (harmflow-app#873). A test of what else the
+//! shell does adds its own command here.
 
 use std::io::{BufRead, Write};
 use std::sync::mpsc;
@@ -47,6 +48,12 @@ enum Command<'a> {
     Notices,
     /// The title of the tray's status item macOS shows, and which of the tray's two images it shows.
     Tray,
+    /// The text and the tooltip of each element of the window's page that this CSS selector matches, as the page shows
+    /// them, in document order.
+    Read(&'a str),
+    /// Clicks the first element of the window's page that this CSS selector matches, as a user's click does: the page
+    /// gets the same click event, and a checkbox or a button acts on it.
+    Click(&'a str),
 }
 
 fn parse(line: &str) -> Option<Command<'_>> {
@@ -62,6 +69,8 @@ fn parse(line: &str) -> Option<Command<'_>> {
         ("terminate", "") => Some(Command::Terminate),
         ("notices", "") => Some(Command::Notices),
         ("tray", "") => Some(Command::Tray),
+        ("read", selector) if !selector.is_empty() => Some(Command::Read(selector)),
+        ("click", selector) if !selector.is_empty() => Some(Command::Click(selector)),
         _ => None,
     }
 }
@@ -131,6 +140,22 @@ fn run<R: Runtime>(app: &AppHandle<R>, command: Command) -> Value {
         }
         Command::Notices => delivered(),
         Command::Tray => shown_tray(app),
+        Command::Read(selector) => in_page(
+            app,
+            &format!(
+                "({{ elements: Array.from(document.querySelectorAll({}), (e) => ({{ text: e.innerText, title: e.title }})) }})",
+                js_string(selector)
+            ),
+        ),
+        Command::Click(selector) => {
+            let selector = js_string(selector);
+            in_page(
+                app,
+                &format!(
+                    "(() => {{ const e = document.querySelector({selector}); if (!e) return {{ error: \"nothing matches \" + {selector} }}; e.click(); return {{ ok: true }}; }})()"
+                ),
+            )
+        }
     }
 }
 
@@ -187,6 +212,39 @@ fn tray_image(shown: &NSImage) -> &'static str {
         .into_iter()
         .find(|(_, png)| decoded(png).as_ref() == Some(&shown))
         .map_or("unknown", |(name, _)| name)
+}
+
+/// A string as a JavaScript literal: JSON's string syntax is JavaScript's.
+fn js_string(s: &str) -> String {
+    Value::from(s).to_string()
+}
+
+/// Evaluates `expression` in the main window's page and returns its value, which must be one JSON can hold. The page
+/// answers through WebKit's completion handler, on the main thread, so the control thread waits for it with a timeout.
+fn in_page<R: Runtime>(app: &AppHandle<R>, expression: &str) -> Value {
+    let Some(window) = app.get_webview_window(window::MAIN) else {
+        return json!({ "error": "no main window" });
+    };
+    // WebKit answers a script that throws with no value, and the conversion of a value JSON cannot hold, such as an
+    // element, would fail in wry: the page itself turns either into a string, the error included.
+    let script = format!(
+        "(() => {{ try {{ return JSON.stringify({expression}); }} catch (e) {{ return JSON.stringify({{ error: String(e) }}); }} }})()"
+    );
+    let (tx, rx) = mpsc::channel();
+    if let Err(err) = window.eval_with_callback(script, move |answer| {
+        let _ = tx.send(answer);
+    }) {
+        return json!({ "error": err.to_string() });
+    }
+    let answer = match rx.recv_timeout(Duration::from_secs(5)) {
+        Ok(answer) => answer,
+        Err(err) => return json!({ "error": format!("the page did not answer: {err}") }),
+    };
+    // wry hands back the script's value as JSON, here a string, which holds the JSON of the expression's value.
+    serde_json::from_str::<String>(&answer)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_else(|| json!({ "error": format!("the page answered {answer:?}") }))
 }
 
 /// The notices delivered for the shell, read back from macOS's notification center: the notification plugin hands
@@ -325,11 +383,16 @@ mod tests {
         assert_eq!(parse("terminate"), Some(Command::Terminate));
         assert_eq!(parse("notices\n"), Some(Command::Notices));
         assert_eq!(parse(" tray\n"), Some(Command::Tray));
+        assert_eq!(parse("read .detail__alerts .banner\n"), Some(Command::Read(".detail__alerts .banner")));
+        assert_eq!(parse("click  #settings-restriction-warnings "), Some(Command::Click("#settings-restriction-warnings")));
     }
 
     #[test]
     fn an_unknown_line_is_no_command() {
-        for line in ["", "quit", "Close", "open dashboard", "state now", "choose-app-menu", "choose-tray ", "terminate x", "notice", "notices x", "tray x", "Tray"] {
+        for line in [
+            "", "quit", "Close", "open dashboard", "state now", "choose-app-menu", "choose-tray ", "terminate x", "notice", "notices x", "tray x",
+            "Tray", "read", "read ", "click", "Click #x",
+        ] {
             assert_eq!(parse(line), None, "{line:?}");
         }
     }
@@ -365,5 +428,11 @@ mod tests {
         // One pixel's alpha differs from the idle image's.
         rgba[3] ^= 0xff;
         assert_eq!(tray_image(&as_the_tray_holds(image.width(), image.height(), &rgba)), "unknown");
+    }
+
+    #[test]
+    fn a_selector_reaches_the_page_as_a_string_literal() {
+        assert_eq!(js_string(r#"[title*="a \"b\""]"#), r#""[title*=\"a \\\"b\\\"\"]""#);
+        assert_eq!(js_string("`${x}`\n"), r#""`${x}`\n""#);
     }
 }
