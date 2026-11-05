@@ -28,9 +28,17 @@ const (
 // from a branch other than the base branch, into the base branch. The base branch is where it was: nothing was pushed
 // to it, and nothing was merged. The work came from a worktree of the session's own: the pull request's head branch is
 // checked out under the execution's workspace, at the pull request's head commit, and the task's clone is still on the
-// base branch, at the commit it had before the run, with nothing changed in it.
+// base branch, at the commit it had before the run, with nothing changed in it. Nothing the session wrote to GitHub
+// holds a credential: the draft's title, its body, its commits' messages, its diff, and the comments on it and on the
+// issue hold neither the local API's token nor the token gh is signed in with, nor a piece of either of eight
+// characters or more. The test reads both tokens itself and never prints them.
 func TestEligibleIssueBecomesALinkedDraftPullRequest(t *testing.T) {
 	claude := realClaude(t)
+	out, err := exec.Command("gh", "auth", "token").Output()
+	ghToken := strings.TrimSpace(string(out))
+	if err != nil || len(ghToken) < 8 {
+		t.Fatalf("gh auth token failed (%v): the test needs a gh signed in on this machine", err)
+	}
 	base := sandboxBase(t)
 	for _, label := range []string{draftPRLabel, "harmflow"} {
 		sandboxLabel(t, label)
@@ -139,6 +147,14 @@ func TestEligibleIssueBecomesALinkedDraftPullRequest(t *testing.T) {
 		t.Errorf("execution %s logged no workspace.changed event for %s with the branch %s\n%s", id, issueKey(issue), pr.Head,
 			runFiles(dir))
 	}
+
+	if len(d.token) < 8 {
+		t.Fatal("the daemon wrote no API token of eight characters or more")
+	}
+	noCredentialInPullRequest(t, pr.Number, issue, map[string]string{
+		"the local API's token":          d.token,
+		"the token gh auth token prints": ghToken,
+	})
 }
 
 // worktree is an entry of git worktree list --porcelain: its path, its head commit, and its branch, without
