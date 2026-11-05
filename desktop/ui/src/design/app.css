@@ -3615,7 +3615,9 @@ button.queue-item:hover,
 
 .table__footer {
   display: flex;
+  align-items: center;
   justify-content: center;
+  gap: var(--hf-space-3);
   padding: var(--hf-space-3);
 }
 

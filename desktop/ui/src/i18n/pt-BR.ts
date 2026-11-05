@@ -876,6 +876,7 @@ export const ptBR: Resources = {
     },
     loadMore: "Carregar execuções mais antigas",
     noMore: "Não há execuções mais antigas.",
+    count: "Exibindo {{loaded}} / {{total}}",
   },
   overview: {
     daemon: "Daemon",

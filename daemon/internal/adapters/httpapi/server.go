@@ -493,7 +493,8 @@ func (s *Server) previewSchedule(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) listExecutions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	f := app.ExecutionFilter{TaskID: q.Get("taskId"), Statuses: app.ParseStatuses(q.Get("status"))}
+	f := app.ExecutionFilter{TaskID: q.Get("taskId"), Statuses: app.ParseStatuses(q.Get("status")),
+		Trigger: q.Get("trigger"), Search: q.Get("search")}
 	if v := q.Get("active"); v != "" {
 		b := v == "true"
 		f.Active = &b
@@ -502,7 +503,10 @@ func (s *Server) listExecutions(w http.ResponseWriter, r *http.Request) {
 		f.Limit, _ = strconv.Atoi(v) // a limit that is not a number is 0, the default
 	}
 	f.Before, f.CreatedFrom, f.CreatedUntil = instant(q.Get("before")), instant(q.Get("createdFrom")), instant(q.Get("createdUntil"))
-	writeJSON(w, 200, s.App.ListExecutions(f))
+	page := s.App.ListExecutions(f)
+	// The total goes in a header, so that the body stays the page's bare array for every caller.
+	w.Header().Set("X-Total-Count", strconv.Itoa(page.Total))
+	writeJSON(w, 200, page.Rows)
 }
 
 // instant reads an RFC 3339 instant of a query; an empty or malformed one is none, which bounds nothing.

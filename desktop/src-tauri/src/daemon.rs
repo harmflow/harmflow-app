@@ -116,11 +116,19 @@ fn status_from_health(body: &Value, address: Option<String>) -> DaemonStatus {
     }
 }
 
-/// One response of the local API, as the webview receives it.
+/// One response of the local API, as the webview receives it. `total` is the response's `X-Total-Count`, how many
+/// items a list's filters match, when the daemon sent one: the only header the webview needs.
 #[derive(Debug, Clone, Serialize)]
 pub struct ApiResponse {
     pub status: u16,
     pub body: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
+}
+
+/// The `X-Total-Count` of a response, when it holds a number.
+fn total_count(headers: &reqwest::header::HeaderMap) -> Option<u64> {
+    headers.get("x-total-count")?.to_str().ok()?.trim().parse().ok()
 }
 
 pub struct DaemonClient {
@@ -196,17 +204,19 @@ impl DaemonClient {
         match self.send(method, path, body).await {
             Ok(res) => {
                 let status = res.status().as_u16();
+                let total = total_count(res.headers());
                 let text = res.text().await.unwrap_or_default();
                 let body = if text.is_empty() {
                     Value::Null
                 } else {
                     serde_json::from_str(&text).unwrap_or(Value::String(text))
                 };
-                ApiResponse { status, body }
+                ApiResponse { status, body, total }
             }
             Err(message) => ApiResponse {
                 status: 0,
                 body: serde_json::json!({ "error": { "code": "internal", "message": message } }),
+                total: None,
             },
         }
     }
@@ -406,6 +416,22 @@ mod tests {
         // A daemon built without git information or a build time sends neither, and the status leaves both out.
         let bare = status_from_health(&serde_json::json!({ "pid": 7, "version": "0.1.0" }), None);
         assert_eq!((bare.commit, bare.built_at), (None, None));
+    }
+
+    #[test]
+    fn a_lists_total_reaches_the_webview() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        assert_eq!(total_count(&headers), None);
+        headers.insert("X-Total-Count", "342".parse().unwrap());
+        assert_eq!(total_count(&headers), Some(342));
+        headers.insert("X-Total-Count", "many".parse().unwrap());
+        assert_eq!(total_count(&headers), None);
+
+        // The webview reads the total beside the status and the body, and finds none on a response that has none.
+        let listed = ApiResponse { status: 200, body: serde_json::json!([]), total: Some(342) };
+        assert_eq!(serde_json::to_value(&listed).unwrap(), serde_json::json!({ "status": 200, "body": [], "total": 342 }));
+        let bare = ApiResponse { status: 204, body: Value::Null, total: None };
+        assert_eq!(serde_json::to_value(&bare).unwrap(), serde_json::json!({ "status": 204, "body": null }));
     }
 
     /// The wait for a stopped daemon ends once its process exits, also while it is a zombie its parent never waited

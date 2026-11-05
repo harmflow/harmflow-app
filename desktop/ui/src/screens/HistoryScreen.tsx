@@ -7,7 +7,7 @@ import type { ExecutionStatus, ExecutionSummary, Trigger } from "../api/types";
 import { ExecutionDetail } from "../components/ExecutionDetail";
 import { HarnessLabel } from "../components/Shell";
 import { Banner, Button, Chip, EmptyState, IconButton, Select, StatusChip, TextInput } from "../components/ui";
-import { formatDateTime, formatElapsed } from "../lib/format";
+import { formatDateTime, formatElapsed, formatNumber } from "../lib/format";
 import { useDebounced } from "../lib/hooks";
 import { useStore } from "../state/store";
 
@@ -62,9 +62,13 @@ export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpe
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [rows, setRows] = useState<ExecutionSummary[]>([]);
+  // How many executions the filters match, as the daemon counts them; none until it says.
+  const [total, setTotal] = useState<number | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [exhausted, setExhausted] = useState(false);
   const refreshKey = useDebounced(lastEventId, 1500);
+  // The daemon filters by the search text, so it is sent once the user stops typing, not on every key.
+  const searched = useDebounced(search.trim(), 300);
   const bounds = useMemo(() => period(from, to), [from, to]);
 
   // How many executions are shown, which the automatic refresh fetches again, and the filters' generation, which a
@@ -75,49 +79,58 @@ export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpe
   }, [rows]);
   const generation = useRef(0);
 
+  // Every filter is the daemon's, so that a page, its cursor, and the total all follow them. An invalid period is no
+  // query: the screen says so and keeps what is shown.
+  const pageQuery = useMemo(() => {
+    if (!bounds) return null;
+    const chosen = { status: status || undefined, taskId: taskId || undefined, trigger: trigger || undefined, search: searched || undefined };
+    return (before?: string): ExecutionQuery => ({ ...chosen, limit: PAGE, before, ...bounds });
+  }, [status, taskId, trigger, searched, bounds]);
+
   const load = useCallback(
     async (before?: string) => {
-      // An invalid period is not sent: the screen says so and keeps what is shown.
-      if (!bounds) return;
+      if (!pageQuery) return;
       setLoading(true);
       try {
-        const page = await api.executions({ status: status || undefined, taskId: taskId || undefined, limit: PAGE, before, ...bounds });
-        setRows((prev) => (before ? append(prev, page) : page));
-        setExhausted(page.length < PAGE);
+        const page = await api.executionPage(pageQuery(before));
+        setRows((prev) => (before ? append(prev, page.rows) : page.rows));
+        setTotal(page.total);
+        setExhausted(page.rows.length < PAGE);
       } catch {
         // The connection banner tells the user; keep what is shown.
       } finally {
         setLoading(false);
       }
     },
-    [status, taskId, bounds],
+    [pageQuery],
   );
 
   // The automatic refresh fetches again, page by page, as many executions as are shown, and at least one page, then
   // replaces the rows with them: the rows take their new state, new executions come in at the top, and the pages added
   // with Load more stay. One request for all of them is not made, since the daemon caps a page.
   const refresh = useCallback(async () => {
-    if (!bounds) return;
+    if (!pageQuery) return;
     const wanted = loaded.current;
     const begun = generation.current;
     setLoading(true);
     try {
       let held: ExecutionSummary[] = [];
-      let page: ExecutionSummary[];
+      let page: { rows: ExecutionSummary[]; total?: number };
       do {
         const before = held[held.length - 1]?.createdAt;
-        page = await api.executions({ status: status || undefined, taskId: taskId || undefined, limit: PAGE, before, ...bounds });
-        held = append(held, page);
-      } while (page.length === PAGE && held.length < wanted);
+        page = await api.executionPage(pageQuery(before));
+        held = append(held, page.rows);
+      } while (page.rows.length === PAGE && held.length < wanted);
       if (generation.current !== begun) return;
       setRows(held);
-      setExhausted(page.length < PAGE);
+      setTotal(page.total);
+      setExhausted(page.rows.length < PAGE);
     } catch {
       // The connection banner tells the user; keep what is shown.
     } finally {
       setLoading(false);
     }
-  }, [status, taskId, bounds]);
+  }, [pageQuery]);
 
   // A change of a filter starts again from the first page, since what was loaded belongs to the old filters; an
   // execution event, once debounced, refreshes what is shown.
@@ -132,15 +145,6 @@ export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpe
     generation.current++;
     void load();
   }, [load, refresh, refreshKey]);
-
-  const visible = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return rows.filter((r) => {
-      if (trigger && r.trigger !== trigger) return false;
-      if (!q) return true;
-      return [r.taskName, r.taskId, r.repository, r.workItem, r.id, r.harness].some((v) => v?.toLowerCase().includes(q));
-    });
-  }, [rows, trigger, search]);
 
   const opened = rows.find((r) => r.id === openId);
 
@@ -199,7 +203,7 @@ export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpe
       {bounds ? null : <Banner tone="warning">{t("history.filters.invalidPeriod")}</Banner>}
 
       <div className="panel panel--table">
-        {visible.length === 0 && !loading ? (
+        {rows.length === 0 && !loading ? (
           <EmptyState icon="history" title={t("history.empty")} />
         ) : (
           <div className="table__scroll">
@@ -217,7 +221,7 @@ export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpe
                 </tr>
               </thead>
               <tbody>
-                {visible.map((r) => (
+                {rows.map((r) => (
                   <tr key={r.id} onClick={() => onOpen(r.id)} className={r.id === openId ? "is-selected" : undefined}>
                     <td>
                       <StatusChip status={r.status} compact />
@@ -250,6 +254,11 @@ export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpe
           </div>
         )}
         <div className="table__footer">
+          {total !== undefined && rows.length ? (
+            <span className="muted">
+              {t("history.count", { loaded: formatNumber(rows.length, i18n.language), total: formatNumber(total, i18n.language) })}
+            </span>
+          ) : null}
           {exhausted ? (
             <span className="muted">{rows.length ? t("history.noMore") : null}</span>
           ) : (

@@ -13,8 +13,9 @@ import i18n from "../i18n";
 import { patchStateForTests } from "../state/store";
 import { HistoryScreen } from "./HistoryScreen";
 
-// The daemon as the client sees it: `GET /executions` lists the executions it holds, of one task when the query names
-// it, newest first, a page of at most `limit` created before `before`; every other route has its answer; and every
+// The daemon as the client sees it: `GET /executions` lists the executions it holds, of one task, fired by one trigger,
+// and holding a search text in the task's name when the query names them, newest first, a page of at most `limit`
+// created before `before`, with how many the filters match in its total; every other route has its answer; and every
 // request it received.
 const daemon = vi.hoisted(() => ({
   executions: [] as ExecutionSummary[],
@@ -32,9 +33,14 @@ vi.mock("../api/transport", () => ({
       if (method === "GET" && route === "/executions") {
         const params = new URLSearchParams(search);
         const taskId = params.get("taskId");
+        const trigger = params.get("trigger");
+        const text = params.get("search")?.toLowerCase();
         const before = params.get("before");
-        const listed = daemon.executions.filter((x) => (!taskId || x.taskId === taskId) && (!before || x.createdAt < before));
-        return { status: 200, body: listed.slice(0, Number(params.get("limit") ?? listed.length)) };
+        const matched = daemon.executions.filter(
+          (x) => (!taskId || x.taskId === taskId) && (!trigger || x.trigger === trigger) && (!text || x.taskName.toLowerCase().includes(text)),
+        );
+        const listed = matched.filter((x) => !before || x.createdAt < before);
+        return { status: 200, body: listed.slice(0, Number(params.get("limit") ?? listed.length)), total: matched.length };
       }
       return daemon.answers.has(route) ? { status: 200, body: daemon.answers.get(route) } : { status: 404, body: null };
     },
@@ -317,13 +323,85 @@ describe("the automatic refresh, after Load more", () => {
     expect(rows()[0]).toBe(rowOf(fresh.id));
     expect(rowOf(nth(79).id)).toBeDefined();
     expect(cell(rowOf(running.id)!, 1).textContent).toBe("Completed");
-    expect(host!.querySelector(".table__footer")!.textContent).toBe("No older executions.");
+    expect(host!.querySelector(".table__footer")!.textContent).toBe("Showing 81 / 81No older executions.");
 
     // A change of a filter still starts again from the first page.
     daemon.requests.length = 0;
     await choose("Task", standup.id);
     expect(daemon.requests).toEqual([`GET /executions?taskId=${standup.id}&limit=50`]);
     expect(rows()).toHaveLength(50);
+  });
+});
+
+describe("the count of the executions loaded out of those that match", () => {
+  /** The instant `minutes` after 09:00, as the daemon writes it. */
+  const at = (minutes: number) => new Date(Date.UTC(2026, 6, 1, 9, minutes)).toISOString();
+  /** The standup's nth execution counting back from the newest, fired by the schedule or, one in two, by hand. */
+  const nth = (n: number): ExecutionSummary => ({
+    ...other,
+    id: `exec-${String(n).padStart(3, "0")}`,
+    trigger: n % 2 ? "manual" : "schedule",
+    createdAt: at(100 - n),
+    startedAt: at(100 - n),
+    endedAt: at(100 - n),
+  });
+  const footer = () => host!.querySelector(".table__footer")!.textContent;
+  const query = (request: string) => Object.fromEntries(new URLSearchParams(request.split("?")[1]));
+
+  /** Types a search text as the user does, then lets the screen's pause after typing pass. */
+  async function type(text: string) {
+    const input = host!.querySelector<HTMLInputElement>('input[aria-label="Search"]')!;
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => {
+      setValue.call(input, text);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 350)));
+    await settle();
+  }
+
+  it("shows the count, follows Load more and each filter, and sends the trigger and the search text to the daemon", async () => {
+    daemon.executions = [...Array.from({ length: 80 }, (_, n) => nth(n)), { ...aged, createdAt: at(0) }];
+    await open();
+    expect(rows()).toHaveLength(50);
+    expect(footer()).toBe("Showing 50 / 81Load older executions");
+
+    // Load more: the second page, and the count of what is loaded with it.
+    const more = [...host!.querySelectorAll<HTMLButtonElement>(".table__footer button")].find((b) => b.textContent === "Load older executions")!;
+    await act(async () => more.click());
+    await settle();
+    expect(rows()).toHaveLength(81);
+    expect(footer()).toBe("Showing 81 / 81No older executions.");
+
+    // The trigger filter is the daemon's: the page and the total are of the executions fired by hand alone.
+    daemon.requests.length = 0;
+    await choose("Trigger", "manual");
+    expect(daemon.requests.map(query)).toEqual([{ trigger: "manual", limit: "50" }]);
+    expect(rows()).toHaveLength(40);
+    expect(rows().every((r) => cell(r, 5).textContent === "Manual")).toBe(true);
+    expect(footer()).toBe("Showing 40 / 40No older executions.");
+
+    // So is the search text, sent trimmed once the user stops typing, beside the trigger.
+    daemon.requests.length = 0;
+    await type("  Implement ");
+    expect(daemon.requests.map(query)).toEqual([{ trigger: "manual", search: "Implement", limit: "50" }]);
+    expect(rows()).toHaveLength(0);
+    expect(host!.querySelector(".empty__title")!.textContent).toBe("No executions yet.");
+
+    await choose("Trigger", "");
+    expect(rows().map((r) => r.querySelector("td:nth-child(2) .mono")!.textContent)).toEqual([aged.id]);
+    expect(footer()).toBe("Showing 1 / 1No older executions.");
+  });
+
+  it("writes the count in the interface's language", async () => {
+    daemon.executions = Array.from({ length: 60 }, (_, n) => nth(n));
+    await i18n.changeLanguage("pt-BR");
+    try {
+      await open();
+      expect(footer()).toBe("Exibindo 50 / 60Carregar execuções mais antigas");
+    } finally {
+      await i18n.changeLanguage("en-US");
+    }
   });
 });
 

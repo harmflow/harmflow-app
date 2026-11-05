@@ -850,6 +850,7 @@ export const enUS = {
     },
     loadMore: "Load older executions",
     noMore: "No older executions.",
+    count: "Showing {{loaded}} / {{total}}",
   },
   overview: {
     daemon: "Daemon",

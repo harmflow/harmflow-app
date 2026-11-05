@@ -83,14 +83,15 @@ func checkAgainstAScan(t *testing.T, e *env, tasks []string, want int) {
 	for _, s := range all {
 		scanned = append(scanned, s.ID+" "+string(s.Status))
 	}
-	for _, s := range a.ListExecutions(ExecutionFilter{Limit: 500}) {
+	for _, s := range a.ListExecutions(ExecutionFilter{Limit: 500}).Rows {
 		listed = append(listed, s.ID+" "+string(s.Status))
 	}
 	if !slices.Equal(listed, scanned) {
 		t.Errorf("ListExecutions() = %v, want the scan's %v", listed, scanned)
 	}
-	if got := a.ListExecutions(ExecutionFilter{Limit: 2}); len(got) != 2 || got[0].ID != all[0].ID || got[1].ID != all[1].ID {
-		t.Errorf("ListExecutions(limit 2) = %+v, want the two newest", got)
+	if got := a.ListExecutions(ExecutionFilter{Limit: 2}); len(got.Rows) != 2 || got.Rows[0].ID != all[0].ID ||
+		got.Rows[1].ID != all[1].ID || got.Total != want {
+		t.Errorf("ListExecutions(limit 2) = %+v, want the two newest of %d", got, want)
 	}
 	for _, task := range tasks {
 		var newest *domain.ExecutionSummary
@@ -204,34 +205,106 @@ func TestListExecutionsWithinAPeriod(t *testing.T) {
 	}
 	at := func(n int) *time.Time { t := day(n); return &t }
 	later := day(-1).Add(time.Hour)
-	listed := func(f ExecutionFilter) []string {
-		var out []string
-		for _, s := range e.app.ListExecutions(f) {
-			out = append(out, s.ID)
-		}
-		return out
-	}
+	// The total is the period's, whatever the page: neither the cursor nor the limit changes it.
 	for _, c := range []struct {
-		name string
-		f    ExecutionFilter
-		want []int
+		name  string
+		f     ExecutionFilter
+		want  []int
+		total int
 	}{
-		{"a lower bound, which it includes", ExecutionFilter{CreatedFrom: at(-3)}, []int{-1, -2, -3}},
-		{"an upper bound, which it excludes", ExecutionFilter{CreatedUntil: at(-2)}, []int{-3, -4, -5}},
-		{"both bounds", ExecutionFilter{CreatedFrom: at(-4), CreatedUntil: at(-1)}, []int{-2, -3, -4}},
-		{"a period with no execution", ExecutionFilter{CreatedFrom: &later}, nil},
-		{"the first page of a period", ExecutionFilter{CreatedFrom: at(-4), CreatedUntil: at(-1), Limit: 2}, []int{-2, -3}},
+		{"a lower bound, which it includes", ExecutionFilter{CreatedFrom: at(-3)}, []int{-1, -2, -3}, 3},
+		{"an upper bound, which it excludes", ExecutionFilter{CreatedUntil: at(-2)}, []int{-3, -4, -5}, 3},
+		{"both bounds", ExecutionFilter{CreatedFrom: at(-4), CreatedUntil: at(-1)}, []int{-2, -3, -4}, 3},
+		{"a period with no execution", ExecutionFilter{CreatedFrom: &later}, nil, 0},
+		{"the first page of a period", ExecutionFilter{CreatedFrom: at(-4), CreatedUntil: at(-1), Limit: 2},
+			[]int{-2, -3}, 3},
 		{"the next page, the cursor inside the period", ExecutionFilter{CreatedFrom: at(-4), CreatedUntil: at(-1), Limit: 2,
-			Before: at(-3)}, []int{-4}},
-		{"a cursor at the period's start", ExecutionFilter{CreatedFrom: at(-4), CreatedUntil: at(-1), Before: at(-4)}, nil},
+			Before: at(-3)}, []int{-4}, 3},
+		{"a cursor at the period's start", ExecutionFilter{CreatedFrom: at(-4), CreatedUntil: at(-1), Before: at(-4)}, nil,
+			3},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			var want []string
 			for _, n := range c.want {
 				want = append(want, ids[n])
 			}
-			if got := listed(c.f); !slices.Equal(got, want) {
-				t.Errorf("ListExecutions() = %v, want %v", got, want)
+			page := e.app.ListExecutions(c.f)
+			var got []string
+			for _, s := range page.Rows {
+				got = append(got, s.ID)
+			}
+			if !slices.Equal(got, want) || page.Total != c.total {
+				t.Errorf("ListExecutions() = %v of %d, want %v of %d", got, page.Total, want, c.total)
+			}
+		})
+	}
+}
+
+// ListExecutions selects by the trigger that fired an execution and by a search text, which matches a part of the
+// task's name or ID, the repository, the work item, the execution's ID, or the harness, case aside; its total counts
+// every execution the filters select, past the page, and the cursor pages through those alone.
+func TestListExecutionsByTriggerAndSearch(t *testing.T) {
+	e := newEnv(t)
+	e.create("issues", "")
+	e.create("standup", "")
+	now := e.clock.Now()
+	type made struct {
+		task      string
+		trigger   domain.Trigger
+		workItem  string
+		createdAt time.Duration
+	}
+	var ids []string
+	// Newest first: two scheduled runs of the issues task with their work items, a manual one, and two of the standup.
+	for _, m := range []made{
+		{"issues", domain.TriggerSchedule, "org/core-banking#12", -1 * time.Minute},
+		{"standup", domain.TriggerManual, "", -2 * time.Minute},
+		{"issues", domain.TriggerSchedule, "org/payments#7", -3 * time.Minute},
+		{"issues", domain.TriggerManual, "", -4 * time.Minute},
+		{"standup", domain.TriggerSchedule, "", -5 * time.Minute},
+	} {
+		created := now.Add(m.createdAt)
+		x := domain.NewExecution(domain.TaskDocument{Metadata: domain.TaskMetadata{ID: m.task, Name: "Task " + m.task}},
+			m.trigger, nil, created)
+		x.Status, x.StartedAt, x.EndedAt, x.WorkItem = domain.StatusCompleted, &created, &created, m.workItem
+		e.app.mu.Lock()
+		e.app.addExecutionLocked(x)
+		e.app.mu.Unlock()
+		e.app.persistExecution(x)
+		ids = append(ids, x.ID)
+	}
+	before := now.Add(-2 * time.Minute)
+	for _, c := range []struct {
+		name  string
+		f     ExecutionFilter
+		want  []int
+		total int
+	}{
+		{"a trigger", ExecutionFilter{Trigger: string(domain.TriggerSchedule)}, []int{0, 2, 4}, 3},
+		{"another trigger", ExecutionFilter{Trigger: string(domain.TriggerManual)}, []int{1, 3}, 2},
+		{"a trigger that fired none", ExecutionFilter{Trigger: string(domain.TriggerCatchUp)}, nil, 0},
+		{"a task's name, case aside", ExecutionFilter{Search: "  TASK ISSUES "}, []int{0, 2, 3}, 3},
+		{"a task's ID", ExecutionFilter{Search: "standup"}, []int{1, 4}, 2},
+		{"a work item", ExecutionFilter{Search: "payments#7"}, []int{2}, 1},
+		{"an execution's ID", ExecutionFilter{Search: ids[3]}, []int{3}, 1},
+		{"a text no execution holds", ExecutionFilter{Search: "nothing"}, nil, 0},
+		{"a trigger and a search text", ExecutionFilter{Trigger: string(domain.TriggerSchedule), Search: "org/"},
+			[]int{0, 2}, 2},
+		{"the first page, the total past it", ExecutionFilter{Search: "issues", Limit: 1}, []int{0}, 3},
+		{"the next page", ExecutionFilter{Search: "issues", Limit: 1, Before: &before}, []int{2}, 3},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var want []string
+			for _, n := range c.want {
+				want = append(want, ids[n])
+			}
+			page := e.app.ListExecutions(c.f)
+			var got []string
+			for _, s := range page.Rows {
+				got = append(got, s.ID)
+			}
+			if !slices.Equal(got, want) || page.Total != c.total {
+				t.Errorf("ListExecutions(%+v) = %v of %d, want %v of %d", c.f, got, page.Total, want, c.total)
 			}
 		})
 	}
@@ -280,7 +353,7 @@ func TestExecutionRowCarriesTheCurrentAttemptsEffort(t *testing.T) {
 	}
 	check := func(t *testing.T) {
 		rows := map[string]ExecutionSummary{}
-		for _, s := range e.app.ListExecutions(ExecutionFilter{TaskID: "effort"}) {
+		for _, s := range e.app.ListExecutions(ExecutionFilter{TaskID: "effort"}).Rows {
 			rows[s.ID] = s
 		}
 		for i, c := range cases {

@@ -68,30 +68,42 @@ func trimParams(p map[string]string, n int) map[string]string {
 	return out
 }
 
-// ExecutionFilter selects executions: of one task, in some statuses, active or not, created in a period, and created
-// before an instant, the paging cursor; a zero field selects all. The period runs from CreatedFrom, inclusive, to
-// CreatedUntil, exclusive. Limit caps the list, 100 when it is not between 1 and 500.
+// ExecutionFilter selects executions: of one task, in some statuses, active or not, fired by one trigger, holding a
+// search text, created in a period, and created before an instant, the paging cursor; a zero field selects all. The
+// search text matches, case aside, a part of the task's name or ID, the repository, the work item, the execution's ID,
+// or the harness. The period runs from CreatedFrom, inclusive, to CreatedUntil, exclusive. Limit caps the list, 100
+// when it is not between 1 and 500.
 type ExecutionFilter struct {
 	TaskID       string
 	Statuses     []string
 	Active       *bool
+	Trigger      string
+	Search       string
 	Limit        int
 	Before       *time.Time
 	CreatedFrom  *time.Time
 	CreatedUntil *time.Time
 }
 
-// ListExecutions lists the executions the filter selects, newest first: it walks the executions from the newest and
-// stops at the limit, or at the first one created before the period.
-func (a *App) ListExecutions(f ExecutionFilter) []ExecutionSummary {
+// ExecutionPage is one page of the executions a filter selects, newest first, and Total, how many executions the
+// filter selects with no cursor and no limit, so that every page of a list gives the same total.
+type ExecutionPage struct {
+	Rows  []ExecutionSummary
+	Total int
+}
+
+// ListExecutions lists the executions the filter selects, newest first: it walks the executions from the newest, to
+// the first one created before the period, counting the ones the filter selects and keeping those of the page.
+func (a *App) ListExecutions(f ExecutionFilter) ExecutionPage {
 	limit := f.Limit
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
+	search := strings.ToLower(strings.TrimSpace(f.Search))
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	out := []ExecutionSummary{}
-	for i := len(a.byCreated) - 1; i >= 0 && len(out) < limit; i-- {
+	page := ExecutionPage{Rows: []ExecutionSummary{}}
+	for i := len(a.byCreated) - 1; i >= 0; i-- {
 		if f.CreatedFrom != nil && a.byCreated[i].at.Before(*f.CreatedFrom) {
 			break
 		}
@@ -101,13 +113,28 @@ func (a *App) ListExecutions(f ExecutionFilter) []ExecutionSummary {
 		case f.TaskID != "" && s.TaskID != f.TaskID:
 		case len(f.Statuses) > 0 && !containsString(f.Statuses, string(s.Status)):
 		case f.Active != nil && s.Status.IsActive() != *f.Active:
-		case f.Before != nil && !s.CreatedAt.Before(*f.Before):
+		case f.Trigger != "" && string(s.Trigger) != f.Trigger:
+		case search != "" && !holds(s, search):
 		case f.CreatedUntil != nil && !s.CreatedAt.Before(*f.CreatedUntil):
 		default:
-			out = append(out, row(s))
+			page.Total++
+			if len(page.Rows) < limit && (f.Before == nil || s.CreatedAt.Before(*f.Before)) {
+				page.Rows = append(page.Rows, row(s))
+			}
 		}
 	}
-	return out
+	return page
+}
+
+// holds reports whether an execution's task name or ID, repository, work item, ID, or harness holds text, which is in
+// lower case.
+func holds(s *domain.ExecutionSummary, text string) bool {
+	for _, v := range []string{s.TaskName, s.TaskID, s.Repository, s.WorkItem, s.ID, s.Harness} {
+		if strings.Contains(strings.ToLower(v), text) {
+			return true
+		}
+	}
+	return false
 }
 
 // ExecutionView is the full record as the API returns it.

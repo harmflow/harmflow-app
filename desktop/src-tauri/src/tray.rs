@@ -343,7 +343,7 @@ mod tests {
     }
 
     fn answer(status: u16, body: Value) -> ApiResponse {
-        ApiResponse { status, body }
+        ApiResponse { status, body, total: None }
     }
 
     fn refused_running(count: &str) -> ApiResponse {

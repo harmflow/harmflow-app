@@ -10,6 +10,14 @@ export type ConnectionState = "connecting" | "connected" | "reconnecting" | "dis
 export interface RawResponse {
   status: number;
   body: unknown;
+  /** The response's `X-Total-Count`, how many items a list's filters match, when the daemon sent one. */
+  total?: number;
+}
+
+/** The `X-Total-Count` header's value, when it is a count. */
+function totalCount(value: string | null): number | undefined {
+  const n = value === null || value.trim() === "" ? NaN : Number(value);
+  return Number.isInteger(n) && n >= 0 ? n : undefined;
 }
 
 export interface StreamHandlers {
@@ -42,7 +50,7 @@ class HttpTransport implements Transport {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const text = await res.text();
-    return { status: res.status, body: parseBody(text) };
+    return { status: res.status, body: parseBody(text), total: totalCount(res.headers.get("X-Total-Count")) };
   }
 
   async requestText(path: string): Promise<{ status: number; text: string }> {
