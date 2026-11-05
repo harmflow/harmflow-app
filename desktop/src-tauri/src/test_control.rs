@@ -4,16 +4,17 @@
 //! the tray's state, and opens the dashboard as the tray's item does, with no Accessibility permission
 //! (harmflow-app#464). It reads the app menu macOS shows, chooses one of its items or one of the tray's, and asks the
 //! app to quit as the Dock's Quit does (harmflow-app#655). It reads the notices macOS delivered for the shell
-//! (harmflow-app#515). A test of what else the shell does adds its own command here.
+//! (harmflow-app#515), and the title and the image of the tray's status item macOS shows (harmflow-app#880). A test
+//! of what else the shell does adds its own command here.
 
 use std::io::{BufRead, Write};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use objc2::{sel, MainThreadMarker};
-use objc2_app_kit::{NSApplication, NSEventModifierFlags, NSMenu};
-use objc2_foundation::NSObjectNSDelayedPerforming;
+use objc2::{sel, AllocAnyThread, MainThreadMarker};
+use objc2_app_kit::{NSApplication, NSBitmapImageRep, NSEventModifierFlags, NSImage, NSMenu};
+use objc2_foundation::{NSData, NSObjectNSDelayedPerforming};
 use serde_json::{json, Value};
 use tauri::menu::MenuItemKind;
 use tauri::{AppHandle, Manager, Runtime};
@@ -44,6 +45,8 @@ enum Command<'a> {
     Terminate,
     /// The notices macOS's notification center holds as delivered for the shell, with the identity they were sent under.
     Notices,
+    /// The title of the tray's status item macOS shows, and which of the tray's two images it shows.
+    Tray,
 }
 
 fn parse(line: &str) -> Option<Command<'_>> {
@@ -58,6 +61,7 @@ fn parse(line: &str) -> Option<Command<'_>> {
         ("choose-tray", id) if !id.is_empty() => Some(Command::ChooseTray(id)),
         ("terminate", "") => Some(Command::Terminate),
         ("notices", "") => Some(Command::Notices),
+        ("tray", "") => Some(Command::Tray),
         _ => None,
     }
 }
@@ -126,7 +130,63 @@ fn run<R: Runtime>(app: &AppHandle<R>, command: Command) -> Value {
             json!({ "ok": true })
         }
         Command::Notices => delivered(),
+        Command::Tray => shown_tray(app),
     }
+}
+
+/// The tray as macOS shows it, read on the main thread from the status item Tauri's tray holds: the title of the
+/// item's button, `null` when it shows none, and which of the tray's two images the button shows, told by its pixels
+/// (`tray_image`). It reads neither the state the tray decided nor what `tray::render` asked for.
+fn shown_tray<R: Runtime>(app: &AppHandle<R>) -> Value {
+    let Some(tray) = app.tray_by_id(tray::TRAY_ID) else { return json!({ "error": "the app has no tray" }) };
+    let shown = tray.with_inner_tray_icon(|inner| {
+        let mtm = MainThreadMarker::new().expect("with_inner_tray_icon runs on the main thread");
+        // No status item while the tray is hidden.
+        let button = inner.ns_status_item()?.button(mtm)?;
+        // A tray with no title sets an empty one on the button.
+        let title = button.title().to_string();
+        let image = button.image().map_or("none", |image| tray_image(&image));
+        Some(json!({ "title": (!title.is_empty()).then_some(title), "image": image }))
+    });
+    match shown {
+        Ok(Some(answer)) => answer,
+        Ok(None) => json!({ "error": "macOS shows no status item for the tray" }),
+        Err(err) => json!({ "error": err.to_string() }),
+    }
+}
+
+/// An image's pixels as AppKit holds them: its width and height in pixels, the bytes of a row, and the bytes of every
+/// row, read back from its TIFF representation.
+type Pixels = (isize, isize, isize, Vec<u8>);
+
+/// The pixels of `image`, or `None` when AppKit gives them in no single plane.
+fn pixels(image: &NSImage) -> Option<Pixels> {
+    let tiff = image.TIFFRepresentation()?;
+    let rep = NSBitmapImageRep::imageRepWithData(&tiff)?;
+    let (wide, high, row) = (rep.pixelsWide(), rep.pixelsHigh(), rep.bytesPerRow());
+    let data = rep.bitmapData();
+    if rep.isPlanar() || data.is_null() || high <= 0 || row <= 0 {
+        return None;
+    }
+    // SAFETY: a meshed bitmap holds `bytesPerRow` bytes for each of its rows at `bitmapData`, which `rep` keeps alive.
+    let bytes = unsafe { std::slice::from_raw_parts(data, (row * high) as usize) }.to_vec();
+    Some((wide, high, row, bytes))
+}
+
+/// The pixels of a PNG as AppKit decodes it, as it decodes the PNG the tray-icon crate hands macOS for the tray.
+fn decoded(png: &[u8]) -> Option<Pixels> {
+    let image = NSImage::initWithData(NSImage::alloc(), &NSData::with_bytes(png))?;
+    pixels(&image)
+}
+
+/// Which of the tray's two images `shown` is: `idle` or `executing` when its pixels are those of `tray::ICON_IDLE` or
+/// `tray::ICON_EXECUTING` decoded the same way, `unknown` when they are neither's.
+fn tray_image(shown: &NSImage) -> &'static str {
+    let Some(shown) = pixels(shown) else { return "unknown" };
+    [("idle", tray::ICON_IDLE), ("executing", tray::ICON_EXECUTING)]
+        .into_iter()
+        .find(|(_, png)| decoded(png).as_ref() == Some(&shown))
+        .map_or("unknown", |(name, _)| name)
 }
 
 /// The notices delivered for the shell, read back from macOS's notification center: the notification plugin hands
@@ -264,12 +324,46 @@ mod tests {
         assert_eq!(parse("choose-tray  quit"), Some(Command::ChooseTray("quit")));
         assert_eq!(parse("terminate"), Some(Command::Terminate));
         assert_eq!(parse("notices\n"), Some(Command::Notices));
+        assert_eq!(parse(" tray\n"), Some(Command::Tray));
     }
 
     #[test]
     fn an_unknown_line_is_no_command() {
-        for line in ["", "quit", "Close", "open dashboard", "state now", "choose-app-menu", "choose-tray ", "terminate x", "notice", "notices x"] {
+        for line in ["", "quit", "Close", "open dashboard", "state now", "choose-app-menu", "choose-tray ", "terminate x", "notice", "notices x", "tray x", "Tray"] {
             assert_eq!(parse(line), None, "{line:?}");
         }
+    }
+
+    /// An image as the tray-icon crate hands macOS the tray's: the RGBA pixels of Tauri's `Image`, encoded again as
+    /// an 8-bit RGBA PNG and decoded by AppKit.
+    fn as_the_tray_holds(width: u32, height: u32, rgba: &[u8]) -> objc2::rc::Retained<NSImage> {
+        let mut encoded = Vec::new();
+        let mut encoder = png::Encoder::new(&mut encoded, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.write_header().and_then(|mut writer| writer.write_image_data(rgba)).expect("the pixels encode");
+        NSImage::initWithData(NSImage::alloc(), &NSData::with_bytes(&encoded)).expect("AppKit decodes the PNG")
+    }
+
+    fn tray_holds(icon: &[u8]) -> objc2::rc::Retained<NSImage> {
+        let image = tauri::image::Image::from_bytes(icon).expect("a tray image decodes");
+        as_the_tray_holds(image.width(), image.height(), image.rgba())
+    }
+
+    #[test]
+    fn each_tray_image_is_told_by_its_pixels() {
+        assert_eq!(tray_image(&tray_holds(tray::ICON_IDLE)), "idle");
+        assert_eq!(tray_image(&tray_holds(tray::ICON_EXECUTING)), "executing");
+        assert!(decoded(tray::ICON_IDLE).is_some());
+        assert_ne!(decoded(tray::ICON_IDLE), decoded(tray::ICON_EXECUTING));
+    }
+
+    #[test]
+    fn an_image_of_neither_is_unknown() {
+        let image = tauri::image::Image::from_bytes(tray::ICON_IDLE).expect("a tray image decodes");
+        let mut rgba = image.rgba().to_vec();
+        // One pixel's alpha differs from the idle image's.
+        rgba[3] ^= 0xff;
+        assert_eq!(tray_image(&as_the_tray_holds(image.width(), image.height(), &rgba)), "unknown");
     }
 }

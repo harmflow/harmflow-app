@@ -15,7 +15,7 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use crate::daemon::ApiResponse;
 use crate::state::{ActiveExecution, AppState};
 
-const TRAY_ID: &str = "main";
+pub(crate) const TRAY_ID: &str = "main";
 /// The ids of the tray's items, which `menu::on_event` handles with the app menu's.
 pub const OPEN: &str = "open";
 pub const STOP: &str = "stop";
@@ -24,8 +24,8 @@ pub const EXECUTION_PREFIX: &str = "exec:";
 const ACTIVE_STATUSES: [&str; 5] = ["preparing", "running", "switching_harness", "testing", "publishing"];
 const MAX_LISTED: usize = 5;
 
-static ICON_IDLE: &[u8] = include_bytes!("../icons/tray-idle.png");
-static ICON_EXECUTING: &[u8] = include_bytes!("../icons/tray-executing.png");
+pub(crate) static ICON_IDLE: &[u8] = include_bytes!("../icons/tray-idle.png");
+pub(crate) static ICON_EXECUTING: &[u8] = include_bytes!("../icons/tray-executing.png");
 
 /// The tray's icon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

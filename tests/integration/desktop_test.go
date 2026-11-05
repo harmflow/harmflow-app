@@ -160,3 +160,80 @@ func (s *shell) waitState(visible, tray bool) {
 	}
 	s.t.Fatalf("the shell's state is %v, want visible %v and trayEnabled %v", state, visible, tray)
 }
+
+// tray reads the tray as macOS shows it, through the shell's test control channel: the title of its status item, nil
+// when it shows none, and which of the tray's two images it shows, idle or executing, or unknown when neither.
+func (s *shell) tray() (title, image any) {
+	s.t.Helper()
+	answer := s.send("tray")
+	return answer["title"], answer["image"]
+}
+
+// waitTray waits until the tray shows the title, nil for none, and the image. The shell refreshes the tray a moment
+// after an execution's event reaches it, so a change takes a moment.
+func (s *shell) waitTray(title any, image string) {
+	s.t.Helper()
+	var gotTitle, gotImage any
+	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
+		if gotTitle, gotImage = s.tray(); gotTitle == title && gotImage == image {
+			return
+		}
+	}
+	s.t.Fatalf("tray = title %v, image %v after 30s, want title %v, image %s", gotTitle, gotImage, title, image)
+}
+
+// keepsTray fails the test unless the tray shows the title and the image at every read for the duration d.
+func (s *shell) keepsTray(title any, image string, d time.Duration) {
+	s.t.Helper()
+	for end := time.Now().Add(d); time.Now().Before(end); time.Sleep(200 * time.Millisecond) {
+		if gotTitle, gotImage := s.tray(); gotTitle != title || gotImage != image {
+			s.t.Fatalf("tray = title %v, image %v, want title %v, image %s throughout %v", gotTitle, gotImage, title,
+				image, d)
+		}
+	}
+}
+
+// harmflow-app#880: the menu bar's HarmFlow item, as macOS shows it, follows only the executions that run. Before any
+// execution it shows the idle image and no count. While an execution runs, it shows the executing image and the count
+// 1, and a second firing of the same task, which waits queued, adds nothing to it. Once both executions have ended, it
+// shows the idle image and no count again. The test reads the title and the image of the tray's status item through
+// the debug build's control channel, which tells the image by its pixels. The run spends no usage: the stand-in
+// fake-claude is the harness, and it holds every session at a gate until the test opens it.
+func TestTheTrayShowsOnlyTheRunningExecutions(t *testing.T) {
+	bin := realDesktop(t)
+	d := startDaemon(t, t.TempDir())
+	gate := filepath.Join(t.TempDir(), "gate")
+	stand := standIn(t, "fake-claude", "claude",
+		"case \"$SCENARIO\" in\n", fmt.Sprintf("until [ -e '%s' ]; do sleep 0.05; done\ncase \"$SCENARIO\" in\n", gate))
+	d.call("PUT", "/harnesses/claude-code", map[string]any{"path": stand.path}, 200)
+	d.call("POST", "/tasks", map[string]any{"yaml": task("gated", "SCENARIO=ok", "")}, 201)
+
+	s := startShell(t, bin, d)
+	s.waitState(true, true)
+	s.waitTray(nil, "idle")
+
+	first := d.call("POST", "/tasks/gated/run", nil, 202)["executionId"].(string)
+	d.waitStatus(first, "running")
+	s.waitTray("1", "executing")
+
+	second := d.call("POST", "/tasks/gated/run", nil, 202)
+	if second["outcome"] != "queued" {
+		t.Fatalf("POST /tasks/gated/run while %s runs = %v, want outcome queued", first, second)
+	}
+	queued := second["executionId"].(string)
+	if x := d.call("GET", "/executions/"+queued, nil, 200); x["status"] != "queued" {
+		t.Fatalf("the second execution %s is %v, want queued while %s runs", queued, x["status"], first)
+	}
+	// The queued firing's event reaches the shell, which refreshes the tray from it, well within the two seconds.
+	s.keepsTray("1", "executing", 2*time.Second)
+
+	if err := os.WriteFile(gate, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{first, queued} {
+		if x := d.waitStatus(id, "completed", "failed", "cancelled", "interrupted"); x["status"] != "completed" {
+			t.Fatalf("the execution %s ended %v (%v), want completed", id, x["status"], x["errorMessage"])
+		}
+	}
+	s.waitTray(nil, "idle")
+}
