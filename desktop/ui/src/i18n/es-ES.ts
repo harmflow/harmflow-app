@@ -1370,7 +1370,7 @@ export const esES: Resources = {
     variableName: "Nombre",
     variableValue: "Valor",
     addVariable: "Añadir variable",
-    allowedFoldersHint: "Además de tu carpeta personal y de los volúmenes montados, las carpetas donde pueden estar el workspace de una tarea, sus repositorios y sus rutas con escritura, como /srv/repos. Ninguna puede ser tu carpeta personal, ~/Library, una carpeta oculta de tu carpeta personal ni los datos del propio HarmFlow.",
+    allowedFoldersHint: "Además de tu carpeta personal y de los volúmenes montados, las carpetas donde pueden estar el workspace de una tarea, sus repositorios y sus rutas con escritura, como /srv/repos. Ninguna puede ser tu carpeta personal, ~/Library, una carpeta oculta de tu carpeta personal que no sea ~/.harmflow ni los datos del propio HarmFlow.",
     allowedFolder: "Carpeta permitida",
     allowedFolderPlaceholder: "/ruta/absoluta",
     addAllowedFolder: "Añadir carpeta",

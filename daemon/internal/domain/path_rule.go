@@ -80,9 +80,14 @@ func (r PathRule) Check(p string) error {
 		"{{path}} is outside your home folder, the mounted volumes, and the allowed folders in Settings", "path", p)
 }
 
+// writableHiddenFolder is the one hidden folder at the top of the home directory that a path may lie in. HarmFlow keeps
+// none of its own files there, so a harness that writes into it reaches nothing HarmFlow trusts.
+const writableHiddenFolder = ".harmflow"
+
 // Forbidden returns an error when the resolved path p is the home directory or one of its ancestors, or lies inside or
-// contains HarmFlow's data directory, ~/Library, or a hidden folder at the top of the home directory: where the
-// credentials, the harnesses' configuration, the login items, and HarmFlow's task files live.
+// contains HarmFlow's data directory, ~/Library, or a hidden folder at the top of the home directory other than
+// writableHiddenFolder: where the credentials, the harnesses' configuration, the login items, and HarmFlow's task files
+// live.
 func (r PathRule) Forbidden(p string) error {
 	if within(p, r.home) {
 		return TextErr("path_forbidden_home", "{{path}} is your home folder or contains it; choose a folder inside it",
@@ -95,7 +100,9 @@ func (r PathRule) Forbidden(p string) error {
 	case within(filepath.Join(r.home, "Library"), p):
 		place = "~/Library"
 	case below(r.home, p) && strings.HasPrefix(rel(r.home, p), "."):
-		place = "~/" + strings.SplitN(rel(r.home, p), string(filepath.Separator), 2)[0]
+		if top := strings.SplitN(rel(r.home, p), string(filepath.Separator), 2)[0]; top != writableHiddenFolder {
+			place = "~/" + top
+		}
 	}
 	if place != "" {
 		return TextErr("path_forbidden_place", "{{path}} is inside or contains {{place}}, where no harness may write",

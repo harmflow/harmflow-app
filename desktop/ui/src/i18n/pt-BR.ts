@@ -1370,7 +1370,7 @@ export const ptBR: Resources = {
     variableName: "Nome",
     variableValue: "Valor",
     addVariable: "Adicionar variável",
-    allowedFoldersHint: "Além da sua pasta pessoal e dos volumes montados, as pastas onde podem ficar o workspace de uma tarefa, os seus repositórios e os seus caminhos graváveis, como /srv/repos. Nenhuma pode ser a sua pasta pessoal, ~/Library, uma pasta oculta da sua pasta pessoal ou os dados do próprio HarmFlow.",
+    allowedFoldersHint: "Além da sua pasta pessoal e dos volumes montados, as pastas onde podem ficar o workspace de uma tarefa, os seus repositórios e os seus caminhos graváveis, como /srv/repos. Nenhuma pode ser a sua pasta pessoal, ~/Library, uma pasta oculta da sua pasta pessoal que não seja ~/.harmflow ou os dados do próprio HarmFlow.",
     allowedFolder: "Pasta permitida",
     allowedFolderPlaceholder: "/caminho/absoluto",
     addAllowedFolder: "Adicionar pasta",
