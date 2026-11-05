@@ -23,7 +23,7 @@ import i18n from "../i18n";
 import { enUS } from "../i18n/en-US";
 import { actions, patchStateForTests, startSync } from "../state/store";
 import { OverviewScreen } from "./OverviewScreen";
-import { SettingsScreen, type SettingsSection } from "./SettingsScreen";
+import { SECTION_GROUPS, SettingsScreen, type SettingsSection } from "./SettingsScreen";
 
 // The daemon as the client sees it: the settings and the health it serves, every request it received with its body,
 // the stream it feeds, a settings update applied as the daemon applies it, a period outside 1 to 3650 refused with the
@@ -599,6 +599,34 @@ describe("the Storage section's disk use and directories", () => {
     } finally {
       native.available = false;
     }
+  });
+});
+
+// The Overview's spend band keeps its view, cost or tokens, across launches in the user's preferences, with no row in
+// Settings: no section holds a control, a label, or a row for it. The texts are the band's own, through i18n, so the
+// test follows the locale it renders in. The AI tools section's quota sliders, which speak of what HarmFlow may spend,
+// are not the band's.
+describe("the spend band's view", () => {
+  const sections: SettingsSection[] = [...SECTION_GROUPS.flatMap((g) => g.sections), "about"];
+
+  it.each(sections)("has no control, label, or row in the %s section", async (section) => {
+    patchStateForTests({ harnesses: [claudeCode, codex], tools, diagnostics });
+    await open(section);
+    expect(text(host!.querySelector(".settings__title"))).toBe(i18n.t(`settings.sections.${section}`));
+
+    const selector = i18n.t("overview.spend.view");
+    const choices = [i18n.t("overview.spend.cost"), i18n.t("overview.spend.tokens")];
+    // Nothing labeled with the selector's text, in its text, its accessible name, or its tooltip.
+    expect(host!.textContent).not.toContain(selector);
+    const labeled = [...host!.querySelectorAll("[aria-label], [title]")].filter(
+      (el) => el.getAttribute("aria-label")?.includes(selector) || el.getAttribute("title")?.includes(selector),
+    );
+    expect(labeled.map((el) => el.outerHTML)).toEqual([]);
+    // No element with the text, the accessible name, or the tooltip of either choice.
+    const named = [...host!.querySelectorAll("*")].filter((el) =>
+      choices.some((c) => text(el) === c || el.getAttribute("aria-label") === c || el.getAttribute("title") === c),
+    );
+    expect(named.map((el) => el.outerHTML)).toEqual([]);
   });
 });
 

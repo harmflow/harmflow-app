@@ -1,12 +1,14 @@
 // @vitest-environment happy-dom
 // Renders each screen from a known state, to catch rendering errors without a browser or a daemon; the executions
 // screen's cards are also driven in a DOM, against a stand-in for the daemon's local API.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { native } from "../api/native";
-import type { Execution, ExecutionSummary, HarmflowEvent, Harness, Health, Notification, Settings, Task, TaskSummary, WorkItem } from "../api/types";
+import type { Execution, ExecutionSummary, HarmflowEvent, Harness, Health, Notification, Settings, Spend, Task, TaskSummary, WorkItem } from "../api/types";
 import { ExecutionCard } from "../components/ExecutionCard";
 import { ExecutionDetail, RawCaptures } from "../components/ExecutionDetail";
 import { HarnessInventory } from "../components/Harnesses";
@@ -493,6 +495,109 @@ describe("an execution that found no work", () => {
     expect(mark(rows[0])).toEqual({ tones: ["status-mark--danger"], title: "Failed", label: "Failed", icon: icon("x") });
     expect(panel.textContent).not.toContain(noWork.taskName);
     expect(panel.textContent).not.toContain("No work");
+  });
+});
+
+// The Overview's Spend this month band is the element right after the four counters, a direct child of the screen
+// ahead of the panels' grid, in the cost view and in the token view. The unit tests' DOM does no layout: the band's
+// full width is read from that place, in the screen's flex column, and from its class, which no rule narrows.
+describe("the Overview's spend band", () => {
+  let root: Root | undefined;
+  let host: HTMLElement | undefined;
+
+  const none = { unpriced: 0, notReported: 0, partial: 0, running: 0 };
+  const month: Spend = {
+    month: "2026-10",
+    daysInMonth: 31,
+    days: [
+      { date: "2026-10-01", costUsd: 2.5, tokens: 1_200_000, attempts: 3, undercount: none },
+      { date: "2026-10-02", costUsd: 0.75, tokens: 3_000_000, attempts: 2, undercount: none },
+      { date: "2026-10-03", costUsd: 1, tokens: 400_000, attempts: 1, undercount: none },
+    ],
+    total: { costUsd: 4.25, tokens: 4_600_000 },
+  };
+
+  beforeAll(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  // The band opens in the view the last launch kept: none kept, it opens in the cost view.
+  beforeEach(() => localStorage.clear());
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    host?.remove();
+    root = host = undefined;
+    daemon.answers.clear();
+    daemon.requests.length = 0;
+    localStorage.clear();
+    patchStateForTests({ spend: undefined });
+  });
+
+  const settle = () => act(() => new Promise<void>((resolve) => setImmediate(resolve)));
+
+  /** The Overview, the month's spend read from the stand-in daemon as the store reads it. */
+  async function open() {
+    daemon.answers.set("/spend", month);
+    await act(() => actions.refreshSpend());
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(<OverviewScreen onOpenExecution={() => {}} onNewTask={() => {}} onOpenTask={() => {}} />));
+    await settle();
+  }
+
+  /** Checks the band's place in the screen, and answers the band. */
+  function band() {
+    const screen = host!.firstElementChild!;
+    expect(screen.classList.contains("screen")).toBe(true);
+    const bands = host!.querySelectorAll("section.spend");
+    expect(bands).toHaveLength(1);
+    const spend = bands[0];
+    expect(spend.classList.contains("panel")).toBe(true);
+    // A direct child of the screen, right after the counters, which are the screen's first element.
+    expect(spend.parentElement).toBe(screen);
+    const counters = spend.previousElementSibling!;
+    expect(counters.className).toBe("counters");
+    expect(counters.querySelectorAll(".counter")).toHaveLength(4);
+    expect(counters.previousElementSibling).toBeNull();
+    // Ahead of the panels' grid, and not inside it.
+    const grid = spend.nextElementSibling!;
+    expect(grid.className).toBe("overview-grid");
+    expect(spend.closest(".overview-grid")).toBeNull();
+    expect(grid.querySelector(".spend")).toBeNull();
+    return spend;
+  }
+
+  const choice = (spend: Element, view: "cost" | "tokens") =>
+    [...spend.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((b) => b.textContent === i18n.t(`overview.spend.${view}`))!;
+
+  it("is the element right after the counters, a direct child of the screen ahead of the panels' grid, in the cost view and in the token view", async () => {
+    await open();
+    expect(daemon.requests).toContain("GET /spend");
+
+    const cost = band();
+    expect(cost.querySelector('[role="radiogroup"]')!.getAttribute("aria-label")).toBe(i18n.t("overview.spend.view"));
+    expect(choice(cost, "cost").getAttribute("aria-checked")).toBe("true");
+    // The month the stand-in served: one column per day it holds.
+    expect(cost.querySelectorAll(".spend__slot--day")).toHaveLength(month.days.length);
+
+    await act(async () => choice(cost, "tokens").click());
+    const tokens = band();
+    expect(choice(tokens, "tokens").getAttribute("aria-checked")).toBe("true");
+    expect(choice(tokens, "cost").getAttribute("aria-checked")).toBe("false");
+    expect(tokens.querySelectorAll(".spend__slot--day")).toHaveLength(month.days.length);
+  });
+
+  it("takes the screen's full width, which no rule of the stylesheet narrows", () => {
+    const css = readFileSync(join(__dirname, "..", "design", "app.css"), "utf8");
+    // The screen is a flex column that stretches its children, the band among them, across its width.
+    const screen = /(?:^|\n)\.screen \{([^}]*)\}/.exec(css)![1];
+    expect(screen).toMatch(/display: flex;/);
+    expect(screen).toMatch(/flex-direction: column;/);
+    expect(screen).not.toMatch(/align-items:/);
+    // No rule that names the band's own class sets its width or its place across the column.
+    const rules = [...css.matchAll(/(?:^|\n)([^{}\n]*\.spend(?![\w-])[^{}\n]*)\{([^}]*)\}/g)];
+    for (const [, selector, body] of rules) expect(body, selector).not.toMatch(/(?:^|[;\s])(?:width|max-width|align-self|margin(?:-left|-right)?)\s*:/);
   });
 });
 
