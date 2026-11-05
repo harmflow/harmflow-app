@@ -11,8 +11,8 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
-// signingHarness is a fake Claude Code the daemon can sign in. It reads signed out until a sign-in of it succeeds, and
-// each sign-in waits for the test to say how it ends, through end, or for its context.
+// signingHarness is a fake Claude Code, or Codex, the daemon can sign in. It reads signed out until a sign-in of it
+// succeeds, and each sign-in waits for the test to say how it ends, through end, or for its context.
 type signingHarness struct {
 	*fakeHarness
 	end chan ports.SignInResult // unbuffered: the test hands each sign-in its end
@@ -34,6 +34,13 @@ func newSigningHarness(signedIn bool) *signingHarness {
 		signedIn: signedIn}
 }
 
+// newCodexSigningHarness is a signingHarness read as Codex.
+func newCodexSigningHarness(signedIn bool) *signingHarness {
+	s := newSigningHarness(signedIn)
+	s.fakeHarness = &fakeHarness{id: domain.HarnessCodex}
+	return s
+}
+
 func (s *signingHarness) Detect(ctx context.Context, manual string) ports.HarnessInfo {
 	info := s.fakeHarness.Detect(ctx, manual)
 	s.mu.Lock()
@@ -42,6 +49,10 @@ func (s *signingHarness) Detect(ctx context.Context, manual string) ports.Harnes
 	case s.unverified:
 		info.Authentication = "unknown"
 		info.SetDiagnostic(domain.T("authentication_unverified", "authentication could not be verified"))
+	case !s.signedIn && s.id == domain.HarnessCodex:
+		info.Readiness, info.Authentication = "not_ready", "invalid"
+		info.SetDiagnostic(domain.T("not_signed_in", "{{name}} is not signed in; run `{{command}}` in a terminal",
+			"name", "Codex", "command", "codex login"))
 	case !s.signedIn:
 		info.Readiness, info.Authentication = "not_ready", "invalid"
 		info.SetDiagnostic(domain.T("claude_not_signed_in", "Claude Code is not signed in; run `claude` in a terminal and sign in"))
@@ -78,7 +89,7 @@ func (s *signingHarness) started() int {
 	return s.signIns
 }
 
-// signInEnv starts a daemon whose Claude Code is signer.
+// signInEnv starts a daemon whose harness of signer's ID, Claude Code or Codex, is signer.
 func signInEnv(t *testing.T, signer *signingHarness, timeout time.Duration) *env {
 	t.Helper()
 	return newEnv(t, func(e *env) { e.signer, e.signInTimeout = signer, timeout })
@@ -103,8 +114,13 @@ func (e *env) waitPublished(eventType string) domain.Event {
 }
 
 func (e *env) claudeInfo() ports.HarnessInfo {
+	return e.harnessInfo(domain.HarnessClaudeCode)
+}
+
+// harnessInfo is the harness of the ID as Harnesses() lists it.
+func (e *env) harnessInfo(id string) ports.HarnessInfo {
 	for _, h := range e.app.Harnesses() {
-		if h.ID == domain.HarnessClaudeCode {
+		if h.ID == id {
 			return h
 		}
 	}
@@ -178,7 +194,18 @@ func TestSignInTimesOutAndWaitsForTheButton(t *testing.T) {
 // harmflow-app#791: with no timeout set, a sign-in waits ten minutes for the browser: the context its adapter drives it
 // under ends ten minutes after it started.
 func TestSignInWaitsTenMinutesByDefault(t *testing.T) {
-	signer := newSigningHarness(false)
+	waitsTenMinutesByDefault(t, newSigningHarness(false))
+}
+
+// harmflow-app#876: a Codex sign-in, with no timeout set, waits ten minutes for the browser, as Claude Code's does.
+func TestCodexSignInWaitsTenMinutesByDefault(t *testing.T) {
+	waitsTenMinutesByDefault(t, newCodexSigningHarness(false))
+}
+
+// waitsTenMinutesByDefault starts a daemon with no sign-in timeout set, whose signer reads signed out, and checks that
+// the context of the sign-in it starts ends ten minutes after its start.
+func waitsTenMinutesByDefault(t *testing.T, signer *signingHarness) {
+	t.Helper()
 	e := signInEnv(t, signer, 0)
 	e.waitSignIns(signer, 1)
 	signer.mu.Lock()
@@ -254,13 +281,27 @@ func TestSignedOutAttemptStartsTheSignIn(t *testing.T) {
 // the daemon starts no sign-in for it: not once the daemon starts, not at a check, and not when a task runs on it. Only
 // a harness that says it is signed out gets one.
 func TestUnknownSignInStartsNone(t *testing.T) {
-	signer := newSigningHarness(false)
+	unknownSignInStartsNone(t, newSigningHarness(false), taskYAML("unknown", ""))
+}
+
+// harmflow-app#876: a Codex whose check cannot tell whether it is signed in reads unknown and stays ready, and the
+// daemon starts no sign-in for it, as for Claude Code: not once the daemon starts, not at a check, and not when a task
+// runs on it.
+func TestCodexUnknownSignInStartsNone(t *testing.T) {
+	unknownSignInStartsNone(t, newCodexSigningHarness(false), codexTaskYAML("unknown", ""))
+}
+
+// unknownSignInStartsNone starts a daemon whose signer cannot tell whether it is signed in, and checks that it reads
+// unknown, ready, and its sign-in available, with no sign-in started or announced: once the daemon started, after two
+// checks, and after the task "unknown", which yaml defines on signer, completed.
+func unknownSignInStartsNone(t *testing.T, signer *signingHarness, yaml string) {
+	t.Helper()
 	signer.unverified = true
 	e := signInEnv(t, signer, 0)
 	noSignIn := func(when string) {
 		t.Helper()
 		time.Sleep(200 * time.Millisecond) // a sign-in starts on a goroutine of its own
-		info := e.claudeInfo()
+		info := e.harnessInfo(signer.ID())
 		if info.Authentication != "unknown" || info.Readiness != "ready" || info.DiagnosticKey != "authentication_unverified" {
 			t.Errorf("%s, authentication %q, readiness %q, diagnostic %q; want unknown, ready, authentication_unverified",
 				when, info.Authentication, info.Readiness, info.DiagnosticKey)
@@ -275,19 +316,24 @@ func TestUnknownSignInStartsNone(t *testing.T) {
 			t.Errorf("%s, %s events %+v, want none", when, domain.EventHarnessSignInStarted, got)
 		}
 	}
-	if !e.poll(10*time.Second, func() bool { return e.claudeInfo().Readiness != "checking" }) {
-		t.Fatal("Claude Code's first check never ended")
+	if !e.poll(10*time.Second, func() bool { return e.harnessInfo(signer.ID()).Readiness != "checking" }) {
+		t.Fatalf("%s's first check never ended", signer.ID())
 	}
 	noSignIn("after the daemon started")
 	e.app.RefreshHarnesses(t.Context())
 	e.app.RefreshHarnesses(t.Context())
 	noSignIn("after two checks")
-	e.create("unknown", "")
+	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: yaml}); err != nil {
+		t.Fatalf("create unknown: %v", err)
+	}
 	r, err := e.app.RunTask("unknown")
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.wait(r.ExecutionID, domain.StatusCompleted)
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	if len(x.Attempts) != 1 || x.Attempts[0].Harness != signer.ID() {
+		t.Errorf("attempts %+v, want one, on %s", x.Attempts, signer.ID())
+	}
 	noSignIn("after a task ran on it")
 }
 

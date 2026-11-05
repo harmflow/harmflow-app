@@ -482,7 +482,8 @@ type env struct {
 	timeoutUnit time.Duration
 	// records is the execution repository the App starts on, which a configure may wrap.
 	records ports.ExecutionRepository
-	// signer stands in for Claude Code in place of claude, when a test sets one: a harness the daemon can sign in.
+	// signer stands in for the harness of its ID, claude or codex, when a test sets one: a harness the daemon can sign
+	// in.
 	signer ports.HarnessAdapter
 	// signInTimeout is how long a sign-in waits for the browser, when a test sets it; the default otherwise.
 	signInTimeout time.Duration
@@ -534,8 +535,10 @@ func (e *env) start(t *testing.T, configure ...func(*env)) {
 		c(e)
 	}
 	harnesses := []ports.HarnessAdapter{e.claude, e.codex}
-	if e.signer != nil {
-		harnesses[0] = e.signer
+	for i, h := range harnesses {
+		if e.signer != nil && h.ID() == e.signer.ID() {
+			harnesses[i] = e.signer
+		}
 	}
 	logger := e.logger
 	if logger == nil {
