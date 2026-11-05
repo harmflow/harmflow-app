@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import type { Spend, SpendDay } from "../api/types";
 import { formatCompact, formatUsd } from "../lib/costs";
 import { formatNumber } from "../lib/format";
-import { axisTop, dayMarks, dayValue, isEmptyMonth, keepSpendView, keptSpendView, totalValue, type SpendView } from "../lib/spend";
+import { SPEND_VIEWS, axisTop, dayMarks, dayValue, isEmptyMonth, keepSpendView, keptSpendView, totalValue, type SpendView } from "../lib/spend";
 import { useStore } from "../state/store";
 import { Panel, cx } from "./ui";
 
@@ -41,7 +41,7 @@ export function SpendBand() {
       className="spend"
       actions={
         <div className="segmented" role="radiogroup" aria-label={t("overview.spend.view")}>
-          {(["cost", "tokens"] as const).map((v) => (
+          {SPEND_VIEWS.map((v) => (
             <button
               key={v}
               type="button"

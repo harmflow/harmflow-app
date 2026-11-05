@@ -77,7 +77,7 @@ export interface FieldChange {
   to: string;
 }
 
-const COPIED_FIELDS: { field: FieldChange["field"]; path: Path }[] = [
+export const COPIED_FIELDS: { field: FieldChange["field"]; path: Path }[] = [
   { field: "description", path: ["metadata", "description"] },
   { field: "model", path: ["spec", "harness", "preferred", "model"] },
   { field: "skills", path: ["spec", "skills"] },

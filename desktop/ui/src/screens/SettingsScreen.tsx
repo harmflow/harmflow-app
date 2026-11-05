@@ -32,6 +32,9 @@ export const SECTION_GROUPS: ReadonlyArray<{ key: "interface" | "agents" | "comp
   { key: "computer", sections: ["daemon", "storage", "security"] },
 ];
 
+/** The daemon's folders and files Storage lists, in order, each one it reports. */
+export const DIRECTORIES = ["homeDir", "tasksDir", "stateDir", "logsDir", "workspaceDir", "runsDir", "runtimeFile", "builtinsDir"] as const;
+
 const SECTION_ICONS: Record<SettingsSection, IconName> = {
   general: "globe",
   notifications: "bell",
@@ -595,8 +598,7 @@ function StorageSection({ report }: { report: DraftReport }) {
       <Panel title={t("settings.subheads.directories")}>
         {diagnostics ? (
           <KeyValue
-            items={(["homeDir", "tasksDir", "stateDir", "logsDir", "workspaceDir", "runsDir", "runtimeFile", "builtinsDir"] as const)
-              .filter((k) => diagnostics[k])
+            items={DIRECTORIES.filter((k) => diagnostics[k])
               .map((k) => [
                 t(`settings.dirs.${k}`),
                 <span className="dir-row">

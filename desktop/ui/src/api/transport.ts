@@ -5,7 +5,8 @@
 import eventSchema from "../../../../contracts/schemas/event.schema.json";
 import type { HarmflowEvent } from "./types";
 
-export type ConnectionState = "connecting" | "connected" | "reconnecting" | "disconnected" | "daemon_stopped";
+export const CONNECTION_STATES = ["connecting", "connected", "reconnecting", "disconnected", "daemon_stopped"] as const;
+export type ConnectionState = (typeof CONNECTION_STATES)[number];
 
 export interface RawResponse {
   status: number;

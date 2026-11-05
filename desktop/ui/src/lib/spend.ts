@@ -2,8 +2,9 @@
 // the top of the axis. The daemon sums the days; this only reads them.
 import type { Spend, SpendDay } from "../api/types";
 
-/** The unit the band shows: the estimated cost in USD, or the tokens, every class summed. */
-export type SpendView = "cost" | "tokens";
+/** The units the band shows, in the order of its switch: the estimated cost in USD, or the tokens, every class summed. */
+export const SPEND_VIEWS = ["cost", "tokens"] as const;
+export type SpendView = (typeof SPEND_VIEWS)[number];
 
 /** Where the band's view is kept across launches, as the sidebar's state is. */
 export const SPEND_VIEW_KEY = "harmflow.spendView";
@@ -41,8 +42,9 @@ export function axisTop(spend: Spend, view: SpendView): number {
   return Math.max(AXIS_FLOOR[view], ...spend.days.map((d) => dayValue(d, view)));
 }
 
-/** A reason a day's figure undercounts. */
-export type SpendReason = "unpriced" | "notReported" | "partial" | "running";
+/** The reasons a day's figure undercounts, in the order the band lists them. */
+export const SPEND_REASONS = ["unpriced", "notReported", "partial", "running"] as const;
+export type SpendReason = (typeof SPEND_REASONS)[number];
 
 /**
  * The reasons a day's figure undercounts in the view, with the attempts behind each. A model with no price leaves only
@@ -50,7 +52,7 @@ export type SpendReason = "unpriced" | "notReported" | "partial" | "running";
  * both short.
  */
 export function dayMarks(day: SpendDay, view: SpendView): { reason: SpendReason; count: number }[] {
-  const reasons: SpendReason[] = view === "cost" ? ["unpriced", "notReported", "partial", "running"] : ["notReported", "partial", "running"];
+  const reasons = view === "cost" ? SPEND_REASONS : SPEND_REASONS.filter((reason) => reason !== "unpriced");
   return reasons.map((reason) => ({ reason, count: day.undercount[reason] })).filter((m) => m.count > 0);
 }
 

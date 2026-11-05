@@ -18,6 +18,9 @@ const TOTAL = 5;
 export const FIRST_TASK_STEP = 4;
 export const LAST_STEP = TOTAL;
 
+/** The points of the first step's scope of local operation, in order. */
+export const SCOPE_POINTS = ["local", "permissions", "github", "api"] as const;
+
 /** Where first use stands when it hands the first task over, so that it comes back with the autostart choice made. */
 export type FirstUse = { step: number; autostart: boolean };
 
@@ -104,7 +107,7 @@ export function OnboardingScreen({
             <h2>{t("onboarding.scope.title")}</h2>
             <p>{t("onboarding.scope.body")}</p>
             <ul className="onboarding__points">
-              {(["local", "permissions", "github", "api"] as const).map((k) => (
+              {SCOPE_POINTS.map((k) => (
                 <li key={k}>
                   <Icon name={k === "local" ? "home" : k === "permissions" ? "shield" : k === "github" ? "pr" : "key"} size={18} />
                   <span>{t(`onboarding.scope.points.${k}`)}</span>

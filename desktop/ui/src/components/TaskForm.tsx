@@ -55,6 +55,19 @@ export interface TaskFormProps {
 
 type Item = Record<string, unknown>;
 
+/** The closed sets the form offers in a select: the key of their labels under tasks.options, and where they are written. */
+export const OPTION_FIELDS = {
+  ordering: ["spec", "github", "queue", "ordering"],
+  resumeStrategy: ["spec", "github", "queue", "resumeStrategy"],
+  profile: ["spec", "permissions", "profile"],
+  network: ["spec", "permissions", "network"],
+  missedRun: ["spec", "schedule", "missedRun", "policy"],
+  overlap: ["spec", "concurrency", "overlappingRuns"],
+} as const satisfies Record<string, Path>;
+
+/** The lists of a custom permission profile, in the form's order. */
+export const CUSTOM_LISTS = ["allowedTools", "deniedTools", "writablePaths", "readablePaths", "allowedPrograms", "deniedPrograms"] as const;
+
 function systemZone(): string {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -197,10 +210,10 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
             <Icon name="sparkle" size={13} /> {t("tasks.fields.workSelectionHint")}
           </p>
           <div className="grid-3">
-            <EnumField path={["spec", "github", "queue", "ordering"]} label={t("tasks.fields.ordering")} optionKey="ordering" doc={doc} set={set} defLabel={defLabel} />
+            <EnumField label={t("tasks.fields.ordering")} optionKey="ordering" doc={doc} set={set} defLabel={defLabel} />
             <IntField path={["spec", "github", "queue", "maxDiscoveredPerCycle"]} label={t("tasks.fields.maxDiscoveredPerCycle")} doc={doc} set={set} />
             <IntField path={["spec", "github", "queue", "maxItemsPerCycle"]} label={t("tasks.fields.maxItemsPerCycle")} doc={doc} set={set} />
-            <EnumField path={["spec", "github", "queue", "resumeStrategy"]} label={t("tasks.fields.resumeStrategy")} optionKey="resumeStrategy" doc={doc} set={set} defLabel={defLabel} />
+            <EnumField label={t("tasks.fields.resumeStrategy")} optionKey="resumeStrategy" doc={doc} set={set} defLabel={defLabel} />
             <IntField path={["spec", "github", "queue", "maxResumeAttempts"]} label={t("tasks.fields.maxResumeAttempts")} doc={doc} set={set} />
             <IntField path={["spec", "github", "queue", "maxFailedRetries"]} label={t("tasks.fields.maxFailedRetries")} doc={doc} set={set} />
             <IntField path={["spec", "github", "delivery", "testRepairAttempts"]} label={t("tasks.fields.testRepairAttempts")} doc={doc} set={set} />
@@ -256,8 +269,8 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
           </p>
         ) : null}
         <div className="grid-3">
-          <EnumField path={["spec", "permissions", "profile"]} label={t("tasks.fields.profile")} optionKey="profile" doc={doc} set={set} defLabel={defLabel} />
-          <EnumField path={["spec", "permissions", "network"]} label={t("tasks.fields.network")} optionKey="network" doc={doc} set={set} defLabel={defLabel} />
+          <EnumField label={t("tasks.fields.profile")} optionKey="profile" doc={doc} set={set} defLabel={defLabel} />
+          <EnumField label={t("tasks.fields.network")} optionKey="network" doc={doc} set={set} defLabel={defLabel} />
           <div className="field field--toggle">
             <Toggle
               checked={get<boolean>(["spec", "permissions", "restrictToWorkspace"]) ?? (def(["spec", "permissions", "restrictToWorkspace"]) as boolean) ?? true}
@@ -268,7 +281,7 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
         </div>
         {get<string>(["spec", "permissions", "profile"]) === "custom" ? (
           <div className="grid-3">
-            {(["allowedTools", "deniedTools", "writablePaths", "readablePaths", "allowedPrograms", "deniedPrograms"] as const).map((key) => (
+            {CUSTOM_LISTS.map((key) => (
               <Field key={key} label={t(`tasks.fields.${key}`)} hint={t("tasks.fields.listHint")}>
                 <ListArea value={get(["spec", "permissions", "custom", key])} onValue={(v) => set(["spec", "permissions", "custom", key], v)} />
               </Field>
@@ -580,21 +593,20 @@ function IntField({ path, label, doc, set }: { path: Path; label: string; doc: D
 }
 
 function EnumField({
-  path,
   label,
   optionKey,
   doc,
   set,
   defLabel,
 }: {
-  path: Path;
   label: string;
-  optionKey: "ordering" | "resumeStrategy" | "missedRun" | "overlap" | "profile" | "network";
+  optionKey: keyof typeof OPTION_FIELDS;
   doc: Doc;
   set: SetFn;
   defLabel: (path: Path, label?: (v: string) => string) => string;
 }) {
   const { t } = useTranslation();
+  const path = OPTION_FIELDS[optionKey];
   const optionLabel = (v: string) => t(`tasks.options.${optionKey}.${v}` as never, { defaultValue: v }) as string;
   return (
     <Field label={label}>
@@ -952,8 +964,8 @@ function ScheduleFields({
         </div>
       ) : null}
       <div className="grid-2">
-        <EnumField path={["spec", "schedule", "missedRun", "policy"]} label={t("tasks.fields.missedRun")} optionKey="missedRun" doc={doc} set={set} defLabel={defLabel} />
-        <EnumField path={["spec", "concurrency", "overlappingRuns"]} label={t("tasks.fields.overlap")} optionKey="overlap" doc={doc} set={set} defLabel={defLabel} />
+        <EnumField label={t("tasks.fields.missedRun")} optionKey="missedRun" doc={doc} set={set} defLabel={defLabel} />
+        <EnumField label={t("tasks.fields.overlap")} optionKey="overlap" doc={doc} set={set} defLabel={defLabel} />
       </div>
       <div className="preview">
         <span className="preview__label">{t("tasks.fields.preview")}</span>

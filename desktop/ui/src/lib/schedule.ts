@@ -126,10 +126,11 @@ const MACROS: Record<string, string> = {
   "@hourly": "0 * * * *",
 };
 
-const MONTH_NAMES: Record<string, number> = {
+/** The months and the weekdays by their names in an expression; their numbers are the ones a description names. */
+export const MONTH_NAMES: Record<string, number> = {
   JAN: 1, FEB: 2, MAR: 3, APR: 4, MAY: 5, JUN: 6, JUL: 7, AUG: 8, SEP: 9, OCT: 10, NOV: 11, DEC: 12,
 };
-const DAY_NAMES: Record<string, number> = { SUN: 0, MON: 1, TUE: 2, WED: 3, THU: 4, FRI: 5, SAT: 6 };
+export const DAY_NAMES: Record<string, number> = { SUN: 0, MON: 1, TUE: 2, WED: 3, THU: 4, FRI: 5, SAT: 6 };
 
 interface CronSets {
   minutes: number[];
