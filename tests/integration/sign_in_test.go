@@ -323,7 +323,8 @@ func TestSignInRealClaudeCodeThroughTheBrowser(t *testing.T) {
 // output on pipes. Its `login status` reads signed in once its sign-in's file exists in its Codex home, CODEX_HOME;
 // everything else runs as fake-codex's. `codex login` records the start in @SESSIONS@ and prints what Codex 0.163.0
 // printed, the URL holding @STATE@. It then waits for the test to approve the sign-in by writing @APPROVED@, writes
-// its sign-in into its Codex home, says the sign-in succeeded, and exits 0. It fails on a terminal and on any input.
+// @SIGN_IN@ as its sign-in's file in its Codex home, says the sign-in succeeded, and exits 0. It fails on a terminal
+// and on any input.
 const signInCodex = `#!/bin/bash
 if [ "$*" = "login status" ]; then
   if [ -f "$CODEX_HOME/auth.json" ]; then echo "Logged in using ChatGPT"; exit 0; fi
@@ -341,13 +342,20 @@ echo
 echo "https://auth.openai.com/oauth/authorize?response_type=code&state=@STATE@"
 echo
 until [ -f '@APPROVED@' ]; do sleep 0.1; done
-printf '{"auth_mode":"chatgpt"}' > "$CODEX_HOME/auth.json"
+printf '%s' '@SIGN_IN@' > "$CODEX_HOME/auth.json"
 echo "Successfully logged in." >&2
 `
 
 // newCodexSignInStandIn writes a signInCodex and the empty Codex home of its own the daemon runs it with; the stand-in
-// keeps the sign-in's file there.
+// keeps the sign-in's file there, which names its mode alone.
 func newCodexSignInStandIn(t *testing.T) (signInStandIn, string) {
+	t.Helper()
+	return newCodexSignInStandInWriting(t, `{"auth_mode":"chatgpt"}`)
+}
+
+// newCodexSignInStandInWriting writes a signInCodex whose sign-in writes signIn as its file in the Codex home of its
+// own, which it returns: the stand-in's credential is that file, and its secret signIn.
+func newCodexSignInStandInWriting(t *testing.T, signIn string) (signInStandIn, string) {
 	t.Helper()
 	dir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -357,11 +365,12 @@ func newCodexSignInStandIn(t *testing.T) (signInStandIn, string) {
 	if _, err := rand.Read(random); err != nil {
 		t.Fatal(err)
 	}
-	s := signInStandIn{path: filepath.Join(dir, "bin", "codex"), approved: filepath.Join(dir, "approved"),
-		sessions: filepath.Join(dir, "sessions.log"), state: "state" + hex.EncodeToString(random)}
 	home := filepath.Join(dir, "codex-home")
+	s := signInStandIn{path: filepath.Join(dir, "bin", "codex"), approved: filepath.Join(dir, "approved"),
+		sessions: filepath.Join(dir, "sessions.log"), credential: filepath.Join(home, "auth.json"),
+		state: "state" + hex.EncodeToString(random), secret: signIn}
 	src := strings.NewReplacer("@FAKE@", filepath.Join(repoRoot(), "tests", "integration", "testdata", "fake-codex"),
-		"@SESSIONS@", s.sessions, "@APPROVED@", s.approved, "@STATE@", s.state).Replace(signInCodex)
+		"@SESSIONS@", s.sessions, "@APPROVED@", s.approved, "@STATE@", s.state, "@SIGN_IN@", s.secret).Replace(signInCodex)
 	for _, d := range []string{filepath.Dir(s.path), home} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			t.Fatal(err)
@@ -414,6 +423,43 @@ func TestCodexSignInThroughTheBrowser(t *testing.T) {
 	}
 	d.stop()
 	noLeakInHome(t, homeFiles(t, home), map[string]string{"the sign-in URL's state": codex.state})
+}
+
+// harmflow-app#876: a Codex sign-in leaves Codex's credential where Codex keeps it, as a Claude Code one does. The
+// stand-in writes a random credential of the test's own into its Codex home once the user approves; once the harness
+// reads ready, neither GET /harnesses nor any file under the daemon's home holds it or a piece of it of eight
+// characters or more, and the sign-in's file in the Codex home is still the stand-in's, unchanged.
+func TestCodexSignInCopiesNoCredential(t *testing.T) {
+	t.Parallel()
+	random := make([]byte, 24)
+	if _, err := rand.Read(random); err != nil {
+		t.Fatal(err)
+	}
+	// The pieces are looked for in the random token alone: the file's words, such as "auth_mode", may be in the daemon's
+	// own texts.
+	token := hex.EncodeToString(random)
+	codex, codexHome := newCodexSignInStandInWriting(t, `{"auth_mode":"chatgpt","tokens":{"access_token":"`+token+`"}}`)
+	home := t.TempDir()
+	d := startDaemon(t, home, "CODEX_HOME="+codexHome)
+	d.setHarness("codex", codex.path)
+	d.waitHarness("codex", 30*time.Second, func(h map[string]any) bool { return h["signIn"] == "running" })
+	codex.write(t, codex.approved)
+	d.waitHarness("codex", 60*time.Second, func(h map[string]any) bool {
+		return h["readiness"] == "ready" && h["signIn"] == "available"
+	})
+	status, body := d.request("GET", "/harnesses", nil, nil)
+	if status != 200 {
+		t.Fatalf("GET /harnesses: status %d, want 200: %s", status, body)
+	}
+	if at := leakedPieces(body, token); len(at) != 0 {
+		t.Errorf("GET /harnesses holds pieces of Codex's credential, at offsets %v of it", at)
+	}
+	d.stop()
+	noLeakInHome(t, homeFiles(t, home), map[string]string{"Codex's credential": token})
+	if got, err := os.ReadFile(codex.credential); err != nil || string(got) != codex.secret {
+		t.Errorf("the stand-in's sign-in file after the sign-in: %d bytes, %v; want the one it wrote, unchanged",
+			len(got), err)
+	}
 }
 
 // harmflow-app#572: a Codex sign-in nobody approves ends at its timeout. The harness stays not ready, saying the
