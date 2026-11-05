@@ -492,6 +492,8 @@ type env struct {
 	identify func(ctx context.Context, pid int) (domain.ProcessIdentity, error)
 	// logger is what the App writes its log to, when a test sets one; the log is discarded otherwise.
 	logger *log.Logger
+	// location is the machine's time zone, when a test sets one; UTC otherwise.
+	location *time.Location
 }
 
 // newEnv starts an App on fake harnesses; configure sets up the env, its fakes included, before the App starts.
@@ -539,7 +541,11 @@ func (e *env) start(t *testing.T, configure ...func(*env)) {
 	if logger == nil {
 		logger = log.New(io.Discard, "", 0)
 	}
-	a, err := New(Deps{Paths: e.paths, Version: "test", Clock: e.clock, Wake: e.wake, Location: time.UTC, Tasks: tasks,
+	loc := e.location
+	if loc == nil {
+		loc = time.UTC
+	}
+	a, err := New(Deps{Paths: e.paths, Version: "test", Clock: e.clock, Wake: e.wake, Location: loc, Tasks: tasks,
 		State: state, Executions: e.records, Events: e.events, Validator: v, Harnesses: harnesses,
 		Service: e.service, Workspace: &workspace.Reader{}, TickInterval: time.Hour, TimeoutUnit: e.timeoutUnit,
 		SignInTimeout: e.signInTimeout, HarnessTokens: e.harnessTokens, Identify: e.identify,
@@ -558,13 +564,14 @@ func (e *env) start(t *testing.T, configure ...func(*env)) {
 	t.Cleanup(func() { a.Stop(domain.Text{Message: "test done"}) })
 }
 
-// restart stops the daemon, if it still runs, and starts a new App on the same data directory, fake clock, and
-// stand-in harnesses, as a daemon restart does; configure is as for newEnv. The scheduler loop of a test ticks hourly,
-// so the clock may move before the restart as if the daemon were already down.
+// restart stops the daemon, if it still runs, and starts a new App on the same data directory, fake clock, time zone,
+// and stand-in harnesses, as a daemon restart does; configure is as for newEnv. The scheduler loop of a test ticks
+// hourly, so the clock may move before the restart as if the daemon were already down.
 func (e *env) restart(t *testing.T, configure ...func(*env)) *env {
 	t.Helper()
 	e.app.Stop(domain.Text{Message: "restart"})
-	n := &env{t: t, clock: e.clock, wake: e.wake, claude: e.claude, codex: e.codex, home: e.home, paths: e.paths}
+	n := &env{t: t, clock: e.clock, wake: e.wake, claude: e.claude, codex: e.codex, home: e.home, paths: e.paths,
+		location: e.location}
 	n.start(t, configure...)
 	return n
 }
