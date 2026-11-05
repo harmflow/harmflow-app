@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -406,4 +407,97 @@ func TestRealClaudeCodeAndGhLeaveNoCredentialInTheHome(t *testing.T) {
 
 	d.stop()
 	noLeakInHome(t, homeFiles(t, home), map[string]string{"the token gh auth token prints": token})
+}
+
+// harmflow-app#869, with the real Codex: a general task runs to completed in a fresh daemon home on the real Codex,
+// signed in on its own, with no variable that would hand it an API key instead, and afterwards no file under that home
+// holds a secret of Codex's sign-in file, read before and after the run, nor a piece of one of eight characters or
+// more. The secrets are read here and never printed, and nothing is written into Codex's own home.
+func TestRealCodexLeavesNoCredentialInTheHome(t *testing.T) {
+	codex := realCodex(t)
+	codexDir := codexHome(t)
+	signInFile := filepath.Join(codexDir, "auth.json")
+	secrets, err := codexSecrets(signInFile)
+	if err != nil {
+		t.Fatalf("%v: the test needs a codex signed in on its own on this machine", err)
+	}
+	home := t.TempDir()
+	d := startDaemon(t, home, append([]string{"CODEX_HOME=" + codexDir}, noCredentialEnv()...)...)
+	d.call("PUT", "/harnesses/codex", map[string]any{"path": codex}, 200)
+	work, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.call("PATCH", "/settings", map[string]any{"allowedFolders": []any{work}}, 200)
+	doc := map[string]any{"apiVersion": "harmflow/v1alpha1", "kind": "Task",
+		"metadata": map[string]any{"id": "real-codex-sign-in", "name": "Real Codex on its own sign-in"},
+		"spec": map[string]any{
+			"type":   "general",
+			"prompt": "Reply with the single word ready, and nothing else.",
+			// The model Codex's configuration sets, at the effort low, as in TestCitedUserItemsReachARealCodex.
+			"harness":   map[string]any{"preferred": map[string]any{"provider": "codex", "effort": "low"}},
+			"workspace": map[string]any{"path": work},
+			"execution": map[string]any{"timeoutMinutes": 5},
+		}}
+	d.call("POST", "/tasks", map[string]any{"document": doc}, 201)
+	id := d.call("POST", "/tasks/real-codex-sign-in/run", nil, 202)["executionId"].(string)
+	// Longer than the task's timeout, so that the execution's own end says why a session ran too long.
+	x := d.waitEnd(id, 6*time.Minute)
+	if x["status"] != "completed" {
+		t.Errorf("execution %s = %v (%v), want completed", id, x["status"], x["errorMessage"])
+	}
+	said := false
+	for _, e := range d.events(id) {
+		said = said || e["type"] == "harness.message"
+	}
+	if !said {
+		t.Errorf("the events of execution %s hold no harness.message, so no Codex session answered", id)
+	}
+
+	// Codex may refresh its tokens during a session, so the file's secrets after the run are searched for too.
+	after, err := codexSecrets(signInFile)
+	if err != nil {
+		t.Errorf("after the run, %v", err)
+	}
+	for what, secret := range after {
+		if secrets[what] != secret {
+			secrets[what+" after the run"] = secret
+		}
+	}
+	d.stop()
+	noLeakInHome(t, homeFiles(t, home), secrets)
+}
+
+// codexSecrets reads Codex's sign-in file at path and returns each secret value it holds, of eight characters or more,
+// by where the file keeps it: the tokens of a ChatGPT sign-in, and an API key. It fails when the file cannot be read or
+// holds none, and its error never carries a value of the file.
+func codexSecrets(path string) (map[string]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading Codex's sign-in file: %w", err)
+	}
+	var doc any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("%s is not JSON", path)
+	}
+	secrets := map[string]string{}
+	var walk func(at string, v any)
+	walk = func(at string, v any) {
+		switch v := v.(type) {
+		case map[string]any:
+			for k, child := range v {
+				walk(strings.TrimPrefix(at+"."+k, "."), child)
+			}
+		case string:
+			name := strings.ToLower(at[strings.LastIndex(at, ".")+1:])
+			if len(v) >= 8 && (strings.HasSuffix(name, "token") || strings.HasSuffix(name, "api_key")) {
+				secrets[at+" of Codex's sign-in file"] = v
+			}
+		}
+	}
+	walk("", doc)
+	if len(secrets) == 0 {
+		return nil, fmt.Errorf("%s holds no token or API key of eight characters or more", path)
+	}
+	return secrets, nil
 }
