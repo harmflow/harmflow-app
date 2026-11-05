@@ -115,6 +115,66 @@ func TestPathRuleResolvesTraversalAndSymlinks(t *testing.T) {
 	}
 }
 
+// ~/.harmflow is the one hidden folder at the top of home where a path may lead; the other hidden folders, a name that
+// only begins like it, and a symlink inside it that leads to a refused place stay refused.
+func TestPathRuleAcceptsHarmFlowHiddenFolder(t *testing.T) {
+	f := newFixture(t)
+	hf := filepath.Join(f.home, ".harmflow")
+	if err := os.MkdirAll(filepath.Join(hf, "repos"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	toSSH := filepath.Join(hf, "ssh")
+	if err := os.Symlink(filepath.Join(f.home, ".ssh"), toSSH); err != nil {
+		t.Fatal(err)
+	}
+	toData := filepath.Join(hf, "data")
+	if err := os.Symlink(f.data, toData); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name, path, key string
+	}{
+		{"~/.harmflow itself", hf, ""},
+		{"a clone inside ~/.harmflow", filepath.Join(hf, "repos", "app"), ""},
+		{"a folder not created yet inside ~/.harmflow", filepath.Join(hf, "workspace", "new"), ""},
+		{"a name that only begins with .harmflow", filepath.Join(f.home, ".harmflow-other", "repos"),
+			"path_forbidden_place"},
+		{"a name that extends .harmflow", filepath.Join(f.home, ".harmflowx"), "path_forbidden_place"},
+		{"another hidden folder", filepath.Join(f.home, ".config", "harmflow"), "path_forbidden_place"},
+		{"a .. segment out of ~/.harmflow into another hidden folder", hf + "/../.ssh", "path_forbidden_place"},
+		{"a symlink inside ~/.harmflow into another hidden folder", toSSH + "/keys", "path_forbidden_place"},
+		{"a symlink inside ~/.harmflow into the data directory", toData, "path_forbidden_place"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := keyOf(f.check(t, c.path)); got != c.key {
+				t.Errorf("Check(%s) = %q, want %q", c.path, got, c.key)
+			}
+		})
+	}
+}
+
+// A data directory set inside ~/.harmflow stays refused: the exemption never opens HarmFlow's own files.
+func TestPathRuleRefusesDataDirectoryInsideHarmFlowHiddenFolder(t *testing.T) {
+	f := newFixture(t)
+	data := filepath.Join(f.home, ".harmflow", "data")
+	if err := os.MkdirAll(data, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	rule := NewPathRule(f.home, data, f.volumes, nil)
+	for p, key := range map[string]string{
+		data:                               "path_forbidden_place",
+		filepath.Join(data, "tasks"):       "path_forbidden_place",
+		filepath.Join(f.home, ".harmflow"): "path_forbidden_place",
+		filepath.Join(f.home, ".harmflow", "repos"): "",
+	} {
+		real, _ := ResolvePath(p)
+		if got := keyOf(rule.Check(real)); got != key {
+			t.Errorf("Check(%s) = %q, want %q", p, got, key)
+		}
+	}
+}
+
 func TestResolvePathNeedsAnAbsolutePath(t *testing.T) {
 	if _, err := ResolvePath("repos/app"); keyOf(err) != "path_not_absolute" {
 		t.Errorf("ResolvePath of a relative path: %v", err)
@@ -125,12 +185,13 @@ func TestResolvePathNeedsAnAbsolutePath(t *testing.T) {
 func TestPathRuleForbiddenAppliesToAllowedFolders(t *testing.T) {
 	f := newFixture(t)
 	for p, key := range map[string]string{
-		"/":                               "path_forbidden_home",
-		f.home:                            "path_forbidden_home",
-		filepath.Join(f.home, "Library"):  "path_forbidden_place",
-		filepath.Join(f.home, ".codex"):   "path_forbidden_place",
-		filepath.Join(f.root, "etc"):      "",
-		filepath.Join(f.root, "srv", "x"): "",
+		"/":                                "path_forbidden_home",
+		f.home:                             "path_forbidden_home",
+		filepath.Join(f.home, "Library"):   "path_forbidden_place",
+		filepath.Join(f.home, ".codex"):    "path_forbidden_place",
+		filepath.Join(f.home, ".harmflow"): "",
+		filepath.Join(f.root, "etc"):       "",
+		filepath.Join(f.root, "srv", "x"):  "",
 	} {
 		real, _ := ResolvePath(p)
 		if got := keyOf(f.rule.Forbidden(real)); got != key {

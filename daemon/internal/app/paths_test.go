@@ -59,6 +59,7 @@ func TestTaskPathsAreChecked(t *testing.T) {
 	e := newEnv(t)
 	home := e.app.Paths().UserHome
 	repo := mkdir(t, filepath.Join(home, "Developer", "app"))
+	hfRepo := mkdir(t, filepath.Join(home, ".harmflow", "repos", "app"))
 	mkdir(t, filepath.Join(home, "Library", "Application Support"))
 	outside := mkdir(t, filepath.Join(t.TempDir(), "srv"))
 	if err := os.Symlink(outside, filepath.Join(home, "Developer", "elsewhere")); err != nil {
@@ -99,6 +100,12 @@ func TestTaskPathsAreChecked(t *testing.T) {
 			"path_variable_undefined"},
 		{"a local path inside home", issueTask("t", repo, ""), lp, ""},
 		{"a local path outside", issueTask("t", outside, ""), lp, "path_outside_allowed_area"},
+		// ~/.harmflow is the one hidden folder of home that every path letting a harness write may lie in.
+		{"a local path inside ~/.harmflow", issueTask("t", hfRepo, ""), lp, ""},
+		{"a workspace inside ~/.harmflow", workspace("~/.harmflow/workspace"), ws, ""},
+		{"a writable path inside ~/.harmflow", writable("~/.harmflow/repos"), wp, ""},
+		{"a local path in a name that only begins with .harmflow", issueTask("t", home+"/.harmflow-other/app", ""), lp,
+			"path_forbidden_place"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

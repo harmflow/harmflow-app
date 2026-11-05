@@ -1343,7 +1343,7 @@ export const enUS = {
     variableName: "Name",
     variableValue: "Value",
     addVariable: "Add variable",
-    allowedFoldersHint: "Beside your home folder and the mounted volumes, the folders where a task's workspace, its repositories, and its writable paths may be, such as /srv/repos. None may be your home folder, ~/Library, a hidden folder of your home, or HarmFlow's own data.",
+    allowedFoldersHint: "Beside your home folder and the mounted volumes, the folders where a task's workspace, its repositories, and its writable paths may be, such as /srv/repos. None may be your home folder, ~/Library, a hidden folder of your home other than ~/.harmflow, or HarmFlow's own data.",
     allowedFolder: "Allowed folder",
     allowedFolderPlaceholder: "/absolute/path",
     addAllowedFolder: "Add folder",
