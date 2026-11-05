@@ -4065,6 +4065,80 @@ func TestHeldBackFiringsRecorded(t *testing.T) {
 	}
 }
 
+// A script task's firing due while the task is disabled, pending deletion, or invalid on disk is recorded as skipped,
+// with the reason, as any task's is, and its program does not run. Each program leaves a file named after its task, and
+// the one pending deletion runs from a run by hand, held by a gate file, until the end.
+func TestScriptHeldBackFiringsRecorded(t *testing.T) {
+	e := newEnv(t)
+	dir := t.TempDir()
+	gate := filepath.Join(dir, "gate")
+	schedule := "  schedule:\n    cron: \"0 9 * * *\"\n    timezone: UTC\n  execution:\n    cancelGraceSeconds: 1\n"
+	for _, id := range []string{"off", "broken", "on"} {
+		e.createScript(id, fmt.Sprintf("  script:\n    command: [/bin/sh, -c, \"touch %s\"]\n", filepath.Join(dir, id))+schedule)
+	}
+	e.createScript("going", fmt.Sprintf("  script:\n    command: [/bin/sh, -c, \"echo $$ > %s; while [ ! -e %s ]; do sleep 0.05; done\"]\n",
+		filepath.Join(dir, "going"), gate)+schedule)
+	if _, err := e.app.SetEnabled(t.Context(), "off", false); err != nil {
+		t.Fatal(err)
+	}
+	r, err := e.app.RunTask("going")
+	if err != nil || r.Outcome != "started" {
+		t.Fatalf("RunTask(going) = %+v, %v, want started", r, err)
+	}
+	e.wait(r.ExecutionID, domain.StatusRunning)
+	waitForPid(t, filepath.Join(dir, "going"))
+	if pending, err := e.app.DeleteTask("going"); err != nil || !pending {
+		t.Fatalf("DeleteTask(going) = %v, %v, want pending", pending, err)
+	}
+	view, _ := e.app.GetTask("broken")
+	invalid := strings.Replace(view.YAML, "type: script", "type: nope", 1)
+	if err := os.WriteFile(filepath.Join(e.paths.Tasks, "broken.yaml"), []byte(invalid), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.app.scanTaskFiles(t.Context())
+	e.clock.Advance(61 * time.Minute)
+	e.app.Tick()
+	for id, key := range map[string]string{"off": "task_was_disabled", "going": "task_being_deleted",
+		"broken": "task_file_invalid"} {
+		got := e.lastFiring(id)
+		if got.Outcome != "skipped" || got.ReasonKey != key || got.Trigger != domain.TriggerSchedule ||
+			got.ExecutionID != "" || got.Reason == "" {
+			t.Errorf("%s's record: %+v, want skipped on the schedule with %s", id, got, key)
+		}
+	}
+	if got := e.lastFiring("broken"); got.ReasonParams["file"] != "broken.yaml" {
+		t.Errorf("the invalid file's record names %q, want broken.yaml", got.ReasonParams["file"])
+	}
+	// The task that could run fired on time, its record names the execution, and its program ran.
+	runs := e.executions("on")
+	if got := e.lastFiring("on"); len(runs) != 1 || got.Outcome != "started" || got.ExecutionID != runs[0].ID ||
+		got.Trigger != domain.TriggerSchedule || got.Policy != "" {
+		t.Fatalf("on's record: %+v, executions %+v", got, runs)
+	}
+	e.wait(runs[0].ID, domain.StatusCompleted)
+	e.idle("on")
+	if _, err := os.Stat(filepath.Join(dir, "on")); err != nil {
+		t.Errorf("on's program left no file: %v", err)
+	}
+	// The held-back firings started no program: no execution of their own, and no file.
+	for _, id := range []string{"off", "broken"} {
+		if runs := e.executions(id); len(runs) != 0 {
+			t.Errorf("executions(%s) = %+v, want none", id, runs)
+		}
+		if _, err := os.Stat(filepath.Join(dir, id)); !os.IsNotExist(err) {
+			t.Errorf("%s's program ran: Stat = %v, want not exist", id, err)
+		}
+	}
+	if runs := e.executions("going"); len(runs) != 1 || runs[0].ID != r.ExecutionID {
+		t.Errorf("executions(going) = %+v, want only the run by hand %s", runs, r.ExecutionID)
+	}
+	if err := e.app.CancelExecution(r.ExecutionID); err != nil {
+		t.Fatal(err)
+	}
+	e.wait(r.ExecutionID, domain.StatusCancelled)
+	e.idle("going")
+}
+
 // firings is a copy of the task's firing history, oldest first.
 func (e *env) firings(id string) []firingRecord {
 	e.app.mu.Lock()
@@ -7299,6 +7373,34 @@ func TestFailuresWithNoDesktopAreHeldUnread(t *testing.T) {
 	unread := e.app.Notifications(true)
 	if len(unread) != 2 {
 		t.Fatalf("unread notices %+v, want two, one per failed task", unread)
+	}
+	for _, n := range unread {
+		want, ok := failed[n.TaskID]
+		if !ok || n.EventType != domain.EventExecutionFailed || n.ExecutionID != want || n.Params["executionId"] != want {
+			t.Errorf("notice %+v, want an execution.failed notice of one of the tasks, naming its failed execution", n)
+		}
+		delete(failed, n.TaskID)
+	}
+	if len(failed) != 0 {
+		t.Errorf("no notice for the tasks %v", failed)
+	}
+}
+
+// Two script tasks that notify on execution.failed have their programs exit with code 1 while no desktop app runs and
+// nothing reads the event stream. The daemon holds both notices as unread, one per task, each naming its execution, as
+// it does for any task.
+func TestScriptFailuresWithNoDesktopAreHeldUnread(t *testing.T) {
+	e := newEnv(t)
+	failed := map[string]string{} // task → its failed execution
+	for _, id := range []string{"first", "second"} {
+		e.createScript(id, "  script:\n    command: [/bin/sh, -c, \"exit 1\"]\n"+
+			"  notifications:\n    native:\n      events: [execution.failed]\n")
+		failed[id] = e.runScript(id, domain.StatusFailed).ID // runScript waits until the execution has returned
+	}
+
+	unread := e.app.Notifications(true)
+	if len(unread) != 2 {
+		t.Fatalf("Notifications(true) = %+v, want two, one per failed script task", unread)
 	}
 	for _, n := range unread {
 		want, ok := failed[n.TaskID]
