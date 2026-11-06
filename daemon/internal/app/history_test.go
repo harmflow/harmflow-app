@@ -310,6 +310,118 @@ func TestListExecutionsByTriggerAndSearch(t *testing.T) {
 	}
 }
 
+// walkExecutions lists the executions as ListExecutions did before it searched the creation order: it walks every
+// execution from the newest, to the first one created before the period, counting the ones the filter selects.
+func walkExecutions(a *App, f ExecutionFilter) ExecutionPage {
+	limit := f.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	search := strings.ToLower(strings.TrimSpace(f.Search))
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	page := ExecutionPage{Rows: []ExecutionSummary{}}
+	for i := len(a.byCreated) - 1; i >= 0; i-- {
+		if f.CreatedFrom != nil && a.byCreated[i].at.Before(*f.CreatedFrom) {
+			break
+		}
+		s, ok := a.summaryLocked(a.byCreated[i].id)
+		switch {
+		case !ok:
+		case f.TaskID != "" && s.TaskID != f.TaskID:
+		case len(f.Statuses) > 0 && !containsString(f.Statuses, string(s.Status)):
+		case f.Active != nil && s.Status.IsActive() != *f.Active:
+		case f.Trigger != "" && string(s.Trigger) != f.Trigger:
+		case search != "" && !holds(s, search):
+		case f.CreatedUntil != nil && !s.CreatedAt.Before(*f.CreatedUntil):
+		default:
+			page.Total++
+			if len(page.Rows) < limit && (f.Before == nil || s.CreatedAt.Before(*f.Before)) {
+				page.Rows = append(page.Rows, row(s))
+			}
+		}
+	}
+	return page
+}
+
+// Over a few thousand executions, the page and the total ListExecutions gives for a filter of the period and the
+// cursor alone, read from the creation order, are those of a walk of every execution: the first page, the next ones
+// from a cursor among executions created at the same instant, a cursor past either end, and a period bounded on either
+// side or both. A filter of any other field still gives the walk's.
+func TestListExecutionsOverALongHistory(t *testing.T) {
+	e := newEnv(t)
+	e.create("alpha", "")
+	e.create("beta", "")
+	now := e.clock.Now()
+	const n = 3000
+	minute := func(m int) *time.Time { t := now.Add(time.Duration(-m) * time.Minute); return &t }
+	e.app.mu.Lock()
+	// Three executions are created in each minute, oldest first; the five newest are still running, held whole, and
+	// the rest ended, held as their summaries.
+	for i := range n {
+		task := "alpha"
+		if i%4 == 0 {
+			task = "beta"
+		}
+		created := *minute((n - 1 - i) / 3)
+		x := domain.NewExecution(domain.TaskDocument{Metadata: domain.TaskMetadata{ID: task}}, domain.TriggerSchedule, nil,
+			created)
+		x.Status, x.StartedAt = domain.StatusRunning, &created
+		e.app.addExecutionLocked(x)
+		if i < n-5 {
+			ended := created.Add(30 * time.Second)
+			x.Status, x.EndedAt = domain.StatusCompleted, &ended
+			e.app.keepEndedLocked(x, x.Summarize())
+		}
+	}
+	e.app.mu.Unlock()
+	active := true
+	for _, c := range []struct {
+		name string
+		f    ExecutionFilter
+	}{
+		{"the first page", ExecutionFilter{Limit: 50}},
+		{"the default limit", ExecutionFilter{}},
+		{"the largest page", ExecutionFilter{Limit: 500}},
+		{"a cursor at an instant three executions share", ExecutionFilter{Limit: 50, Before: minute(400)}},
+		{"a cursor past the newest", ExecutionFilter{Limit: 50, Before: minute(-1)}},
+		{"a cursor before the oldest", ExecutionFilter{Limit: 50, Before: minute(n)}},
+		{"a period's start", ExecutionFilter{Limit: 50, CreatedFrom: minute(30)}},
+		{"a period's start past the newest", ExecutionFilter{Limit: 50, CreatedFrom: minute(-1)}},
+		{"a period's end", ExecutionFilter{Limit: 50, CreatedUntil: minute(900)}},
+		{"a period's end before the oldest", ExecutionFilter{Limit: 50, CreatedUntil: minute(n)}},
+		{"both bounds", ExecutionFilter{Limit: 50, CreatedFrom: minute(700), CreatedUntil: minute(100)}},
+		{"both bounds, a cursor inside", ExecutionFilter{Limit: 50, CreatedFrom: minute(700), CreatedUntil: minute(100),
+			Before: minute(650)}},
+		{"both bounds, the cursor at the start", ExecutionFilter{Limit: 50, CreatedFrom: minute(700),
+			CreatedUntil: minute(100), Before: minute(700)}},
+		{"an end before the start", ExecutionFilter{Limit: 50, CreatedFrom: minute(100), CreatedUntil: minute(700)}},
+		{"a task, which walks", ExecutionFilter{Limit: 50, TaskID: "beta", Before: minute(400)}},
+		{"the active ones, which walks", ExecutionFilter{Limit: 50, Active: &active}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got, want := e.app.ListExecutions(c.f), walkExecutions(e.app, c.f)
+			ids := func(p ExecutionPage) []string {
+				var out []string
+				for _, s := range p.Rows {
+					out = append(out, s.ID)
+				}
+				return out
+			}
+			if !slices.Equal(ids(got), ids(want)) || got.Total != want.Total {
+				t.Errorf("ListExecutions(%+v) = %v of %d, want the walk's %v of %d", c.f, ids(got), got.Total, ids(want),
+					want.Total)
+			}
+			if !reflect.DeepEqual(got.Rows, want.Rows) {
+				t.Errorf("ListExecutions(%+v) rows differ from the walk's", c.f)
+			}
+		})
+	}
+	if got := e.app.ListExecutions(ExecutionFilter{Limit: 50}); len(got.Rows) != 50 || got.Total != n {
+		t.Errorf("ListExecutions(limit 50) = %d rows of %d, want 50 of %d", len(got.Rows), got.Total, n)
+	}
+}
+
 // An execution's row carries its current attempt's reported effort and its configured model and effort, kept apart:
 // none of them with no attempt or for a script's attempt, and the reported effort absent when the harness reported
 // none. After a harness switch, they are the new attempt's. A restart reads them from the index.

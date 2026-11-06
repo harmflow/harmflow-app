@@ -92,8 +92,10 @@ type ExecutionPage struct {
 	Total int
 }
 
-// ListExecutions lists the executions the filter selects, newest first: it walks the executions from the newest, to
-// the first one created before the period, counting the ones the filter selects and keeping those of the page.
+// ListExecutions lists the executions the filter selects, newest first. A filter of the period and the cursor alone,
+// as History's first page is, reads the page and the total from the creation order, so that neither grows with the
+// history. Any other filter walks the executions from the newest, to the first one created before the period,
+// counting the ones the filter selects and keeping those of the page.
 func (a *App) ListExecutions(f ExecutionFilter) ExecutionPage {
 	limit := f.Limit
 	if limit <= 0 || limit > 500 {
@@ -102,6 +104,9 @@ func (a *App) ListExecutions(f ExecutionFilter) ExecutionPage {
 	search := strings.ToLower(strings.TrimSpace(f.Search))
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if f.TaskID == "" && len(f.Statuses) == 0 && f.Active == nil && f.Trigger == "" && search == "" {
+		return a.periodPageLocked(f, limit)
+	}
 	page := ExecutionPage{Rows: []ExecutionSummary{}}
 	for i := len(a.byCreated) - 1; i >= 0; i-- {
 		if f.CreatedFrom != nil && a.byCreated[i].at.Before(*f.CreatedFrom) {
@@ -124,6 +129,35 @@ func (a *App) ListExecutions(f ExecutionFilter) ExecutionPage {
 		}
 	}
 	return page
+}
+
+// periodPageLocked is ListExecutions for a filter that selects by the period and the cursor alone. It selects every
+// execution a.byCreated lists from the period's start to its end, so the total is the length of that span, and the
+// page is the newest of the span created before the cursor, each bound found by a binary search.
+func (a *App) periodPageLocked(f ExecutionFilter, limit int) ExecutionPage {
+	from, until := 0, len(a.byCreated)
+	if f.CreatedFrom != nil {
+		from = a.createdIndexLocked(*f.CreatedFrom)
+	}
+	if f.CreatedUntil != nil {
+		until = max(from, a.createdIndexLocked(*f.CreatedUntil))
+	}
+	page := ExecutionPage{Rows: []ExecutionSummary{}, Total: until - from}
+	end := until
+	if f.Before != nil {
+		end = min(end, a.createdIndexLocked(*f.Before))
+	}
+	for i := end - 1; i >= from && len(page.Rows) < limit; i-- {
+		if s, ok := a.summaryLocked(a.byCreated[i].id); ok {
+			page.Rows = append(page.Rows, row(s))
+		}
+	}
+	return page
+}
+
+// createdIndexLocked is the index in a.byCreated of the first execution created at or after t.
+func (a *App) createdIndexLocked(t time.Time) int {
+	return sort.Search(len(a.byCreated), func(i int) bool { return !a.byCreated[i].at.Before(t) })
 }
 
 // holds reports whether an execution's task name or ID, repository, work item, ID, or harness holds text, which is in
