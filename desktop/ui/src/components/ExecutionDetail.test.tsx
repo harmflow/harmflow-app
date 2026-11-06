@@ -539,6 +539,47 @@ describe("execution detail", () => {
     expect(await choose("Results")).toContain(`Base branch not protected — ${said}`);
   });
 
+  // A draft opened with failing tests ends the execution completed, its item resumable (app ›
+  // TestDraftWithFailingTestsCompletesTheExecution): its results read as a completed execution's, never as a failure.
+  it("shows a draft opened with failing tests as its work item's Tests failed and pull request, with no error banner", async () => {
+    const pullRequestUrl = "https://github.com/org/core-banking/pull/9";
+    const draft: Execution = {
+      ...completed,
+      id: "exec-draft-failing",
+      testsStatus: "failed",
+      workItems: [{ ...base.workItems[0], tests: { status: "failed" } }],
+    };
+    const on = { executionId: draft.id, workItemId: "org/core-banking#123" };
+    await open(
+      draft,
+      [
+        event(1, "execution.started", { executionId: draft.id }),
+        event(2, "pull_request.created", { ...on, message: pullRequestUrl, payload: { url: pullRequestUrl, number: 9, branch: "feature/123-agent" } }),
+        event(3, "test.failed", {
+          ...on,
+          severity: "warning",
+          message: "tests failed; the draft pull request documents them",
+          messageKey: "tests_failed",
+          payload: { url: pullRequestUrl },
+        }),
+        event(4, "execution.completed", { executionId: draft.id }),
+      ],
+      capture(""),
+    );
+
+    expect(host!.querySelector(".detail__title-row .chip")!.textContent).toBe("Completed");
+    await choose("Results");
+    const items = [...host!.querySelectorAll(".results__item")];
+    expect(items).toHaveLength(1);
+    const row = (label: string) =>
+      [...items[0].querySelectorAll(".kv__row")].find((r) => r.querySelector("dt")!.textContent === i18n.t(label as never))!.querySelector("dd")!;
+    const tests = row("executions.detail.tests").querySelector(".chip")!;
+    expect(tests.textContent).toBe("Tests failed");
+    expect(tests.className).toContain("chip--danger");
+    expect(row("executions.detail.pullRequest").textContent!.trim()).toBe("#9");
+    expect(host!.querySelectorAll(".banner--danger")).toHaveLength(0);
+  });
+
   // harmflow-app#477: the warning the daemon records when Codex says its managed requirements override a setting
   // HarmFlow runs it with: code other, no message key, Codex's notice as its text (app › TestSettingOverriddenIsAWarning).
   // The notice is the approval_policy line of the fixture codex › TestParseRequirementsOverride replays.
