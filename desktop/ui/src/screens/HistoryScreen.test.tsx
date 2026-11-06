@@ -3,7 +3,8 @@
 // whose log expired under the retention period is still listed for its task, with its whole record, and opening it says
 // its log is gone. That the daemon keeps the record and serves it so is app › TestRetentionDeletesOnlyExpiredLogs's and
 // itest › TestRetentionExpiresTheLogAtStart's. An execution that found no work is listed as No work, in the neutral
-// tone, and one that was interrupted as Interrupted, in the warning tone, neither as a failure. Its filter bar gives
+// tone, and one that was interrupted as Interrupted, in the warning tone, neither as a failure; one that opened a draft
+// whose tests failed as Completed, with its Tests failed and PR chips, never as Failed. Its filter bar gives
 // the date fields the class that keeps them on the filters' line.
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -284,6 +285,33 @@ describe("an execution that found no work", () => {
     };
     expect(status(noWork.id)).toEqual({ label: "No work", tones: ["chip--neutral"] });
     expect(status(failed.id)).toEqual({ label: "Failed", tones: ["chip--danger"] });
+  });
+});
+
+describe("an execution that opened a draft with failing tests", () => {
+  it("shows its row as Completed, with the Tests failed and PR chips, apart from a failed one's with neither", async () => {
+    const draft: ExecutionSummary = { ...aged, id: "exec-draft-failing", testsStatus: "failed" };
+    const failed: ExecutionSummary = { ...aged, id: "exec-failed", status: "failed", pullRequestUrl: undefined, testsStatus: undefined };
+    daemon.executions = [draft, failed];
+    await open();
+    expect(rows()).toHaveLength(2);
+
+    const shown = (id: string) => {
+      const row = rowOf(id)!;
+      const chips = [...cell(row, 8).querySelectorAll(".chip")];
+      return {
+        status: cell(row, 1).textContent,
+        result: chips.map((c) => ({ label: c.textContent, tones: [...c.classList].filter((k) => /^chip--(neutral|success|danger|warning|blue|magenta)$/.test(k)) })),
+      };
+    };
+    expect(shown(draft.id)).toEqual({
+      status: "Completed",
+      result: [
+        { label: "Tests failed", tones: ["chip--danger"] },
+        { label: "PR", tones: ["chip--success"] },
+      ],
+    });
+    expect(shown(failed.id)).toEqual({ status: "Failed", result: [] });
   });
 });
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { HarmflowEvent } from "../api/types";
 import i18n from "../i18n";
+import { enUS } from "../i18n/en-US";
 import { buildTimeline, changedFilesFromEvents, currentStepFrom } from "./timeline";
 
 let nextId = 1;
@@ -105,6 +106,36 @@ describe("buildTimeline", () => {
     } finally {
       await i18n.changeLanguage("en-US");
     }
+  });
+
+  // A draft opened with failing tests: the daemon's test.failed event, as executor.go emits it, says the session's
+  // summary of the tests or, when the session wrote none, the daemon's own tests_failed text.
+  describe("a test.failed event", () => {
+    const failing = (extra: Partial<HarmflowEvent>) =>
+      ev("test.failed", { severity: "warning", workItemId: "org/core-banking#123", payload: { url: "https://github.com/org/core-banking/pull/9" }, ...extra });
+
+    it("with no summary of its own, reads in the danger tone with the daemon's text in the interface's language", async () => {
+      await i18n.changeLanguage("pt-BR");
+      try {
+        const [item] = buildTimeline([failing({ message: enUS.messages.tests_failed, messageKey: "tests_failed" })]);
+        expect(item).toMatchObject({ tone: "danger", icon: "test", labelKey: "eventTypes.test.failed" });
+        expect(item.detail).toBe(i18n.t("messages.tests_failed" as never));
+        expect(item.detail).not.toBe(enUS.messages.tests_failed);
+      } finally {
+        await i18n.changeLanguage("en-US");
+      }
+    });
+
+    it("with the session's summary, reads in the danger tone with that summary, untranslated", async () => {
+      const summary = "2 of 48 tests failed: TestTokenRefresh, TestTokenExpiry";
+      await i18n.changeLanguage("pt-BR");
+      try {
+        const [item] = buildTimeline([failing({ message: summary })]);
+        expect(item).toMatchObject({ tone: "danger", icon: "test", detail: summary });
+      } finally {
+        await i18n.changeLanguage("en-US");
+      }
+    });
   });
 
   it("keeps raw output out of the timeline and orders by id", () => {
