@@ -7573,6 +7573,90 @@ func TestTaskNotificationChoicesDecideItsNotices(t *testing.T) {
 	}
 }
 
+// harmflow-app#905: a cancellation, a draft pull request created, one updated, and failed tests each give the notice a
+// task chose, once, for the execution they belong to, with the global level letting every event through; a task that
+// chose none of them gets none. Each task lists its one event itself, never through the default list, which holds
+// pull_request.created, and runs the same two executions: one cancelled while it runs, and one whose report holds a
+// draft opened, a draft updated, and a work item whose tests failed.
+func TestTaskChoicesDecideTheNoticesOfACancellationADraftAndFailedTests(t *testing.T) {
+	e := newEnv(t)
+	level := "all"
+	if _, err := e.app.UpdateSettings(SettingsPatch{NotificationLevel: &level}); err != nil {
+		t.Fatalf("UpdateSettings(notificationLevel %q): %v", level, err)
+	}
+	const createdURL, updatedURL = "https://github.com/o/r/pull/9", "https://github.com/o/r/pull/10"
+	report := `{"outcome":"completed","summary":"worked three items","workItems":[` +
+		`{"key":"o/r#7","outcome":"completed","pullRequest":{"url":"` + createdURL + `","number":9,"created":true}},` +
+		`{"key":"o/r#8","outcome":"completed","pullRequest":{"url":"` + updatedURL + `","number":10,"created":false}},` +
+		`{"key":"o/r#11","outcome":"completed","tests":{"status":"failed"}}]}`
+	four := []string{domain.EventExecutionCancelled, domain.EventPullRequestCreated, domain.EventPullRequestUpdated,
+		domain.EventTestFailed}
+	for _, c := range []struct {
+		id, event            string // the one event the task chooses
+		title, url, severity string // what its notice holds, where the case checks it
+	}{
+		{id: "cancelled", event: domain.EventExecutionCancelled, title: "Execution cancelled"},
+		{id: "pr-created", event: domain.EventPullRequestCreated, url: createdURL},
+		{id: "pr-updated", event: domain.EventPullRequestUpdated, url: updatedURL},
+		{id: "tests-failed", event: domain.EventTestFailed, severity: "warning"},
+		{id: "not-chosen", event: domain.EventExecutionCompleted},
+	} {
+		t.Run(c.id, func(t *testing.T) {
+			e := e.in(t)
+			e.create(c.id, "  notifications:\n    native:\n      events: ["+c.event+"]\n")
+
+			e.claude.setScript(func(ports.RunRequest) string { return slow })
+			r, _ := e.app.RunTask(c.id)
+			e.wait(r.ExecutionID, domain.StatusRunning)
+			e.prepared(e.claude)
+			if err := e.app.CancelExecution(r.ExecutionID); err != nil {
+				t.Fatalf("CancelExecution(%s): %v", r.ExecutionID, err)
+			}
+			cancelled := e.wait(r.ExecutionID, domain.StatusCancelled)
+			e.idle(c.id) // the notice is decided once the execution has returned
+			e.claude.setScript(func(req ports.RunRequest) string {
+				return fmt.Sprintf(`printf '%%s' '%s' > %s/report.json; echo 'END ok'`, report, req.ExecutionDir)
+			})
+			r, _ = e.app.RunTask(c.id)
+			reported := e.wait(r.ExecutionID, domain.StatusCompleted)
+			e.idle(c.id)
+
+			var got []Notification
+			for _, n := range e.app.Notifications(false) {
+				if n.TaskID == c.id && slices.Contains(four, n.EventType) {
+					got = append(got, n)
+				}
+			}
+			if !slices.Contains(four, c.event) {
+				if len(got) != 0 {
+					t.Errorf("Notifications(task %s) = %+v, want none of %v", c.id, got, four)
+				}
+				return
+			}
+			if len(got) != 1 || got[0].EventType != c.event {
+				t.Fatalf("Notifications(task %s) = %+v, want one %s notice", c.id, got, c.event)
+			}
+			n, want := got[0], reported.ID
+			if c.event == domain.EventExecutionCancelled {
+				want = cancelled.ID
+			}
+			if n.ExecutionID != want {
+				t.Errorf("%s notice executionId = %s, want %s (cancelled %s, reported %s)",
+					c.event, n.ExecutionID, want, cancelled.ID, reported.ID)
+			}
+			if c.title != "" && n.Title != c.title {
+				t.Errorf("%s notice title = %q, want %q", c.event, n.Title, c.title)
+			}
+			if c.url != "" && n.Params["url"] != c.url {
+				t.Errorf("%s notice url = %q, want %q", c.event, n.Params["url"], c.url)
+			}
+			if c.severity != "" && n.Severity != c.severity {
+				t.Errorf("%s notice severity = %q, want %q", c.event, n.Severity, c.severity)
+			}
+		})
+	}
+}
+
 // completedNotices returns the execution.completed notices of one execution.
 func (e *env) completedNotices(executionID string) []Notification {
 	var out []Notification
