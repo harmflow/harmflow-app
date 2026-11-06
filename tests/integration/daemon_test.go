@@ -1042,8 +1042,7 @@ func TestHandStartedDaemonFiresWithAutostartOff(t *testing.T) {
 // user who started it, and its binary has neither set-ID bit, which would run it as the file's owner instead.
 func TestDaemonRunsAsTheUser(t *testing.T) {
 	t.Parallel()
-	uid, gid := os.Getuid(), os.Getgid()
-	if uid == 0 {
+	if os.Getuid() == 0 {
 		t.Fatal("the test process runs as root, so a daemon that keeps its user still runs with elevated privileges: " +
 			"run the tests as a user that is not root")
 	}
@@ -1060,7 +1059,15 @@ func TestDaemonRunsAsTheUser(t *testing.T) {
 	if !ok || pid <= 0 {
 		t.Fatalf("GET /health names the pid %v", pid)
 	}
-	ps := exec.Command("ps", "-o", "ruid=,uid=,svuid=,rgid=,gid=", "-p", strconv.Itoa(int(pid)))
+	wantUserIDs(t, int(pid))
+}
+
+// wantUserIDs checks with ps that the daemon's process pid has the real, effective, and saved user IDs and the real and
+// effective group IDs of the test process.
+func wantUserIDs(t *testing.T, pid int) {
+	t.Helper()
+	uid, gid := os.Getuid(), os.Getgid()
+	ps := exec.Command("ps", "-o", "ruid=,uid=,svuid=,rgid=,gid=", "-p", strconv.Itoa(pid))
 	out, err := ps.Output()
 	if err != nil {
 		t.Fatalf("%s: %v", ps, err)
