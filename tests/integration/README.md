@@ -37,8 +37,8 @@ On a machine already busy, a run of the whole package can fail to start a daemon
 
 A few tests start a real harness instead of a stand-in. Most of them start a real session and spend a little of the
 account's usage; the detection tests of `daemon/internal/app` only run the installed CLI's own checks, but need it
-installed. One reads the machine's own signed-in `gh` and starts no harness. Each one skips unless you opt in. A
-helper named for the CLI decides:
+installed. One reads the machine's own signed-in `gh` and starts no harness, and one has the user's own launchd start
+a daemon. Each one skips unless you opt in. A helper named for what it needs decides:
 
 - `realClaude` (`claude_code_test.go`) skips the test unless `HARMFLOW_TEST_CLAUDE_CODE` is exactly `1` and `claude`
   is on the `PATH`;
@@ -48,6 +48,9 @@ helper named for the CLI decides:
 - `realDesktop` (`desktop_test.go`) skips the test unless it runs on macOS, `HARMFLOW_TEST_DESKTOP` is exactly
   `1`, and `cargo` is on the `PATH`. It starts no harness: it builds the desktop shell's debug build, the only one with
   the control channel a test drives it through, and opens its real window.
+- `realLaunchd` (`launchd_test.go`) skips the test unless it runs on macOS, `HARMFLOW_TEST_LAUNCHD` is exactly `1`,
+  and `launchctl print gui/<uid>` finds the signed-in user's GUI domain. It starts no harness: launchd starts a
+  `harmflowd` in the user's session.
 
 A daemon package cannot import these helpers, so `daemon/internal/app` has its own `realClaude` and `realCodex`, which
 read the same variables the same way. Every test that calls one of them belongs in this table.
@@ -105,6 +108,7 @@ read the same variables the same way. Every test that calls one of them belongs 
 | `TestEachWayToQuitFollowsThePreference` (`quit_test.go`) | `HARMFLOW_TEST_DESKTOP=1` | A Mac with a display, in a signed-in user session, `cargo` on the `PATH`, and the desktop's sidecar (`make sidecar`). The test starts its own daemon on a temporary home, with the stand-ins, so it spends no usage, and starts the shell beside it once per way to quit: the app menu's Quit with the menu bar preference off and on, the Dock's Quit, and the tray's Quit interface. It drives the shell through its test control channel, which reads the app menu macOS shows, chooses an item of it or of the tray, and sends the app `terminate:`, the Dock's quit request, so it needs no Accessibility or Automation permission. In CI and on Linux it skips |
 | `TestChosenEventsReachMacOSAsNativeNotices` (`native_notices_test.go`) | `HARMFLOW_TEST_DESKTOP=1` | A Mac with a display, in a signed-in user session, `cargo` and `pnpm` on the `PATH`, the desktop's dependencies (`make deps`) and its sidecar (`make sidecar`), and nothing else answering at `localhost:1420`. The test starts its own daemon with the stand-in `fake-claude`, so it spends no usage, serves the interface from its dev server, which the shell's debug build loads, and starts the shell. A task that notifies on `execution.completed` and `execution.failed` completes once and fails once, and the test reads the notices macOS delivered for the shell through its test control channel, expecting one of each with the interface's en-US title and body. A debug build delivers its notices under the identity the notification plugin gives a development build, Terminal's: allow Terminal's notifications once before the run, or the test skips, naming the identity. In CI and on Linux it skips |
 | `TestClosingTheWindowFollowsTheTraySetting` (`window_close_test.go`) | `HARMFLOW_TEST_DESKTOP=1` | A Mac with a display, in a signed-in user session, `cargo` on the `PATH`, and the desktop's sidecar (`make sidecar`). The test builds the shell's debug build and starts it on its own daemon's home, with the stand-in `fake-claude`, so it spends no usage. The window opens on the screen for each of its two subtests, `tray_on` and `tray_off`; the test closes it through the shell's test control channel, which raises the same close request as the window's close button, so it needs no Accessibility permission. In CI and on Linux it skips |
+| `TestLaunchdStartedDaemonRunsAsTheUser` (`launchd_test.go`) | `HARMFLOW_TEST_LAUNCHD=1` | A Mac, in a signed-in user session, run as a user that is not root. The test starts its own daemon on a temporary home and a throwaway `HOME`, with the stand-ins, so it spends no usage, and turns autostart on through the local API, so that the daemon writes its user agent under that `HOME`. It stops that daemon, copies the agent there with only its `Label` changed to one unique to the run, and loads the copy into the user's GUI domain with `launchctl bootstrap gui/<uid>`, where launchd starts `harmflowd` from it. It checks that `GET /health` names the pid launchd records for the job, and that the process has the test's own user and group IDs. It never loads, replaces, stops, or unloads the user's own `com.harmflow.daemon`, and writes nothing to the user's own `~/Library/LaunchAgents`, failing if either changed; it boots out the job it loaded when it ends, failed or not. In CI and on Linux it skips |
 
 Run one of them on its own:
 
