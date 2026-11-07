@@ -206,8 +206,10 @@ func TestHarnessTokenIsSavedUsedAndRemoved(t *testing.T) {
 		t.Errorf("the store holds %q and the harness uses %q, want the token, trimmed, in both", store.held(), claude.using())
 	}
 
-	claude.UseToken("") // as a new daemon's adapter starts with none
 	restarted := e.restart(t, func(n *env) {
+		// As a new daemon's adapter starts with none. Only once the old daemon has stopped: a check of its own that ran
+		// late would read the stand-in it shares with the new one signed out, and reject the token.
+		claude.UseToken("")
 		n.signer = claude
 		n.harnessTokens = func(string) ports.SecretStore { return store }
 	})
@@ -225,6 +227,44 @@ func TestHarnessTokenIsSavedUsedAndRemoved(t *testing.T) {
 	}
 	restarted.app.Stop(domain.Text{Message: "test done"})
 	noTokenInHome(t, e.home)
+}
+
+// harmflow-app#915: a check that began after the token was saved, and still runs when the daemon stops, reads the
+// harness as that daemon left it, with the token in use. It does not reject the token, and the restarted daemon uses
+// it.
+func TestACheckRunningAtARestartLeavesTheTokenInUse(t *testing.T) {
+	claude, store := newTokenHarness(), &fakeStore{}
+	releaseStart := claude.fakeHarness.hold(t)
+	e := tokenEnv(t, claude, store)
+	// The start's own check began before the token: let it end first, so that the held check below is a later one.
+	if !e.poll(10*time.Second, claude.fakeHarness.holding) {
+		t.Fatal("the start's check of Claude Code never ran")
+	}
+	releaseStart()
+	if !e.poll(10*time.Second, func() bool { return !claude.fakeHarness.holding() }) {
+		t.Fatal("the start's check of Claude Code still waits once released")
+	}
+	if _, err := e.app.SetHarnessToken(t.Context(), domain.HarnessClaudeCode, secretToken); err != nil {
+		t.Fatal(err)
+	}
+	releaseCheck := claude.fakeHarness.hold(t)
+	e.app.RedetectHarnesses()
+	if !e.poll(10*time.Second, claude.fakeHarness.holding) {
+		t.Fatal("no check of Claude Code began after the token was saved")
+	}
+	// Stop ends the held check's context, and the check reads its answer then.
+	restarted := e.restart(t, func(n *env) {
+		releaseCheck()
+		claude.UseToken("") // as a new daemon's adapter starts with none
+		n.signer = claude
+		n.harnessTokens = func(string) ports.SecretStore { return store }
+	})
+	if claude.using() != secretToken {
+		t.Errorf("after a restart during a check the harness uses %q, want the saved token", claude.using())
+	}
+	if info := restarted.claudeInfo(); info.Token == nil || info.Token.Rejected {
+		t.Errorf("after a restart during a check the token is %+v, want it saved and not rejected", info.Token)
+	}
 }
 
 // harmflow-app#733: an attempt that ends signed out with a token in use rejects the token: it is no longer used, the
