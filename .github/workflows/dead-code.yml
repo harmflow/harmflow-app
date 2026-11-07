@@ -1,0 +1,39 @@
+# Reports the daemon's dead code on main every night, in the run's summary: the functions that nothing reaches from main
+# or from a test, the unexported names that nothing uses, and the functions that only a test reaches. It reads the daemon
+# as macOS and as Linux build it, on a Linux runner. It is a report, never a check: a finding is a lead for a person, so
+# no finding fails a run, and the job fails only when a tool cannot read the code. It runs on no pull request but one
+# that changes it, and no ruleset requires it. .github/scripts/dead-code.sh writes the report; make dead-code pins the
+# tools.
+#
+# Actions are pinned as in ci.yml, to the same commits.
+name: Dead code
+
+on:
+  schedule:
+    - cron: "47 5 * * *" # 02:47 in São Paulo, before the Coverage workflow
+  workflow_dispatch:
+  # A change to the report runs it, so its pull request shows the summary it writes.
+  pull_request:
+    paths:
+      - .github/workflows/dead-code.yml
+      - .github/scripts/dead-code.sh
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dead-code-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  daemon:
+    name: Daemon (macOS and Linux builds)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: daemon/go.mod
+          cache-dependency-path: daemon/go.sum
+      - name: Report
+        run: make dead-code >> "$GITHUB_STEP_SUMMARY"

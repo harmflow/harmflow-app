@@ -158,6 +158,15 @@ audit-interface: ## Advisories against the interface's JavaScript dependencies, 
 audit-shell: ## Advisories against the shell's Rust dependencies (needs cargo-audit)
 	cargo audit --file desktop/src-tauri/Cargo.lock
 
+# The nightly Dead code workflow prints this report into its run's summary; it fails on no finding, only when a tool
+# cannot read the code. Dependabot cannot see these pins: refresh them by hand.
+DEADCODE := golang.org/x/tools/cmd/deadcode@v0.52.0
+STATICCHECK := honnef.co/go/tools/cmd/staticcheck@v0.8.2
+
+.PHONY: dead-code
+dead-code: ## Report, in Markdown, the daemon's dead code as macOS and Linux build it (needs jq)
+	@DEADCODE=$(DEADCODE) STATICCHECK=$(STATICCHECK) .github/scripts/dead-code.sh
+
 # The toolchain line of go.mod is what CI builds and audits with, and Dependabot does not raise it. The weekly Security
 # workflow runs check-go-toolchain; a failure there is fixed with make go-toolchain and a pull request.
 .PHONY: go-toolchain
