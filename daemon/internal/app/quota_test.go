@@ -187,9 +187,9 @@ func TestExtraUsageAllowed(t *testing.T) {
 	}
 }
 
-// A task that allows extra usage, whose Claude Code session turns to extra usage and then fails for a reason of its own,
-// ends as that failure: the attempt is not ended for its extra usage, its error is not read as an exhausted quota, and
-// the execution does not move to its fallback. The pause after the report gives a stop the time to end the attempt
+// A task that allows extra usage, whose Claude Code session turns to extra usage and then fails for a reason of its
+// own, ends as that failure: the attempt is not ended for its extra usage, its error is not read as an exhausted quota,
+// and the execution does not move to its fallback. The pause after the report gives a stop the time to end the attempt
 // first, were it applied whatever the task allows.
 func TestExtraUsageAllowedEndsOnTheSessionsOwnFailure(t *testing.T) {
 	e := newEnv(t)
