@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -298,6 +299,62 @@ func TestRejectedHarnessTokenFallsBack(t *testing.T) {
 	if info, err = e.app.SetHarnessToken(t.Context(), domain.HarnessClaudeCode, secretToken+"-new"); err != nil ||
 		info.Token == nil || info.Token.Rejected || info.Readiness != "ready" {
 		t.Errorf("SetHarnessToken after a rejection = %+v, %v; want a token in use, ready", info.Token, err)
+	}
+}
+
+// harmflow-app#792: an attempt that ends signed out rejects only the saved token it ran with. One that began on the
+// harness's own sign-in, or with a token replaced while it ran, leaves the token saved meanwhile in use, not rejected.
+// The attempt holds on a FIFO until the token is saved.
+func TestAnAttemptRejectsOnlyTheTokenItRanWith(t *testing.T) {
+	cases := []struct {
+		name   string
+		before string // the token saved before the attempt, "" for none
+	}{
+		{"no token", ""},
+		{"a token since replaced", secretToken + "-old"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			claude, store := newTokenHarness(), &fakeStore{}
+			claude.set(true, false) // signed in on its own sign-in, so an attempt with no token starts
+			e := tokenEnv(t, claude, store)
+			if c.before != "" {
+				if _, err := e.app.SetHarnessToken(t.Context(), domain.HarnessClaudeCode, c.before); err != nil {
+					t.Fatal(err)
+				}
+			}
+			fifo := filepath.Join(t.TempDir(), "end")
+			if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+				t.Fatalf("Mkfifo(%s): %v", fifo, err)
+			}
+			// Read-write, so the open does not wait for the shell; closing it at the end lets a held attempt end.
+			feed, err := os.OpenFile(fifo, os.O_RDWR, 0)
+			if err != nil {
+				t.Fatalf("open %s: %v", fifo, err)
+			}
+			t.Cleanup(func() { _ = feed.Close() })
+			claude.setScript(func(ports.RunRequest) string { return "read end < " + fifo + "; echo 'END unavailable'" })
+			e.create("held", "")
+			r, err := e.app.RunTask("held")
+			if err != nil {
+				t.Fatal(err)
+			}
+			e.prepared(claude.fakeHarness)
+			if _, err := e.app.SetHarnessToken(t.Context(), domain.HarnessClaudeCode, secretToken); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := feed.WriteString("end\n"); err != nil {
+				t.Fatalf("write %s: %v", fifo, err)
+			}
+			e.wait(r.ExecutionID, domain.StatusFailed)
+			if got := e.published(domain.EventHarnessTokenRejected); len(got) != 0 {
+				t.Errorf("%s events after the attempt = %+v, want none", domain.EventHarnessTokenRejected, got)
+			}
+			if info := e.claudeInfo(); info.Token == nil || info.Token.Rejected || claude.using() != secretToken {
+				t.Errorf("after an attempt from before the token ended signed out, token %+v, in use %q; want the token "+
+					"saved meanwhile, not rejected, in use", info.Token, claude.using())
+			}
+		})
 	}
 }
 

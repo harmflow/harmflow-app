@@ -182,26 +182,18 @@ func (a *App) tokenInUse(id string) bool {
 	return r != nil && !r.Rejected
 }
 
-// rejectToken stops using the harness's saved token, which the harness rejected, and says so; it reports whether a
-// token was in use. The token stays in the credential store, marked rejected, until the user saves another or removes
-// it.
-func (a *App) rejectToken(id string) bool {
-	a.mu.Lock()
-	r := a.tokens[id]
-	a.mu.Unlock()
-	return a.rejectCheckedToken(id, r)
-}
-
-// rejectCheckedToken is rejectToken for a check that ran with checked, the token saved when it began, or nil for none:
-// a token saved while it ran is not the one the harness rejected, and stays in use.
-func (a *App) rejectCheckedToken(id string, checked *tokenRecord) bool {
+// rejectToken stops using the harness's saved token, which a check or an attempt that ran with it, ranWith, read
+// rejected, and says so; it reports whether it did. A check or an attempt that ran with no token, ranWith nil, or with
+// a token since replaced rejects nothing: the token saved while it ran is not the one the harness rejected, and stays
+// in use. A rejected token stays in the credential store, marked rejected, until the user saves another or removes it.
+func (a *App) rejectToken(id string, ranWith *tokenRecord) bool {
 	t, _, ok := a.tokenTaker(id)
-	if !ok || checked == nil {
+	if !ok || ranWith == nil {
 		return false
 	}
 	a.mu.Lock()
 	r := a.tokens[id]
-	if r != checked || r.Rejected {
+	if r != ranWith || r.Rejected {
 		a.mu.Unlock()
 		return false
 	}
