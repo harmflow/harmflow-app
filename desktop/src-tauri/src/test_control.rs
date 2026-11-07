@@ -6,9 +6,12 @@
 //! app to quit as the Dock's Quit does (harmflow-app#655). It reads the notices macOS delivered for the shell
 //! (harmflow-app#515), and the title and the image of the tray's status item macOS shows (harmflow-app#880). It reads
 //! what the window's page shows and clicks in it, as a user's click does (harmflow-app#873), with the height each
-//! element renders at (harmflow-app#912). A test of what else the shell does adds its own command here.
+//! element renders at (harmflow-app#912). It reads whether the start's show is decided and whether macOS shows the
+//! tray's status item, and calls what the start's fallback calls (harmflow-app#508). A test of what else the shell
+//! does adds its own command here.
 
 use std::io::{BufRead, Write};
+use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -28,8 +31,12 @@ pub const VARIABLE: &str = "HARMFLOW_TEST_SHELL_CONTROL";
 
 #[derive(Debug, PartialEq, Eq)]
 enum Command<'a> {
-    /// Whether the window is visible, whether the tray is enabled, and whether ⌘Q keeps the tray.
+    /// Whether the window is visible, whether the tray is enabled, whether ⌘Q keeps the tray, and whether the
+    /// interface's readiness or the fallback already decided the start's show.
     State,
+    /// What the start's fallback calls once it elapses, `window::show_at_start`, at once: a hidden start schedules no
+    /// fallback, and a normal one waits `window::SHOW_FALLBACK` for it.
+    FallbackShow,
     /// Closes the window through `close()`, which raises the same `CloseRequested` its close button does.
     Close,
     /// The tray's Open dashboard, through the handler of every menu event.
@@ -46,7 +53,8 @@ enum Command<'a> {
     Terminate,
     /// The notices macOS's notification center holds as delivered for the shell, with the identity they were sent under.
     Notices,
-    /// The title of the tray's status item macOS shows, and which of the tray's two images it shows.
+    /// The title of the tray's status item macOS shows, which of the tray's two images it shows, and whether macOS
+    /// shows the item.
     Tray,
     /// The text, the tooltip, and the rendered height in CSS pixels of each element of the window's page that this CSS
     /// selector matches, as the page shows them, in document order.
@@ -61,6 +69,7 @@ fn parse(line: &str) -> Option<Command<'_>> {
     let (name, arg) = line.split_once(' ').map_or((line, ""), |(name, arg)| (name, arg.trim()));
     match (name, arg) {
         ("state", "") => Some(Command::State),
+        ("fallback-show", "") => Some(Command::FallbackShow),
         ("close", "") => Some(Command::Close),
         ("open-dashboard", "") => Some(Command::OpenDashboard),
         ("app-menu", "") => Some(Command::AppMenu),
@@ -104,7 +113,12 @@ fn run<R: Runtime>(app: &AppHandle<R>, command: Command) -> Value {
                 "visible": visible,
                 "trayEnabled": state.tray_enabled(),
                 "keepTrayOnQuit": state.keep_tray_on_quit(),
+                "startShowDecided": state.start_show_decided.load(Ordering::SeqCst),
             })
+        }
+        Command::FallbackShow => {
+            window::show_at_start(app, false, true);
+            json!({ "ok": true })
         }
         Command::Close => match app.get_webview_window(window::MAIN).map(|w| w.close()) {
             Some(Ok(())) => json!({ "ok": true }),
@@ -160,18 +174,20 @@ fn run<R: Runtime>(app: &AppHandle<R>, command: Command) -> Value {
 }
 
 /// The tray as macOS shows it, read on the main thread from the status item Tauri's tray holds: the title of the
-/// item's button, `null` when it shows none, and which of the tray's two images the button shows, told by its pixels
-/// (`tray_image`). It reads neither the state the tray decided nor what `tray::render` asked for.
+/// item's button, `null` when it shows none, which of the tray's two images the button shows, told by its pixels
+/// (`tray_image`), and whether macOS shows the item (`NSStatusItem`'s `visible`). It reads neither the state the tray
+/// decided nor what `tray::render` asked for.
 fn shown_tray<R: Runtime>(app: &AppHandle<R>) -> Value {
     let Some(tray) = app.tray_by_id(tray::TRAY_ID) else { return json!({ "error": "the app has no tray" }) };
     let shown = tray.with_inner_tray_icon(|inner| {
         let mtm = MainThreadMarker::new().expect("with_inner_tray_icon runs on the main thread");
-        // No status item while the tray is hidden.
-        let button = inner.ns_status_item()?.button(mtm)?;
+        // No status item while the tray is hidden: tray-icon removes it from the status bar.
+        let item = inner.ns_status_item()?;
+        let button = item.button(mtm)?;
         // A tray with no title sets an empty one on the button.
         let title = button.title().to_string();
         let image = button.image().map_or("none", |image| tray_image(&image));
-        Some(json!({ "title": (!title.is_empty()).then_some(title), "image": image }))
+        Some(json!({ "title": (!title.is_empty()).then_some(title), "image": image, "visible": item.isVisible() }))
     });
     match shown {
         Ok(Some(answer)) => answer,
@@ -375,6 +391,7 @@ mod tests {
     #[test]
     fn each_command_is_read_from_its_line() {
         assert_eq!(parse("state\n"), Some(Command::State));
+        assert_eq!(parse(" fallback-show\n"), Some(Command::FallbackShow));
         assert_eq!(parse("close"), Some(Command::Close));
         assert_eq!(parse(" open-dashboard "), Some(Command::OpenDashboard));
         assert_eq!(parse("app-menu\n"), Some(Command::AppMenu));
@@ -391,7 +408,7 @@ mod tests {
     fn an_unknown_line_is_no_command() {
         for line in [
             "", "quit", "Close", "open dashboard", "state now", "choose-app-menu", "choose-tray ", "terminate x", "notice", "notices x", "tray x",
-            "Tray", "read", "read ", "click", "Click #x",
+            "Tray", "read", "read ", "click", "Click #x", "fallback", "fallback-show now", "Fallback-show",
         ] {
             assert_eq!(parse(line), None, "{line:?}");
         }
