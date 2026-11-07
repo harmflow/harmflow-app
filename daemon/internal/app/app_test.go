@@ -5829,19 +5829,6 @@ func TestUpdateKeepsTheType(t *testing.T) {
 	}
 }
 
-// legacyIssueTask is issueTask under the GitHub type's legacy names, with a comment a save keeps.
-func legacyIssueTask(id, localPath string) string {
-	return strings.NewReplacer(
-		"  type: github\n", "  # Written before the type was renamed.\n  type: "+domain.LegacyTypeGitHub+"\n",
-		"  github:\n", "  "+domain.LegacyGitHubKey+":\n",
-	).Replace(issueTask(id, localPath, ""))
-}
-
-// hasLegacyNames reports whether a task's text names the GitHub type or its block by a legacy name.
-func hasLegacyNames(text string) bool {
-	return strings.Contains(text, domain.LegacyTypeGitHub) || strings.Contains(text, domain.LegacyGitHubKey)
-}
-
 // firstRepositoryName is the name of the first repository of a decoded github block, nil when it has none.
 func firstRepositoryName(block any) any {
 	repos, _ := valueAt(block, "repositories").([]any)
@@ -5849,76 +5836,6 @@ func firstRepositoryName(block any) any {
 		return nil
 	}
 	return valueAt(repos[0], "name")
-}
-
-// A task file that still names the GitHub type and its block by their legacy names loads as a github task, and nothing
-// rewrites it until it is saved. Then the form and the YAML editor alike write the new names, the YAML editor keeping
-// the file's comments, and the save is no change of the type. A form that still sends the legacy names is read the
-// same way.
-func TestLegacyGitHubNamesLoadAndSaveAsNew(t *testing.T) {
-	e := newEnv(t)
-	repo := mkdir(t, filepath.Join(e.app.Paths().UserHome, "repo"))
-	written := map[string]string{}
-	for _, id := range []string{"from-form", "from-editor"} {
-		written[id] = legacyIssueTask(id, repo)
-		path := filepath.Join(e.app.Paths().Tasks, id+".yaml")
-		if err := os.WriteFile(path, []byte(written[id]), 0o600); err != nil {
-			t.Fatalf("os.WriteFile(%s) = %v, want no error", path, err)
-		}
-	}
-	e.app.scanTaskFiles(t.Context())
-	for id, text := range written {
-		v, err := e.app.GetTask(id)
-		if err != nil || v.Invalid || v.Type != domain.TypeGitHub || !slices.Equal(v.Repositories, []string{"octo/repo"}) {
-			t.Fatalf("GetTask(%s) = %s task, invalid %v, repositories %v, %v; want a valid %s task of octo/repo", id,
-				v.Type, v.Invalid, v.Repositories, err, domain.TypeGitHub)
-		}
-		if got := firstRepositoryName(valueAt(v.Document, "spec", "github")); got != "octo/repo" {
-			t.Errorf("GetTask(%s).Document spec.github.repositories[0].name = %v, want octo/repo", id, got)
-		}
-		if onDisk, err := os.ReadFile(v.Path); err != nil || string(onDisk) != text || v.YAML != text {
-			t.Errorf("os.ReadFile(%s) = %q, %v and GetTask(%s).YAML = %q; want both as written",
-				v.Path, onDisk, err, id, v.YAML)
-		}
-	}
-
-	t.Run("the YAML editor", func(t *testing.T) {
-		view, _ := e.app.GetTask("from-editor")
-		edited := strings.Replace(view.YAML, "Implement the oldest", "Implement the newest", 1)
-		if _, err := e.app.UpdateTask(t.Context(), "from-editor", TaskInput{YAML: edited, BaseRevision: view.Revision}); err != nil {
-			t.Fatalf("UpdateTask(from-editor) = %v, want the edit saved", err)
-		}
-		onDisk, _ := os.ReadFile(view.Path)
-		if text := string(onDisk); hasLegacyNames(text) || !strings.Contains(text, "type: github\n") ||
-			!strings.Contains(text, "  github:\n") || !strings.Contains(text, "Implement the newest") ||
-			!strings.Contains(text, "# Written before the type was renamed.") {
-			t.Errorf("os.ReadFile(%s) after UpdateTask(from-editor) = %q, "+
-				"want the edit and the comment under the new names", view.Path, text)
-		}
-	})
-
-	t.Run("the form", func(t *testing.T) {
-		view, _ := e.app.GetTask("from-form")
-		document, err := json.Marshal(view.Document)
-		if err != nil {
-			t.Fatalf("json.Marshal(GetTask(from-form).Document) = %v, want no error", err)
-		}
-		legacy := strings.NewReplacer(`"type":"github"`, `"type":"`+domain.LegacyTypeGitHub+`"`,
-			`"github":{`, `"`+domain.LegacyGitHubKey+`":{`).Replace(string(document))
-		if !hasLegacyNames(legacy) {
-			t.Fatalf("hasLegacyNames(%s) = false, want true", legacy)
-		}
-		if r := e.app.Validate(t.Context(), TaskInput{Document: json.RawMessage(legacy)}); !r.Valid || hasLegacyNames(r.YAML) {
-			t.Errorf("Validate(the form's document under the legacy names) valid %v, YAML %q, errors %+v; want it valid "+
-				"under the new names", r.Valid, r.YAML, r.Errors)
-		}
-		if _, err := e.app.UpdateTask(t.Context(), "from-form", TaskInput{Document: document, BaseRevision: view.Revision}); err != nil {
-			t.Fatalf("UpdateTask(from-form) = %v, want it saved", err)
-		}
-		if onDisk, _ := os.ReadFile(view.Path); hasLegacyNames(string(onDisk)) {
-			t.Errorf("os.ReadFile(%s) after UpdateTask(from-form) = %q, want the new names", view.Path, onDisk)
-		}
-	})
 }
 
 // A GitHub task need not select the built-in issue implementer, and the rule against merging is the implementer's, not

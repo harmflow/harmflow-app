@@ -210,25 +210,6 @@ func TestUpgradeMovesConfiguredValues(t *testing.T) {
 	}
 }
 
-// A record of any schema that names its task's type by the GitHub type's legacy name reads as a GitHub task's, and
-// every other type stays as it is.
-func TestUpgradeReadsTheLegacyGitHubType(t *testing.T) {
-	for _, c := range []struct{ schema, recorded, want string }{
-		{"1", LegacyTypeGitHub, TypeGitHub},
-		{ExecutionSchemaVersion, LegacyTypeGitHub, TypeGitHub},
-		{ExecutionSchemaVersion, TypeGitHub, TypeGitHub},
-		{ExecutionSchemaVersion, TypeGeneral, TypeGeneral},
-		{ExecutionSchemaVersion, TypeScriptTask, TypeScriptTask},
-	} {
-		x := Execution{SchemaVersion: c.schema, TaskType: c.recorded}
-		x.Upgrade()
-		if x.TaskType != c.want {
-			t.Errorf("Upgrade() of a schema %s record of a %s task: TaskType = %q, want %q", c.schema, c.recorded,
-				x.TaskType, c.want)
-		}
-	}
-}
-
 // A skipped result changes no status, so a selected item can go back to the status it had before.
 func TestSkippedResultKeepsTheStatus(t *testing.T) {
 	for _, outcome := range []string{"skipped", "completed", "failed", ""} {

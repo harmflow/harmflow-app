@@ -18,22 +18,6 @@ const (
 	TypeScriptTask = "script"
 )
 
-// LegacyTypeGitHub and LegacyGitHubKey are the GitHub type's name and its parameters block's from before the type
-// served any task that works GitHub repositories. A task file or an execution record written then may still carry
-// them, and they are read as TypeGitHub and its block.
-const (
-	LegacyTypeGitHub = "github-issue-implementation"
-	LegacyGitHubKey  = "githubIssueImplementation"
-)
-
-// CanonicalType returns a task type's current name: TypeGitHub for LegacyTypeGitHub, and any other type as it is.
-func CanonicalType(t string) string {
-	if t == LegacyTypeGitHub {
-		return TypeGitHub
-	}
-	return t
-}
-
 // Operating systems a script task may declare.
 const (
 	SystemMacOS   = "macos"
