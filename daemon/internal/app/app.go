@@ -142,6 +142,9 @@ type runHandle struct {
 	cancel          context.CancelFunc
 	cancelRequested bool
 	done            chan struct{}
+	// releaseIndex ends the hold of the index file the terminal save was made under, which writes the index; nil
+	// before that save. Only the execution's own goroutine uses it.
+	releaseIndex func()
 }
 
 // App holds the daemon's use cases and their in-memory state: the tasks, executions, schedule, ledger, harness
@@ -202,6 +205,12 @@ type App struct {
 	// written; a save waits only for the saves of its own record. Guarded by mu, it holds a record while a save holds or
 	// waits for it.
 	records map[string]*recordLock
+	// noticeMu orders the saves of the notices as ledgerMu orders the ledger's: a save holds it from its snapshot to the
+	// end of its write. It is taken before mu; no caller of saveNotifications holds mu.
+	noticeMu sync.Mutex
+	// noticeSaves counts the saves of the notices keepNotice started, which run off the caller's path; Stop waits for
+	// them.
+	noticeSaves sync.WaitGroup
 
 	stopOnce sync.Once
 	// stopLoops cancels the context Start runs the loops under, and stopDetection the one of the harness detection it
@@ -370,6 +379,8 @@ func (a *App) Stop(reason domain.Text) {
 			}
 		}
 		a.wg.Wait()
+		// The executions and loops that ended kept their last notices; those saves end before the daemon does.
+		a.noticeSaves.Wait()
 		// No execution or loop asks a harness anything more: the processes harnesses keep between calls end.
 		for _, id := range sortedKeys(a.adapters) {
 			if c, ok := a.adapters[id].(ports.HarnessCloser); ok {
