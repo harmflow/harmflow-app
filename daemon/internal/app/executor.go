@@ -101,6 +101,9 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 		e := a.tasks[x.TaskID]
 		deletePending := e != nil && e.deletePending
 		a.mu.Unlock()
+		if h.releaseIndex != nil {
+			h.releaseIndex() // the index file, written once the task has left the running set
+		}
 		close(h.done)
 		if l, ok := a.d.Events.(interface{ Close(string) }); ok {
 			l.Close(x.ID)
@@ -1540,6 +1543,11 @@ func (r *run) finish(status domain.ExecutionStatus, reason domain.Text) {
 	a.mu.Unlock()
 	for _, key := range unreported {
 		a.failWorkItem(r.x.TaskID, key, r.x.ID, r.lastOperation, r.limitsOrDefault())
+	}
+	if r.h != nil {
+		// The terminal save writes the record but not the index file, whose write waits until the task has left the
+		// running set: execute releases this hold then.
+		r.h.releaseIndex = a.d.Executions.HoldIndex()
 	}
 	r.save(true)
 	// Only now: the ledger must keep the marks of its results until the record says the execution ended.

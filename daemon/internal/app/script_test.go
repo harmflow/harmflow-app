@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/harmflow/harmflow-app/daemon/internal/adapters/fsstore"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/procutil"
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
@@ -669,6 +670,177 @@ func TestScriptStopEndsItsProcesses(t *testing.T) {
 	e.idle("slow")
 	if x.ErrorKey != "execution_timed_out" || x.Attempts[0].Outcome != domain.AttemptTimedOut || alive(child) {
 		t.Errorf("timed out: %s, attempt %+v, child alive %v", x.ErrorKey, x.Attempts[0], alive(child))
+	}
+}
+
+// heldStep holds the first call of a step that writes to disk until free is called, and closes held once it holds it.
+type heldStep struct {
+	first   sync.Once
+	freed   sync.Once
+	held    chan struct{}
+	release chan struct{}
+}
+
+func newHeldStep() *heldStep {
+	return &heldStep{held: make(chan struct{}), release: make(chan struct{})}
+}
+
+// hold blocks the first caller until free; every later caller passes.
+func (h *heldStep) hold() {
+	h.first.Do(func() {
+		close(h.held)
+		<-h.release
+	})
+}
+
+func (h *heldStep) free() { h.freed.Do(func() { close(h.release) }) }
+
+// heldNotices stands in for the state store: it holds the save of the notices whose newest is an execution's failure.
+type heldNotices struct {
+	ports.StateStore
+	step *heldStep
+}
+
+var _ ports.StateStore = (*heldNotices)(nil)
+
+func (h *heldNotices) Save(name string, v any) error {
+	if list, ok := v.([]Notification); ok && name == "notifications" && len(list) > 0 &&
+		list[0].EventType == domain.EventExecutionFailed {
+		h.step.hold()
+	}
+	return h.StateStore.Save(name, v)
+}
+
+// heldIndex stands in for the execution repository and holds where it writes the index file: in the save of a record
+// of an execution that ended, made with no HoldIndex under way, or else in the last release of a HoldIndex under which
+// such a save was made.
+type heldIndex struct {
+	ports.ExecutionRepository
+	step    *heldStep
+	mu      sync.Mutex
+	holds   int
+	pending bool
+}
+
+var _ ports.ExecutionRepository = (*heldIndex)(nil)
+
+func (h *heldIndex) Save(x *domain.Execution) error {
+	err := h.ExecutionRepository.Save(x)
+	h.mu.Lock()
+	writes := x.Status.IsTerminal() && h.holds == 0
+	h.pending = h.pending || x.Status.IsTerminal() && h.holds > 0
+	h.mu.Unlock()
+	if writes {
+		h.step.hold()
+	}
+	return err
+}
+
+func (h *heldIndex) HoldIndex() func() {
+	release := h.ExecutionRepository.HoldIndex()
+	h.mu.Lock()
+	h.holds++
+	h.mu.Unlock()
+	return func() {
+		h.mu.Lock()
+		h.holds--
+		writes := h.holds == 0 && h.pending
+		if writes {
+			h.pending = false
+		}
+		h.mu.Unlock()
+		if writes {
+			h.step.hold()
+		}
+		release()
+	}
+}
+
+// harmflow-app#886: once an execution has failed, neither the save of its failure's notice nor the write of the index
+// file stands between its terminal status and its task leaving the running set. With either step held, the task
+// leaves it; released, the step is still done, and the notice is still published after the failure.
+func TestScriptTaskLeavesTheRunningSetWhileItsEndIsWritten(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		wrap func(step *heldStep) func(*env)
+		// written reports whether the held step's write holds the failed execution.
+		written func(e *env, id string) bool
+	}{
+		{"notice save held", func(step *heldStep) func(*env) {
+			return func(e *env) { e.state = &heldNotices{StateStore: e.state, step: step} }
+		}, func(e *env, id string) bool {
+			var list []Notification
+			if _, err := e.app.d.State.Load("notifications", &list); err != nil {
+				return false
+			}
+			return slices.ContainsFunc(list, func(n Notification) bool {
+				return n.ExecutionID == id && n.EventType == domain.EventExecutionFailed
+			})
+		}},
+		{"index write held", func(step *heldStep) func(*env) {
+			return func(e *env) { e.records = &heldIndex{ExecutionRepository: e.records, step: step} }
+		}, func(e *env, id string) bool {
+			data, err := os.ReadFile(filepath.Join(e.paths.Executions, fsstore.IndexFile))
+			if err != nil {
+				return false
+			}
+			var doc struct {
+				Executions []struct {
+					Summary domain.ExecutionSummary `json:"summary"`
+				} `json:"executions"`
+			}
+			if json.Unmarshal(data, &doc) != nil {
+				return false
+			}
+			for _, en := range doc.Executions {
+				if en.Summary.ID == id && en.Summary.Status == domain.StatusFailed {
+					return true
+				}
+			}
+			return false
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			step := newHeldStep()
+			e := newEnv(t, tc.wrap(step))
+			t.Cleanup(step.free) // before the App stops, which waits for its executions
+			e.createScript("fails", `  script:
+    command: [/bin/sh, -c, "exit 1"]
+`)
+			res, err := e.app.RunTask("fails")
+			if err != nil || res.Outcome != "started" {
+				t.Fatalf("RunTask(fails) = %+v, %v; want it started", res, err)
+			}
+			select {
+			case <-step.held:
+			case <-time.After(time.Minute):
+				t.Fatal("the step to hold never ran")
+			}
+			e.wait(res.ExecutionID, domain.StatusFailed)
+			e.idle("fails")
+
+			step.free()
+			if !e.poll(10*time.Second, func() bool { return tc.written(e, res.ExecutionID) }) {
+				t.Errorf("once released, the held step never wrote execution %s", res.ExecutionID)
+			}
+			var order []string
+			ch, _, cancel := e.app.Subscribe(1)
+			defer cancel()
+			for drained := false; !drained; {
+				select {
+				case ev := <-ch:
+					if ev.ExecutionID == res.ExecutionID && (ev.Type == domain.EventExecutionFailed ||
+						ev.Type == domain.EventNotificationCreated && ev.Payload["eventType"] == domain.EventExecutionFailed) {
+						order = append(order, ev.Type)
+					}
+				default:
+					drained = true
+				}
+			}
+			if want := []string{domain.EventExecutionFailed, domain.EventNotificationCreated}; !slices.Equal(order, want) {
+				t.Errorf("events of execution %s = %v, want %v", res.ExecutionID, order, want)
+			}
+		})
 	}
 }
 

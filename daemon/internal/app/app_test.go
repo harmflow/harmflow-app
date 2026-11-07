@@ -482,6 +482,8 @@ type env struct {
 	timeoutUnit time.Duration
 	// records is the execution repository the App starts on, which a configure may wrap.
 	records ports.ExecutionRepository
+	// state is the state store the App starts on, which a configure may wrap.
+	state ports.StateStore
 	// signer stands in for the harness of its ID, claude or codex, when a test sets one: a harness the daemon can sign
 	// in.
 	signer ports.HarnessAdapter
@@ -525,6 +527,7 @@ func (e *env) start(t *testing.T, configure ...func(*env)) {
 	state, _ := fsstore.NewState(e.paths.State)
 	execs, _ := fsstore.NewExecutions(e.paths.Executions)
 	e.records = execs
+	e.state = state
 	events, _ := eventlog.New(e.paths.Logs, time.Now)
 	v, err := schema.New()
 	if err != nil {
@@ -549,7 +552,7 @@ func (e *env) start(t *testing.T, configure ...func(*env)) {
 		loc = time.UTC
 	}
 	a, err := New(Deps{Paths: e.paths, Version: "test", Clock: e.clock, Wake: e.wake, Location: loc, Tasks: tasks,
-		State: state, Executions: e.records, Events: e.events, Validator: v, Harnesses: harnesses,
+		State: e.state, Executions: e.records, Events: e.events, Validator: v, Harnesses: harnesses,
 		Service: e.service, Workspace: &workspace.Reader{}, TickInterval: time.Hour, TimeoutUnit: e.timeoutUnit,
 		SignInTimeout: e.signInTimeout, HarnessTokens: e.harnessTokens, Identify: e.identify,
 		Logger: logger})

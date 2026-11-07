@@ -166,12 +166,14 @@ func (a *App) notifySignIn(e domain.Event) {
 	a.keepNotice(n)
 }
 
-// keepNotice records a notice, newest first, and announces it.
+// keepNotice records a notice, newest first, and announces it. The notices are saved off the caller's path, so an
+// execution that ended leaves the running set without waiting for that save; what the API lists and publishes is the
+// notices in memory, at once.
 func (a *App) keepNotice(n Notification) {
 	a.mu.Lock()
 	a.notifications = trimNotifications(append([]Notification{n}, a.notifications...))
 	a.mu.Unlock()
-	a.saveNotifications()
+	a.noticeSaves.Go(a.saveNotifications)
 	payload, _ := toMap(n).(map[string]any)
 	a.d.Events.Append(domain.Event{Type: domain.EventNotificationCreated, TaskID: n.TaskID, ExecutionID: n.ExecutionID,
 		Timestamp: n.CreatedAt, Message: n.Title, Payload: payload})
@@ -258,7 +260,10 @@ func (a *App) loadNotifications() {
 	}
 }
 
+// saveNotifications writes the notices as they are now; a later save always writes a later list.
 func (a *App) saveNotifications() {
+	a.noticeMu.Lock()
+	defer a.noticeMu.Unlock()
 	a.mu.Lock()
 	list := append([]Notification(nil), a.notifications...)
 	a.mu.Unlock()
