@@ -61,6 +61,9 @@ type run struct {
 	// that its task does not allow. Both are set before the attempt's harness starts.
 	stopAttempt context.CancelFunc
 	extraUsage  atomic.Bool
+	// ranWith is the harness's saved token the current attempt's session runs with, nil for none, taken before the
+	// harness prepares the session; an attempt that ends signed out rejects only that token.
+	ranWith *tokenRecord
 	// selected holds every work item the session selected, in order, each with what the ledger held for it before;
 	// guarded by the App's mutex.
 	selected []selection
@@ -524,10 +527,10 @@ func (r *run) attempts(ctx context.Context, start func(harness string) error) (d
 				return domain.StatusFailed, domain.T("execution_timed_out", "the execution timeout elapsed")
 			}
 			if end.SignedOut {
-				// A saved token the harness rejected is dropped, and a check on the harness's own sign-in decides whether
-				// its sign-in starts. Either way it runs for the next executions, beside this one, which fails over or fails
-				// as it would anyway.
-				if a.rejectToken(profile.Provider) {
+				// The saved token the attempt ran with, which the harness rejected, is dropped, and a check on the harness's
+				// own sign-in decides whether its sign-in starts; a token saved while the attempt ran stays in use. Either way
+				// it runs for the next executions, beside this one, which fails over or fails as it would anyway.
+				if a.rejectToken(profile.Provider, r.ranWith) {
 					a.detect(ctx, profile.Provider)
 				} else {
 					a.signInWhenSignedOut(profile.Provider)
@@ -732,6 +735,9 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 		at.Prompt, at.SessionContext = eventlog.Redact(req.Prompt), eventlog.Redact(req.Context)
 		r.x.Changed()
 	}
+	// The token Prepare gives the session is this record's, or one saved since: SetHarnessToken hands the harness a token
+	// before it keeps the token's record.
+	r.ranWith = a.tokens[p.Provider]
 	a.mu.Unlock()
 	inv, parser, err := ad.Prepare(info, req)
 	if err != nil {
