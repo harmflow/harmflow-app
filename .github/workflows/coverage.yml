@@ -9,7 +9,7 @@ name: Coverage
 
 on:
   schedule:
-    - cron: "17 6 * * *" # 03:17 in São Paulo
+    - cron: "17 3 * * *" # 03:17 UTC
   workflow_dispatch:
   # A change to the report runs it, so its pull request shows the summary it writes.
   pull_request:
