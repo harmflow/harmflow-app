@@ -10,7 +10,7 @@ name: Dead code
 
 on:
   schedule:
-    - cron: "47 5 * * *" # 02:47 in São Paulo, before the Coverage workflow
+    - cron: "47 5 * * *" # 05:47 UTC
   workflow_dispatch:
   # A change to the report runs it, so its pull request shows the summary it writes.
   pull_request:

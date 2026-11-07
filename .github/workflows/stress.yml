@@ -12,7 +12,7 @@ name: Stress
 
 on:
   schedule:
-    - cron: "47 6 * * *" # 03:47 in São Paulo, after the Coverage workflow
+    - cron: "47 3 * * *" # 03:47 UTC, after the Coverage workflow
   workflow_dispatch:
 
 permissions:

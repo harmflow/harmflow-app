@@ -9,7 +9,7 @@ name: Security
 
 on:
   schedule:
-    - cron: "17 3 * * 1" # Mondays, 00:17 in São Paulo
+    - cron: "17 0 * * 1" # Mondays, 00:17 UTC
   workflow_dispatch:
   # A change to the scan runs it, so its pull request shows what the scan and the audits find.
   pull_request:
