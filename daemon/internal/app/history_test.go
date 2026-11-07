@@ -578,6 +578,8 @@ type unheldSaves struct {
 	saved []string
 }
 
+var _ ports.ExecutionRepository = (*unheldSaves)(nil)
+
 func (u *unheldSaves) HoldIndex() func() {
 	release := u.ExecutionRepository.HoldIndex()
 	u.mu.Lock()

@@ -32,6 +32,10 @@ type tokenHarness struct {
 }
 
 var _ ports.TokenSignIn = (*tokenHarness)(nil)
+var _ ports.HarnessAdapter = (*tokenHarness)(nil)
+var _ ports.ExtraUsageReporter = (*tokenHarness)(nil)
+var _ ports.QuotaReader = (*tokenHarness)(nil)
+var _ ports.SessionKeeper = (*tokenHarness)(nil)
 
 func newTokenHarness() *tokenHarness {
 	return &tokenHarness{fakeHarness: &fakeHarness{id: domain.HarnessClaudeCode}}
@@ -89,6 +93,8 @@ type fakeStore struct {
 	value  string
 	setErr error
 }
+
+var _ ports.SecretStore = (*fakeStore)(nil)
 
 var errNoSecret = errors.New("no secret stored")
 

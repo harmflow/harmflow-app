@@ -467,6 +467,8 @@ type heldState struct {
 	writes []ledgerFile
 }
 
+var _ ports.StateStore = (*heldState)(nil)
+
 func (s *heldState) Load(string, any) (bool, error) { return false, nil }
 
 func (s *heldState) Save(_ string, v any) error {

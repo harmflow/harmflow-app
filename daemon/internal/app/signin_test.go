@@ -28,6 +28,10 @@ type signingHarness struct {
 }
 
 var _ ports.SignInDriver = (*signingHarness)(nil)
+var _ ports.HarnessAdapter = (*signingHarness)(nil)
+var _ ports.ExtraUsageReporter = (*signingHarness)(nil)
+var _ ports.QuotaReader = (*signingHarness)(nil)
+var _ ports.SessionKeeper = (*signingHarness)(nil)
 
 func newSigningHarness(signedIn bool) *signingHarness {
 	return &signingHarness{fakeHarness: &fakeHarness{id: domain.HarnessClaudeCode}, end: make(chan ports.SignInResult),

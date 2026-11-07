@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
+	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
 // heldSchedule is a StateStore whose first Save, once it has begun, waits for release before it writes; it records
@@ -21,6 +22,8 @@ type heldSchedule struct {
 	calls  int
 	writes []scheduleFile
 }
+
+var _ ports.StateStore = (*heldSchedule)(nil)
 
 func (s *heldSchedule) Load(string, any) (bool, error) { return false, nil }
 
