@@ -12,7 +12,11 @@ import pkg from "./package.json" with { type: "json" };
 // The tests of the dashboard against a real harmflowd, which only `make test-desktop-daemon` runs
 // (vitest.daemon.config.ts): the unit run and its coverage floors must not need a daemon. They start it with
 // src/state/realDaemon.ts, which no unit test imports.
-export const DAEMON_TESTS = ["src/state/state.test.ts", "src/state/realDaemon.test.tsx"];
+export const DAEMON_TESTS = [
+  "src/state/state.test.ts",
+  "src/state/realDaemon.test.tsx",
+  "src/screens/ExecutionsScreen.test.tsx",
+];
 
 // In a plain browser the dashboard reaches the daemon through this dev server: /api is forwarded to the address in
 // the daemon's runtime file, with the token added here and the Origin header dropped, so the token never reaches the
