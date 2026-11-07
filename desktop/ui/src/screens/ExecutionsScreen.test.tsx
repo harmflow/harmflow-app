@@ -141,12 +141,21 @@ describe("a dashboard opened late against the real daemon", () => {
     expect(html).toContain(i18n.t("executions.activeTitle", { count: 1 }));
     expect(html).toMatch(/class="exec-card__title" title="Running when the dashboard opens"/);
 
+    // The stream, opened with no cursor, delivers the execution's live events to the store whether or not its detail is
+    // open, and a tick comes every half second. The detail opens once the store holds one, as it may in the app, so
+    // that every run opens it in the same order.
+    const streamed = await until("an event of the execution from the stream", () => getState().events[id]?.[0], SILENCE_MS);
+    expect(streamed.id, "the first streamed event follows the history read before the dashboard opened").toBeGreaterThan(
+      Math.max(0, ...before.map((e) => e.id)),
+    );
+
     // Opening its detail gives the store every event emitted before the dashboard opened, from execution.created on.
     await Promise.all([actions.loadExecution(id), actions.loadEvents(id)]);
     expect(eventsReadsOf(dashboard, id)).toHaveLength(1);
     const atOpen = getState().events[id] ?? [];
-    expect(atOpen[0]?.type).toBe("execution.created");
-    expect(idsAndTypes(atOpen).slice(0, before.length)).toEqual(idsAndTypes(before));
+    expect(idsAndTypes(atOpen).slice(0, before.length), "the history emitted before the dashboard opened").toEqual(
+      idsAndTypes(before),
+    );
     const readUpTo = Math.max(0, ...atOpen.map((e) => e.id));
 
     // The later events arrive from the stream, with no further read of the stored events, until execution.completed.
