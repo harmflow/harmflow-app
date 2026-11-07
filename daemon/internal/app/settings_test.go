@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
+	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
 // fakeAutostart stands in for the launchd agent: it keeps whether autostart is on, and never reaches launchctl or the
@@ -18,6 +19,8 @@ type fakeAutostart struct {
 	enables  []autostartCall
 	disables int
 }
+
+var _ ports.HostServiceManager = (*fakeAutostart)(nil)
 
 type autostartCall struct {
 	executable string

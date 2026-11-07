@@ -40,6 +40,8 @@ type fakeClock struct {
 	now time.Time
 }
 
+var _ ports.Clock = (*fakeClock)(nil)
+
 func (c *fakeClock) Now() time.Time {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -57,6 +59,8 @@ type fakeWake struct {
 	mu sync.Mutex
 	at time.Time
 }
+
+var _ ports.WakeMonitor = (*fakeWake)(nil)
 
 func (w *fakeWake) LastWake() time.Time {
 	w.mu.Lock()
@@ -98,6 +102,11 @@ type fakeHarness struct {
 	// that enforces everything.
 	restrictions []ports.Restriction
 }
+
+var _ ports.HarnessAdapter = (*fakeHarness)(nil)
+var _ ports.ExtraUsageReporter = (*fakeHarness)(nil)
+var _ ports.QuotaReader = (*fakeHarness)(nil)
+var _ ports.SessionKeeper = (*fakeHarness)(nil)
 
 func (f *fakeHarness) ID() string   { return f.id }
 func (f *fakeHarness) Name() string { return f.id }
@@ -254,6 +263,8 @@ type fakeParser struct {
 	finished func() // the executor calls Finish once the process has exited and its output is drained
 }
 
+var _ ports.OutputParser = (*fakeParser)(nil)
+
 func (p *fakeParser) Line(b []byte) []ports.HarnessEvent {
 	s := string(b)
 	wasWaiting := p.waiting
@@ -378,6 +389,8 @@ type hookedEvents struct {
 	invalid []string
 	count   atomic.Int64 // events appended
 }
+
+var _ ports.EventLog = (*hookedEvents)(nil)
 
 func newHookedEvents(t *testing.T, log *eventlog.Log, v *schema.Validator) *hookedEvents {
 	h := &hookedEvents{Log: log, schema: v, checked: map[string]int{}}
@@ -7406,6 +7419,8 @@ type countedExecutions struct {
 	saves map[string]int
 	holds int
 }
+
+var _ ports.ExecutionRepository = (*countedExecutions)(nil)
 
 func (c *countedExecutions) Save(x *domain.Execution) error {
 	c.mu.Lock()
