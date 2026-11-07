@@ -24,8 +24,12 @@ const (
 	eventsTab     = `.detail .tabs [role="tab"]:nth-child(2)`
 )
 
-// element is an element of the window's page, as the shell's test control channel reads it: its text and its tooltip.
-type element struct{ text, title string }
+// element is an element of the window's page, as the shell's test control channel reads it: its text, its tooltip, and
+// the height it renders at, in CSS pixels.
+type element struct {
+	text, title string
+	height      float64
+}
 
 // read is the elements of the window's page that the CSS selector matches, in document order, read through the shell's
 // test control channel.
@@ -37,7 +41,8 @@ func (s *shell) read(selector string) []element {
 		e, _ := item.(map[string]any)
 		text, _ := e["text"].(string)
 		title, _ := e["title"].(string)
-		out = append(out, element{text, title})
+		height, _ := e["height"].(float64)
+		out = append(out, element{text, title, height})
 	}
 	return out
 }

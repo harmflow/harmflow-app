@@ -1520,8 +1520,11 @@ body:has([aria-modal="true"]) .tooltip {
   font-size: var(--hf-font-size-2xs);
 }
 
+/* overflow-x makes the row a scroll container, whose automatic minimum height is 0: in a flex column of fixed height,
+   such as the editor's or an execution's detail, it would absorb the column's overflow and shrink to its border. */
 .tabs {
   display: flex;
+  flex-shrink: 0;
   gap: var(--hf-space-1);
   margin: 0 var(--hf-space-4);
   border-bottom: 1px solid var(--hf-color-border);

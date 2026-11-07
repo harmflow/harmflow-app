@@ -5,8 +5,8 @@
 //! (harmflow-app#464). It reads the app menu macOS shows, chooses one of its items or one of the tray's, and asks the
 //! app to quit as the Dock's Quit does (harmflow-app#655). It reads the notices macOS delivered for the shell
 //! (harmflow-app#515), and the title and the image of the tray's status item macOS shows (harmflow-app#880). It reads
-//! what the window's page shows and clicks in it, as a user's click does (harmflow-app#873). A test of what else the
-//! shell does adds its own command here.
+//! what the window's page shows and clicks in it, as a user's click does (harmflow-app#873), with the height each
+//! element renders at (harmflow-app#912). A test of what else the shell does adds its own command here.
 
 use std::io::{BufRead, Write};
 use std::sync::mpsc;
@@ -48,8 +48,8 @@ enum Command<'a> {
     Notices,
     /// The title of the tray's status item macOS shows, and which of the tray's two images it shows.
     Tray,
-    /// The text and the tooltip of each element of the window's page that this CSS selector matches, as the page shows
-    /// them, in document order.
+    /// The text, the tooltip, and the rendered height in CSS pixels of each element of the window's page that this CSS
+    /// selector matches, as the page shows them, in document order.
     Read(&'a str),
     /// Clicks the first element of the window's page that this CSS selector matches, as a user's click does: the page
     /// gets the same click event, and a checkbox or a button acts on it.
@@ -143,7 +143,7 @@ fn run<R: Runtime>(app: &AppHandle<R>, command: Command) -> Value {
         Command::Read(selector) => in_page(
             app,
             &format!(
-                "({{ elements: Array.from(document.querySelectorAll({}), (e) => ({{ text: e.innerText, title: e.title }})) }})",
+                "({{ elements: Array.from(document.querySelectorAll({}), (e) => ({{ text: e.innerText, title: e.title, height: e.getBoundingClientRect().height }})) }})",
                 js_string(selector)
             ),
         ),
