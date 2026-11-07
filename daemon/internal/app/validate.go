@@ -67,17 +67,6 @@ func (a *App) validate(ctx context.Context, in TaskInput, mode catalogMode) *Val
 		}
 		value, r.node, r.content = v, node, []byte(in.YAML)
 		r.YAML = in.YAML
-		// A file with the GitHub type's legacy names loads under the new ones, and a save writes them. The text as
-		// written stays what the editor shows and what each issue's line and column point into; loading a file never
-		// writes its content.
-		if schema.RenameLegacy(value, node) {
-			out, err := encodeNode(node)
-			if err != nil {
-				r.Errors = append(r.Errors, schema.Issue{Text: domain.TextOf(err), Code: "syntax"})
-				return r
-			}
-			r.content = out
-		}
 	case len(in.Document) > 0 && string(in.Document) != "null":
 		v, err := schema.FromJSON(in.Document)
 		if err != nil {
@@ -86,10 +75,6 @@ func (a *App) validate(ctx context.Context, in TaskInput, mode catalogMode) *Val
 			return r
 		}
 		value = v
-		if schema.RenameLegacy(value, nil) {
-			// value holds only what JSON decodes to, so encoding it again cannot fail.
-			in.Document, _ = json.Marshal(value)
-		}
 		// The editor shows YAML even for a document the form cannot save yet.
 		var plain any
 		if json.Unmarshal(in.Document, &plain) == nil {

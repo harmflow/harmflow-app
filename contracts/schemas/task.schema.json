@@ -64,7 +64,7 @@
       }
     },
     "taskType": {
-      "description": "github works GitHub repositories and takes their targets and per-cycle limits; general takes no type parameters; script runs a program of the user's instead of a harness session. A file that still names the type github-issue-implementation, or its block githubIssueImplementation, loads as github, and saving it writes the new names.",
+      "description": "github works GitHub repositories and takes their targets and per-cycle limits; general takes no type parameters; script runs a program of the user's instead of a harness session.",
       "type": "string",
       "enum": [
         "github",

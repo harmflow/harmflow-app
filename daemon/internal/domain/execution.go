@@ -355,7 +355,6 @@ func (x *Execution) Upgrade() {
 		}
 		x.Model = ""
 	}
-	x.TaskType = CanonicalType(x.TaskType)
 	x.SchemaVersion = ExecutionSchemaVersion
 }
 

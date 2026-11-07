@@ -200,8 +200,7 @@ spec:
 ```
 
 A GitHub task does in its repositories what its prompt, agents, and skills say: this one implements issues with the
-built-in issue implementer, which never merges. A file that still names the type `github-issue-implementation` and its
-block `githubIssueImplementation` loads as before, and saving it writes the new names.
+built-in issue implementer, which never merges.
 
 A repository's `baseBranch` is `main` unless it names another, and any branch is accepted. GitHub links a pull
 request's `Closes #<n>` to its issue only when the pull request goes into the repository's default branch. With
