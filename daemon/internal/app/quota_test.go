@@ -187,6 +187,39 @@ func TestExtraUsageAllowed(t *testing.T) {
 	}
 }
 
+// A task that allows extra usage, whose Claude Code session turns to extra usage and then fails for a reason of its own,
+// ends as that failure: the attempt is not ended for its extra usage, its error is not read as an exhausted quota, and
+// the execution does not move to its fallback. The pause after the report gives a stop the time to end the attempt
+// first, were it applied whatever the task allows.
+func TestExtraUsageAllowedEndsOnTheSessionsOwnFailure(t *testing.T) {
+	e := newEnv(t)
+	e.create("generous", codexFallback+"  execution:\n    allowExtraUsage: true\n")
+	e.claude.setScript(func(ports.RunRequest) string { return "echo 'EXTRA usage'; sleep 1; echo 'END error'" })
+	r, _ := e.app.RunTask("generous")
+	x := e.wait(r.ExecutionID, domain.StatusFailed)
+	if len(x.Attempts) != 1 || x.Attempts[0].Harness != domain.HarnessClaudeCode ||
+		x.Attempts[0].Outcome != domain.AttemptFailed || x.Attempts[0].ErrorKey == "extra_usage_stopped" {
+		t.Fatalf("attempts %+v; want one Claude Code attempt that failed on its own error", x.Attempts)
+	}
+	if x.HarnessSwitches != 0 {
+		t.Errorf("%d harness switches, want 0", x.HarnessSwitches)
+	}
+	if n := e.codex.promptCount(); n != 0 {
+		t.Errorf("Codex got %d prompts, want 0", n)
+	}
+	counts, _ := e.eventCounts(r.ExecutionID)
+	for _, ev := range []string{domain.EventHarnessSwitched, domain.EventHarnessQuotaExhausted} {
+		if counts[ev] != 0 {
+			t.Errorf("%d %s events, want 0", counts[ev], ev)
+		}
+	}
+	for _, w := range x.Warnings {
+		if w.Code == domain.WarningPolicyUnenforced {
+			t.Errorf("warning %+v on a task that allows extra usage", w)
+		}
+	}
+}
+
 // A task that allows no extra usage is warned at validation for each harness of its chain that cannot be stopped once
 // it runs, Codex here; one that allows it is not. A script task, which runs no harness, does not take the key.
 func TestExtraUsageValidation(t *testing.T) {
