@@ -53,10 +53,11 @@ type shell struct {
 	exited  chan struct{}
 }
 
-// startShell starts the desktop shell on the daemon's home, with its test control channel on.
-func startShell(t *testing.T, bin string, d *daemon) *shell {
+// startShell starts the desktop shell on the daemon's home, with its test control channel on and the arguments args,
+// such as the --hidden the login item starts it with.
+func startShell(t *testing.T, bin string, d *daemon, args ...string) *shell {
 	t.Helper()
-	cmd := exec.Command(bin)
+	cmd := exec.Command(bin, args...)
 	cmd.Env = daemonEnv([]string{"HARMFLOW_HOME=" + d.home, "HARMFLOW_TEST_SHELL_CONTROL=1", "HARMFLOW_DAEMON_BIN=" + binary})
 	in, err := cmd.StdinPipe()
 	if err != nil {
@@ -103,14 +104,22 @@ func startShell(t *testing.T, bin string, d *daemon) *shell {
 // send writes a command and returns its answer, failing the test on an error or no answer within ten seconds.
 func (s *shell) send(command string) map[string]any {
 	s.t.Helper()
+	answer := s.ask(command)
+	if answer["error"] != nil {
+		s.t.Fatalf("%s: %v", command, answer["error"])
+	}
+	return answer
+}
+
+// ask writes a command and returns its answer, an error the shell answers with included, failing the test when the
+// shell exits or gives no answer within ten seconds.
+func (s *shell) ask(command string) map[string]any {
+	s.t.Helper()
 	if _, err := fmt.Fprintln(s.in, command); err != nil {
 		s.t.Fatalf("%s: %v", command, err)
 	}
 	select {
 	case answer := <-s.answers:
-		if answer["error"] != nil {
-			s.t.Fatalf("%s: %v", command, answer["error"])
-		}
 		return answer
 	case <-s.exited:
 		s.t.Fatalf("%s: the shell exited", command)
