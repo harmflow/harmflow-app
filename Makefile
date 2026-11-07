@@ -74,7 +74,7 @@ deps: ## Install the desktop's JavaScript dependencies
 	pnpm -C desktop install --frozen-lockfile
 
 .PHONY: test
-test: test-daemon test-desktop test-integration test-packaging ## Run every test
+test: test-daemon test-desktop test-desktop-daemon test-integration test-packaging ## Run every test
 
 .PHONY: test-daemon
 test-daemon: ## Unit tests of the daemon
@@ -86,6 +86,11 @@ test-desktop: sidecar ## Type check and unit tests of the desktop
 	pnpm -C desktop typecheck
 	pnpm -C desktop test
 	cd desktop/src-tauri && cargo test
+
+# Apart from test-desktop and coverage-desktop, whose unit run and floors must not need a daemon.
+.PHONY: test-desktop-daemon
+test-desktop-daemon: daemon ## The dashboard's store and timeline against a real daemon, with fake harnesses
+	HARMFLOW_TEST_DAEMON="$(CURDIR)/build/harmflowd" pnpm -C desktop test:daemon
 
 .PHONY: check-imports
 check-imports: ## Fail on Go imports outside the Go guide's three groups, as CI does

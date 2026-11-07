@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:daemon": "vitest run --config vitest.daemon.config.ts",
     "typecheck": "tsc --noEmit -p .",
     "generate": "openapi-typescript ../../contracts/api/openapi.yaml -o src/api/generated.ts"
   },
