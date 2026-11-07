@@ -159,20 +159,31 @@ describe("spacing", () => {
   });
 });
 
+/** A rule of app.css by its exact selector, with where it starts: of two rules of one class each, the later wins. */
+function rule(selector: string): { at: number; body: string } {
+  const match = new RegExp(`(?:^|\\n)${selector.replace(/[.]/g, "\\.")}\\s*{([^}]*)}`).exec(appCss);
+  expect(match, selector).not.toBeNull();
+  return { at: match!.index, body: match![1] };
+}
+
 describe("the History filter bar", () => {
   it("keeps a date field only as wide as its date, not the full width of the bar's line", () => {
-    // A rule of app.css by its exact selector, with where it starts: of two rules of one class each, the later wins.
-    const rule = (selector: string) => {
-      const match = new RegExp(`(?:^|\\n)${selector.replace(/[.]/g, "\\.")}\\s*{([^}]*)}`).exec(appCss);
-      expect(match, selector).not.toBeNull();
-      return { at: match!.index, body: match![1] };
-    };
     const input = rule(".input");
     const date = rule(".filters__date");
     expect(input.body).toMatch(/width:\s*100%;/);
     expect(date.body).toMatch(/(?:^|[\s;])width:\s*auto;/);
     expect(date.body).not.toMatch(/width:\s*100%/);
     expect(date.at).toBeGreaterThan(input.at);
+  });
+});
+
+describe("the tab row", () => {
+  it("keeps its height in a flex column of fixed height, as the task editor and an execution's detail are", () => {
+    // overflow-x makes the row a scroll container, whose automatic minimum height is 0: without flex-shrink: 0, a
+    // column whose content is taller than it shrinks the row to its border (harmflow-app#912).
+    const tabs = rule(".tabs");
+    expect(tabs.body).toMatch(/(?:^|[\s;])flex-shrink:\s*0;/);
+    expect(tabs.body).toMatch(/overflow-x:\s*auto;/);
   });
 });
 
