@@ -2,6 +2,7 @@
 package launchd
 
 import (
+	"bytes"
 	"encoding/xml"
 	"fmt"
 	"os"
@@ -57,6 +58,67 @@ func (a *Agent) Enable(executable string, args []string, env map[string]string) 
 	return fsstore.WriteAtomic(a.PlistPath, []byte(plist), 0o644)
 }
 
+// Refresh brings the user agent up to date with what Enable would write now, so an agent an earlier version wrote, with
+// the Background process class say, takes the current one at the next login (harmflow-app#907). It rewrites only an
+// agent that starts this daemon: one whose ProgramArguments and EnvironmentVariables are the ones Enable would write
+// for executable, args, and env. An agent that starts another executable, or this one with other arguments or
+// variables, is left as it is, so a test or development daemon never takes over the user's agent. With no agent,
+// autostart is off and Refresh writes none. It reports whether it rewrote the agent, and calls no launchctl: the daemon
+// running now goes on.
+func (a *Agent) Refresh(executable string, args []string, env map[string]string) (bool, error) {
+	data, err := os.ReadFile(a.PlistPath)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	plist := renderPlist(executable, args, env, a.LogPath)
+	if string(data) == plist {
+		return false, nil
+	}
+	written, err := decodePlist(data)
+	if err != nil {
+		return false, fmt.Errorf("read the user agent %q: %w", a.PlistPath, err)
+	}
+	if !startsDaemon(written, append([]string{executable}, args...), env) {
+		return false, nil
+	}
+	if err := fsstore.WriteAtomic(a.PlistPath, []byte(plist), 0o644); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// startsDaemon reports whether a decoded user agent runs program with the variables env and no others: the same
+// ProgramArguments, and the same EnvironmentVariables, an agent without them having none.
+func startsDaemon(plist map[string]any, program []string, env map[string]string) bool {
+	got, ok := plist["ProgramArguments"].([]any)
+	if !ok || len(got) != len(program) {
+		return false
+	}
+	for i, v := range got {
+		if s, ok := v.(string); !ok || s != program[i] {
+			return false
+		}
+	}
+	gotEnv := map[string]any{}
+	if v, ok := plist["EnvironmentVariables"]; ok {
+		if gotEnv, ok = v.(map[string]any); !ok {
+			return false
+		}
+	}
+	if len(gotEnv) != len(env) {
+		return false
+	}
+	for k, v := range env {
+		if s, ok := gotEnv[k].(string); !ok || s != v {
+			return false
+		}
+	}
+	return true
+}
+
 // Disable deletes the user agent, so the next login does not start the daemon. It calls no launchctl: a bootout would
 // stop the daemon launchd started, the very one serving the request, and end its executions (harmflow-app#81). The job
 // launchd already loaded stays until logout, so until then KeepAlive may still restart a daemon that crashes.
@@ -108,7 +170,7 @@ func renderPlist(executable string, args []string, env map[string]string, logPat
     <false/>
   </dict>
   <key>ProcessType</key>
-  <string>Background</string>
+  <string>Standard</string>
   <key>StandardErrorPath</key>
   <string>%s</string>
   <key>StandardOutPath</key>
@@ -117,4 +179,76 @@ func renderPlist(executable string, args []string, env map[string]string, logPat
 </plist>
 `, esc(logPath), esc(logPath))
 	return b.String()
+}
+
+// decodePlist reads an XML property list whose root is a dictionary: a dict is a map, an array a slice, a string a
+// string, and true and false a bool. Any other value is an error.
+func decodePlist(data []byte) (map[string]any, error) {
+	d := xml.NewDecoder(bytes.NewReader(data))
+	for {
+		tok, err := d.Token()
+		if err != nil {
+			return nil, err
+		}
+		if start, ok := tok.(xml.StartElement); ok && start.Name.Local != "plist" {
+			v, err := plistValue(d, start)
+			if err != nil {
+				return nil, err
+			}
+			dict, ok := v.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("the root is a %s, not a dict", start.Name.Local)
+			}
+			return dict, nil
+		}
+	}
+}
+
+func plistValue(d *xml.Decoder, start xml.StartElement) (any, error) {
+	switch start.Name.Local {
+	case "string":
+		var s string
+		err := d.DecodeElement(&s, &start)
+		return s, err
+	case "true", "false":
+		return start.Name.Local == "true", d.Skip()
+	case "array", "dict":
+		var items []any
+		var keys []string
+		for {
+			tok, err := d.Token()
+			if err != nil {
+				return nil, err
+			}
+			switch tok := tok.(type) {
+			case xml.StartElement:
+				if start.Name.Local == "dict" && tok.Name.Local == "key" {
+					var k string
+					if err := d.DecodeElement(&k, &tok); err != nil {
+						return nil, err
+					}
+					keys = append(keys, k)
+					continue
+				}
+				v, err := plistValue(d, tok)
+				if err != nil {
+					return nil, err
+				}
+				items = append(items, v)
+			case xml.EndElement:
+				if start.Name.Local == "array" {
+					return items, nil
+				}
+				if len(keys) != len(items) {
+					return nil, fmt.Errorf("a dict with %d keys and %d values", len(keys), len(items))
+				}
+				dict := map[string]any{}
+				for i, k := range keys {
+					dict[k] = items[i]
+				}
+				return dict, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("unexpected <%s>", start.Name.Local)
 }

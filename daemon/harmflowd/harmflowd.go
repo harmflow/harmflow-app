@@ -210,6 +210,16 @@ func Run(cfg Config, registrations ...Registration) error {
 			daemonEnv[name] = v
 		}
 	}
+	// An agent an earlier version wrote for this daemon takes what Enable writes now from the next login. The daemon
+	// goes on whatever the rewrite does: it only changes what the next login starts.
+	service := launchd.NewAgent(userHome, filepath.Join(paths.Logs, "daemon.log"))
+	if exe != "" {
+		if rewritten, err := service.Refresh(exe, daemonArgs, daemonEnv); err != nil {
+			logger.Printf("bringing the login agent up to date: %v", err)
+		} else if rewritten {
+			logger.Printf("brought the login agent %s up to date; it applies from the next login", service.Location())
+		}
+	}
 	system := sysinfo.New(paths.Home)
 	a, err := app.New(app.Deps{
 		Paths: paths, Version: cfg.Version, Commit: cfg.Commit, BuiltAt: cfg.BuiltAt, Wake: wake.NewMonitor(),
@@ -218,7 +228,7 @@ func Run(cfg Config, registrations ...Registration) error {
 			&claudecode.Adapter{Home: userHome, PathEnv: pathEnv, Env: harnessEnv},
 			&codex.Adapter{Home: userHome, PathEnv: pathEnv, Env: harnessEnv, ClientVersion: cfg.Version},
 		},
-		Service:    launchd.NewAgent(userHome, filepath.Join(paths.Logs, "daemon.log")),
+		Service:    service,
 		System:     system,
 		Tools:      &tools.Prober{Home: userHome, PathEnv: pathEnv, Env: harnessEnv},
 		Workspace:  &workspace.Reader{PathEnv: pathEnv, Env: harnessEnv},
