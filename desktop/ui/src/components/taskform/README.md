@@ -2,11 +2,11 @@
 
 ## Overview
 
-This folder contains the parts that `TaskForm` renders inside its sections: the agent the prompt is copied from, the script fields, the agent and skill pickers, the repository list, the harness profile and its fallback list, the custom permission lists, the whole-number and closed-set fields, and the schedule builder.
+This folder contains the parts that `TaskForm` renders inside its sections: the agent the prompt is copied from, the script fields, the agent and skill pickers, the repository list, the harness profile and its fallback list, the custom permission lists, the whole-number and closed-set fields, the schedule builder, and the parameters the cited skills and agents declare.
 
 ## Interface
 
-- Each part is exported by its named module. `[AgentOrigin.tsx:AgentOrigin]` `[ScriptFields.tsx:ScriptFields]` `[NamePicker.tsx:NamePicker]` `[RepositoryList.tsx:RepositoryList]` `[HarnessProfile.tsx:HarnessProfile]` `[HarnessProfile.tsx:FallbackList]` `[ListArea.tsx:ListArea]` `[IntField.tsx:IntField]` `[EnumField.tsx:EnumField]` `[ScheduleFields.tsx:ScheduleFields]`
+- Each part is exported by its named module. `[AgentOrigin.tsx:AgentOrigin]` `[ScriptFields.tsx:ScriptFields]` `[NamePicker.tsx:NamePicker]` `[RepositoryList.tsx:RepositoryList]` `[HarnessProfile.tsx:HarnessProfile]` `[HarnessProfile.tsx:FallbackList]` `[ListArea.tsx:ListArea]` `[IntField.tsx:IntField]` `[EnumField.tsx:EnumField]` `[ScheduleFields.tsx:ScheduleFields]` `[DeclaredParameters.tsx:DeclaredParameters]` `[DeclaredParameters.tsx:declaredGroups]`
 - What several modules share lives in `formModel.ts`: the list row type, the setter type, the closed sets, and the row cleaner. `OPTION_FIELDS` is also re-exported by `TaskForm.tsx` for its existing importers. `[formModel.ts:OPTION_FIELDS]` `[formModel.ts:cleanRow]` `[formModel.ts:SetFn]` `[formModel.ts:Item]`
 
 ## Invariants

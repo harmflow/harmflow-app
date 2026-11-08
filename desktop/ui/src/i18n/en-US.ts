@@ -345,6 +345,18 @@ export const enUS = {
     skill_not_found: 'skill "{{name}}" cannot be found for {{harness}} ($t(itemSource.{{source}}))',
     agent_missing: 'agent "{{name}}" is missing on this machine for {{harness}} ($t(itemSource.{{source}}))',
     skill_missing: 'skill "{{name}}" is missing on this machine for {{harness}} ($t(itemSource.{{source}}))',
+    parameter_required: '{{kind}} "{{item}}" needs a value for its parameter "{{name}}"',
+    parameter_wrong_type: 'the parameter "{{name}}" of {{kind}} "{{item}}" must be of type {{type}}',
+    parameter_schema_mismatch: 'the parameter "{{name}}" of {{kind}} "{{item}}" does not match its schema: {{detail}}',
+    parameter_schema_invalid:
+      'the schema {{kind}} "{{item}}" declares for its parameter "{{name}}" cannot be used, so its value is not checked: {{detail}}',
+    parameter_schema_missing: '{{kind}} "{{item}}" declares its object parameter "{{name}}" with no schema, so the parameter is ignored',
+    parameter_type_unknown:
+      '{{kind}} "{{item}}" declares its parameter "{{name}}" with the unknown type "{{type}}", so the parameter is ignored',
+    parameter_undeclared:
+      'no cited {{kind}} "{{item}}" declares the parameter "{{name}}", so its value is left out of the session and dropped on the next save',
+    parameters_unverified:
+      'the file of {{kind}} "{{item}}" cannot be read, so its parameter values are passed as the task gives them, unchecked',
     fallback_agent_missing:
       '{{harness}} is not a valid fallback: agent "{{name}}" cannot be found for it ($t(itemSource.{{source}}))',
     fallback_skill_missing:
@@ -1092,6 +1104,15 @@ export const enUS = {
       permissions: "Permissions",
       execution: "Limits",
       notifications: "Notifications",
+      parameters: "Parameters of the skills and agents",
+    },
+    paramTypes: {
+      text: "text",
+      number: "number",
+      boolean: "yes or no",
+      text_list: "list of text, one per line",
+      repository: "repository, owner/name",
+      object: "YAML, as JSON",
     },
     agent: {
       label: "Agent",
@@ -1196,6 +1217,11 @@ export const enUS = {
         "Usage billed beyond what the AI tool's plan includes. Off, an attempt does not start on an AI tool whose plan is used up, and a Claude Code attempt that turns to extra usage is ended. On, neither check holds an attempt back.",
       notificationsEnabled: "Native notifications",
       notificationEvents: "Notify me about",
+      parametersOf: {
+        skill: "Skill {{name}}",
+        agent: "Agent {{name}}",
+      },
+      parameterUnreadable: "Not valid YAML in its JSON form yet; the last valid value is kept",
       programKind: "What it runs",
       programCommand: "A program",
       programInline: "An inline script",

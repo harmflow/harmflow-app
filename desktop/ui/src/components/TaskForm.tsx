@@ -7,6 +7,7 @@ import { NOTIFIABLE_EVENTS, schemaDefault, schemaEnum } from "../lib/schema";
 import { getIn, setIn, slugify, type Doc, type Path } from "../lib/taskForm";
 import { Icon, type IconName } from "./Icon";
 import { AgentOrigin } from "./taskform/AgentOrigin";
+import { DeclaredParameters, declaredGroups } from "./taskform/DeclaredParameters";
 import { EnumField } from "./taskform/EnumField";
 import type { Item } from "./taskform/formModel";
 import { FallbackList, HarnessProfile } from "./taskform/HarnessProfile";
@@ -81,6 +82,7 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
   const isGithub = type === "github";
   // A script task runs a program instead of a harness session: no prompt, agents, skills, or harness.
   const isScript = type === "script";
+  const declared = isScript ? [] : declaredGroups(doc, catalog);
 
   const setName = (name: string) => {
     let next = setIn(doc, ["metadata", "name"], name);
@@ -296,6 +298,12 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
           })}
         </FieldGroup>
       </Section>
+
+      {declared.length > 0 ? (
+        <Section id="parameters" title={t("tasks.sections.parameters")} icon="layers">
+          <DeclaredParameters groups={declared} doc={doc} set={set} errorPaths={errorPaths} />
+        </Section>
+      ) : null}
     </div>
   );
 }
