@@ -15,6 +15,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
@@ -25,6 +26,24 @@ type FrontMatter struct {
 	Tools       any    `yaml:"tools"`
 	Model       string `yaml:"model"`
 	Skills      any    `yaml:"skills"`
+	// Parameters are the parameters a task that cites the skill or agent gives it values for.
+	Parameters []domain.ParameterDeclaration `yaml:"parameters"`
+}
+
+// Declarations reads the parameters the skill or agent at path declares: an agent's file, or a skill's folder, whose
+// SKILL.md it reads. One that declares none has none; an error means its file could not be read. A front matter that
+// does not parse declares none, as Parse reads it.
+func Declarations(kind, path string) ([]domain.ParameterDeclaration, error) {
+	file := path
+	if kind == "skill" {
+		file = filepath.Join(path, "SKILL.md")
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return nil, err
+	}
+	fm, _ := Parse(data)
+	return fm.Parameters, nil
 }
 
 // Parse splits a Markdown file into its front matter and body.

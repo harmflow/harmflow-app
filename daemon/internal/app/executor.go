@@ -50,6 +50,9 @@ type run struct {
 	items          []attemptWorkItem // the work items the current attempt works, guarded by a.mu
 	finalText      string            // the agent's last message, the summary when the session leaves no report
 	hasContext     bool              // context.json holds parameters or history the session can use, not only the task's identity
+	// declared are the values of the parameters the task's agents and skills declare, as the current attempt's harness
+	// finds them, with their defaults; empty before the attempt resolves them.
+	declared domain.DeclaredParameters
 	// lineOperation is set while the last operation is a pull request a progress line recorded, and lineCommands is how
 	// many commands had started when that line was read; both are guarded by the App's mutex.
 	lineOperation bool
@@ -445,15 +448,16 @@ func (r *run) writeContext(prev []previousAttempt) error {
 		history = history[:50]
 	}
 	params := r.eff.TypeParameters()
+	declared := map[string]any{"skills": nonNilValues(r.declared.Skills), "agents": nonNilValues(r.declared.Agents)}
 	// Without any of these the file holds only the task's own name and past runs, which a session can mistake for
 	// the subject of the prompt.
-	r.hasContext = params != nil || len(items) > 0 || len(interrupted) > 0 || len(prev) > 0
+	r.hasContext = params != nil || hasValues(r.declared) || len(items) > 0 || len(interrupted) > 0 || len(prev) > 0
 	ctxDoc := map[string]any{
 		"schemaVersion": "1",
 		"harmflow":      map[string]any{"version": a.d.Version},
 		"task": map[string]any{
 			"id": r.def.Metadata.ID, "name": r.def.Metadata.Name, "type": r.def.Spec.Type,
-			"parameters": params,
+			"parameters": params, "declaredParameters": declared,
 		},
 		"execution": map[string]any{"id": r.x.ID, "trigger": r.x.Trigger, "attempt": r.attempt + 1,
 			"timeoutAt": r.x.TimeoutAt},
@@ -471,6 +475,51 @@ func (r *run) writeContext(prev []previousAttempt) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(r.dir, "context.json"), data, 0o600)
+}
+
+// nonNilValues is a map of declared values as context.json writes it: an object, never null.
+func nonNilValues(m map[string]map[string]any) map[string]map[string]any {
+	if m == nil {
+		return map[string]map[string]any{}
+	}
+	return m
+}
+
+// hasValues says whether any agent or skill has a declared parameter with a value or a default.
+func hasValues(p domain.DeclaredParameters) bool {
+	for _, m := range []map[string]map[string]any{p.Skills, p.Agents} {
+		for _, vals := range m {
+			if len(vals) > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// declareParameters checks the values the task gives the parameters its agents and skills declare, as this attempt's
+// harness found them, and keeps the values its session receives. A value validation would refuse ends the attempt as
+// the task's error: a task file edited outside the dashboard, or an agent or skill changed since it was saved, does not
+// run with it. A value no cited item declares any longer is a warning on the execution, and left out.
+func (r *run) declareParameters(agents, skills []ports.ResolvedItem) *domain.TextError {
+	var items []domain.ItemParameters
+	for _, it := range agents {
+		items = append(items, declaredBy("agent", it.Name, it))
+	}
+	for _, it := range skills {
+		items = append(items, declaredBy("skill", it.Name, it))
+	}
+	declared, problems := domain.ResolveParameters(r.eff.Spec.Parameters, items, r.a.d.Validator.CheckDeclared)
+	for _, p := range problems {
+		if p.Error {
+			return &domain.TextError{Text: p.Text}
+		}
+	}
+	for _, p := range problems {
+		r.warn(domain.Warning{Code: domain.WarningOther, Subject: p.Path, Text: p.Text}, "", false)
+	}
+	r.declared = declared
+	return nil
 }
 
 func (r *run) repositoryPaths() map[string]string {
@@ -725,6 +774,15 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 	for _, w := range warnings {
 		r.warn(w, "", false)
 	}
+	// The declared values are known only once the attempt's harness has found its items. A value the declarations refuse
+	// ends the attempt once it is recorded, before its harness starts.
+	refused := r.declareParameters(agents, skills)
+	if refused == nil {
+		if err := r.writeContext(prev); err != nil {
+			refused = &domain.TextError{Text: domain.T("context_write_failed", "writing context.json: {{detail}}",
+				"detail", err.Error())}
+		}
+	}
 	now := a.now()
 	a.mu.Lock()
 	n := len(r.x.Attempts) + 1
@@ -743,6 +801,11 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 	a.mu.Unlock()
 	r.setStatus(domain.StatusRunning, domain.T("step_starting_harness", "Starting {{harness}}", "harness", ad.Name()))
 	r.save(true)
+	if refused != nil {
+		end := domain.AttemptEnd{Class: domain.ClassTaskError, Error: refused.Text}
+		r.endAttempt(end, -1)
+		return end, false
+	}
 
 	req := ports.RunRequest{
 		ExecutionID: r.x.ID, TaskID: r.x.TaskID, Attempt: n, Prompt: r.eff.Spec.Prompt,

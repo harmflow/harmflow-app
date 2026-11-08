@@ -83,21 +83,22 @@ type TaskMetadata struct {
 
 // TaskSpec is a task's spec block. A script task has no prompt and no harness, so both are left out of its file.
 type TaskSpec struct {
-	Enabled       *bool            `yaml:"enabled,omitempty" json:"enabled,omitempty"`
-	Type          string           `yaml:"type" json:"type"`
-	Prompt        string           `yaml:"prompt,omitempty" json:"prompt,omitempty"`
-	Origin        *Origin          `yaml:"origin,omitempty" json:"origin,omitempty"`
-	Agents        []string         `yaml:"agents,omitempty" json:"agents,omitempty"`
-	Skills        []string         `yaml:"skills,omitempty" json:"skills,omitempty"`
-	Workspace     *Workspace       `yaml:"workspace,omitempty" json:"workspace,omitempty"`
-	Schedule      *Schedule        `yaml:"schedule,omitempty" json:"schedule,omitempty"`
-	Concurrency   *Concurrency     `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
-	Harness       HarnessSelection `yaml:"harness,omitempty" json:"harness,omitzero"`
-	Permissions   *Permissions     `yaml:"permissions,omitempty" json:"permissions,omitempty"`
-	Execution     *ExecutionLimits `yaml:"execution,omitempty" json:"execution,omitempty"`
-	Notifications *Notifications   `yaml:"notifications,omitempty" json:"notifications,omitempty"`
-	GitHub        *GitHubSpec      `yaml:"github,omitempty" json:"github,omitempty"`
-	Script        *ScriptSpec      `yaml:"script,omitempty" json:"script,omitempty"`
+	Enabled       *bool               `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	Type          string              `yaml:"type" json:"type"`
+	Prompt        string              `yaml:"prompt,omitempty" json:"prompt,omitempty"`
+	Origin        *Origin             `yaml:"origin,omitempty" json:"origin,omitempty"`
+	Agents        []string            `yaml:"agents,omitempty" json:"agents,omitempty"`
+	Skills        []string            `yaml:"skills,omitempty" json:"skills,omitempty"`
+	Parameters    *DeclaredParameters `yaml:"parameters,omitempty" json:"parameters,omitempty"`
+	Workspace     *Workspace          `yaml:"workspace,omitempty" json:"workspace,omitempty"`
+	Schedule      *Schedule           `yaml:"schedule,omitempty" json:"schedule,omitempty"`
+	Concurrency   *Concurrency        `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
+	Harness       HarnessSelection    `yaml:"harness,omitempty" json:"harness,omitzero"`
+	Permissions   *Permissions        `yaml:"permissions,omitempty" json:"permissions,omitempty"`
+	Execution     *ExecutionLimits    `yaml:"execution,omitempty" json:"execution,omitempty"`
+	Notifications *Notifications      `yaml:"notifications,omitempty" json:"notifications,omitempty"`
+	GitHub        *GitHubSpec         `yaml:"github,omitempty" json:"github,omitempty"`
+	Script        *ScriptSpec         `yaml:"script,omitempty" json:"script,omitempty"`
 }
 
 // Origin is the agent a task's prompt was copied from and a hash of what was copied. The task never runs that agent:
@@ -576,6 +577,7 @@ func (d TaskDocument) clone() TaskDocument {
 	s.Origin = clonePtr(s.Origin)
 	s.Agents = cloneSlice(s.Agents)
 	s.Skills = cloneSlice(s.Skills)
+	s.Parameters = s.Parameters.clone()
 	if s.Workspace != nil {
 		w := *s.Workspace
 		s.Workspace = &w

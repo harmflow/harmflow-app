@@ -17,12 +17,22 @@
     "task": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "name", "type", "parameters"],
+      "required": ["id", "name", "type", "parameters", "declaredParameters"],
       "properties": {
         "id": { "type": "string" },
         "name": { "type": "string" },
         "type": { "type": "string" },
-        "parameters": { "description": "The block of the task's type, as task.schema.json describes it; null for a type that has none.", "type": ["object", "null"] }
+        "parameters": { "description": "The block of the task's type, as task.schema.json describes it; null for a type that has none.", "type": ["object", "null"] },
+        "declaredParameters": {
+          "description": "The values of the parameters the task's skills and agents declare, in the shape of the task's spec.parameters: each one the task gives, and the default of each it does not. A value whose declaration is gone is left out; the values of a skill whose declaration the harness gives no file to read are passed as the task gives them.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["skills", "agents"],
+          "properties": {
+            "skills": { "type": "object", "additionalProperties": { "type": "object" } },
+            "agents": { "type": "object", "additionalProperties": { "type": "object" } }
+          }
+        }
       }
     },
     "execution": {

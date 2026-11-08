@@ -1016,6 +1016,14 @@ components:
         - skill_not_found
         - agent_missing
         - skill_missing
+        - parameter_required
+        - parameter_wrong_type
+        - parameter_schema_mismatch
+        - parameter_schema_invalid
+        - parameter_schema_missing
+        - parameter_type_unknown
+        - parameter_undeclared
+        - parameters_unverified
         - fallback_agent_missing
         - fallback_skill_missing
         - skill_list_unreadable
@@ -1493,6 +1501,34 @@ components:
           items: { type: string }
         copy:
           $ref: "#/components/schemas/AgentCopy"
+        parameters:
+          description: >-
+            The parameters it declares in its front matter, which a task that cites it gives values for under
+            spec.parameters. Absent when its file cannot be read, as for a plugin's skill, so its parameters are not
+            known; an empty list when it declares none.
+          type: array
+          items:
+            $ref: "#/components/schemas/ParameterDeclaration"
+
+    ParameterDeclaration:
+      description: One parameter a skill or an agent declares, as its front matter writes it.
+      type: object
+      required: [name, type, required]
+      properties:
+        name: { type: string }
+        type:
+          type: string
+          enum: [text, number, boolean, text_list, repository, object]
+        description: { type: string }
+        default:
+          description: The value a task that gives none takes.
+        required:
+          description: Whether a task must give it a value when it has no default.
+          type: boolean
+        schema:
+          description: The JSON Schema an object parameter's value must match.
+          type: object
+          additionalProperties: true
 
     AgentCopy:
       description: >-
