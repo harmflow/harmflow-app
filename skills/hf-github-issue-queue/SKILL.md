@@ -13,7 +13,7 @@ executions. Read `task.parameters.queue` from `context.json`:
 | `maxDiscoveredPerCycle` | 10 | How many eligible new issues a cycle discovers, across all the task's repositories together (§2); excluded and already-processed issues do not count |
 | `maxItemsPerCycle` | 1 | How many work items this execution processes |
 | `ordering` | `oldest_first` | `oldest_first` or `newest_first`, by issue creation — the order discovery reads issues in (§2) |
-| `resumeStrategy` | `resume_first` | `resume_first`, `new_first`, or `alternate` between the two lists |
+| `resumeStrategy` | `resume_first` | `resume_first`, `new_first`, or `alternate`: one item of §1 and one new issue in turn, starting with §1, within the cycle only — with one item a cycle it takes an item of §1 whenever there is one (§3) |
 | `maxResumeAttempts` | 3 | Resumptions of one item before it needs a human |
 | `maxFailedRetries` | 3 | Operational failures of one item before it needs a human |
 
@@ -147,10 +147,20 @@ another's. Build both lists before you select anything, then merge them by `resu
 - `resume_first`: every item of §1 — the drafts to resume, then the work to retry — and then the new issues.
 - `new_first`: every new issue, and then every item of §1. Work to retry is an item of §1 like a draft to resume: under
   `new_first`, a new eligible issue comes before it, whatever their ages.
+- `alternate`: one item of §1, then one new issue, in turn, starting with an item of §1 — the drafts to resume first,
+  then the work to retry, as §1's list reads — never two of one kind in a row while both lists have items left. Once
+  one list is empty, the rest of the other follows in its own order. It alternates within this cycle only and keeps no
+  state between executions: with `maxItemsPerCycle: 1`, it takes the kind it starts with, an item of §1, whenever
+  there is one, as `resume_first` does.
 
 For example, `context.json` lists `OWNER/REPO#12` as `failed`, with `failures: 1`, no pull request links it, and
 `maxFailedRetries` is 3, so it is work to retry. `OWNER/REPO#15`, opened later, is a new eligible issue, and nothing
 is left to resume. With `maxItemsPerCycle: 1`, `resume_first` selects `#12`, and `new_first` selects `#15`.
+
+For `alternate`, managed drafts to resume link `OWNER/REPO#20` and `OWNER/REPO#21`, in §1's order, and `#30` and
+`#31`, opened later, are new eligible issues, in the task's `ordering`. With `maxItemsPerCycle: 4`, `alternate`
+selects `#20`, `#30`, `#21`, `#31`; `resume_first` would select `#20`, `#21`, `#30`, `#31`, and `new_first` `#30`,
+`#31`, `#20`, `#21`. With `maxItemsPerCycle: 1`, `alternate` selects `#20`.
 
 For each selected item, append one line to `progress.jsonl`. Its `message` is the issue's title, then ` — from `
 and the list the item came from: `drafts to resume`, `work to retry`, or `new issues`.
