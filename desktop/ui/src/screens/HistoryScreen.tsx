@@ -1,5 +1,6 @@
 // Every execution, newest first, kept with no time limit. Opening one replays its stored
-// events, or says its log expired.
+// events, or says its log expired. Opened again in the same app session, the screen shows at once what it showed when
+// the user left it, its filters included, then brings it up to date.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, type ExecutionQuery } from "../api/client";
@@ -9,7 +10,7 @@ import { HarnessLabel } from "../components/Shell";
 import { Banner, Button, Chip, EmptyState, IconButton, Select, StatusChip, TextInput } from "../components/ui";
 import { formatDateTime, formatElapsed, formatNumber } from "../lib/format";
 import { useDebounced } from "../lib/hooks";
-import { useStore } from "../state/store";
+import { actions, getState, useStore } from "../state/store";
 
 const STATUSES: ExecutionStatus[] = [
   "queued",
@@ -55,25 +56,39 @@ export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpe
   const { t, i18n } = useTranslation();
   const tasks = useStore((s) => s.tasks);
   const lastEventId = useStore((s) => s.lastEventId);
-  const [status, setStatus] = useState("");
-  const [taskId, setTaskId] = useState("");
-  const [trigger, setTrigger] = useState("");
-  const [search, setSearch] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [rows, setRows] = useState<ExecutionSummary[]>([]);
+  // What the screen showed when the user last left it in this app session, read once: the screen starts from it.
+  const [kept] = useState(() => getState().history);
+  const [status, setStatus] = useState(kept?.filters.status ?? "");
+  const [taskId, setTaskId] = useState(kept?.filters.taskId ?? "");
+  const [trigger, setTrigger] = useState(kept?.filters.trigger ?? "");
+  const [search, setSearch] = useState(kept?.filters.search ?? "");
+  const [from, setFrom] = useState(kept?.filters.from ?? "");
+  const [to, setTo] = useState(kept?.filters.to ?? "");
+  const [rows, setRows] = useState<ExecutionSummary[]>(kept?.rows ?? []);
   // How many executions the filters match, as the daemon counts them; none until it says.
-  const [total, setTotal] = useState<number | undefined>(undefined);
+  const [total, setTotal] = useState<number | undefined>(kept?.total);
   const [loading, setLoading] = useState(false);
-  const [exhausted, setExhausted] = useState(false);
+  const [exhausted, setExhausted] = useState(kept?.exhausted ?? false);
   const refreshKey = useDebounced(lastEventId, 1500);
   // The daemon filters by the search text, so it is sent once the user stops typing, not on every key.
   const searched = useDebounced(search.trim(), 300);
   const bounds = useMemo(() => period(from, to), [from, to]);
 
+  // What is shown is kept for the next visit. A change of a filter marks the rows stale until a fetch under the new
+  // filters ends, so that a visit after one that failed fetches them again.
+  useEffect(() => {
+    const filters = { status, taskId, trigger, search, from, to };
+    const held = getState().history?.filters;
+    if (held && (Object.keys(filters) as (keyof typeof filters)[]).every((k) => held[k] === filters[k])) return;
+    actions.keepHistory({ filters, stale: true });
+  }, [status, taskId, trigger, search, from, to]);
+  useEffect(() => {
+    actions.keepHistory({ rows, total, exhausted });
+  }, [rows, total, exhausted]);
+
   // How many executions are shown, which the automatic refresh fetches again, and the filters' generation, which a
   // change of a filter moves on so that a refresh begun under the old filters drops its result.
-  const loaded = useRef(0);
+  const loaded = useRef(kept?.rows.length ?? 0);
   useEffect(() => {
     loaded.current = rows.length;
   }, [rows]);
@@ -87,15 +102,20 @@ export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpe
     return (before?: string): ExecutionQuery => ({ ...chosen, limit: PAGE, before, ...bounds });
   }, [status, taskId, trigger, searched, bounds]);
 
+  // A first page, or a refresh, fetched under the filters still set, brings the kept rows up to date as of the last
+  // event read before it began. A next page leaves that as it was: the rows above it were fetched earlier.
   const load = useCallback(
     async (before?: string) => {
       if (!pageQuery) return;
+      const eventId = getState().lastEventId;
+      const begun = generation.current;
       setLoading(true);
       try {
         const page = await api.executionPage(pageQuery(before));
         setRows((prev) => (before ? append(prev, page.rows) : page.rows));
         setTotal(page.total);
         setExhausted(page.rows.length < PAGE);
+        if (!before && generation.current === begun) actions.keepHistory({ eventId, stale: false });
       } catch {
         // The connection banner tells the user; keep what is shown.
       } finally {
@@ -111,6 +131,7 @@ export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpe
   const refresh = useCallback(async () => {
     if (!pageQuery) return;
     const wanted = loaded.current;
+    const eventId = getState().lastEventId;
     const begun = generation.current;
     setLoading(true);
     try {
@@ -125,6 +146,7 @@ export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpe
       setRows(held);
       setTotal(page.total);
       setExhausted(page.rows.length < PAGE);
+      actions.keepHistory({ eventId, stale: false });
     } catch {
       // The connection banner tells the user; keep what is shown.
     } finally {
@@ -133,18 +155,30 @@ export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpe
   }, [pageQuery]);
 
   // A change of a filter starts again from the first page, since what was loaded belongs to the old filters; an
-  // execution event, once debounced, refreshes what is shown.
-  const seen = useRef({ load, refreshKey });
+  // execution event, once debounced, refreshes what is shown. On the screen's first render, nothing kept loads the
+  // first page; rows kept are already shown, and are refreshed in the background only when an event came since they
+  // were fetched, or they are stale. A render that changed neither, as StrictMode's second run of the effects, does
+  // nothing more.
+  const seen = useRef<{ load: typeof load; refreshKey: number } | null>(null);
   useEffect(() => {
     const prev = seen.current;
     seen.current = { load, refreshKey };
-    if (prev.load === load && prev.refreshKey !== refreshKey) {
-      void refresh();
+    if (!prev) {
+      if (!kept) {
+        generation.current++;
+        void load();
+      } else if (kept.stale || kept.eventId !== getState().lastEventId) {
+        void refresh();
+      }
       return;
     }
-    generation.current++;
-    void load();
-  }, [load, refresh, refreshKey]);
+    if (prev.load !== load) {
+      generation.current++;
+      void load();
+    } else if (prev.refreshKey !== refreshKey) {
+      void refresh();
+    }
+  }, [kept, load, refresh, refreshKey]);
 
   const opened = rows.find((r) => r.id === openId);
 

@@ -5,25 +5,36 @@
 // itest › TestRetentionExpiresTheLogAtStart's. An execution that found no work is listed as No work, in the neutral
 // tone, and one that was interrupted as Interrupted, in the warning tone, neither as a failure; one that opened a draft
 // whose tests failed as Completed, with its Tests failed and PR chips, never as Failed. Its filter bar gives
-// the date fields the class that keeps them on the filters' line.
+// the date fields the class that keeps them on the filters' line. Opened again in the same app session, the screen
+// shows its kept rows and filters before any request answers, then refreshes them in the background only when an event
+// came since, or the connection was lost.
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { native } from "../api/native";
+import type { StreamHandlers } from "../api/transport";
 import type { Execution, ExecutionOutput, ExecutionSummary, HarmflowEvent, TaskSummary } from "../api/types";
 import i18n from "../i18n";
-import { patchStateForTests } from "../state/store";
+import { patchStateForTests, startSync } from "../state/store";
 import { HistoryScreen } from "./HistoryScreen";
 
 // The daemon as the client sees it: `GET /executions` lists the executions it holds, of one task, fired by one trigger,
 // and holding a search text in the task's name when the query names them, newest first, a page of at most `limit`
-// created before `before`, with how many the filters match in its total; every other route has its answer; and every
-// request it received.
+// created before `before`, with how many the filters match in its total, or fails while `failing`, or waits for
+// `release` while `holding`; every other route has its answer; every request it received; and the stream it feeds.
 const daemon = vi.hoisted(() => ({
   executions: [] as ExecutionSummary[],
   answers: new Map<string, unknown>(),
   requests: [] as string[],
+  failing: false,
+  holding: false,
+  waiting: [] as Array<() => void>,
+  stream: undefined as StreamHandlers | undefined,
 }));
+function release() {
+  daemon.holding = false;
+  daemon.waiting.splice(0).forEach((answer) => answer());
+}
 vi.mock("../api/transport", () => ({
   isTauri: () => false,
   EVENT_TYPES: [],
@@ -33,6 +44,7 @@ vi.mock("../api/transport", () => ({
       daemon.requests.push(`${method} ${path}`);
       const [route, search] = path.split("?");
       if (method === "GET" && route === "/executions") {
+        if (daemon.failing) return { status: 500, body: null };
         const params = new URLSearchParams(search);
         const taskId = params.get("taskId");
         const trigger = params.get("trigger");
@@ -42,12 +54,16 @@ vi.mock("../api/transport", () => ({
           (x) => (!taskId || x.taskId === taskId) && (!trigger || x.trigger === trigger) && (!text || x.taskName.toLowerCase().includes(text)),
         );
         const listed = matched.filter((x) => !before || x.createdAt < before);
-        return { status: 200, body: listed.slice(0, Number(params.get("limit") ?? listed.length)), total: matched.length };
+        const answer = { status: 200, body: listed.slice(0, Number(params.get("limit") ?? listed.length)), total: matched.length };
+        return daemon.holding ? new Promise((resolve) => daemon.waiting.push(() => resolve(answer))) : answer;
       }
       return daemon.answers.has(route) ? { status: 200, body: daemon.answers.get(route) } : { status: 404, body: null };
     },
     requestText: async () => ({ status: 404, text: "" }),
-    stream: () => () => {},
+    stream: (handlers: StreamHandlers) => {
+      daemon.stream = handlers;
+      return () => {};
+    },
   },
 }));
 
@@ -152,7 +168,10 @@ afterEach(() => {
   daemon.executions = [];
   daemon.answers.clear();
   daemon.requests.length = 0;
-  patchStateForTests({ tasks: [], details: {}, events: {}, logExpired: {} });
+  daemon.failing = false;
+  release();
+  // As a new launch of the app: nothing of History is kept.
+  patchStateForTests({ tasks: [], details: {}, events: {}, logExpired: {}, history: undefined, lastEventId: 0 });
 });
 
 /** Lets the stand-in daemon's answers arrive and React render them. */
@@ -180,6 +199,18 @@ async function choose(filter: string, value: string) {
     setValue.call(select, value);
     select.dispatchEvent(new Event("change", { bubbles: true }));
   });
+  await settle();
+}
+
+/** Types a search text as the user does, then lets the screen's pause after typing pass. */
+async function type(text: string) {
+  const input = host!.querySelector<HTMLInputElement>('input[aria-label="Search"]')!;
+  const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+  await act(async () => {
+    setValue.call(input, text);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(() => new Promise<void>((resolve) => setTimeout(resolve, 350)));
   await settle();
 }
 
@@ -394,18 +425,6 @@ describe("the count of the executions loaded out of those that match", () => {
   const footer = () => host!.querySelector(".table__footer")!.textContent;
   const query = (request: string) => Object.fromEntries(new URLSearchParams(request.split("?")[1]));
 
-  /** Types a search text as the user does, then lets the screen's pause after typing pass. */
-  async function type(text: string) {
-    const input = host!.querySelector<HTMLInputElement>('input[aria-label="Search"]')!;
-    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
-    await act(async () => {
-      setValue.call(input, text);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 350)));
-    await settle();
-  }
-
   it("shows the count, follows Load more and each filter, and sends the trigger and the search text to the daemon", async () => {
     daemon.executions = [...Array.from({ length: 80 }, (_, n) => nth(n)), { ...aged, createdAt: at(0) }];
     await open();
@@ -461,5 +480,134 @@ describe("the filter bar", () => {
       expect(date.classList.contains("input"), date.getAttribute("aria-label")!).toBe(true);
       expect(date.classList.contains("filters__date"), date.getAttribute("aria-label")!).toBe(true);
     }
+  });
+});
+
+describe("History opened again in the same app session", () => {
+  /** The instant `minutes` after 09:00, as the daemon writes it. */
+  const at = (minutes: number) => new Date(Date.UTC(2026, 6, 1, 9, minutes)).toISOString();
+  /** The standup's nth execution counting back from the newest: 80 of them make a full page and part of a second. */
+  const nth = (n: number): ExecutionSummary => ({ ...other, id: `exec-${String(n).padStart(3, "0")}`, createdAt: at(100 - n), startedAt: at(100 - n), endedAt: at(100 - n) });
+  const footer = () => host!.querySelector(".table__footer")!.textContent;
+  const query = (request: string) => Object.fromEntries(new URLSearchParams(request.split("?")[1]));
+  const filter = (label: string) => host!.querySelector<HTMLInputElement | HTMLSelectElement>(`[aria-label="${label}"]`)!.value;
+  /** History's own requests, apart from the lists the store reads for the other screens. */
+  const historyRequests = () => daemon.requests.filter((r) => r.startsWith("GET /executions?") && !/[?&](active|status)=/.test(r));
+
+  /** Leaves History for another screen, which unmounts it, as the app does. */
+  const leave = () => act(() => root!.unmount());
+
+  /** Opens History again, without waiting for the daemon's answers. */
+  async function reopen() {
+    root = createRoot(host!);
+    await act(async () => root!.render(<Screen />));
+  }
+
+  it("shows the rows, the count, and the filters before any request answers, then refreshes them as an event asks", async () => {
+    const running: ExecutionSummary = { ...nth(60), status: "running", endedAt: undefined };
+    daemon.executions = Array.from({ length: 80 }, (_, n) => (n === 60 ? running : nth(n)));
+    await open();
+    await choose("Task", standup.id);
+    await type("Standup");
+    const more = [...host!.querySelectorAll<HTMLButtonElement>(".table__footer button")].find((b) => b.textContent === "Load older executions")!;
+    await act(async () => more.click());
+    await settle();
+    expect(rows()).toHaveLength(80);
+    expect(footer()).toBe("Showing 80 / 80No older executions.");
+    leave();
+
+    // While the user is on another screen, the running execution ends, and its event reaches the app.
+    daemon.executions = daemon.executions.map((x) => (x.id === running.id ? nth(60) : x));
+    act(() => patchStateForTests({ lastEventId: 1 }));
+    daemon.requests.length = 0;
+    daemon.holding = true;
+    await reopen();
+
+    // Before any answer: the same rows, the pages Load more added included, the same count, and the same filters.
+    expect(rows()).toHaveLength(80);
+    expect(host!.querySelector(".empty__title")).toBeNull();
+    expect(footer()).toBe("Showing 80 / 80No older executions.");
+    expect(filter("Task")).toBe(standup.id);
+    expect(filter("Search")).toBe("Standup");
+    expect(cell(rowOf(running.id)!, 1).textContent).toBe("Running");
+
+    // In the background, the screen fetches again as many as were shown, under the same filters, and shows the new state.
+    release();
+    await settle();
+    expect(daemon.requests.map(query)).toEqual([
+      { taskId: standup.id, search: "Standup", limit: "50" },
+      { taskId: standup.id, search: "Standup", limit: "50", before: nth(49).createdAt },
+    ]);
+    expect(rows()).toHaveLength(80);
+    expect(cell(rowOf(running.id)!, 1).textContent).toBe("Completed");
+
+    // A change of a filter still starts again from the first page.
+    daemon.requests.length = 0;
+    await choose("Task", "");
+    expect(daemon.requests.map(query)).toEqual([{ search: "Standup", limit: "50" }]);
+    expect(rows()).toHaveLength(50);
+  });
+
+  it("asks nothing when no event came since, keeps the rows when the refresh fails, and asks again on the next visit", async () => {
+    daemon.executions = [other, aged];
+    await open();
+    expect(rows()).toHaveLength(2);
+    leave();
+
+    // No event came since the rows were fetched: no request.
+    daemon.requests.length = 0;
+    await reopen();
+    await settle();
+    expect(daemon.requests).toEqual([]);
+    expect(rows()).toHaveLength(2);
+    leave();
+
+    // An event came, and the refresh fails: the rows and the count stay as they were.
+    act(() => patchStateForTests({ lastEventId: 1 }));
+    daemon.failing = true;
+    await reopen();
+    await settle();
+    expect(daemon.requests).toEqual(["GET /executions?limit=50"]);
+    expect(rows()).toHaveLength(2);
+    expect(footer()).toBe("Showing 2 / 2No older executions.");
+    leave();
+
+    // They were not brought up to date, so the next visit asks again.
+    daemon.failing = false;
+    daemon.requests.length = 0;
+    await reopen();
+    await settle();
+    expect(daemon.requests).toEqual(["GET /executions?limit=50"]);
+    expect(rows()).toHaveLength(2);
+  });
+
+  // The store's sync starts once per file and keeps its connection: this test stays the file's last.
+  it("fetches the rows again on the next visit after the connection to the daemon was lost, with no event since", async () => {
+    // The app's sync, its periodic refreshes held still: only the stream's connection changes here.
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    startSync();
+    act(() => daemon.stream!.onConnection("connected"));
+    await settle();
+    daemon.executions = [other, aged];
+    await open();
+    leave();
+
+    daemon.requests.length = 0;
+    await reopen();
+    await settle();
+    expect(historyRequests()).toEqual([]);
+    leave();
+
+    // The connection is lost, then the daemon answers again.
+    act(() => {
+      daemon.stream!.onConnection("reconnecting");
+      daemon.stream!.onConnection("connected");
+    });
+    await settle();
+    daemon.requests.length = 0;
+    await reopen();
+    await settle();
+    expect(historyRequests()).toEqual(["GET /executions?limit=50"]);
+    expect(rows()).toHaveLength(2);
   });
 });

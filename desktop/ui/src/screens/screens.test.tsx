@@ -1528,6 +1528,8 @@ describe("the History screen's period", () => {
     root = host = undefined;
     daemon.answers.clear();
     daemon.requests.length = 0;
+    // Each test opens History as on a new launch, with nothing kept from the one before.
+    patchStateForTests({ history: undefined });
   });
 
   /** Lets the stand-in daemon's answers arrive and React render them. */
