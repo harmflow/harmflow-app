@@ -5,6 +5,7 @@ import { esES } from "../i18n/es-ES";
 import { ptBR } from "../i18n/pt-BR";
 
 const ui = join(__dirname, "..", "..");
+const src = join(__dirname, "..");
 const appCss = readFileSync(join(__dirname, "app.css"), "utf8");
 const fontsCss = readFileSync(join(__dirname, "fonts.css"), "utf8");
 const themeCss = readFileSync(join(__dirname, "theme.css"), "utf8");
@@ -156,6 +157,184 @@ describe("spacing", () => {
     const defined = new Set(scale.map((d) => d.property));
     const read = found.flatMap((d) => [...d.value.matchAll(/var\((--hf-space-[\w-]+)\)/g)].map(([, token]) => token));
     expect([...new Set(read)].filter((token) => !defined.has(token))).toEqual([]);
+  });
+});
+
+// The CSS named colors. transparent and currentColor are left out: they name no color of their own.
+const namedColors = new Set(
+  (
+    "aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood " +
+    "cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray " +
+    "darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen " +
+    "darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue " +
+    "firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew " +
+    "hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan " +
+    "lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue " +
+    "lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine " +
+    "mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise " +
+    "mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange " +
+    "orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum " +
+    "powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna " +
+    "silver skyblue slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet " +
+    "wheat white whitesmoke yellow yellowgreen"
+  ).split(" "),
+);
+
+interface Literal {
+  file: string;
+  line: number;
+  value: string;
+}
+
+/**
+ * The literal colors of a CSS value, with where each starts in it: a hex value, rgb() or hsl() whose channels are not
+ * a token, or a named color. rgba(var(--hf-rgb-…), <alpha>) takes its channels from a token and is none.
+ */
+function colorsIn(value: string): { at: number; value: string }[] {
+  const unquoted = value.replace(/"[^"]*"|'[^']*'/g, (s) => " ".repeat(s.length));
+  const matches = [
+    ...unquoted.matchAll(/#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3,4})(?![\w-])/gi),
+    ...unquoted.matchAll(/(?<![\w-])(?:rgb|hsl)a?\((?!\s*var\()[^)]*\)/gi),
+    ...[...unquoted.matchAll(/(?<![\w#-])[a-z]+(?![\w(-])/gi)].filter(([word]) => namedColors.has(word.toLowerCase())),
+  ];
+  return matches.map((m) => ({ at: m.index, value: m[0] })).sort((a, b) => a.at - b.at);
+}
+
+/** The line of an offset in a text, counted from 1. */
+function lineAt(text: string, offset: number): number {
+  return text.slice(0, offset).split("\n").length;
+}
+
+/** A text with its comments blanked out, so that offsets and lines stay where they were. */
+function withoutComments(text: string, line: RegExp | null): string {
+  const blank = (s: string) => s.replace(/[^\n]/g, " ");
+  const blocks = text.replace(/\/\*[\s\S]*?\*\//g, blank);
+  return line ? blocks.replace(line, blank) : blocks;
+}
+
+/** The literal colors of a stylesheet's declarations. */
+function stylesheetColors(file: string, css: string): Literal[] {
+  const text = withoutComments(css, null);
+  return [...text.matchAll(/(?<![\w-])-{0,2}[a-z][\w-]*\s*:\s*([^;{}]+)(?=[;}])/gi)].flatMap((declaration) => {
+    const start = declaration.index + declaration[0].length - declaration[1].length;
+    return colorsIn(declaration[1]).map(({ at, value }) => ({ file, line: lineAt(text, start + at), value }));
+  });
+}
+
+// The style properties of an inline style object that take a color, with their value up to the next property, and
+// the SVG attributes that take one, with theirs.
+const styleProperty =
+  /(?<![\w$.])(?:[a-z]+Color|color|background(?:Image)?|border(?:Top|Right|Bottom|Left)?|outline|boxShadow|textShadow|fill|stroke)\s*:\s*((?:"[^"\n]*"|'[^'\n]*'|`[^`]*`|[^,}\n"'`])*)/g;
+const svgAttribute = /(?<![\w-])(?:fill|stroke|stopColor|floodColor|lightingColor|color)=("[^"]*"|'[^']*'|\{[^}\n]*\})/g;
+
+/**
+ * The literal colors a component sets in an inline style or an SVG attribute: in its string literals there, but the
+ * ones a comparison reads (`tone === "cyan"`), which set nothing.
+ */
+function componentColors(file: string, source: string): Literal[] {
+  const text = withoutComments(source, /(?<![:"'`\\])\/\/[^\n]*/g);
+  return [...text.matchAll(styleProperty), ...text.matchAll(svgAttribute)]
+    .flatMap((setting) => {
+      const start = setting.index + setting[0].length - setting[1].length;
+      const strings = [...setting[1].matchAll(/"[^"]*"|'[^']*'|`[^`]*`/g)].filter(
+        (string) =>
+          !/[=!]=\s*$/.test(setting[1].slice(0, string.index)) && !/^\s*[=!]=/.test(setting[1].slice(string.index + string[0].length)),
+      );
+      return strings.flatMap((string) =>
+        colorsIn(string[0].slice(1, -1)).map(({ at, value }) => ({ offset: start + string.index + 1 + at, value })),
+      );
+    })
+    .sort((a, b) => a.offset - b.offset)
+    .map(({ offset, value }) => ({ file, line: lineAt(text, offset), value }));
+}
+
+/**
+ * The gradients whose stops only fill a mask: a mask reads how opaque its fill is, not its color, so their literal
+ * stops set opacity and draw no color on screen. Each is named here with its file, and nothing else is allowed.
+ */
+const maskGradients = [
+  {
+    file: "components/Icon.tsx",
+    id: "fade",
+    why: "the logo's fade: its white stops fill the mask that fades the wave's two ends out",
+  },
+];
+
+/** Where a gradient's element starts and ends in a source, from its id. */
+function gradientAt(source: string, id: string): { start: number; end: number } | null {
+  const match = new RegExp(`<(linearGradient|radialGradient)\\b[^>]*\\bid=\\{?["'\`][^"'\`]*\\b${id}["'\`]\\}?[^>]*>[\\s\\S]*?</\\1>`).exec(source);
+  return match ? { start: match.index, end: match.index + match[0].length } : null;
+}
+
+/** Every file under a folder, by its path from that folder. */
+function filesUnder(dir: string): string[] {
+  return (readdirSync(dir, { recursive: true }) as string[]).map((path) => path.split("\\").join("/"));
+}
+
+const describeLiteral = ({ file, line, value }: Literal) => `${file}:${line}: ${value}`;
+
+describe("colors", () => {
+  it("finds a literal color in a stylesheet or a component, and lets a token through", () => {
+    const css = [
+      ".a {",
+      "  color: #22d3ee;",
+      "  border: 1px solid red;",
+      "  background: rgb(1, 2, 3), hsl(200 50% 50%);",
+      "  box-shadow: 0 0 4px rgba(var(--hf-rgb-cyan), 0.4);",
+      "  fill: currentColor;",
+      "  border-color: transparent;",
+      "  /* color: #000; */",
+      '  font-family: "Red Hat", var(--hf-font-sans);',
+      "}",
+      ".b:hover { color: var(--hf-color-cyan); background: var(--hf-rgb-white); }",
+    ].join("\n");
+    expect(stylesheetColors("x.css", css).map(describeLiteral)).toEqual([
+      "x.css:2: #22d3ee",
+      "x.css:3: red",
+      "x.css:4: rgb(1, 2, 3)",
+      "x.css:4: hsl(200 50% 50%)",
+    ]);
+
+    const tsx = [
+      "export function A() {",
+      '  return <svg><path fill="#22d3ee" stroke={tone === "cyan" ? color.cyan : "navy"} /><g style={{ color: "white", gap: 4 }} /></svg>;',
+      "}",
+      'const theme = { ".x": { backgroundColor: on ? "rgba(var(--hf-rgb-cyan), 0.05)" : "hsl(1, 2%, 3%)" } };',
+      '// fill="#fff"',
+      'const label = "issue #123 is red";',
+    ].join("\n");
+    expect(componentColors("A.tsx", tsx).map(describeLiteral)).toEqual(["A.tsx:2: #22d3ee", "A.tsx:2: navy", "A.tsx:2: white", "A.tsx:4: hsl(1, 2%, 3%)"]);
+  });
+
+  it("writes no literal color in a stylesheet but theme.css", () => {
+    const found = filesUnder(src)
+      .filter((file) => file.endsWith(".css") && file !== "design/theme.css")
+      .flatMap((file) => stylesheetColors(file, readFileSync(join(src, file), "utf8")));
+    expect(found.map(describeLiteral)).toEqual([]);
+  });
+
+  it("sets no literal color in a component's inline style or SVG attribute, but in a mask's gradient", () => {
+    const sources = filesUnder(src).filter((file) => /\.tsx?$/.test(file) && !/\.test\.tsx?$/.test(file));
+    expect(sources).toContain("design/theme.ts");
+    const found = sources.flatMap((file) => {
+      const source = readFileSync(join(src, file), "utf8");
+      const allowed = maskGradients.filter((g) => g.file === file).flatMap((g) => gradientAt(source, g.id) ?? []);
+      return componentColors(file, source).filter(({ line }) => !allowed.some(({ start, end }) => line >= lineAt(source, start) && line <= lineAt(source, end)));
+    });
+    expect(found.map(describeLiteral)).toEqual([]);
+  });
+
+  it.each(maskGradients)("allows the literal stops of $file's $id gradient, which only fills a mask", ({ file, id }) => {
+    const source = readFileSync(join(src, file), "utf8");
+    const gradient = gradientAt(source, id);
+    expect(gradient, `the ${id} gradient in ${file}`).not.toBeNull();
+    const reference = new RegExp(`["'\`-]${id}["'\`]`);
+    const masks = [...source.matchAll(/<mask\b[\s\S]*?<\/mask>/g)].map((m) => m[0]);
+    expect(masks.some((mask) => reference.test(mask)), `a <mask> in ${file} filled by ${id}`).toBe(true);
+    // Outside its own element and the masks, nothing in the file uses the gradient.
+    let rest = source.slice(0, gradient!.start) + source.slice(gradient!.end);
+    for (const mask of masks) rest = rest.replace(mask, "");
+    expect(rest.match(reference), `uses of ${id} outside a <mask>`).toBeNull();
   });
 });
 
