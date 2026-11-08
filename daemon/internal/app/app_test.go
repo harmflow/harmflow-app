@@ -3492,20 +3492,78 @@ func TestContextNeverNamesTheTask(t *testing.T) {
 	contextNeverNamesTheTask(t, nil)
 }
 
-// harmflow-app#949: the daemon checks its task files against the harnesses once every harness is detected, which on a
-// loaded machine can come after the test created its task. That check prepares the preferred harness with no prompt,
-// for its policy, and is no attempt: the test counts three attempts all the same. The hook runs the check where it
-// raced, once the harnesses' scripts are set and before the first execution.
+// harmflow-app#950: the check of the task files once every harness is detected validates again only the files the
+// daemon loaded at start. A task created through the API while a detection still runs was validated in full by its
+// creation: the check prepares no harness for it and announces no update of it, and still checks the file loaded at
+// start, in the same run.
+func TestCheckTasksLeavesATaskCreatedAfterStart(t *testing.T) {
+	var release func()
+	e := newEnv(t, func(e *env) {
+		release = e.codex.hold(t)
+		loaded := strings.Replace(taskYAML("loaded", ""), "provider: claude-code", "provider: codex", 1)
+		if err := os.WriteFile(filepath.Join(e.paths.Tasks, "loaded.yaml"), []byte(loaded), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !e.poll(10*time.Second, e.codex.holding) {
+		t.Fatal("the start's detection of Codex never ran")
+	}
+	e.create("created", "")
+
+	var mu sync.Mutex
+	checks := map[string]int{} // the policy checks each harness received once the task was created
+	count := func(harness string) func(ports.RunRequest) string {
+		return func(req ports.RunRequest) string {
+			if req.PolicyCheck {
+				mu.Lock()
+				checks[harness]++
+				mu.Unlock()
+			}
+			return "echo 'END ok'"
+		}
+	}
+	e.claude.setScript(count(domain.HarnessClaudeCode))
+	e.codex.setScript(count(domain.HarnessCodex))
+	policyChecks := func(harness string) int {
+		mu.Lock()
+		defer mu.Unlock()
+		return checks[harness]
+	}
+	release()
+	// The check takes the tasks in the order of their IDs, so it would have checked created before loaded.
+	if !e.poll(10*time.Second, func() bool { return policyChecks(domain.HarnessCodex) > 0 }) {
+		t.Fatal("the check once Codex was detected prepared no harness for loaded, want it checked against Codex")
+	}
+	if n := policyChecks(domain.HarnessClaudeCode); n != 0 {
+		t.Errorf("the check once Codex was detected prepared Claude Code %d times for created, want none", n)
+	}
+	for _, ev := range e.published(domain.EventTaskUpdated) {
+		if ev.TaskID == "created" && ev.MessageKey == "task_checked" {
+			t.Errorf("the check once Codex was detected announced created as updated: %+v", ev)
+		}
+	}
+}
+
+// harmflow-app#949: the daemon checks the task files it loaded at start against the harnesses once every harness is
+// detected, which on a loaded machine can come once the harnesses' scripts are set. That check prepares the preferred
+// harness with no prompt, for its policy, and is no attempt: the test counts three attempts all the same. The hook
+// restarts the daemon, so the task's file is one it loaded, and runs the check where it raced, once the harnesses'
+// scripts are set and before the first execution.
 func TestContextCountsNoPolicyCheck(t *testing.T) {
-	if n := contextNeverNamesTheTask(t, func(e *env) { e.app.checkTasks(t.Context()) }); n == 0 {
+	if n := contextNeverNamesTheTask(t, func(e *env) *env {
+		e = e.restart(t)
+		e.app.checkTasks(t.Context())
+		return e
+	}); n == 0 {
 		t.Errorf("checkTasks prepared no harness for the task, so the test raced nothing")
 	}
 }
 
 // contextNeverNamesTheTask runs a general task twice, its first execution failing over from Claude Code to Codex and
 // its second ending on Claude Code, and checks the context of each of the three attempts. between, when set, runs once
-// the harnesses' scripts are set, before the first execution. It returns how many policy checks the harnesses received.
-func contextNeverNamesTheTask(t *testing.T, between func(*env)) int {
+// the harnesses' scripts are set, before the first execution, and returns the env the test goes on with. It returns how
+// many policy checks the harnesses received.
+func contextNeverNamesTheTask(t *testing.T, between func(*env) *env) int {
 	t.Helper()
 	e := newEnv(t)
 	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: `apiVersion: harmflow/v1alpha1
@@ -3548,7 +3606,7 @@ spec:
 			req.ExecutionDir)
 	})
 	if between != nil {
-		between(e)
+		e = between(e)
 	}
 	r, err := e.app.RunTask("napoleon")
 	if err != nil {

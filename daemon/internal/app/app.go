@@ -136,6 +136,9 @@ type taskEntry struct {
 	warnings      []domain.Warning
 	deletePending bool
 	selfRevision  string // the revision the daemon itself last wrote
+	// loadedRevision is the revision loadTasks loaded at start, which checkTasks validates again; empty once the file
+	// changed, or the daemon wrote it, since.
+	loadedRevision string
 }
 
 type runHandle struct {
