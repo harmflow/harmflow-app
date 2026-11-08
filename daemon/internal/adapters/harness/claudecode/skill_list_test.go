@@ -68,6 +68,7 @@ func TestSkillsComeFromTheInitLine(t *testing.T) {
 	config := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", config)
 	writeSettings(t, filepath.Join(config, "agents", "reviewer.md"), "---\nname: reviewer\n---\n")
+	writeSettings(t, filepath.Join(config, "skills", "review-notes", "SKILL.md"), "---\nname: review-notes\n---\n")
 	marker := filepath.Join(t.TempDir(), "answered")
 	path, log := listingClaude(t, `cat > /dev/null
 echo '{"type":"system","subtype":"hook_started"}'
@@ -95,6 +96,13 @@ touch "$MARKER"
 	}{{"simplify", true}, {"pdf:pdf", true}, {"review-notes", true}, {"on-disk", false}} {
 		if _, found, _, err := a.UserItem(ctx, info, "skill", c.name, ws, []string{added}); found != c.found || err != nil {
 			t.Errorf("UserItem(skill %s) = %v, %v; want %v", c.name, found, err, c.found)
+		}
+	}
+	// A listed skill of the user's own carries the folder of its SKILL.md, for what it declares; a bundled skill and a
+	// plugin's carry none.
+	for name, want := range map[string]string{"review-notes": filepath.Join(config, "skills", "review-notes"), "simplify": "", "pdf:pdf": ""} {
+		if it, _, _, _ := a.UserItem(ctx, info, "skill", name, ws, nil); it.Path != want {
+			t.Errorf("UserItem(skill %s).Path = %q, want %q", name, it.Path, want)
 		}
 	}
 	if agents, _, err := a.UserItems(ctx, info, "agent", ws, nil); !slices.Equal(names(agents), []string{"reviewer"}) || err != nil {

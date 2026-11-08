@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -35,6 +36,7 @@ type ValidationResult struct {
 	doc     *domain.TaskDocument
 	content []byte
 	node    *yaml.Node
+	items   []domain.ItemParameters // what the cited agents and skills declare, as validation read them
 }
 
 // catalogMode decides whether a missing agent or skill is an error (saving) or a warning (import and external edits),
@@ -281,12 +283,119 @@ func (a *App) semanticChecks(ctx context.Context, r *ValidationResult, doc domai
 		}
 	}
 	a.scriptChecks(r, doc)
+	a.parameterChecks(ctx, r, doc, mode)
 	if mode == catalogStart {
 		return // the restrictions a harness enforces depend on what its detection found
 	}
 	for _, w := range a.policyWarnings(ctx, doc) {
 		r.addWarning("/spec/permissions", w.Code, w.Text)
 	}
+}
+
+// parameterChecks checks the values the task gives the parameters its agents and skills declare, as its preferred
+// harness finds them: a missing required value, a value of the wrong type, and an object its schema rejects are errors
+// in every mode, and a value no cited item declares a warning. When the daemon loads its task files, only the
+// built-ins' declarations are read, and a value for another item is checked once the harnesses are asked.
+func (a *App) parameterChecks(ctx context.Context, r *ValidationResult, doc domain.TaskDocument, mode catalogMode) {
+	if doc.IsScript() {
+		return
+	}
+	r.items = a.declaredItems(ctx, doc, mode != catalogStart)
+	_, problems := domain.ResolveParameters(doc.Spec.Parameters, r.items, a.d.Validator.CheckDeclared)
+	for _, p := range problems {
+		switch {
+		case p.Error:
+			r.addError(p.Path, p.Text)
+		case mode == catalogStart && p.Text.Key == "parameters_unverified":
+			// not read yet: checkTasks reads it once the harnesses can be asked
+		default:
+			r.addWarning(p.Path, domain.WarningOther, p.Text)
+		}
+	}
+}
+
+// dropUndeclared removes from a task about to be saved each value no cited agent or skill declares, which validation
+// warned about, keeping the rest of the file as written.
+func dropUndeclared(r *ValidationResult) error {
+	if r.doc == nil || !domain.DropUndeclared(r.doc.Spec.Parameters, r.items) {
+		return nil
+	}
+	if r.doc.Spec.Parameters.Empty() {
+		r.doc.Spec.Parameters = nil
+	}
+	out, err := pruneParameters(r.content, r.doc.Spec.Parameters)
+	if err != nil {
+		return err
+	}
+	r.content, r.YAML = out, string(out)
+	_, r.node, _ = schema.ParseYAML(out)
+	// The values the warnings named are no longer in the file.
+	r.Warnings = slices.DeleteFunc(r.Warnings, func(is schema.Issue) bool { return is.Key == "parameter_undeclared" })
+	return nil
+}
+
+// pruneParameters removes from the YAML text each value of spec.parameters that values no longer holds, and each map
+// left empty, keeping the rest of the file, its comments included, as written.
+func pruneParameters(content []byte, values *domain.DeclaredParameters) ([]byte, error) {
+	var root yaml.Node
+	if err := yaml.Unmarshal(content, &root); err != nil {
+		return nil, err
+	}
+	if len(root.Content) == 0 {
+		return content, nil
+	}
+	spec := mappingValue(root.Content[0], "spec")
+	params := mappingValue(spec, "parameters")
+	if params == nil {
+		return content, nil
+	}
+	keep := domain.DeclaredParameters{}
+	if values != nil {
+		keep = *values
+	}
+	for key, kept := range map[string]map[string]map[string]any{"skills": keep.Skills, "agents": keep.Agents} {
+		filterMapping(mappingValue(params, key), func(item string, v *yaml.Node) bool {
+			vals, ok := kept[item]
+			if !ok {
+				return false
+			}
+			filterMapping(v, func(name string, _ *yaml.Node) bool {
+				_, ok := vals[name]
+				return ok
+			})
+			return v.Kind != yaml.MappingNode || len(v.Content) > 0
+		})
+	}
+	filterMapping(params, func(_ string, v *yaml.Node) bool { return v.Kind != yaml.MappingNode || len(v.Content) > 0 })
+	filterMapping(spec, func(k string, v *yaml.Node) bool { return k != "parameters" || len(v.Content) > 0 })
+	return encodeNode(&root)
+}
+
+// mappingValue is the value of key in a mapping node; nil for none, or for a node that is no mapping.
+func mappingValue(m *yaml.Node, key string) *yaml.Node {
+	if m == nil || m.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			return m.Content[i+1]
+		}
+	}
+	return nil
+}
+
+// filterMapping keeps the pairs of a mapping node that keep accepts, in their order.
+func filterMapping(m *yaml.Node, keep func(key string, value *yaml.Node) bool) {
+	if m == nil || m.Kind != yaml.MappingNode {
+		return
+	}
+	out := m.Content[:0]
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if keep(m.Content[i].Value, m.Content[i+1]) {
+			out = append(out, m.Content[i], m.Content[i+1])
+		}
+	}
+	m.Content = out
 }
 
 // missingItem is an agent or skill a harness cannot load, and where it was looked for. When unreadable is set, the

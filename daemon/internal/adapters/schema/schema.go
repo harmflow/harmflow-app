@@ -205,6 +205,49 @@ func (v *Validator) ValidateContext(doc any) []Issue {
 	return collect(v.context.Validate(doc), nil)
 }
 
+// declaredSchemaURL is where a schema a skill or an agent declares is compiled; it refers to nothing else.
+const declaredSchemaURL = "https://harmflow.com/schemas/v1alpha1/declared-parameter.schema.json"
+
+// CheckDeclared checks a value against a JSON Schema a skill or an agent declares for an object parameter, both as YAML
+// or JSON decoded them: the problems found, each as "<pointer>: <text>" in en-US, none for a value that matches. An
+// error says the schema cannot be compiled.
+func (v *Validator) CheckDeclared(schemaDoc, value any) ([]string, error) {
+	doc, err := asJSON(schemaDoc)
+	if err != nil {
+		return nil, err
+	}
+	c := jsonschema.NewCompiler()
+	if err := c.AddResource(declaredSchemaURL, doc); err != nil {
+		return nil, err
+	}
+	s, err := c.Compile(declaredSchemaURL)
+	if err != nil {
+		return nil, err
+	}
+	inst, err := asJSON(value)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, is := range collect(s.Validate(inst), nil) {
+		path := is.Path
+		if path == "" {
+			path = "/"
+		}
+		out = append(out, path+": "+is.Message)
+	}
+	return out, nil
+}
+
+// asJSON gives a value as the validator reads JSON, the numbers YAML decodes as integers included.
+func asJSON(v any) (any, error) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return jsonschema.UnmarshalJSON(bytes.NewReader(data))
+}
+
 var printer = message.NewPrinter(language.English)
 
 func collect(err error, node *yaml.Node) []Issue {

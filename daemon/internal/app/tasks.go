@@ -323,6 +323,11 @@ func (a *App) createTask(ctx context.Context, in TaskInput, mode catalogMode, ov
 			return TaskView{}, err
 		}
 	}
+	if mode == catalogStrict {
+		if err := dropUndeclared(r); err != nil {
+			return TaskView{}, err
+		}
+	}
 	id := r.doc.Metadata.ID
 	a.mu.Lock()
 	_, exists := a.tasks[id]
@@ -374,6 +379,10 @@ func (a *App) UpdateTask(ctx context.Context, id string, in TaskInput) (TaskView
 	if savedType != "" && in.BaseRevision == revision && r.doc.Spec.Type != savedType {
 		return TaskView{}, a.invalidError(withError(r, "/spec/type",
 			domain.T("type_immutable", "the type cannot change; create a new task instead")))
+	}
+	// A value no cited agent or skill declares any longer, which validation warned about, is not written again.
+	if err := dropUndeclared(r); err != nil {
+		return TaskView{}, err
 	}
 	f, err := a.d.Tasks.Save(id, r.content, in.BaseRevision)
 	if errors.Is(err, ports.ErrConflict) {

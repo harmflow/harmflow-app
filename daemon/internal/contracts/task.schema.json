@@ -36,6 +36,37 @@
       "type": "string",
       "pattern": "^([a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?|[^\\s:/\\\\]([^:/\\\\]{0,62}[^\\s:/\\\\])?:[^\\s:/\\\\]([^:/\\\\]{0,62}[^\\s:/\\\\])?)$"
     },
+    "declaredParameters": {
+      "description": "The values of the parameters the cited skills and agents declare in their front matter, in one map per skill or agent, kept apart so that a skill and an agent of the same name never meet. A key is the name the task cites the skill or agent by, and a key below it the name its declaration gives a parameter, whatever its convention. A value is checked against its declaration: a missing required value or a value of the wrong type is an error, and a value no cited skill or agent declares any longer is a warning, left out of the session's context and dropped on the next save.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "skills": {
+          "description": "By skill name, as skillName writes it.",
+          "type": "object",
+          "patternProperties": {
+            "^([a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?|[^\\s:/\\\\]([^:/\\\\]{0,62}[^\\s:/\\\\])?:[^\\s:/\\\\]([^:/\\\\]{0,62}[^\\s:/\\\\])?)$": {
+              "$ref": "#/$defs/parameterValues"
+            }
+          },
+          "additionalProperties": false
+        },
+        "agents": {
+          "description": "By agent name, an identifier.",
+          "type": "object",
+          "patternProperties": {
+            "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$": {
+              "$ref": "#/$defs/parameterValues"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "parameterValues": {
+      "description": "One skill's or agent's parameter values, by the names its declaration gives them.",
+      "type": "object"
+    },
     "programName": {
       "description": "A program a session starts, by its name and never by a path: letters, digits, dot, underscore, plus, and hyphen, beginning with a letter or a digit, as git, python3, or clang++.",
       "type": "string",
@@ -126,6 +157,9 @@
           },
           "uniqueItems": true
         },
+        "parameters": {
+          "$ref": "#/$defs/declaredParameters"
+        },
         "workspace": {
           "$ref": "#/$defs/workspace"
         },
@@ -175,6 +209,7 @@
               "origin": false,
               "agents": false,
               "skills": false,
+              "parameters": false,
               "workspace": false,
               "harness": false,
               "github": false,

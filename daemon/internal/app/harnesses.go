@@ -252,6 +252,27 @@ type CatalogEntry struct {
 	Description string     `json:"description,omitempty"`
 	Harnesses   []string   `json:"harnesses"`
 	Copy        *AgentCopy `json:"copy,omitempty"`
+	// Parameters are what it declares, which a task that cites it gives values for; nil when its file cannot be read.
+	Parameters *[]domain.ParameterDeclaration `json:"parameters,omitempty"`
+}
+
+// catalogParameters are the parameters an item declares as the editor shows them, those HarmFlow cannot use left out;
+// nil when its file cannot be read.
+func catalogParameters(kind string, it ports.ResolvedItem) *[]domain.ParameterDeclaration {
+	ip := declaredBy(kind, it.Name, it)
+	if !ip.Known {
+		return nil
+	}
+	out := []domain.ParameterDeclaration{}
+	seen := map[string]bool{}
+	for _, d := range ip.Declarations {
+		if d.Name == "" || seen[d.Name] || !slices.Contains(domain.ParamTypes, d.Type) || d.Type == domain.ParamObject && d.Schema == nil {
+			continue
+		}
+		seen[d.Name] = true
+		out = append(out, d)
+	}
+	return &out
 }
 
 // AgentCopy is what selecting an agent copies into a task, the harnesses its model is valid for, the front-matter
@@ -330,6 +351,50 @@ func (a *App) resolveItem(ctx context.Context, kind, name, harness, installation
 		m.source += "_errors"
 	}
 	return itemLookup{item: it, found: found, missing: m, unreadable: err}
+}
+
+// declaredItems reads what each agent and skill the task cites declares, as its preferred harness finds them — in the
+// installation its profile names, or the one in use — for the task's folder and the folders it adds. With asks false,
+// as when the daemon loads its task files without asking a harness, only the built-ins are read; an item not read is
+// not Known.
+func (a *App) declaredItems(ctx context.Context, doc domain.TaskDocument, asks bool) []domain.ItemParameters {
+	harness, installation := "", ""
+	if profiles := doc.Profiles(); len(profiles) > 0 {
+		harness, installation = profiles[0].Provider, profiles[0].Installation
+	}
+	workspace, added := a.itemWorkspace(doc), a.addedFolders(doc)
+	var out []domain.ItemParameters
+	for _, kind := range []string{"agent", "skill"} {
+		names := doc.Spec.Agents
+		if kind == "skill" {
+			names = doc.Spec.Skills
+		}
+		for _, name := range names {
+			ip := domain.ItemParameters{Kind: kind, Name: name}
+			if asks || strings.HasPrefix(name, BuiltinPrefix) {
+				if l := a.resolveItem(ctx, kind, name, harness, installation, workspace, added); l.found {
+					ip = declaredBy(kind, name, l.item)
+				}
+			}
+			out = append(out, ip)
+		}
+	}
+	return out
+}
+
+// declaredBy is what an agent or skill a harness found declares, under the name the task cites it by; not Known when
+// the harness gives no path to its file, or the file cannot be read.
+func declaredBy(kind, name string, it ports.ResolvedItem) domain.ItemParameters {
+	ip := domain.ItemParameters{Kind: kind, Name: name}
+	if it.Path == "" {
+		return ip
+	}
+	decls, err := catalog.Declarations(kind, it.Path)
+	if err != nil {
+		return ip
+	}
+	ip.Declarations, ip.Known = decls, true
+	return ip
 }
 
 // discoveryErrors reads a harness's discovery errors as one line: each file and the harness's message.
@@ -426,7 +491,7 @@ func (a *App) Catalog(ctx context.Context, workspace, task string, added ...stri
 		entries := map[string]*CatalogEntry{}
 		for _, it := range a.builtinDir().Items(kind) {
 			entries[it.Name] = &CatalogEntry{Name: it.Name, Kind: kind, Source: "builtin", Description: it.Description,
-				Harnesses: all, Copy: a.agentCopy(it)}
+				Harnesses: all, Copy: a.agentCopy(it), Parameters: catalogParameters(kind, it)}
 		}
 		for _, id := range all {
 			ad := a.adapters[id]
@@ -446,7 +511,7 @@ func (a *App) Catalog(ctx context.Context, workspace, task string, added ...stri
 				e := entries[it.Name]
 				if e == nil {
 					e = &CatalogEntry{Name: it.Name, Kind: kind, Source: "user", Description: it.Description, Harnesses: []string{},
-						Copy: a.agentCopy(it)}
+						Copy: a.agentCopy(it), Parameters: catalogParameters(kind, it)}
 					entries[it.Name] = e
 				}
 				e.Harnesses = append(e.Harnesses, id)

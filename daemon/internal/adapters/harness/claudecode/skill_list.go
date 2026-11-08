@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -48,7 +50,8 @@ type initSkills struct {
 // is not on it. Each CLI's list is kept until ReloadUserItems, since reading it starts a session that takes seconds;
 // one that failed is not kept. A second lookup shares the listing already running, and a lookup whose context ends
 // returns while the listing goes on for the others; the last one to leave stops it. A CLI that was not detected cannot
-// answer, which is an error, never an empty list.
+// answer, which is an error, never an empty list. A listed skill of the user's own carries its folder, for what its
+// SKILL.md declares (userSkillPath).
 func (a *Adapter) installedSkills(ctx context.Context, info ports.HarnessInfo) ([]ports.ResolvedItem, error) {
 	if !info.Detected || info.Path == "" {
 		return nil, domain.TextErr("harness_not_detected", "{{harness}} was not detected on this machine", "harness", Name)
@@ -108,7 +111,7 @@ func (a *Adapter) runListing(ctx context.Context, info ports.HarnessInfo, key st
 		slices.Sort(names)
 		for _, n := range slices.Compact(names) {
 			if n != "" {
-				l.items = append(l.items, ports.ResolvedItem{Name: n, Kind: "skill"})
+				l.items = append(l.items, ports.ResolvedItem{Name: n, Kind: "skill", Path: a.userSkillPath(n)})
 			}
 		}
 	}
@@ -125,6 +128,20 @@ func (a *Adapter) runListing(ctx context.Context, info ports.HarnessInfo, key st
 		}
 	}
 	close(l.done)
+}
+
+// userSkillPath is the folder of a skill the list names, when it is the user's own, in the configuration directory's
+// skills folder, so that what its SKILL.md declares can be read; "" for a skill bundled with Claude Code or a plugin's,
+// whose file HarmFlow does not look for.
+func (a *Adapter) userSkillPath(name string) string {
+	if strings.ContainsAny(name, `:/\`) || name == "." || name == ".." {
+		return ""
+	}
+	dir := filepath.Join(a.configDir(), "skills", name)
+	if st, err := os.Stat(filepath.Join(dir, "SKILL.md")); err != nil || st.IsDir() {
+		return ""
+	}
+	return dir
 }
 
 // listSkills starts a Claude Code session in the user's home folder, with the flags an execution gives it that change
