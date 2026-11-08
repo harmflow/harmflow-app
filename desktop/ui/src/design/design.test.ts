@@ -7,7 +7,7 @@ import { ptBR } from "../i18n/pt-BR";
 const ui = join(__dirname, "..", "..");
 const appCss = readFileSync(join(__dirname, "app.css"), "utf8");
 const fontsCss = readFileSync(join(__dirname, "fonts.css"), "utf8");
-const tokensCss = readFileSync(join(__dirname, "tokens.css"), "utf8");
+const themeCss = readFileSync(join(__dirname, "theme.css"), "utf8");
 
 interface Face {
   family: string;
@@ -27,7 +27,7 @@ const faces: Face[] = [...fontsCss.matchAll(/@font-face\s*{([^}]*)}/g)].map(([, 
 });
 
 function stack(token: string): string[] {
-  const value = new RegExp(`${token}:\\s*([^;]+);`).exec(tokensCss)?.[1] ?? "";
+  const value = new RegExp(`${token}:\\s*([^;]+);`).exec(themeCss)?.[1] ?? "";
   return value.split(",").map((name) => name.trim().replace(/^"|"$/g, ""));
 }
 
@@ -102,7 +102,7 @@ describe("bundled fonts", () => {
     expect(stack("--hf-font-sans").slice(0, 3)).toEqual(["Inter", "SF Pro Text", "-apple-system"]);
     expect(stack("--hf-font-display").slice(0, 3)).toEqual(["Inter Display", "SF Pro Display", "-apple-system"]);
     expect(stack("--hf-font-mono").slice(0, 3)).toEqual(["JetBrains Mono", "SF Mono", "ui-monospace"]);
-    expect(tokensCss).toMatch(/--hf-font-display-settings:\s*"opsz" 32;/);
+    expect(themeCss).toMatch(/--hf-font-display-settings:\s*"opsz" 32;/);
   });
 
   it.each([

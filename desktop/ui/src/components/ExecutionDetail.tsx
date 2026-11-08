@@ -7,7 +7,7 @@ import { api } from "../api/client";
 import { native } from "../api/native";
 import type { Attempt, Execution, ExecutionOutput, ExecutionSummary, HarmflowEvent, MessageKey, MessageParams } from "../api/types";
 import { isActive } from "../api/types";
-import type { Tone } from "../design/tokens";
+import type { Tone } from "../design/theme";
 import { daemonText, eventText, fieldText } from "../lib/daemonText";
 import { formatBytes, formatDateTime, formatDuration, formatTime, elapsedMs } from "../lib/format";
 import { matching } from "../lib/shortcuts";

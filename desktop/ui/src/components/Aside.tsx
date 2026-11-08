@@ -1,7 +1,7 @@
 // The right column of the executions screen: the queue, the recent history, and a quiet signature card.
 import { useTranslation } from "react-i18next";
 import type { Stats, WorkItem } from "../api/types";
-import type { Tone } from "../design/tokens";
+import type { Tone } from "../design/theme";
 import { formatRelative } from "../lib/format";
 import { useNow } from "../lib/hooks";
 import { useStore } from "../state/store";

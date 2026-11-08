@@ -8,7 +8,7 @@ import { RootBoundary, rootOptions } from "./components/ErrorBoundary";
 import "./i18n";
 import { register, type Registered, type Registration } from "./registrations";
 import "./design/fonts.css";
-import "./design/tokens.css";
+import "./design/theme.css";
 import "./design/app.css";
 
 export type { RegisteredScreen, RegisteredSettingsSection, Registration, SettingsGroup } from "./registrations";
