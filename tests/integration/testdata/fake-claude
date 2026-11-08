@@ -3,11 +3,12 @@
 # SCENARIO=ok (default), SCENARIO=quota, SCENARIO=quotausage (a quota after the result line reported usage and cost),
 # SCENARIO=leftover (a quota after starting a background process it leaves running, whose pid is in leftover.pid),
 # SCENARIO=error (a session that ends in an error, which fails the execution), SCENARIO=slow, SCENARIO=session, SCENARIO=stray, SCENARIO=report, SCENARIO=secret, SCENARIO=ticks (a message every
-# half second for five seconds, then success), SCENARIO=push (commits on a branch of the workspace's repository, pushes
-# it, reports the push, and waits), SCENARIO=pullrequest (reports a pull request and waits). A session of push or
-# pullrequest whose context.json lists an interrupted execution repeats nothing and ends at once. With PARTIAL=1 in the
-# prompt, it first leaves partial work, in any scenario: a file in its workspace and a step in progress.jsonl. With
-# MESSAGE=1, SCENARIO=quota first prints a message that holds a token, its partial output.
+# half second for five seconds, then success), SCENARIO=gated (a message every half second until the test writes
+# release in the execution's directory, then success; five minutes at most), SCENARIO=push (commits on a branch of the
+# workspace's repository, pushes it, reports the push, and waits), SCENARIO=pullrequest (reports a pull request and
+# waits). A session of push or pullrequest whose context.json lists an interrupted execution repeats nothing and ends at
+# once. With PARTIAL=1 in the prompt, it first leaves partial work, in any scenario: a file in its workspace and a step
+# in progress.jsonl. With MESSAGE=1, SCENARIO=quota first prints a message that holds a token, its partial output.
 # ITEM=<key> in the prompt makes any scenario select that work item first, and go on once the daemon has logged the
 # selection.
 case "$1" in
@@ -169,6 +170,15 @@ case "$SCENARIO" in
       sleep 0.5
     done
     echo '{"type":"result","subtype":"success","is_error":false,"result":"Ticked ten times.","session_id":"fake-session"}'
+    exit 0 ;;
+  gated)
+    # As long as a test needs the execution running and emitting, whatever a loaded host does to its timing.
+    for i in $(seq 600); do
+      echo '{"type":"assistant","message":{"content":[{"type":"text","text":"Tick '"$i"'"}]}}'
+      [ -f "$HARMFLOW_EXECUTION_DIR/release" ] && break
+      sleep 0.5
+    done
+    echo '{"type":"result","subtype":"success","is_error":false,"result":"Released after '"$i"' ticks.","session_id":"fake-session"}'
     exit 0 ;;
   push)
     resume
