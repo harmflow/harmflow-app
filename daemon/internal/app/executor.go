@@ -185,7 +185,7 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 	case r.daemonStopping() && !r.cancelRequested() && !r.ownEnd:
 		// A daemon that stops never continues the execution: it is interrupted, even when the harness it ended exited as
 		// one that finished, with code 0 and a final message.
-		status, reason = domain.StatusInterrupted, daemonStopped()
+		status, reason = domain.StatusInterrupted, a.stoppedReason()
 	case status == "":
 		status, reason = r.outcomeFromReport()
 	}
@@ -846,7 +846,7 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 	// As for a program, the user's cancellation comes first, then the daemon's stop, then the timeout. A harness the
 	// stop ended is interrupted, whatever its exit: code 0 with its success line, another code, or a signal.
 	if stopped && !r.cancelRequested() && r.daemonStopping() {
-		r.endAttemptAs(end, proc.ExitCode(), domain.AttemptInterrupted, daemonStopped())
+		r.endAttemptAs(end, proc.ExitCode(), domain.AttemptInterrupted, r.a.stoppedReason())
 	} else {
 		r.endAttempt(end, proc.ExitCode())
 	}

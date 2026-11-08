@@ -102,6 +102,20 @@ export const native = {
     return confirm(message, { title, kind: "warning", okLabel, cancelLabel });
   },
 
+  /**
+   * Asks a question with two answers and a cancel, and resolves to the one picked. A plain browser can ask only yes or
+   * no, so it offers the first answer alone.
+   */
+  async choose(message: string, title: string, first: string, second: string, cancelLabel: string): Promise<"first" | "second" | "cancel"> {
+    if (!isTauri()) return window.confirm(message) ? "first" : "cancel";
+    const dialog = await import("@tauri-apps/plugin-dialog");
+    // With custom buttons the dialog answers the label of the one clicked.
+    const answer = await dialog.message(message, { title, kind: "warning", buttons: { yes: first, no: second, cancel: cancelLabel } });
+    if (answer === first || answer === "Yes") return "first";
+    if (answer === second || answer === "No") return "second";
+    return "cancel";
+  },
+
   async setLoginItem(enabled: boolean): Promise<void> {
     if (!isTauri()) return;
     const autostart = await import("@tauri-apps/plugin-autostart");

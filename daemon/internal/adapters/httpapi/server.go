@@ -319,15 +319,39 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	if builtAt := s.App.BuiltAt(); !builtAt.IsZero() {
 		body["builtAt"] = builtAt
 	}
+	if drain, ok := s.App.Draining(); ok {
+		body["draining"] = drain
+	}
 	writeJSON(w, 200, body)
 }
 
+// stop asks the daemon to stop: at once, or, with drain, once its running executions end or the deadline, in seconds,
+// passes. A forced stop wins over a drain, in the same request or during one.
 func (s *Server) stop(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Force bool `json:"force"`
+		Force    bool `json:"force"`
+		Drain    bool `json:"drain"`
+		Deadline *int `json:"deadline"`
 	}
 	if err := decode(r, &body); err != nil {
 		fail(w, err)
+		return
+	}
+	if body.Drain && !body.Force {
+		var deadline time.Duration
+		if body.Deadline != nil {
+			if *body.Deadline < 1 {
+				fail(w, &app.Error{Code: app.CodeBadRequest, Text: domain.T("drain_deadline_invalid",
+					"the drain's deadline must be a whole number of seconds above zero")})
+				return
+			}
+			deadline = time.Duration(*body.Deadline) * time.Second
+		}
+		if err := s.App.RequestDrain(deadline); err != nil {
+			fail(w, err)
+			return
+		}
+		writeJSON(w, 202, map[string]any{"ok": true, "message": "the daemon stops once its running executions end"})
 		return
 	}
 	if err := s.App.RequestShutdown(body.Force); err != nil {

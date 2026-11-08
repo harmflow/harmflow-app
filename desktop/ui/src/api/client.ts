@@ -84,7 +84,8 @@ export interface ExecutionQuery {
 
 export const api = {
   health: () => call<Health>("GET", "/health"),
-  stopDaemon: (force = false) => call<Accepted>("POST", "/daemon/stop", { force }),
+  /** Stops the daemon; with drain, once its running executions end, at the deadline the daemon gives by default. */
+  stopDaemon: (force = false, drain = false) => call<Accepted>("POST", "/daemon/stop", drain ? { drain: true } : { force }),
   diagnostics: () => call<Diagnostics>("GET", "/diagnostics"),
   stats: () => call<Stats>("GET", "/stats"),
   /** The current month's spend per day, for the Overview's band. */

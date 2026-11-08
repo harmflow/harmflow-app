@@ -254,6 +254,11 @@ func Run(cfg Config, registrations ...Registration) error {
 	if err := a.Start(ctx); err != nil {
 		return err
 	}
+	// Taken before the address is published, so a signal sent to a daemon that answers is never the default action of
+	// the runtime, which ends the process with SIGQUIT's goroutine dump.
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	defer signal.Stop(sig)
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.Serve() }()
 	if err := writeRuntime(paths.RuntimeFile, srv, secrets.Kind(), cfg.Version); err != nil {
@@ -262,19 +267,7 @@ func Run(cfg Config, registrations ...Registration) error {
 	defer os.Remove(paths.RuntimeFile) // a file left behind is replaced at the next start
 	logger.Printf("HarmFlow daemon %s listening on %s (home %s, builtins %s)", cfg.Version, srv.Address(), home, paths.Builtins)
 
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-	defer signal.Stop(sig)
-	select {
-	case s := <-sig:
-		logger.Printf("stopping on %s", s)
-		a.Stop(domain.T("daemon_signal", "the daemon received {{signal}}", "signal", s.String()))
-	case <-a.ShutdownRequested:
-		logger.Printf("stopping at the user's request")
-		time.Sleep(200 * time.Millisecond) // let the API answer the stop request
-		a.Stop(domain.T("daemon_stop_requested", "stopped at the user's request"))
-	case err := <-serveErr:
-		a.Stop(domain.T("local_api_stopped", "the local API stopped"))
+	if err := awaitStop(a, a.ShutdownRequested, sig, serveErr, logger); err != nil {
 		return err
 	}
 	stop()
@@ -285,6 +278,45 @@ func Run(cfg Config, registrations ...Registration) error {
 	}
 	logger.Printf("stopped")
 	return nil
+}
+
+// stopper is what awaitStop asks of the use cases.
+type stopper interface {
+	RequestDrain(deadline time.Duration) error
+	ShutdownReason() domain.Text
+	Stop(reason domain.Text)
+}
+
+// awaitStop waits for what stops the daemon, and stops it. SIGINT and SIGTERM stop it at once, cancelling the running
+// executions. SIGQUIT asks for a draining stop with the default deadline, and the wait goes on, so a SIGINT or a
+// SIGTERM still stops the daemon at once during the drain. requested closing — a stop the local API asked for, or the
+// end of a drain — stops it for the reason the use cases give. A local API that stops serving stops it too, and its
+// error is returned.
+func awaitStop(a stopper, requested <-chan struct{}, sig <-chan os.Signal, serveErr <-chan error, logger *log.Logger) error {
+	for {
+		select {
+		case s := <-sig:
+			if s == syscall.SIGQUIT {
+				logger.Printf("draining on %s", s)
+				if err := a.RequestDrain(0); err != nil {
+					logger.Printf("draining on %s: %v", s, err)
+				}
+				continue
+			}
+			logger.Printf("stopping on %s", s)
+			a.Stop(domain.T("daemon_signal", "the daemon received {{signal}}", "signal", s.String()))
+			return nil
+		case <-requested:
+			reason := a.ShutdownReason()
+			logger.Printf("stopping: %s", reason.Message)
+			time.Sleep(200 * time.Millisecond) // let the API answer the stop request
+			a.Stop(reason)
+			return nil
+		case err := <-serveErr:
+			a.Stop(domain.T("local_api_stopped", "the local API stopped"))
+			return err
+		}
+	}
 }
 
 // writeRuntime publishes the address in a file only the user can read.

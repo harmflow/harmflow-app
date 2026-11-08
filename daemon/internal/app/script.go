@@ -319,7 +319,7 @@ func (r *run) runScript(ctx context.Context, deadline time.Time) (domain.Executi
 	case stopped && r.cancelRequested():
 		status, reason, outcome = domain.StatusCancelled, domain.T("execution_cancelled", "cancelled"), domain.AttemptCancelled
 	case stopped && r.daemonStopping():
-		status, reason, outcome = domain.StatusInterrupted, daemonStopped(), domain.AttemptInterrupted
+		status, reason, outcome = domain.StatusInterrupted, r.a.stoppedReason(), domain.AttemptInterrupted
 	case stopped && errors.Is(ctx.Err(), context.DeadlineExceeded):
 		status, reason = domain.StatusFailed, domain.T("execution_timed_out", "the execution timeout elapsed")
 		outcome = domain.AttemptTimedOut
