@@ -318,6 +318,11 @@
         "provider": {
           "$ref": "#/$defs/harnessProvider"
         },
+        "installation": {
+          "description": "The installation of the harness the profile runs on, by the identifier the harness list gives it, such as a Codex home's ~/.codex; unset, the installation in use.",
+          "type": "string",
+          "minLength": 1
+        },
         "model": {
           "description": "A model the installed harness accepts; default leaves the harness's own default.",
           "type": "string",

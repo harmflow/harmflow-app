@@ -151,12 +151,14 @@ type Concurrency struct {
 
 // HarnessProfile is one harness a task may run with: its provider, and the model and effort to ask it for, where
 // DefaultModel and DefaultEffort leave the harness's own. Ephemeral false asks the harness to keep its session where it
-// keeps its own, for the owner to read or resume; unset or true, the default, it keeps none.
+// keeps its own, for the owner to read or resume; unset or true, the default, it keeps none. Installation names the
+// installation of the harness the profile runs on; unset, it runs on the one in use.
 type HarnessProfile struct {
-	Provider  string `yaml:"provider" json:"provider"`
-	Model     string `yaml:"model,omitempty" json:"model,omitempty"`
-	Effort    string `yaml:"effort,omitempty" json:"effort,omitempty"`
-	Ephemeral *bool  `yaml:"ephemeral,omitempty" json:"ephemeral,omitempty"`
+	Provider     string `yaml:"provider" json:"provider"`
+	Installation string `yaml:"installation,omitempty" json:"installation,omitempty"`
+	Model        string `yaml:"model,omitempty" json:"model,omitempty"`
+	Effort       string `yaml:"effort,omitempty" json:"effort,omitempty"`
+	Ephemeral    *bool  `yaml:"ephemeral,omitempty" json:"ephemeral,omitempty"`
 }
 
 // KeepsSession reports whether the profile asks the harness to keep its session: Ephemeral set to false.

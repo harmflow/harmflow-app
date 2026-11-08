@@ -1009,6 +1009,8 @@ components:
         - codex_profile_unchecked
         - harness_not_detected
         - harness_not_ready
+        - harness_installation_missing
+        - harness_installation_signed_out
         - agent_not_found
         - skill_not_found
         - agent_missing
@@ -1352,6 +1354,23 @@ components:
           description: >-
             The entry of installations in use, as found or set by hand. path is where it resolves to, a symlink's
             target included.
+        installationId:
+          type: string
+          description: >-
+            What a task's harness profile names this installation by, in its installation key, such as a Codex home's
+            ~/.codex; absent for a harness whose installations are its binaries alone.
+        home:
+          type: string
+          description: >-
+            The folder of the installation's own configuration and sign-in, which its probes and attempts run with, such
+            as a Codex home; absent for a harness that has none.
+        homes:
+          description: >-
+            The installations of the binary in use, one per home detection found, each with what its own probes read:
+            its sign-in, plan, managed requirements, models, and efforts. The one in use is among them, with the
+            installationId of the harness itself, and none has homes of its own. Absent for a harness without homes.
+          type: array
+          items: { $ref: "#/components/schemas/Harness" }
         version: { type: string }
         versionSupport: { type: string, enum: [supported, untested_newer, below_minimum, unknown] }
         authentication: { type: string, enum: [valid, invalid, unknown] }
@@ -1686,6 +1705,8 @@ components:
         number: { type: integer }
         harness: { type: string, description: "Empty for a script task's attempt, which runs a program instead of a harness." }
         harnessVersion: { type: string }
+        installation: { type: string, description: "The installation of the harness the attempt ran on, as a task's harness profile names it; absent for a harness whose installations are its binaries alone." }
+        installationHome: { type: string, description: "The home of that installation, which the attempt ran with; never anything read from it." }
         model: { type: string, description: "The model the harness reported using; absent when it reported none." }
         effort: { type: string, description: "The effort the harness reported using; absent when it reported none." }
         configuredModel: { type: string, description: "The model the task asked for, default when it set none. Never the one used." }

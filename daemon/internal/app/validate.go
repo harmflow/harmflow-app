@@ -181,7 +181,7 @@ func (a *App) semanticChecks(ctx context.Context, r *ValidationResult, doc domai
 		asks := mode != catalogStart
 		var info ports.HarnessInfo
 		if asks {
-			info = a.harnessInfo(ctx, p.Provider)
+			info = a.profileInstallation(ctx, r, ad, p, path, mode)
 			if err := ad.ValidateProfile(info, p.Model, p.Effort); err != nil {
 				r.addError(path, domain.TextOf(err))
 			} else if w, ok := ad.(ports.ProfileWarner); ok {
@@ -214,7 +214,7 @@ func (a *App) semanticChecks(ctx context.Context, r *ValidationResult, doc domai
 		}
 		// Agents and skills must be available to every harness of the chain. Those a harness loads itself, whose list it
 		// could not give, are unverified on the preferred harness and on a fallback alike.
-		missing := a.missingItems(ctx, doc, p.Provider, a.itemWorkspace(doc), a.addedFolders(doc))
+		missing := a.missingItems(ctx, doc, p.Provider, p.Installation, a.itemWorkspace(doc), a.addedFolders(doc))
 		for _, m := range missing {
 			code := domain.WarningMissingSkill
 			kindPath := "/spec/skills"
@@ -237,7 +237,8 @@ func (a *App) semanticChecks(ctx context.Context, r *ValidationResult, doc domai
 	}
 	if len(profiles) > 1 && profiles[0].Provider != "" {
 		for i, p := range profiles[1:] {
-			if p.Provider == profiles[0].Provider && p.Model == profiles[0].Model {
+			// Another installation of the same harness is another account, so it is no repeat.
+			if p.Provider == profiles[0].Provider && p.Model == profiles[0].Model && p.Installation == profiles[0].Installation {
 				r.addWarning(fmt.Sprintf("/spec/harness/fallback/candidates/%d", i), domain.WarningOther,
 					domain.T("fallback_repeats_preferred", "this fallback repeats the preferred harness and model"))
 			}
@@ -370,9 +371,41 @@ func (m missingItem) params(harness string) []string {
 	return params
 }
 
-// missingItems are the task's agents and skills a harness cannot load for workspace and the added folders. A list that
-// cannot be read is one entry, and the items of its kind are not looked up again.
-func (a *App) missingItems(ctx context.Context, doc domain.TaskDocument, harness, workspace string, added []string) []missingItem {
+// profileInstallation is what detection found of the installation a profile at path runs on, which its model and
+// effort are checked against. An installation key the detected harness lists no installation by is an error on save
+// and a warning otherwise, as a missing skill is, and the profile is then checked against the installation in use. A
+// named installation that says it is signed out is one too: only the save refuses it, so a sign-in that expires after
+// the save leaves the task valid, and its attempts there fail over or fail. A harness not detected is warned about on
+// its own.
+func (a *App) profileInstallation(ctx context.Context, r *ValidationResult, ad ports.HarnessAdapter, p domain.HarnessProfile,
+	path string, mode catalogMode) ports.HarnessInfo {
+	info := a.harnessInfo(ctx, p.Provider)
+	if p.Installation == "" || !info.Detected {
+		return info
+	}
+	add := func(text domain.Text) {
+		if mode == catalogStrict {
+			r.addError(path+"/installation", text)
+		} else {
+			r.addWarning(path+"/installation", domain.WarningHarnessNotReady, text)
+		}
+	}
+	inst, found := info.InstallationNamed(p.Installation)
+	if !found {
+		add(installationMissing(ad.Name(), p.Installation))
+		return info
+	}
+	if inst.Authentication == "invalid" {
+		add(domain.T("harness_installation_signed_out", `{{harness}}'s installation "{{installation}}" is not signed in`,
+			"harness", ad.Name(), "installation", p.Installation))
+	}
+	return inst
+}
+
+// missingItems are the task's agents and skills an installation of a harness, the one in use for an empty one, cannot
+// load for workspace and the added folders. A list that cannot be read is one entry, and the items of its kind are not
+// looked up again.
+func (a *App) missingItems(ctx context.Context, doc domain.TaskDocument, harness, installation, workspace string, added []string) []missingItem {
 	var out []missingItem
 	for _, kind := range []string{"agent", "skill"} {
 		names := doc.Spec.Agents
@@ -380,7 +413,7 @@ func (a *App) missingItems(ctx context.Context, doc domain.TaskDocument, harness
 			names = doc.Spec.Skills
 		}
 		for _, name := range names {
-			l := a.resolveItem(ctx, kind, name, harness, workspace, added)
+			l := a.resolveItem(ctx, kind, name, harness, installation, workspace, added)
 			if l.unreadable != nil {
 				l.missing.unreadable = l.unreadable
 				out = append(out, l.missing)
@@ -406,7 +439,10 @@ func (a *App) policyWarnings(ctx context.Context, doc domain.TaskDocument) []dom
 	if !ok {
 		return nil
 	}
-	info := a.harnessInfo(ctx, ad.ID())
+	info, found := a.installationInfo(ctx, ad.ID(), eff.Spec.Harness.Preferred.Installation)
+	if !found {
+		info = a.harnessInfo(ctx, ad.ID())
+	}
 	work, repos := a.taskFolders(eff, doc.Metadata.ID, a.currentPathEnv())
 	var added []string
 	for _, f := range repos {

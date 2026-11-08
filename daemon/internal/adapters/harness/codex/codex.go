@@ -57,9 +57,9 @@ type Adapter struct {
 	servers     map[string]*appServer // by the home each runs with
 	reload      bool                  // the next skills/list of each home not in reloaded carries forceReload
 	reloaded    map[string]bool       // the homes whose skills/list carried forceReload since ReloadUserItems
-	listTimeout time.Duration // a call to the app server; zero is defaultListTimeout
-	helpTimeout time.Duration // each help check, `exec --help` and the top-level --help; zero is the probe's own limit
-	signInStep  time.Duration // the wait for `codex login` to reach its browser's step; zero is defaultSignInStep
+	listTimeout time.Duration         // a call to the app server; zero is defaultListTimeout
+	helpTimeout time.Duration         // each help check, `exec --help` and the top-level --help; zero is the probe's own limit
+	signInStep  time.Duration         // the wait for `codex login` to reach its browser's step; zero is defaultSignInStep
 }
 
 var (
@@ -555,7 +555,9 @@ func (a *Adapter) ProfileWarning(info ports.HarnessInfo, model, effort string) (
 		"Codex's list of models could not be read, so the model and effort were not checked"), true
 }
 
-func (a *Adapter) userDir(info ports.HarnessInfo) catalog.Dir { return catalog.Dir{Root: a.homeOf(info)} }
+func (a *Adapter) userDir(info ports.HarnessInfo) catalog.Dir {
+	return catalog.Dir{Root: a.homeOf(info)}
+}
 
 // UserItem implements ports.HarnessAdapter: a skill is the first of that name in the installed Codex's skill list, an
 // agent is looked up in the installation's Codex home. The list is the installation's, so the workspace and the added

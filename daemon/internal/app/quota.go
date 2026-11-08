@@ -20,25 +20,27 @@ type quotaReading struct {
 	at    time.Time
 }
 
-// quota is the harness's quota as an attempt checks it before it starts: the reading of the last five minutes, or a new
-// one, read with no model call. Attempts that start together share one read. read is false when the adapter reads no
-// quota; a read that fails is not kept, so the next attempt reads again.
+// quota is the quota of the installation of a harness that info describes, as an attempt checks it before it starts:
+// the reading of the last five minutes, or a new one, read with no model call. Attempts that start together share one
+// read. read is false when the adapter reads no quota; a read that fails is not kept, so the next attempt reads again.
+// Each installation runs under its own account, so each keeps a reading of its own.
 func (a *App) quota(ctx context.Context, ad ports.HarnessAdapter, info ports.HarnessInfo) (q domain.Quota, read bool, err error) {
 	reader, ok := ad.(ports.QuotaReader)
 	if !ok {
 		return domain.Quota{}, false, nil
 	}
+	key := quotaKey(ad.ID(), info.InstallationID)
 	a.mu.Lock()
-	lock := a.quotaReads[ad.ID()]
+	lock := a.quotaReads[key]
 	if lock == nil {
 		lock = &sync.Mutex{}
-		a.quotaReads[ad.ID()] = lock
+		a.quotaReads[key] = lock
 	}
 	a.mu.Unlock()
 	lock.Lock()
 	defer lock.Unlock()
 	a.mu.Lock()
-	last, kept := a.quotas[ad.ID()]
+	last, kept := a.quotas[key]
 	a.mu.Unlock()
 	if kept && a.now().Sub(last.at) < quotaTTL {
 		return last.quota, true, nil
@@ -47,14 +49,24 @@ func (a *App) quota(ctx context.Context, ad ports.HarnessAdapter, info ports.Har
 	if err != nil {
 		return domain.Quota{}, true, err
 	}
-	a.storeQuota(ad.ID(), q)
+	a.storeQuota(key, q)
 	return q, true, nil
 }
 
-// storeQuota keeps a harness's quota reading, read before an attempt or reported by a running one.
-func (a *App) storeQuota(harness string, q domain.Quota) {
+// quotaKey is what an installation's quota reading is kept under: the harness, and the installation when it has an
+// identifier.
+func quotaKey(harness, installation string) string {
+	if installation == "" {
+		return harness
+	}
+	return harness + " " + installation
+}
+
+// storeQuota keeps an installation's quota reading, under its quotaKey, read before an attempt or reported by a running
+// one.
+func (a *App) storeQuota(key string, q domain.Quota) {
 	a.mu.Lock()
-	a.quotas[harness] = quotaReading{quota: q, at: a.now()}
+	a.quotas[key] = quotaReading{quota: q, at: a.now()}
 	a.mu.Unlock()
 }
 
@@ -125,13 +137,13 @@ func (a *App) quotaExhaustedText(harness string, w domain.QuotaWindow) domain.Te
 // when its task does not allow it: the response that turned to it is the only one that ran on it.
 func (r *run) onQuota(q domain.Quota) {
 	r.a.mu.Lock()
-	harness := ""
-	if at := r.x.CurrentAttempt(); at != nil {
-		harness = at.Harness
+	key := ""
+	if at := r.x.CurrentAttempt(); at != nil && at.Harness != "" {
+		key = quotaKey(at.Harness, at.Installation)
 	}
 	r.a.mu.Unlock()
-	if harness != "" {
-		r.a.storeQuota(harness, q)
+	if key != "" {
+		r.a.storeQuota(key, q)
 	}
 	if q.UsingExtraUsage && !r.def.AllowsExtraUsage() && r.extraUsage.CompareAndSwap(false, true) {
 		r.stopAttempt()

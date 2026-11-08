@@ -130,6 +130,18 @@ func (a *App) detect(ctx context.Context, id string) ports.HarnessInfo {
 	return info
 }
 
+// installationInfo is what detection last found of the installation of a harness that a profile's installation key
+// names, the one in use for an empty key; found is false when the harness lists none by that name.
+func (a *App) installationInfo(ctx context.Context, harness, installation string) (ports.HarnessInfo, bool) {
+	return a.harnessInfo(ctx, harness).InstallationNamed(installation)
+}
+
+// installationMissing says a harness lists no installation by the name a profile's installation key gives.
+func installationMissing(harness, installation string) domain.Text {
+	return domain.T("harness_installation_missing", `{{harness}} has no installation "{{installation}}" on this machine`,
+		"harness", harness, "installation", installation)
+}
+
 func (a *App) harnessInfo(ctx context.Context, id string) ports.HarnessInfo {
 	a.mu.Lock()
 	info, ok := a.inventory[id]
@@ -243,9 +255,11 @@ type itemLookup struct {
 	unreadable error // the harness's list could not be read
 }
 
-// resolveItem finds an agent or skill by name for a harness: built-ins by the hf- prefix, the user's as the harness
-// finds them for workspace and the folders a session of the task adds.
-func (a *App) resolveItem(ctx context.Context, kind, name, harness, workspace string, added []string) itemLookup {
+// resolveItem finds an agent or skill by name for an installation of a harness, the one in use for an empty
+// installation: built-ins by the hf- prefix, the user's as the installation finds them for workspace and the folders a
+// session of the task adds. An installation the harness does not list is looked up as the one in use, whose absence
+// validation and the attempt report on their own.
+func (a *App) resolveItem(ctx context.Context, kind, name, harness, installation, workspace string, added []string) itemLookup {
 	m := missingItem{kind: kind, name: name, source: "harness"}
 	if strings.HasPrefix(name, BuiltinPrefix) {
 		it, ok := a.builtinDir().Item(kind, name)
@@ -264,7 +278,11 @@ func (a *App) resolveItem(ctx context.Context, kind, name, harness, workspace st
 	if u, ok := ad.(ports.UnverifiedItemsAllower); ok && u.AllowsUnverified(kind) {
 		m.unverifiable = true
 	}
-	it, found, problems, err := ad.UserItem(ctx, a.harnessInfo(ctx, harness), kind, name, workspace, added)
+	info, ok := a.installationInfo(ctx, harness, installation)
+	if !ok {
+		info = a.harnessInfo(ctx, harness)
+	}
+	it, found, problems, err := ad.UserItem(ctx, info, kind, name, workspace, added)
 	if len(problems) > 0 {
 		m.errors = discoveryErrors(problems)
 		m.where += ", which could not load " + m.errors
