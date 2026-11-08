@@ -8,10 +8,10 @@
 // The stand-in decides which error the daemon gives: that the daemon gives a document and its YAML the same one is
 // itest › TestOneSchemaForEveryEntryPoint's. ⌘S saves as the Save button does, from any focus in the editor
 // (harmflow-app#230). A save shows the warnings the daemon gives, such as a fallback that cannot load the task's skill
-// (harmflow-app#216) or its agent (harmflow-app#347). The catalog is asked for with the task's ID, so a task with no
-// workspace path is offered the skills of the folder it runs in, which validation reads (harmflow-app#283). A Claude Code
-// task with one is offered the installation's skills, a plugin's among them, and not a skill only its workspace holds
-// (harmflow-app#833).
+// (harmflow-app#216) or its agent (harmflow-app#347). The editor offers the catalog the daemon gives for the task's
+// workspace and ID, asked for with the ID so that a task with no workspace path is read in the folder it runs in, as
+// validation reads it (harmflow-app#283). For a Claude Code task that catalog holds the installation's skills, a
+// plugin's among them, and not a skill only its workspace holds (harmflow-app#833).
 // An editor open on a task warns when the stream delivers a change of its file made outside HarmFlow, and a save from it
 // afterwards reports the conflict and overwrites nothing; each banner's actions load the file or keep the edit
 // (harmflow-app#593). Each later change warns again, after the user kept their edits, loaded the file, or saved past
@@ -668,16 +668,16 @@ describe("task editor catalog", () => {
   const catalogs = () => daemon.requests.filter((r) => r.method === "GET" && r.path.startsWith("/catalog")).map((r) => r.path);
 
   it.each(["edit", "create"] as const)(
-    "asks in %s mode for the skills of the folder the task runs in when it sets no workspace path, as validation reads it",
+    "asks in %s mode for the catalog of the task's ID when it sets no workspace path, as validation reads it",
     async (mode) => {
       await open(mode);
       expect(catalogs()).toEqual(["/catalog?task=standup"]);
     },
   );
 
-  // The Skills field offers the skills the catalog lists for the task's workspace, which for Claude Code are the
-  // installation's, a plugin's by the name Claude Code reports for it, the same whatever the workspace: a skill only the
-  // workspace holds is not among them (harmflow-app#833). That the daemon answers the editor's request so is itest ›
+  // The Skills field offers the skills of the catalog the daemon gives for the task's workspace and ID, which for
+  // Claude Code are the installation's, a plugin's by the name Claude Code reports for it, the same whatever the
+  // workspace: a skill only the workspace holds is not among them (harmflow-app#833). That the daemon answers the editor's request so is itest ›
   // TestEditorCatalogOffersTheInstallationsSkills', and that it lists them from Claude Code's own skill list is app ›
   // TestClaudeCodeSkillsComeFromItsSkillList's.
   describe("on a Claude Code task with a workspace path", () => {
@@ -723,7 +723,7 @@ describe("task editor catalog", () => {
       };
     };
 
-    /** Opens the editor on the task with `loaded` as the app's catalog, the stand-in answering its workspace's with `answer`. */
+    /** Opens the editor on the task with `loaded` as the app's catalog, the stand-in answering its workspace and ID with `answer`. */
     async function openTask(task: Task, loaded: Catalog, answer: Catalog) {
       patchStateForTests({ catalog: loaded });
       const workspace = (task.document.spec as { workspace: { path: string } }).workspace.path;

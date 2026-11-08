@@ -1897,11 +1897,11 @@ export interface operations {
     getCatalog: {
         parameters: {
             query?: {
-                /** @description The workspace path of the task the catalog is for, expanded as the task's paths are. A harness that finds the user's items per workspace, as Codex and Claude Code find their skills, lists them for this folder. When absent, or when it does not expand, the folder is the one HarmFlow runs the task named by `task` in, as validation and an execution read it; HarmFlow's workspace root with no `task` either. */
+                /** @description The workspace path of the task the catalog is for, expanded as the task's paths are. A harness that finds the user's items per workspace lists them for this folder. Claude Code's and Codex's skills are their installation's, the same for every workspace, so this folder changes none of them. When absent, or when it does not expand, the folder is the one HarmFlow runs the task named by `task` in, as validation and an execution read it; HarmFlow's workspace root with no `task` either. */
                 workspace?: string;
-                /** @description The ID of the task the catalog is for. With no `workspace`, its harnesses list the user's items for the folder HarmFlow runs this task in, the folder validation reads for a task with no workspace path. */
+                /** @description The ID of the task the catalog is for. With no `workspace`, a harness that finds the user's items per workspace lists them for the folder HarmFlow runs this task in, the folder validation reads for a task with no workspace path. */
                 task?: string;
-                /** @description A folder a session of the task adds beside its workspace — a repository's local path or a writable path — expanded as the task's paths are, once per folder. A harness that finds skills in the folders a session adds, as Claude Code does, lists them for these folders too, as validation and an execution read them. */
+                /** @description A folder a session of the task adds beside its workspace — a repository's local path or a writable path — expanded as the task's paths are, once per folder. A harness that finds skills in the folders a session adds lists them for these folders too, as validation and an execution read them. Claude Code's and Codex's skills are their installation's, so these folders add none of theirs. */
                 addDir?: string[];
             };
             header?: never;
