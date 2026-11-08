@@ -10,7 +10,7 @@ import { formatBytes, formatNumber, formatRelative, formatTime } from "../lib/fo
 import { useNow } from "../lib/hooks";
 import { ariaKeys, shortcutText, type ShortcutId } from "../lib/shortcuts";
 import { dynamicText, useRegistered } from "../registrations";
-import { actions, useStore } from "../state/store";
+import { actions, every, useStore } from "../state/store";
 import { HarnessMark, Icon, Logo, type IconName } from "./Icon";
 import { toast } from "./toast";
 import { Banner, Button, Gauge, IconButton, cx } from "./ui";
@@ -110,7 +110,7 @@ export function Sidebar({
   useEffect(() => {
     if (collapsed) return;
     void actions.refreshSystem();
-    const timer = setInterval(() => void actions.refreshSystem(), GAUGES_EVERY_MS);
+    const timer = every("system", GAUGES_EVERY_MS, actions.refreshSystem);
     return () => clearInterval(timer);
   }, [collapsed]);
 
@@ -322,6 +322,13 @@ export function Header({
         <div className="topbar__banner">
           <Banner tone="blue" icon="refresh">
             {t("connection.lostHint")}
+          </Banner>
+        </div>
+      ) : null}
+      {connection === "not_answering" ? (
+        <div className="topbar__banner">
+          <Banner tone="warning" icon="refresh">
+            {t("connection.notAnsweringHint")}
           </Banner>
         </div>
       ) : null}

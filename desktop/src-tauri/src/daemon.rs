@@ -15,6 +15,8 @@ use serde_json::Value;
 const KEYCHAIN_SERVICE: &str = "com.harmflow.local-api";
 const KEYCHAIN_ACCOUNT: &str = "token";
 const DAEMON_BINARY: &str = "harmflowd";
+/// How long a request of the local API waits for the daemon's answer.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// `$HARMFLOW_HOME`, or `~/Library/Application Support/HarmFlow`.
 pub fn harmflow_home() -> PathBuf {
@@ -32,7 +34,10 @@ pub fn harmflow_home() -> PathBuf {
 #[serde(rename_all = "camelCase")]
 pub struct Runtime {
     pub address: String,
-    /// "keychain" or "file"; the pid, version, and start time it also holds are read from GET /health instead.
+    /// The daemon's process, which tells a daemon that does not answer from one that is gone.
+    #[serde(default)]
+    pub pid: Option<u32>,
+    /// "keychain" or "file"; the version and start time it also holds are read from GET /health instead.
     #[serde(default)]
     pub token_store: Option<String>,
 }
@@ -84,6 +89,10 @@ fn read_token(home: &Path, store: Option<&str>) -> Result<String, String> {
 #[serde(rename_all = "camelCase")]
 pub struct DaemonStatus {
     pub running: bool,
+    /// The daemon runs but did not answer in time: GET /health timed out once its port took the connection, while the
+    /// pid of the runtime file is alive. A busy or throttled daemon, not a stopped one (#908).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub not_answering: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub address: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -106,6 +115,7 @@ fn status_from_health(body: &Value, address: Option<String>) -> DaemonStatus {
     let get = |k: &str| body.get(k).and_then(Value::as_str).map(str::to_string);
     DaemonStatus {
         running: true,
+        not_answering: false,
         address,
         pid: body.get("pid").and_then(Value::as_u64).map(|p| p as u32),
         version: get("version"),
@@ -131,23 +141,85 @@ fn total_count(headers: &reqwest::header::HeaderMap) -> Option<u64> {
     headers.get("x-total-count")?.to_str().ok()?.trim().parse().ok()
 }
 
+/// Why a request got no answer from the daemon.
+#[derive(Debug)]
+enum Failure {
+    /// The request never left: its path or method is not allowed, or the runtime file or the token could not be read.
+    Setup(String),
+    /// The request was sent and failed: refused, timed out, or cut.
+    Http(reqwest::Error),
+}
+
+impl Failure {
+    fn message(&self) -> String {
+        match self {
+            Failure::Setup(message) => message.clone(),
+            Failure::Http(err) => err.to_string(),
+        }
+    }
+
+    /// The daemon's port took the connection, and no answer came within the request's timeout.
+    fn unanswered(&self) -> bool {
+        matches!(self, Failure::Http(err) if err.is_timeout() && !err.is_connect())
+    }
+
+    /// The connection was refused, not left waiting: nothing listens at the address any longer, so the daemon stopped
+    /// or restarted on another port. A connection that timed out is a busy daemon's, and no reason to read it again.
+    fn refused(&self) -> bool {
+        matches!(self, Failure::Http(err) if err.is_connect() && !err.is_timeout())
+    }
+}
+
+/// The response the webview receives for a request that failed: status 0, and the reason as an internal error.
+fn failed_response(failure: &Failure) -> ApiResponse {
+    ApiResponse {
+        status: 0,
+        body: serde_json::json!({ "error": { "code": "internal", "message": failure.message() } }),
+        total: None,
+    }
+}
+
+async fn api_response(res: reqwest::Response) -> ApiResponse {
+    let status = res.status().as_u16();
+    let total = total_count(res.headers());
+    let text = res.text().await.unwrap_or_default();
+    let body = if text.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_str(&text).unwrap_or(Value::String(text))
+    };
+    ApiResponse { status, body, total }
+}
+
 pub struct DaemonClient {
     http: reqwest::Client,
     conn: Mutex<Option<Connection>>,
+    /// How long a request waits for the daemon's answer: `REQUEST_TIMEOUT`, shorter in the tests.
+    timeout: Duration,
+    /// The HarmFlow folder the runtime file and the token are read from; `None` is `harmflow_home()`, read each time.
+    home: Option<PathBuf>,
 }
 
 impl DaemonClient {
     pub fn new() -> Self {
+        Self::with(None, REQUEST_TIMEOUT)
+    }
+
+    fn with(home: Option<PathBuf>, timeout: Duration) -> Self {
         let http = reqwest::Client::builder()
             .no_proxy()
             .connect_timeout(Duration::from_secs(3))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
-        Self { http, conn: Mutex::new(None) }
+        Self { http, conn: Mutex::new(None), timeout, home }
     }
 
     pub fn http(&self) -> &reqwest::Client {
         &self.http
+    }
+
+    fn home(&self) -> PathBuf {
+        self.home.clone().unwrap_or_else(harmflow_home)
     }
 
     /// The cached connection, or a fresh one read from the runtime file and the Keychain.
@@ -157,7 +229,7 @@ impl DaemonClient {
                 return Ok(c.clone());
             }
         }
-        let home = harmflow_home();
+        let home = self.home();
         let runtime = read_runtime(&home)?;
         let token = read_token(&home, runtime.token_store.as_deref())?;
         let conn = Connection { runtime, token };
@@ -174,50 +246,43 @@ impl DaemonClient {
         }
     }
 
-    async fn send_once(&self, method: &reqwest::Method, path: &str, body: &Option<Value>) -> Result<reqwest::Response, String> {
-        let conn = self.connection()?;
+    async fn send_once(&self, method: &reqwest::Method, path: &str, body: &Option<Value>) -> Result<reqwest::Response, Failure> {
+        let conn = self.connection().map_err(Failure::Setup)?;
         let mut req = self
             .http
             .request(method.clone(), format!("{}/api/v1{}", conn.base_url(), path))
             .bearer_auth(&conn.token)
-            .timeout(Duration::from_secs(30));
+            .timeout(self.timeout);
         if let Some(b) = body {
             req = req.json(b);
         }
-        req.send().await.map_err(|e| e.to_string())
+        req.send().await.map_err(Failure::Http)
     }
 
-    /// Sends a request; after a 401 or a refused connection it rereads the token and address and tries once more.
-    pub async fn send(&self, method: &str, path: &str, body: Option<Value>) -> Result<reqwest::Response, String> {
-        validate_path(path)?;
-        let method = parse_method(method)?;
+    /// Sends a request. A 401 or a refused connection says the token or the address changed: it reads both again and
+    /// tries once more. Any other failure, a timeout included, keeps them and is not sent again at once: a daemon too
+    /// busy to answer would only queue the same request twice (#908).
+    async fn exchange(&self, method: &str, path: &str, body: Option<Value>) -> Result<reqwest::Response, Failure> {
+        validate_path(path).map_err(Failure::Setup)?;
+        let method = parse_method(method).map_err(Failure::Setup)?;
         match self.send_once(&method, path, &body).await {
-            Ok(res) if res.status() != reqwest::StatusCode::UNAUTHORIZED => Ok(res),
-            _ => {
-                self.invalidate();
-                self.send_once(&method, path, &body).await
-            }
+            Ok(res) if res.status() == reqwest::StatusCode::UNAUTHORIZED => {}
+            Err(failure) if failure.refused() => {}
+            done => return done,
         }
+        self.invalidate();
+        self.send_once(&method, path, &body).await
+    }
+
+    /// Sends a request, as `exchange` does, with the reason of a failure as text.
+    pub async fn send(&self, method: &str, path: &str, body: Option<Value>) -> Result<reqwest::Response, String> {
+        self.exchange(method, path, body).await.map_err(|failure| failure.message())
     }
 
     pub async fn request(&self, method: &str, path: &str, body: Option<Value>) -> ApiResponse {
-        match self.send(method, path, body).await {
-            Ok(res) => {
-                let status = res.status().as_u16();
-                let total = total_count(res.headers());
-                let text = res.text().await.unwrap_or_default();
-                let body = if text.is_empty() {
-                    Value::Null
-                } else {
-                    serde_json::from_str(&text).unwrap_or(Value::String(text))
-                };
-                ApiResponse { status, body, total }
-            }
-            Err(message) => ApiResponse {
-                status: 0,
-                body: serde_json::json!({ "error": { "code": "internal", "message": message } }),
-                total: None,
-            },
+        match self.exchange(method, path, body).await {
+            Ok(res) => api_response(res).await,
+            Err(failure) => failed_response(&failure),
         }
     }
 
@@ -231,20 +296,47 @@ impl DaemonClient {
         }
     }
 
-    /// Running means the runtime file exists and GET /health answers with it.
+    /// Running means the runtime file exists and GET /health answers with it. A check that timed out once the
+    /// daemon's port took its connection, while the pid of the runtime file is alive, reads as not answering: the
+    /// daemon runs, too busy to answer yet. Any other failure reads as stopped. Neither forgets the cached address and
+    /// token, which `exchange` alone reads again.
     pub async fn status(&self) -> DaemonStatus {
-        let res = self.request("GET", "/health", None).await;
+        let res = match self.exchange("GET", "/health", None).await {
+            Ok(res) => api_response(res).await,
+            Err(failure) => {
+                if failure.unanswered() {
+                    if let Some(status) = self.alive_status(failure.message()).await {
+                        return status;
+                    }
+                }
+                failed_response(&failure)
+            }
+        };
         if res.status == 200 {
             let address = self.connection().ok().map(|c| c.runtime.address);
             return status_from_health(&res.body, address);
         }
-        self.invalidate();
         let error = res
             .body
             .pointer("/error/message")
             .and_then(Value::as_str)
             .map(str::to_string);
         DaemonStatus { running: false, error, ..Default::default() }
+    }
+
+    /// The not-answering status of the daemon the runtime file names, when its pid is alive; `None` otherwise.
+    async fn alive_status(&self, error: String) -> Option<DaemonStatus> {
+        let runtime = read_runtime(&self.home()).ok()?;
+        let pid = runtime.pid?;
+        let gone = tokio::task::spawn_blocking(move || process_gone(pid)).await.ok()?.ok()?;
+        (!gone).then(|| DaemonStatus {
+            running: false,
+            not_answering: true,
+            address: Some(runtime.address),
+            pid: Some(pid),
+            error: Some(error),
+            ..Default::default()
+        })
     }
 }
 
@@ -432,6 +524,158 @@ mod tests {
         assert_eq!(serde_json::to_value(&listed).unwrap(), serde_json::json!({ "status": 200, "body": [], "total": 342 }));
         let bare = ApiResponse { status: 204, body: Value::Null, total: None };
         assert_eq!(serde_json::to_value(&bare).unwrap(), serde_json::json!({ "status": 204, "body": null }));
+    }
+
+    /// A stand-in for the daemon's local API on a port of its own. It accepts every connection and answers the
+    /// requests it reads with `answers`, in turn; once they run out, it keeps each connection open and never answers.
+    struct StandIn {
+        address: String,
+        accepted: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        tokens: std::sync::Arc<Mutex<Vec<String>>>,
+    }
+
+    impl StandIn {
+        fn start(answers: &[&'static str]) -> Self {
+            use std::io::{Read, Write};
+            use std::sync::atomic::Ordering;
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap().to_string();
+            let accepted = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let tokens = std::sync::Arc::new(Mutex::new(Vec::new()));
+            let (count, seen) = (accepted.clone(), tokens.clone());
+            let mut answers = answers.to_vec().into_iter();
+            // The thread ends with the test process; the connections it holds stay open until then.
+            std::thread::spawn(move || {
+                let mut held = Vec::new();
+                for stream in listener.incoming() {
+                    let Ok(mut stream) = stream else { continue };
+                    count.fetch_add(1, Ordering::SeqCst);
+                    let mut request = Vec::new();
+                    let mut buf = [0u8; 1024];
+                    while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                        match stream.read(&mut buf) {
+                            Ok(0) | Err(_) => break,
+                            Ok(n) => request.extend_from_slice(&buf[..n]),
+                        }
+                    }
+                    let text = String::from_utf8_lossy(&request);
+                    let token = text
+                        .lines()
+                        .find_map(|l| l.to_ascii_lowercase().starts_with("authorization:").then(|| l[14..].trim().to_string()));
+                    seen.lock().unwrap().extend(token);
+                    match answers.next() {
+                        Some(answer) => {
+                            let _ = stream.write_all(answer.as_bytes());
+                        }
+                        None => held.push(stream),
+                    }
+                }
+            });
+            StandIn { address, accepted, tokens }
+        }
+
+        fn accepted(&self) -> usize {
+            self.accepted.load(std::sync::atomic::Ordering::SeqCst)
+        }
+
+        fn tokens(&self) -> Vec<String> {
+            self.tokens.lock().unwrap().clone()
+        }
+    }
+
+    const UNAUTHORIZED: &str = "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+    const HEALTHY: &str = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 27\r\nConnection: close\r\n\r\n{\"pid\":7,\"version\":\"0.1.0\"}";
+
+    /// A HarmFlow folder of its own, whose runtime file names `address` and `pid` and whose file store holds `token`.
+    fn runtime_home(name: &str, address: &str, pid: u32, token: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("harmflow-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("run")).unwrap();
+        write_runtime(&dir, address, pid, token);
+        dir
+    }
+
+    fn write_runtime(dir: &Path, address: &str, pid: u32, token: &str) {
+        let runtime = serde_json::json!({ "address": address, "pid": pid, "tokenStore": "file" });
+        std::fs::write(dir.join("run").join("daemon.json"), runtime.to_string()).unwrap();
+        std::fs::write(dir.join("run").join("token"), format!("{token}\n")).unwrap();
+    }
+
+    /// harmflow-app#908: a daemon that takes the connection and never answers is asked once. The timeout neither sends
+    /// the request again nor forgets the address and the token, and its status reads as running but not answering
+    /// while the pid of the runtime file is alive.
+    #[tokio::test]
+    async fn a_timeout_keeps_the_token_and_reads_as_not_answering() {
+        let daemon = StandIn::start(&[]);
+        let home = runtime_home("not-answering", &daemon.address, std::process::id(), "first");
+        let client = DaemonClient::with(Some(home.clone()), Duration::from_millis(300));
+
+        let sent = client.send("GET", "/stats", None).await;
+        // A token read again now would be this one.
+        write_runtime(&home, &daemon.address, std::process::id(), "second");
+        let kept = client.connection().map(|c| c.token);
+        let status = client.status().await;
+        std::fs::remove_dir_all(&home).ok();
+
+        assert!(sent.is_err(), "a request that never got an answer succeeded");
+        assert_eq!(kept.as_deref(), Ok("first"), "the timeout dropped the cached token");
+        assert_eq!(daemon.accepted(), 2, "one connection for the request and one for the status, no retry");
+        assert!(status.not_answering && !status.running, "status {status:?}, want not answering");
+        assert_eq!(status.pid, Some(std::process::id()));
+        assert_eq!(status.address.as_deref(), Some(daemon.address.as_str()));
+        assert_eq!(serde_json::to_value(&status).unwrap()["notAnswering"], true);
+    }
+
+    /// harmflow-app#908: a timeout whose runtime file names a pid that is gone reads as a stopped daemon, as before.
+    #[tokio::test]
+    async fn a_timeout_with_its_pid_gone_reads_as_stopped() {
+        let mut exited = Command::new("/usr/bin/true").spawn().unwrap();
+        exited.wait().unwrap();
+        let daemon = StandIn::start(&[]);
+        let home = runtime_home("pid-gone", &daemon.address, exited.id(), "first");
+        let client = DaemonClient::with(Some(home.clone()), Duration::from_millis(300));
+
+        let status = client.status().await;
+        std::fs::remove_dir_all(&home).ok();
+
+        assert!(!status.running && !status.not_answering, "status {status:?}, want stopped");
+        assert!(status.error.is_some(), "a stopped status gives no reason");
+        let json = serde_json::to_value(&status).unwrap();
+        assert!(json.get("notAnswering").is_none(), "a stopped status sends notAnswering: {json}");
+    }
+
+    /// A 401 says the token changed: the client reads it again and sends the request once more, with the new one.
+    #[tokio::test]
+    async fn a_401_reads_the_token_again_and_retries_once() {
+        let daemon = StandIn::start(&[UNAUTHORIZED, HEALTHY]);
+        let home = runtime_home("unauthorized", &daemon.address, std::process::id(), "first");
+        let client = DaemonClient::with(Some(home.clone()), Duration::from_secs(5));
+        client.connection().unwrap();
+        write_runtime(&home, &daemon.address, std::process::id(), "second");
+
+        let res = client.request("GET", "/health", None).await;
+        std::fs::remove_dir_all(&home).ok();
+
+        assert_eq!(res.status, 200);
+        assert_eq!(daemon.tokens(), ["Bearer first", "Bearer second"]);
+    }
+
+    /// A refused connection says the address changed: the client reads the runtime file again and sends the request
+    /// once more, to the daemon's new port.
+    #[tokio::test]
+    async fn a_refused_connection_reads_the_address_again_and_retries_once() {
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().to_string();
+        let daemon = StandIn::start(&[HEALTHY]);
+        let home = runtime_home("refused", &closed, std::process::id(), "first");
+        let client = DaemonClient::with(Some(home.clone()), Duration::from_secs(5));
+        client.connection().unwrap();
+        write_runtime(&home, &daemon.address, std::process::id(), "first");
+
+        let status = client.status().await;
+        std::fs::remove_dir_all(&home).ok();
+
+        assert!(status.running, "status {status:?}, want running at the new address");
+        assert_eq!(status.address.as_deref(), Some(daemon.address.as_str()));
+        assert_eq!(daemon.accepted(), 1);
     }
 
     /// The wait for a stopped daemon ends once its process exits, also while it is a zombie its parent never waited

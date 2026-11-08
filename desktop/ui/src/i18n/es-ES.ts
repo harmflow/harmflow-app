@@ -72,7 +72,10 @@ export const esES: Resources = {
     reconnecting: "Reconectando con el daemon",
     disconnected: "Se perdió la conexión con el daemon",
     daemon_stopped: "Daemon detenido",
+    not_answering: "Sin respuesta",
     lastUpdate: "Última actualización: {{time}}",
+    notAnsweringHint:
+      "El daemon está en ejecución, pero aún no responde. La aplicación de escritorio sigue intentándolo.",
     lostHint:
       "Se perdió la conexión con el daemon. Las ejecuciones siguen en el daemon; el panel se reconecta y reproduce los eventos que perdió.",
     versionMismatch:

@@ -1,20 +1,27 @@
 // Follows the daemon's event stream as the dashboard does, against a stand-in for the daemon's local API: when a
 // harness's check ends, the inventory is read again, once for a burst of checks, and never detected again, which
 // would announce another check. And the execution lists are shown as their own answers arrive, whatever /stats takes,
-// and their refresh never reads the sidebar's gauges.
+// and their refresh never reads the sidebar's gauges. And a daemon that runs but does not answer reads as such, not as
+// stopped, and no periodic refresh starts while the previous one of its kind still waits for it.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { native, type DaemonStatus } from "../api/native";
 import type { StreamHandlers } from "../api/transport";
 import type { ExecutionSummary, HarmflowEvent, Harness, Queue } from "../api/types";
-import { actions, getState, patchStateForTests, startSync } from "./store";
+import { actions, every, getState, patchStateForTests, startSync, type PeriodicRefresh } from "./store";
 
-// The daemon as the client sees it: an answer per route, or per path with its query; the routes that never answer;
-// every request it received; and the stream it feeds.
+// The daemon as the client sees it: an answer per route, or per path with its query; the routes that do not answer
+// until `release`, which answers each waiting request with a 404; every request it received; and the stream it feeds.
 const daemon = vi.hoisted(() => ({
   answers: new Map<string, unknown>(),
   silent: new Set<string>(),
+  waiting: [] as Array<() => void>,
   requests: [] as string[],
   stream: undefined as StreamHandlers | undefined,
 }));
+function release() {
+  daemon.silent.clear();
+  daemon.waiting.splice(0).forEach((answer) => answer());
+}
 vi.mock("../api/transport", () => ({
   isTauri: () => false,
   EVENT_TYPES: [],
@@ -23,7 +30,7 @@ vi.mock("../api/transport", () => ({
     request: async (method: string, path: string) => {
       daemon.requests.push(`${method} ${path}`);
       const route = path.split("?")[0];
-      if (daemon.silent.has(route)) return new Promise(() => {});
+      if (daemon.silent.has(route)) return new Promise((resolve) => daemon.waiting.push(() => resolve({ status: 404, body: null })));
       const key = daemon.answers.has(path) ? path : route;
       return daemon.answers.has(key) ? { status: 200, body: daemon.answers.get(key) } : { status: 404, body: null };
     },
@@ -90,7 +97,7 @@ describe("Detect again", () => {
   });
   afterEach(() => {
     daemon.answers.clear();
-    daemon.silent.clear();
+    release();
     patchStateForTests({ redetecting: null });
   });
 
@@ -193,7 +200,7 @@ describe("a detail opened after a live event of its execution", () => {
 describe("execution lists", () => {
   afterEach(() => {
     daemon.answers.clear();
-    daemon.silent.clear();
+    release();
   });
 
   it("updates the active executions, the recent ones, and the queue while /stats never answers", async () => {
@@ -224,5 +231,86 @@ describe("execution lists", () => {
     expect(getState().stats).toEqual(stats);
     expect(daemon.requests).toContain("GET /stats");
     expect(daemon.requests.filter((r) => r.startsWith("GET /system"))).toEqual([]);
+  });
+});
+
+// harmflow-app#908: the shell tells a daemon that runs but does not answer from one that is gone, and the store shows
+// which, with the connection's state.
+describe("a daemon whose health check fails", () => {
+  const status = (s: DaemonStatus) => vi.spyOn(native, "daemonStatus").mockResolvedValue(s);
+
+  beforeEach(() => {
+    native.available = true;
+    patchStateForTests({ connection: "connected", daemonRunning: true });
+  });
+  afterEach(() => {
+    native.available = false;
+    vi.restoreAllMocks();
+    daemon.answers.clear();
+  });
+
+  it("reads as not answering while the shell finds the daemon's process alive", async () => {
+    status({ running: false, notAnswering: true, pid: 4242, error: "operation timed out" });
+
+    await actions.refreshHealth();
+
+    expect(getState().connection).toBe("not_answering");
+    expect(getState().daemonRunning).toBe(true);
+  });
+
+  it("reads as stopped when the shell finds no daemon", async () => {
+    status({ running: false, error: "connection refused" });
+
+    await actions.refreshHealth();
+
+    expect(getState().connection).toBe("daemon_stopped");
+    expect(getState().daemonRunning).toBe(false);
+  });
+
+  it("returns to the stream's state once the daemon answers again", async () => {
+    startSync();
+    daemon.stream!.onConnection("reconnecting");
+    status({ running: false, notAnswering: true, pid: 4242 });
+    await actions.refreshHealth();
+    expect(getState().connection).toBe("not_answering");
+
+    daemon.answers.set("/health", { status: "ok", version: "0.1.0", apiVersion: "v1", pid: 4242 });
+    await actions.refreshHealth();
+
+    expect(getState().connection).toBe("reconnecting");
+  });
+});
+
+// harmflow-app#908: against a daemon too busy to answer, a periodic refresh skips its tick while the previous refresh of
+// its kind still waits, so the requests do not pile up; once that one ends, the next tick refreshes again.
+describe("a periodic refresh", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    release();
+    vi.useRealTimers();
+  });
+
+  const kinds: Array<[PeriodicRefresh, string, number, () => Promise<void>]> = [
+    ["stats", "GET /stats", 5000, () => actions.refreshStats()],
+    ["system", "GET /system", 5000, () => actions.refreshSystem()],
+    ["health", "GET /health", 10000, () => actions.refreshHealth()],
+    ["executions", "GET /queue", 30000, () => actions.refreshExecutions()],
+    ["spend", "GET /spend", 60000, () => actions.refreshSpend()],
+  ];
+
+  it.each(kinds)("of %s starts no request while the previous one still waits", async (kind, request, ms, refresh) => {
+    daemon.silent.add(request.slice("GET ".length));
+    daemon.requests.length = 0;
+    const timer = every(kind, ms, refresh);
+    const sent = () => daemon.requests.filter((r) => r === request).length;
+
+    await vi.advanceTimersByTimeAsync(ms * 3.5);
+    expect(sent()).toBe(1);
+
+    release();
+    await vi.advanceTimersByTimeAsync(ms);
+    clearInterval(timer);
+
+    expect(sent()).toBe(2);
   });
 });

@@ -140,55 +140,102 @@ async function settle<T>(p: Promise<T>): Promise<T | undefined> {
   }
 }
 
+/** The refreshes the interface repeats on a clock of its own. */
+export type PeriodicRefresh = "stats" | "system" | "health" | "executions" | "spend";
+
+/** How many refreshes of each periodic kind still wait for the daemon's answer. */
+const inFlight = new Map<PeriodicRefresh, number>();
+
+/** Runs `refresh` as one of its kind in flight, until it ends. */
+async function tracked(kind: PeriodicRefresh, refresh: () => Promise<void>): Promise<void> {
+  inFlight.set(kind, (inFlight.get(kind) ?? 0) + 1);
+  try {
+    await refresh();
+  } finally {
+    inFlight.set(kind, (inFlight.get(kind) ?? 1) - 1);
+  }
+}
+
+/**
+ * Runs `refresh` every `ms`, skipping each tick while a refresh of its kind still waits: against a daemon too busy to
+ * answer, ticks would otherwise pile up requests it serves only once it answers again (#908). Returns the timer.
+ */
+export function every(kind: PeriodicRefresh, ms: number, refresh: () => Promise<void>): ReturnType<typeof setInterval> {
+  return setInterval(() => {
+    if (!inFlight.get(kind)) void refresh();
+  }, ms);
+}
+
+/** The state the event stream reported last, which a daemon that answers again returns to. */
+let streamConnection: ConnectionState = "connecting";
+
 export const actions = {
   // Each part is set as soon as its own request ends, so a slow /stats delays only the stats. A request that fails
   // leaves its part as it was.
-  async refreshExecutions() {
-    const part = async <K extends keyof State>(key: K, request: Promise<State[K]>) => {
-      const value = await settle(request);
-      if (value !== undefined) setState({ [key]: value } as Partial<State>);
-      touch();
-    };
-    await Promise.all([
-      part("active", api.executions({ active: true, limit: 50 })),
-      part(
-        "recent",
-        api.executions({ limit: 12, status: "completed,no_work,failed,cancelled,interrupted,needs_attention" }),
-      ),
-      part("queue", api.queue()),
-      part("stats", api.stats()),
-    ]);
+  refreshExecutions() {
+    return tracked("executions", async () => {
+      const part = async <K extends keyof State>(key: K, request: Promise<State[K]>) => {
+        const value = await settle(request);
+        if (value !== undefined) setState({ [key]: value } as Partial<State>);
+        touch();
+      };
+      await Promise.all([
+        part("active", api.executions({ active: true, limit: 50 })),
+        part(
+          "recent",
+          api.executions({ limit: 12, status: "completed,no_work,failed,cancelled,interrupted,needs_attention" }),
+        ),
+        part("queue", api.queue()),
+        part("stats", api.stats()),
+      ]);
+    });
   },
 
-  async refreshStats() {
-    const stats = await settle(api.stats());
-    if (stats) setState({ stats });
+  refreshStats() {
+    return tracked("stats", async () => {
+      const stats = await settle(api.stats());
+      if (stats) setState({ stats });
+    });
   },
 
-  async refreshSpend() {
-    const spend = await settle(api.spend());
-    if (spend) setState({ spend });
+  refreshSpend() {
+    return tracked("spend", async () => {
+      const spend = await settle(api.spend());
+      if (spend) setState({ spend });
+    });
   },
 
   // An older daemon answers /system with 404: its gauges are unknown. Any other failure leaves them as they were.
-  async refreshSystem() {
-    try {
-      setState({ system: await api.system() });
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 404) setState({ system: undefined });
-    }
+  refreshSystem() {
+    return tracked("system", async () => {
+      try {
+        setState({ system: await api.system() });
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) setState({ system: undefined });
+      }
+    });
   },
 
-  async refreshHealth() {
-    try {
-      const health = await api.health();
-      setState({ health, daemonRunning: true });
-    } catch {
-      if (native.available) {
-        const status = await settle(native.daemonStatus());
-        if (status && !status.running) setState({ daemonRunning: false, connection: "daemon_stopped" });
+  // A daemon that does not answer is told apart from one that is gone: the shell reads a timed-out check against a
+  // live pid as not answering, and anything else that fails as stopped. Once the daemon answers again, the connection
+  // returns to the state the event stream reported last.
+  refreshHealth() {
+    return tracked("health", async () => {
+      try {
+        const health = await api.health();
+        setState((s) => ({
+          health,
+          daemonRunning: true,
+          ...(s.connection === "not_answering" ? { connection: streamConnection } : {}),
+        }));
+      } catch {
+        if (native.available) {
+          const status = await settle(native.daemonStatus());
+          if (status?.notAnswering) setState({ daemonRunning: true, connection: "not_answering" });
+          else if (status && !status.running) setState({ daemonRunning: false, connection: "daemon_stopped" });
+        }
       }
-    }
+    });
   },
 
   async refreshTasks() {
@@ -414,6 +461,7 @@ export function startSync() {
   transport.stream({
     onEvent: handleEvent,
     onConnection: (connection) => {
+      streamConnection = connection;
       // A lost connection may have missed a check's announcement, or the daemon stopped and ended the detection.
       setState(connection === "connected" ? { connection } : { connection, redetecting: null });
       if (connection === "connected") {
@@ -427,10 +475,10 @@ export function startSync() {
   });
   void native.appVersion().then((appVersion) => setState({ appVersion }));
   void actions.refreshAll();
-  setInterval(() => void actions.refreshStats(), 5000);
-  setInterval(() => void actions.refreshHealth(), 10000);
-  setInterval(() => void actions.refreshExecutions(), 30000);
+  every("stats", 5000, actions.refreshStats);
+  every("health", 10000, actions.refreshHealth);
+  every("executions", 30000, actions.refreshExecutions);
   // Past midnight, today is a new day of the band, or of a new month.
-  setInterval(() => void actions.refreshSpend(), 60000);
+  every("spend", 60000, actions.refreshSpend);
   void native.onNavigate((target) => actions.navigate(target));
 }

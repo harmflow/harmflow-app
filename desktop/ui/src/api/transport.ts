@@ -5,7 +5,15 @@
 import eventSchema from "../../../../contracts/schemas/event.schema.json";
 import type { HarmflowEvent } from "./types";
 
-export const CONNECTION_STATES = ["connecting", "connected", "reconnecting", "disconnected", "daemon_stopped"] as const;
+// not_answering is the store's, never the stream's: the daemon runs, but its health check timed out (#908).
+export const CONNECTION_STATES = [
+  "connecting",
+  "connected",
+  "reconnecting",
+  "disconnected",
+  "daemon_stopped",
+  "not_answering",
+] as const;
 export type ConnectionState = (typeof CONNECTION_STATES)[number];
 
 export interface RawResponse {

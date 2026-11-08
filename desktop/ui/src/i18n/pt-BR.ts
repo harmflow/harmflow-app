@@ -72,7 +72,10 @@ export const ptBR: Resources = {
     reconnecting: "Reconectando ao daemon",
     disconnected: "Conexão com o daemon perdida",
     daemon_stopped: "Daemon parado",
+    not_answering: "Sem resposta",
     lastUpdate: "Última atualização: {{time}}",
+    notAnsweringHint:
+      "O daemon está em execução, mas ainda não responde. O aplicativo de desktop continua tentando.",
     lostHint:
       "A conexão com o daemon caiu. As execuções continuam no daemon; o painel reconecta e reproduz os eventos que perdeu.",
     versionMismatch:
