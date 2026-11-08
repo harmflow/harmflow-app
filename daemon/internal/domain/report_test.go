@@ -1,17 +1,25 @@
 package domain
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // harmflow-app#615: a report whose one work item failed with no pull request is a failed execution, whatever its own
-// outcome says. A report with several work items keeps reading its outcome alone.
+// outcome says. harmflow-app#892: a report of several work items, some failed with no pull request, needs attention,
+// or fails when its outcome is failed or when no item's pull request was opened.
 func TestStatusForReport(t *testing.T) {
 	opened := &PullRequestRef{URL: "https://github.com/o/r/pull/9"}
 	notOpened := WorkItemResult{Key: "o/r#7", Outcome: "failed"}
+	secondNotOpened := WorkItemResult{Key: "o/r#8", Outcome: "failed"}
+	draft := WorkItemResult{Key: "o/r#8", Outcome: "completed", PullRequest: opened}
+	draftTestsFailed := WorkItemResult{Key: "o/r#8", Outcome: "completed", PullRequest: opened,
+		Tests: &TestsResult{Status: "failed"}}
 	for _, tc := range []struct {
 		name string
 		r    *ExecutionReport
 		want ExecutionStatus
-		item string // the key PullRequestNotOpened names, empty for none
+		item string // the keys PullRequestNotOpened names, joined by commas, empty for none
 	}{
 		{"no report", nil, StatusCompleted, ""},
 		{"completed", &ExecutionReport{Outcome: "completed"}, StatusCompleted, ""},
@@ -30,15 +38,31 @@ func TestStatusForReport(t *testing.T) {
 			WorkItems: []WorkItemResult{{Key: "o/r#7", Outcome: "failed", PullRequest: opened}}}, StatusCompleted, ""},
 		{"a draft with failing tests", &ExecutionReport{Outcome: "completed", WorkItems: []WorkItemResult{{Key: "o/r#7",
 			Outcome: "completed", PullRequest: opened, Tests: &TestsResult{Status: "failed"}}}}, StatusCompleted, ""},
-		{"several items, one not opened", &ExecutionReport{Outcome: "completed", WorkItems: []WorkItemResult{notOpened,
-			{Key: "o/r#8", Outcome: "completed", PullRequest: opened}}}, StatusCompleted, ""},
+		{"several items, one not opened, completed", &ExecutionReport{Outcome: "completed",
+			WorkItems: []WorkItemResult{notOpened, draft}}, StatusNeedsAttention, "o/r#7"},
+		{"several items, one not opened, no outcome", &ExecutionReport{WorkItems: []WorkItemResult{draft, notOpened}},
+			StatusNeedsAttention, "o/r#7"},
+		{"several items, one not opened, no work", &ExecutionReport{Outcome: "no_work",
+			WorkItems: []WorkItemResult{notOpened, draft}}, StatusNeedsAttention, "o/r#7"},
+		{"several items, one not opened, failed", &ExecutionReport{Outcome: "failed",
+			WorkItems: []WorkItemResult{notOpened, draft}}, StatusFailed, "o/r#7"},
+		{"several items, none opened, completed", &ExecutionReport{Outcome: "completed",
+			WorkItems: []WorkItemResult{notOpened, secondNotOpened}}, StatusFailed, "o/r#7,o/r#8"},
+		{"several items, none opened, needs attention", &ExecutionReport{Outcome: "needs_attention",
+			WorkItems: []WorkItemResult{notOpened, secondNotOpened}}, StatusFailed, "o/r#7,o/r#8"},
+		{"several items, all opened, one with failing tests", &ExecutionReport{Outcome: "completed",
+			WorkItems: []WorkItemResult{{Key: "o/r#7", Outcome: "completed", PullRequest: opened}, draftTestsFailed}},
+			StatusCompleted, ""},
+		{"several items, one failed with its pull request", &ExecutionReport{Outcome: "completed",
+			WorkItems: []WorkItemResult{{Key: "o/r#7", Outcome: "failed", PullRequest: opened}, draft}},
+			StatusCompleted, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := StatusForReport(tc.r); got != tc.want {
 				t.Errorf("StatusForReport = %s, want %s", got, tc.want)
 			}
-			if key, ok := tc.r.PullRequestNotOpened(); key != tc.item || ok != (tc.item != "") {
-				t.Errorf("PullRequestNotOpened = %q, %v; want %q", key, ok, tc.item)
+			if got := strings.Join(tc.r.PullRequestNotOpened(), ","); got != tc.item {
+				t.Errorf("PullRequestNotOpened = %q, want %q", got, tc.item)
 			}
 		})
 	}

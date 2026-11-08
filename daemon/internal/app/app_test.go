@@ -930,6 +930,90 @@ func TestPullRequestNotOpenedFailsTheExecution(t *testing.T) {
 	}
 }
 
+// harmflow-app#892: a report of several work items, some of them failed with no pull request, never ends the execution
+// as a plain success. It needs attention, or fails when the report's outcome is failed or when no item's pull request
+// was opened, with a reason under pull_requests_not_opened that names each item not opened. Each such item reads
+// failed with one failure and keeps its branch and worktree path, and the clean-up keeps its worktree while the
+// execution's log is kept. A report whose items all had their pull request opened, one with failing tests, completes.
+func TestPullRequestsNotOpenedOfSeveralWorkItems(t *testing.T) {
+	const (
+		opened      = `"outcome":"completed","pullRequest":{"url":"https://github.com/o/r/pull/9"}`
+		testsFailed = `"outcome":"completed","pullRequest":{"url":"https://github.com/o/r/pull/9"},"tests":{"status":"failed"}`
+		notOpened   = `"outcome":"failed","tests":{"status":"passed"}`
+	)
+	for _, tc := range []struct {
+		name, outcome, first, second string
+		want                         domain.ExecutionStatus
+		notOpened                    []string // the keys the reason names, in the report's order
+	}{
+		{"one not opened, the report completed", `"outcome":"completed",`, opened, notOpened,
+			domain.StatusNeedsAttention, []string{"o/r#2"}},
+		{"one not opened, the report with no outcome", "", notOpened, opened, domain.StatusNeedsAttention,
+			[]string{"o/r#1"}},
+		{"one not opened, the report failed", `"outcome":"failed",`, notOpened, opened, domain.StatusFailed,
+			[]string{"o/r#1"}},
+		{"none opened", `"outcome":"completed",`, notOpened, notOpened, domain.StatusFailed,
+			[]string{"o/r#1", "o/r#2"}},
+		{"both opened, one with failing tests", `"outcome":"completed",`, opened, testsFailed, domain.StatusCompleted,
+			nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newWorkspaces(t)
+			w.create("reporter", "")
+			paths := map[string]string{"o/r#1": w.worktree("reporter", "r-1"), "o/r#2": w.worktree("reporter", "r-2")}
+			item := func(key, result string) string {
+				return `{"key":"` + key + `",` + result + `,"branch":"harmflow/` + strings.TrimPrefix(key, "o/r#") +
+					`-fix","worktreePath":"` + paths[key] + `"}`
+			}
+			report := `{` + tc.outcome + `"summary":"two items","workItems":[` + item("o/r#1", tc.first) + `,` +
+				item("o/r#2", tc.second) + `]}`
+			x := runTask(w.env, "reporter", tc.want, selectTwo(w.app.d.Paths.Logs)+withReport(report))
+
+			end := domain.TerminalEventFor(tc.want)
+			keys := w.eventKeys(x.ID, end)
+			if tc.notOpened == nil {
+				if x.ErrorKey != "" {
+					t.Errorf("error of the execution: %q %v; want none", x.ErrorKey, x.ErrorParams)
+				}
+				return
+			}
+			named := strings.Join(tc.notOpened, ", ")
+			if x.ErrorKey != "pull_requests_not_opened" || x.ErrorParams["workItems"] != named ||
+				!strings.Contains(x.ErrorMessage, named) {
+				t.Errorf("error of the execution: %q %v %q; want pull_requests_not_opened naming %s", x.ErrorKey,
+					x.ErrorParams, x.ErrorMessage, named)
+			}
+			if keys[end] != "pull_requests_not_opened" {
+				t.Errorf("events of the execution by type, with their keys: %v; want its end as "+
+					"pull_requests_not_opened", keys)
+			}
+			for _, key := range tc.notOpened {
+				branch := "harmflow/" + strings.TrimPrefix(key, "o/r#") + "-fix"
+				if got := ledgerItem(w.env, "reporter", key); got == nil || got.Status != domain.WorkItemFailed ||
+					got.Failures != 1 || got.Branch != branch {
+					t.Errorf("%s in the ledger: %+v; want failed, with one failure and the branch %s", key, got, branch)
+				}
+				if !slices.ContainsFunc(x.WorkItems, func(r domain.WorkItemResult) bool {
+					return r.Key == key && r.Branch == branch && r.WorktreePath == paths[key]
+				}) {
+					t.Errorf("work items of the execution %+v; want %s with its branch and worktree path %s",
+						x.WorkItems, key, paths[key])
+				}
+			}
+			// A failed execution keeps the worktree until its log expires; one that needs attention keeps it longer,
+			// until the item ends.
+			kept := "until its execution's log expires"
+			if tc.want == domain.StatusNeedsAttention {
+				kept = "its work item has not ended"
+			}
+			res := w.app.CleanWorkspaces()
+			for _, key := range tc.notOpened {
+				w.present(res, paths[key], kept)
+			}
+		})
+	}
+}
+
 // An execution's record holds its report's first work item with that item's own pull request, or with none when the
 // report gives that item none, never another item's, whatever repository it is in and whichever item the session
 // selected last.
