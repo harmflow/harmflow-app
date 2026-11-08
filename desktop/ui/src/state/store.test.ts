@@ -163,7 +163,9 @@ describe("a detail opened after a live event of its execution", () => {
   it("holds the execution's whole history, then the live event once and in order", async () => {
     startSync();
     daemon.requests.length = 0;
-    daemon.answers.set(route, { events: history, logExpired: false });
+    // Only a read from the start gets the history; a read after the live event gets what follows it, nothing yet.
+    daemon.answers.set(`${route}?limit=5000`, { events: history, logExpired: false });
+    daemon.answers.set(route, { events: [], logExpired: false });
 
     daemon.stream!.onEvent(event(5, "harness.message"));
     await actions.loadEvents(id);
