@@ -497,7 +497,8 @@ func (r *run) attempts(ctx context.Context, start func(harness string) error) (d
 		profile := chain[idx]
 		ad := a.adapters[profile.Provider]
 		// Revalidate before every attempt, on the installation the profile names.
-		info, found := a.detect(ctx, profile.Provider).InstallationNamed(profile.Installation)
+		detected := a.detect(ctx, profile.Provider)
+		info, found := detected.InstallationNamed(profile.Installation)
 		if !found {
 			info = ports.HarnessInfo{ID: profile.Provider, Readiness: "not_installed"}
 			info.SetDiagnostic(installationMissing(ad.Name(), profile.Installation))
@@ -534,10 +535,12 @@ func (r *run) attempts(ctx context.Context, start func(harness string) error) (d
 			if end.SignedOut {
 				// The saved token the attempt ran with, which the harness rejected, is dropped, and a check on the harness's
 				// own sign-in decides whether its sign-in starts; a token saved while the attempt ran stays in use. Either way
-				// it runs for the next executions, beside this one, which fails over or fails as it would anyway.
+				// it runs for the next executions, beside this one, which fails over or fails as it would anyway. The sign-in
+				// the daemon starts is the installation in use's, so an attempt on another installation starts none: it would
+				// sign the wrong home in.
 				if a.rejectToken(profile.Provider, r.ranWith) {
 					a.detect(ctx, profile.Provider)
-				} else {
+				} else if info.InstallationID == detected.InstallationID {
 					a.signInWhenSignedOut(profile.Provider)
 				}
 			}

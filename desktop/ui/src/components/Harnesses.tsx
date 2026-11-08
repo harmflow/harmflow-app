@@ -171,6 +171,7 @@ function HomeList({ harness }: { harness: Harness }) {
             home.account?.plan ? `${t("harness.plan")}: ${home.account.plan === "unknown" ? t("harness.planUnknown") : home.account.plan}` : "",
             home.account ? `${t("harness.requirements")}: ${t(`harness.requirementsState.${!requirements ? "unknown" : requirements.managed ? "managed" : "none"}`)}` : "",
             home.models.length ? `${t("harness.models")}: ${home.models.map((m) => m.id).join(", ")}` : "",
+            home.efforts.length ? `${t("harness.efforts")}: ${home.efforts.join(", ")}` : "",
           ].filter(Boolean);
           return (
             <li key={home.installationId} className="installations__item" title={home.home}>

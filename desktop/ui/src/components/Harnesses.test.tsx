@@ -583,11 +583,11 @@ describe("HarnessInventory of Codex homes", () => {
     expect(shown[i18n.t("harness.homes")]).toBe(
       "~/.codex" +
         i18n.t("harness.readiness.ready") +
-        `Authentication: ${i18n.t("harness.authentication.valid")} · Plan: plus · Managed requirements: Not managed · Models: default, model-a` +
+        `Authentication: ${i18n.t("harness.authentication.valid")} · Plan: plus · Managed requirements: Not managed · Models: default, model-a · Efforts: default` +
         "~/.codex-b" +
         i18n.t("harness.readiness.not_ready") +
         i18n.t("harness.inUse") +
-        `Authentication: ${i18n.t("harness.authentication.invalid")} · Models: default, model-b` +
+        `Authentication: ${i18n.t("harness.authentication.invalid")} · Models: default, model-b · Efforts: default` +
         i18n.t("harness.homesHint"),
     );
     expect(html).toContain('title="/Users/someone/.codex-b"');
