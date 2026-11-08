@@ -279,6 +279,20 @@ describe("a daemon whose health check fails", () => {
 
     expect(getState().connection).toBe("reconnecting");
   });
+
+  it("is not shown as reconnecting while the stream waits, and ends when the stream connects", async () => {
+    startSync();
+    daemon.stream!.onConnection("connected");
+    status({ running: false, notAnswering: true, pid: 4242 });
+    await actions.refreshHealth();
+
+    daemon.stream!.onConnection("reconnecting");
+    daemon.stream!.onConnection("disconnected");
+    expect(getState().connection).toBe("not_answering");
+
+    daemon.stream!.onConnection("connected");
+    expect(getState().connection).toBe("connected");
+  });
 });
 
 // harmflow-app#908: against a daemon too busy to answer, a periodic refresh skips its tick while the previous refresh of
