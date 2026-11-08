@@ -116,8 +116,11 @@
   --hf-line-height: 1.45;
   --hf-letter-spacing-label: 0.08em;
 
-  /* Spacing */
+  /* Spacing. Every padding, margin, and gap of the stylesheets reads one of these (design.test.ts); the step is 4px,
+     and -0-5 and -1-5 are its halves. */
+  --hf-space-0-5: 2px;
   --hf-space-1: 4px;
+  --hf-space-1-5: 6px;
   --hf-space-2: 8px;
   --hf-space-3: 12px;
   --hf-space-4: 16px;
