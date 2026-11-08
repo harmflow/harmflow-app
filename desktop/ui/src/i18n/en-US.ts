@@ -1328,10 +1328,6 @@ export const enUS = {
     starting: "Starting…",
     stopConfirmTitle: "Stop the daemon?",
     stopConfirm: "No schedule fires while the daemon is stopped; missed firings follow each task's missed-run policy.",
-    stopConfirmRunning_one:
-      "{{count}} execution is running. Stopping the daemon now interrupts it; it will be recorded as interrupted.",
-    stopConfirmRunning_other:
-      "{{count}} executions are running. Stopping the daemon now interrupts them; they will be recorded as interrupted.",
     stopChoiceRunning_one:
       "{{count}} execution is running. Wait for it to finish, and the daemon stops then, within 30 minutes at most; or cancel it now, and it will be recorded as interrupted.",
     stopChoiceRunning_other:

@@ -10,7 +10,7 @@ use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, Runtime};
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind, MessageDialogResult};
 
 use crate::daemon::ApiResponse;
 use crate::state::{ActiveExecution, AppState};
@@ -198,31 +198,86 @@ async fn refresh(app: &AppHandle, state: &AppState) {
     render(app);
 }
 
-/// The dialog a stop shows before anything is sent.
+/// The dialog a stop shows before anything is sent: with executions running, a choice between waiting for them and
+/// cancelling them; with none, a confirmation.
 #[derive(Debug, PartialEq, Eq)]
 struct StopDialog {
     title: String,
     message: String,
-    ok: String,
+    /// "Wait for them", offered only while executions run.
+    wait: Option<String>,
+    /// "Cancel them" while executions run, "Stop daemon" otherwise.
+    stop: String,
     cancel: String,
 }
 
-/// The dialog for `count` running executions: it names them when there are some, in the singular for one, and says no
-/// schedule fires while the daemon is stopped when there are none. `label` is as for `menu_entries`.
+/// The user's answer to the stop dialog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StopAnswer {
+    /// Wait for the running executions: a draining stop, which the daemon ends once they have finished or its deadline
+    /// has passed.
+    Wait,
+    /// Stop now, cancelling what runs.
+    Stop,
+    /// Keep the daemon running.
+    Cancel,
+}
+
+impl StopDialog {
+    fn buttons(&self) -> MessageDialogButtons {
+        match &self.wait {
+            Some(wait) => MessageDialogButtons::YesNoCancelCustom(wait.clone(), self.stop.clone(), self.cancel.clone()),
+            None => MessageDialogButtons::OkCancelCustom(self.stop.clone(), self.cancel.clone()),
+        }
+    }
+
+    /// The answer the dialog's result gives. A custom button answers its label; a dialog that answers the platform's
+    /// own buttons answers Yes for the first and No for the second, as the window's `native.choose` reads them.
+    fn answer(&self, result: &MessageDialogResult) -> StopAnswer {
+        match result {
+            MessageDialogResult::Custom(text) if self.wait.as_ref() == Some(text) => StopAnswer::Wait,
+            MessageDialogResult::Custom(text) if *text == self.stop => StopAnswer::Stop,
+            MessageDialogResult::Yes if self.wait.is_some() => StopAnswer::Wait,
+            MessageDialogResult::Yes | MessageDialogResult::No | MessageDialogResult::Ok => StopAnswer::Stop,
+            _ => StopAnswer::Cancel,
+        }
+    }
+}
+
+/// The dialog for `count` running executions: it names them when there are some, in the singular for one, and offers
+/// to wait for them or cancel them; when there are none, it says no schedule fires while the daemon is stopped. `label`
+/// is as for `menu_entries`.
 fn stop_dialog(count: usize, label: impl Fn(&str, &str) -> String) -> StopDialog {
-    let message = if count == 1 {
-        label("stopConfirmRunning_one", "{{count}} execution is running. Stopping the daemon now interrupts it.")
-            .replace("{{count}}", &count.to_string())
-    } else if count > 1 {
-        label("stopConfirmRunning_other", "{{count}} executions are running. Stopping the daemon now interrupts them.")
-            .replace("{{count}}", &count.to_string())
-    } else {
-        label("stopConfirm", "No schedule fires while the daemon is stopped.")
+    let (message, wait, stop) = match count {
+        0 => (
+            label("stopConfirm", "No schedule fires while the daemon is stopped."),
+            None,
+            label("stopOk", "Stop daemon"),
+        ),
+        1 => (
+            label(
+                "stopChoiceRunning_one",
+                "{{count}} execution is running. Wait for it to finish, and the daemon stops then; or cancel it now, \
+                 and it will be recorded as interrupted.",
+            ),
+            Some(label("stopWait_one", "Wait for it")),
+            label("stopCancelRunning_one", "Cancel it"),
+        ),
+        _ => (
+            label(
+                "stopChoiceRunning_other",
+                "{{count}} executions are running. Wait for them to finish, and the daemon stops then; or cancel them \
+                 now, and they will be recorded as interrupted.",
+            ),
+            Some(label("stopWait_other", "Wait for them")),
+            label("stopCancelRunning_other", "Cancel them"),
+        ),
     };
     StopDialog {
         title: label("stopTitle", "Stop the daemon?"),
-        message,
-        ok: label("stopOk", "Stop daemon"),
+        message: message.replace("{{count}}", &count.to_string()),
+        wait,
+        stop,
         cancel: label("cancel", "Cancel"),
     }
 }
@@ -235,9 +290,15 @@ struct Request {
     body: Value,
 }
 
-/// The request the user's answer sends: none when declined, a stop forced when executions run when confirmed.
-fn stop_request(count: usize, confirmed: bool) -> Option<Request> {
-    confirmed.then(|| Request { method: "POST", path: "/daemon/stop", body: serde_json::json!({ "force": count > 0 }) })
+/// The request the user's answer sends for `count` running executions: none when declined, a draining stop when the
+/// user waits for them, and otherwise a stop, forced when executions run.
+fn stop_request(count: usize, answer: StopAnswer) -> Option<Request> {
+    let body = match answer {
+        StopAnswer::Cancel => return None,
+        StopAnswer::Wait => serde_json::json!({ "drain": true }),
+        StopAnswer::Stop => serde_json::json!({ "force": count > 0 }),
+    };
+    Some(Request { method: "POST", path: "/daemon/stop", body })
 }
 
 /// Stopping the daemon is its own command, and always asks first.
@@ -247,26 +308,26 @@ pub fn confirm_stop<R: Runtime>(app: &AppHandle<R>) {
     ask_stop(app, state, count);
 }
 
-/// Asks to stop the daemon with the dialog for `count` running executions, and sends the stop once the user confirms.
+/// Asks to stop the daemon with the dialog for `count` running executions, and sends the stop the user chose.
 fn ask_stop<R: Runtime>(app: &AppHandle<R>, state: Arc<AppState>, count: usize) {
     let dialog = stop_dialog(count, |key, fallback| state.label(key, fallback));
     let handle = app.clone();
     app.dialog()
-        .message(dialog.message)
-        .title(dialog.title)
+        .message(dialog.message.clone())
+        .title(dialog.title.clone())
         .kind(MessageDialogKind::Warning)
-        .buttons(MessageDialogButtons::OkCancelCustom(dialog.ok, dialog.cancel))
-        .show(move |confirmed| {
-            let Some(request) = stop_request(count, confirmed) else { return };
+        .buttons(dialog.buttons())
+        .show_with_result(move |result| {
+            let Some(request) = stop_request(count, dialog.answer(&result)) else { return };
             tauri::async_runtime::spawn(stop(handle, state, request));
         });
 }
 
 /// Sends the stop and follows the daemon's answer: a refusal is never dropped (harmflow-app#630).
 async fn stop<R: Runtime>(app: AppHandle<R>, state: Arc<AppState>, request: Request) {
-    let forced = request.body.get("force").and_then(Value::as_bool).unwrap_or(false);
+    let chosen = ["force", "drain"].iter().any(|key| request.body.get(*key).and_then(Value::as_bool).unwrap_or(false));
     let res = state.daemon.request(request.method, request.path, Some(request.body)).await;
-    match after_stop(&res, forced) {
+    match after_stop(&res, chosen) {
         AfterStop::Stopping => {}
         AfterStop::ConfirmRunning(count) => ask_stop(&app, state, count),
         AfterStop::Failed(message) => {
@@ -286,13 +347,16 @@ async fn stop<R: Runtime>(app: AppHandle<R>, state: Arc<AppState>, request: Requ
 enum AfterStop {
     /// The daemon accepted the stop.
     Stopping,
-    /// The daemon refused an unforced stop while executions run: ask again with its count, then force the stop.
+    /// The daemon refused a plain stop while executions run: ask again with its count, whether to wait for them or
+    /// cancel them.
     ConfirmRunning(usize),
     /// Any other answer, or no answer: show the daemon's message, or the request's error.
     Failed(String),
 }
 
-fn after_stop(res: &ApiResponse, forced: bool) -> AfterStop {
+/// `chosen` is true for a stop that already answered for running executions, forced or draining: a refusal of it is
+/// shown, never asked again.
+fn after_stop(res: &ApiResponse, chosen: bool) -> AfterStop {
     if (200..300).contains(&res.status) {
         return AfterStop::Stopping;
     }
@@ -304,7 +368,7 @@ fn after_stop(res: &ApiResponse, forced: bool) -> AfterStop {
         .and_then(Value::as_str)
         .and_then(|count| count.parse::<usize>().ok())
         .filter(|count| *count > 0);
-    if let (false, Some("executions_running"), Some(count)) = (forced, code, count) {
+    if let (false, Some("executions_running"), Some(count)) = (chosen, code, count) {
         return AfterStop::ConfirmRunning(count);
     }
     let message = match error.and_then(|e| e.get("message")).and_then(Value::as_str) {
@@ -434,51 +498,112 @@ mod tests {
         assert_eq!(listed, ["exec-1", "exec-2", "exec-3", "exec-4", "exec-5"]);
     }
 
+    fn stop_with(body: Value) -> Option<Request> {
+        Some(Request { method: "POST", path: "/daemon/stop", body })
+    }
+
     #[test]
     fn a_stop_with_an_execution_running_asks_and_names_it() {
         let dialog = stop_dialog(1, defaults);
         assert_eq!(dialog.title, "Stop the daemon?");
-        assert_eq!(dialog.message, "1 execution is running. Stopping the daemon now interrupts it.");
-        assert_eq!((dialog.ok.as_str(), dialog.cancel.as_str()), ("Stop daemon", "Cancel"));
-        assert_eq!(stop_request(1, false), None);
         assert_eq!(
-            stop_request(1, true),
-            Some(Request { method: "POST", path: "/daemon/stop", body: json!({ "force": true }) })
+            dialog.message,
+            "1 execution is running. Wait for it to finish, and the daemon stops then; or cancel it now, and it will be \
+             recorded as interrupted."
         );
+        assert_eq!(dialog.wait.as_deref(), Some("Wait for it"));
+        assert_eq!((dialog.stop.as_str(), dialog.cancel.as_str()), ("Cancel it", "Cancel"));
+        assert_eq!(stop_request(1, StopAnswer::Cancel), None);
+        assert_eq!(stop_request(1, StopAnswer::Stop), stop_with(json!({ "force": true })));
+    }
+
+    #[test]
+    fn waiting_for_the_running_executions_asks_for_a_draining_stop() {
+        for count in [1, 2] {
+            let dialog = stop_dialog(count, defaults);
+            let wait = dialog.wait.clone().expect("a stop with executions running offers to wait");
+            assert_eq!(dialog.answer(&MessageDialogResult::Custom(wait)), StopAnswer::Wait, "{count}");
+            assert_eq!(stop_request(count, StopAnswer::Wait), stop_with(json!({ "drain": true })), "{count}");
+        }
     }
 
     #[test]
     fn a_stop_with_nothing_running_still_asks() {
         let dialog = stop_dialog(0, defaults);
         assert_eq!(dialog.message, "No schedule fires while the daemon is stopped.");
-        assert_eq!(stop_request(0, false), None);
-        assert_eq!(
-            stop_request(0, true),
-            Some(Request { method: "POST", path: "/daemon/stop", body: json!({ "force": false }) })
-        );
+        assert_eq!(dialog.wait, None);
+        assert_eq!((dialog.stop.as_str(), dialog.cancel.as_str()), ("Stop daemon", "Cancel"));
+        assert_eq!(stop_request(0, StopAnswer::Cancel), None);
+        assert_eq!(stop_request(0, StopAnswer::Stop), stop_with(json!({ "force": false })));
+    }
+
+    #[test]
+    fn each_button_answers_its_choice() {
+        use MessageDialogResult::{Cancel, Custom, No, Ok, Yes};
+        let running = stop_dialog(2, defaults);
+        assert!(matches!(
+            running.buttons(),
+            MessageDialogButtons::YesNoCancelCustom(wait, stop, cancel)
+                if wait == "Wait for them" && stop == "Cancel them" && cancel == "Cancel"
+        ));
+        for (result, answer) in [
+            (Custom("Wait for them".into()), StopAnswer::Wait),
+            (Custom("Cancel them".into()), StopAnswer::Stop),
+            (Custom("Cancel".into()), StopAnswer::Cancel),
+            (Yes, StopAnswer::Wait),
+            (No, StopAnswer::Stop),
+            (Cancel, StopAnswer::Cancel),
+        ] {
+            assert_eq!(running.answer(&result), answer, "{result:?}");
+        }
+        let idle = stop_dialog(0, defaults);
+        assert!(matches!(
+            idle.buttons(),
+            MessageDialogButtons::OkCancelCustom(stop, cancel) if stop == "Stop daemon" && cancel == "Cancel"
+        ));
+        for (result, answer) in [
+            (Custom("Stop daemon".into()), StopAnswer::Stop),
+            (Custom("Cancel".into()), StopAnswer::Cancel),
+            (Ok, StopAnswer::Stop),
+            (Yes, StopAnswer::Stop),
+            (Cancel, StopAnswer::Cancel),
+        ] {
+            assert_eq!(idle.answer(&result), answer, "{result:?}");
+        }
     }
 
     #[test]
     fn the_stop_dialog_names_one_execution_in_the_singular_and_two_in_the_plural() {
-        assert_eq!(stop_dialog(1, defaults).message, "1 execution is running. Stopping the daemon now interrupts it.");
+        let one = stop_dialog(1, defaults);
+        assert!(one.message.starts_with("1 execution is running. Wait for it to finish"), "{}", one.message);
+        assert_eq!((one.wait.as_deref(), one.stop.as_str()), (Some("Wait for it"), "Cancel it"));
+        let two = stop_dialog(2, defaults);
         assert_eq!(
-            stop_dialog(2, defaults).message,
-            "2 executions are running. Stopping the daemon now interrupts them."
+            two.message,
+            "2 executions are running. Wait for them to finish, and the daemon stops then; or cancel them now, and \
+             they will be recorded as interrupted."
         );
+        assert_eq!((two.wait.as_deref(), two.stop.as_str()), (Some("Wait for them"), "Cancel them"));
     }
 
     #[test]
     fn the_interfaces_texts_replace_the_defaults() {
         let label = |key: &str, fallback: &str| match key {
             "active" => "{{count}} em execução".to_string(),
-            "stopConfirmRunning_one" => "{{count}} execução em andamento.".to_string(),
-            "stopConfirmRunning_other" => "{{count}} execuções em andamento.".to_string(),
+            "stopChoiceRunning_one" => "{{count}} execução em andamento.".to_string(),
+            "stopChoiceRunning_other" => "{{count}} execuções em andamento.".to_string(),
+            "stopWait_one" => "Aguardar".to_string(),
+            "stopWait_other" => "Aguardar todas".to_string(),
+            "stopCancelRunning_other" => "Cancelar todas".to_string(),
             _ => fallback.to_string(),
         };
         assert_eq!(items(&menu_entries(&running(3), label))[0].1, "3 em execução");
         assert_eq!(stop_dialog(1, label).message, "1 execução em andamento.");
+        assert_eq!(stop_dialog(1, label).wait.as_deref(), Some("Aguardar"));
         assert_eq!(stop_dialog(2, label).message, "2 execuções em andamento.");
-        assert_eq!(stop_dialog(3, label).message, "3 execuções em andamento.");
+        let three = stop_dialog(3, label);
+        assert_eq!(three.message, "3 execuções em andamento.");
+        assert_eq!((three.wait.as_deref(), three.stop.as_str()), (Some("Aguardar todas"), "Cancelar todas"));
     }
 
     #[test]
@@ -489,19 +614,19 @@ mod tests {
 
     #[test]
     fn a_stop_refused_for_running_executions_asks_again_with_the_daemons_count() {
-        // The tray's own list read no execution, so it sent no force; the daemon counted two.
+        // The tray's own list read no execution, so it sent a plain stop; the daemon counted two.
         assert_eq!(after_stop(&refused_running("2"), false), AfterStop::ConfirmRunning(2));
-        // The dialog asked again names the daemon's count and, confirmed, forces the stop.
-        assert_eq!(
-            stop_dialog(2, defaults).message,
-            "2 executions are running. Stopping the daemon now interrupts them."
-        );
-        assert_eq!(stop_request(2, true).map(|r| r.body), Some(json!({ "force": true })));
+        // The dialog asked again names the daemon's count and offers to wait for them or cancel them.
+        let dialog = stop_dialog(2, defaults);
+        assert!(dialog.message.starts_with("2 executions are running."), "{}", dialog.message);
+        assert_eq!(dialog.wait.as_deref(), Some("Wait for them"));
+        assert_eq!(stop_request(2, StopAnswer::Wait), stop_with(json!({ "drain": true })));
+        assert_eq!(stop_request(2, StopAnswer::Stop), stop_with(json!({ "force": true })));
     }
 
     #[test]
     fn a_forced_stop_that_is_still_refused_shows_the_daemons_message() {
-        // A confirmed stop is never asked again in a loop.
+        // A stop that already chose, forced or draining, is never asked again in a loop.
         assert_eq!(
             after_stop(&refused_running("1"), true),
             AfterStop::Failed("1 executions are running; confirm to stop the daemon and cancel them".into())

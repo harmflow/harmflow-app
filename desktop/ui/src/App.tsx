@@ -133,7 +133,8 @@ export function App() {
   }, [executionsAsideHidden]);
 
   // The tray, the app menu's Settings…, and the Help menu's Keyboard Shortcuts speak the interface's language too. A count given as a string reads the key
-  // as written, so both forms of the stop confirmation go with their `{{count}}` left in, for the tray to choose.
+  // as written, so both forms of the stop's question go with their `{{count}}` left in, for the tray to choose; so do
+  // both forms of its buttons, which hold none.
   useEffect(() => {
     void native.setTrayLabels({
       idle: t("tray.idle"),
@@ -143,8 +144,12 @@ export function App() {
       stop: t("tray.stop"),
       stopTitle: t("settings.stopConfirmTitle"),
       stopConfirm: t("settings.stopConfirm"),
-      stopConfirmRunning_one: t("settings.stopConfirmRunning_one", { count: "{{count}}" as unknown as number }),
-      stopConfirmRunning_other: t("settings.stopConfirmRunning_other", { count: "{{count}}" as unknown as number }),
+      stopChoiceRunning_one: t("settings.stopChoiceRunning_one", { count: "{{count}}" as unknown as number }),
+      stopChoiceRunning_other: t("settings.stopChoiceRunning_other", { count: "{{count}}" as unknown as number }),
+      stopWait_one: t("settings.stopWait_one", { count: "{{count}}" as unknown as number }),
+      stopWait_other: t("settings.stopWait_other", { count: "{{count}}" as unknown as number }),
+      stopCancelRunning_one: t("settings.stopCancelRunning_one", { count: "{{count}}" as unknown as number }),
+      stopCancelRunning_other: t("settings.stopCancelRunning_other", { count: "{{count}}" as unknown as number }),
       stopOk: t("settings.stopDaemon"),
       stopFailedTitle: t("settings.stopFailedTitle"),
       stopFailedOk: t("settings.stopFailedOk"),
