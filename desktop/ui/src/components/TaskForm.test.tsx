@@ -1305,3 +1305,88 @@ describe("task form ephemeral session", () => {
     }
   });
 });
+
+// harmflow-app#475: a profile offers the installations of the harness it chose, one per Codex home, and its Model and
+// Effort lists are those of the installation chosen, or of the one in use while none is.
+describe("task form installation", () => {
+  let current: Doc = {};
+  const codexHome = (id: string, model: string, effort: string): Harness => ({
+    id: "codex",
+    name: "Codex",
+    detected: true,
+    installations: ["/opt/homebrew/bin/codex"],
+    installationId: id,
+    home: `/Users/someone/${id.slice(2)}`,
+    authentication: "valid",
+    readiness: "ready",
+    models: [{ id: "default" }, { id: model, efforts: ["default", effort] }],
+    efforts: ["default", effort],
+    lastCheckedAt: "2026-11-08T09:00:00Z",
+  });
+  const first = codexHome("~/.codex", "model-a", "low");
+  const second = codexHome("~/.codex-b", "model-b", "high");
+  const harnesses: Harness[] = [
+    { ...second, homes: [first, second] },
+    { id: "claude-code", name: "Claude Code", detected: true, installations: [], authentication: "valid", readiness: "ready", models: [{ id: "sonnet" }], efforts: ["default"], lastCheckedAt: "2026-11-08T09:00:00Z" },
+  ];
+
+  function Form({ doc }: { doc: Doc }) {
+    const [value, setValue] = useState(doc);
+    current = value;
+    return <TaskForm doc={value} onChange={(d) => setValue((current = d))} mode="edit" harnesses={harnesses} errorPaths={new Set()} />;
+  }
+
+  async function openForm(doc: Doc) {
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(<Form doc={doc} />));
+    await settle();
+  }
+
+  const withProfiles = (preferred: Doc, ...candidates: Doc[]): Doc => {
+    const doc = task({});
+    return { ...doc, spec: { ...(doc.spec as Doc), harness: { preferred, ...(candidates.length ? { fallback: { candidates } } : {}) } } };
+  };
+  const preferred = () => ((current.spec as Doc).harness as { preferred: Doc }).preferred;
+  const profiles = () => [...host!.querySelectorAll("#section-harness .grid-profile")];
+  const fieldOf = (i: number, label: string) =>
+    [...profiles()[i]!.querySelectorAll(".field")].find((f) => f.querySelector(".field__label")?.textContent === label);
+  const installation = (i: number) => fieldOf(i, "Installation")?.querySelector("select");
+  const options = (el: Element | null | undefined) => [...(el?.querySelectorAll("option") ?? [])].map((o) => o.getAttribute("value"));
+  const models = (i: number) => options(profiles()[i]!.querySelector("datalist"));
+  const efforts = (i: number) => options(fieldOf(i, "Effort")?.querySelector("select"));
+
+  it("lists the chosen harness's installations, and the Model and Effort lists follow the one chosen", async () => {
+    await openForm(withProfiles({ provider: "codex" }, { provider: "claude-code" }));
+    expect(options(installation(0))).toStrictEqual(["", "~/.codex", "~/.codex-b"]);
+    expect(installation(0)!.options[0]!.textContent).toBe("In use (~/.codex-b)");
+    expect(installation(1)).toBeUndefined();
+    expect(models(0)).toStrictEqual(["default", "model-b"]);
+    expect(efforts(0)).toStrictEqual(["", "default", "high"]);
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(installation(0), "~/.codex");
+      installation(0)!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await settle();
+    expect(preferred()).toStrictEqual({ provider: "codex", installation: "~/.codex" });
+    expect(models(0)).toStrictEqual(["default", "model-a"]);
+    expect(efforts(0)).toStrictEqual(["", "default", "low"]);
+  });
+
+  it("keeps an installation this machine lacks, saying so, and drops it when the harness changes", async () => {
+    await openForm(withProfiles({ provider: "codex", installation: "~/.gone" }));
+    expect(options(installation(0))).toStrictEqual(["", "~/.codex", "~/.codex-b", "~/.gone"]);
+    expect(installation(0)!.value).toBe("~/.gone");
+    expect(installation(0)!.selectedOptions[0]!.textContent).toBe("~/.gone — not on this machine");
+
+    const provider = fieldOf(0, "AI tool")!.querySelector("select")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(provider, "claude-code");
+      provider.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await settle();
+    expect(preferred()).toStrictEqual({ provider: "claude-code" });
+    expect(installation(0)).toBeUndefined();
+  });
+});

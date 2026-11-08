@@ -150,6 +150,49 @@ export function TokenControl({ harness, locale }: { harness: Harness; locale: st
   );
 }
 
+function authenticationTone(h: Harness): Tone {
+  return h.authentication === "valid" ? "success" : h.authentication === "invalid" ? "danger" : h.detected ? "warning" : "neutral";
+}
+
+/**
+ * The installations of a harness's binary, one per home: each by the identifier a task names it by, its home, how ready
+ * it is, and what its own probes read — its sign-in, plan, managed requirements, and models. The one in use is marked.
+ */
+function HomeList({ harness }: { harness: Harness }) {
+  const { t } = useTranslation();
+  const homes = harness.homes ?? [];
+  return (
+    <div>
+      <ul className="installations">
+        {homes.map((home) => {
+          const requirements = home.managedRequirements;
+          const details = [
+            `${t("harness.authLabel")}: ${t(`harness.authentication.${home.authentication}`)}`,
+            home.account?.plan ? `${t("harness.plan")}: ${home.account.plan === "unknown" ? t("harness.planUnknown") : home.account.plan}` : "",
+            home.account ? `${t("harness.requirements")}: ${t(`harness.requirementsState.${!requirements ? "unknown" : requirements.managed ? "managed" : "none"}`)}` : "",
+            home.models.length ? `${t("harness.models")}: ${home.models.map((m) => m.id).join(", ")}` : "",
+          ].filter(Boolean);
+          return (
+            <li key={home.installationId} className="installations__item" title={home.home}>
+              <span className="mono">{home.installationId}</span>
+              <Chip tone={readinessTone(home)} icon={readinessIcon(home)} title={fieldText(home.diagnostic, home.diagnosticKey, home.diagnosticParams)}>
+                {t(`harness.readiness.${home.readiness}`)}
+              </Chip>
+              {home.installationId === harness.installationId ? (
+                <Chip tone="success" icon="check">
+                  {t("harness.inUse")}
+                </Chip>
+              ) : null}
+              <span className="muted">{details.join(" · ")}</span>
+            </li>
+          );
+        })}
+      </ul>
+      <span className="muted">{t("harness.homesHint")}</span>
+    </div>
+  );
+}
+
 /** A harness's inventory card. A path being set by hand is a draft until its Save, reported to `onDraft`. */
 export function HarnessInventory({ harness, locale, onDraft }: { harness: Harness; locale: string; onDraft?: DraftReport }) {
   const { t } = useTranslation();
@@ -255,6 +298,8 @@ export function HarnessInventory({ harness, locale, onDraft }: { harness: Harnes
               </ul>
             ) : null,
           ],
+          // Only a harness with installations by home has the row.
+          ...(harness.homes?.length ? [[t("harness.homes"), <HomeList harness={harness} />] as [string, ReactNode]] : []),
           [
             t("harness.version"),
             harness.version || harness.versionSupport ? (
@@ -271,17 +316,7 @@ export function HarnessInventory({ harness, locale, onDraft }: { harness: Harnes
           ],
           [
             t("harness.authLabel"),
-            <Chip
-              tone={
-                harness.authentication === "valid"
-                  ? "success"
-                  : harness.authentication === "invalid"
-                    ? "danger"
-                    : harness.detected
-                      ? "warning"
-                      : "neutral"
-              }
-            >
+            <Chip tone={authenticationTone(harness)}>
               {t(`harness.authentication.${harness.authentication}`)}
             </Chip>,
           ],

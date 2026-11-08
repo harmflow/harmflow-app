@@ -819,6 +819,16 @@ function Attempts({ detail, locale }: { detail?: Execution; locale: string }) {
               [t("executions.detail.model"), <UsedValue used={a.model} configured={a.configuredModel} />],
               [t("executions.detail.effort"), <UsedValue used={a.effort} configured={a.configuredEffort} />],
               [t("executions.detail.harnessVersion"), a.harnessVersion ? <span className="mono">{a.harnessVersion}</span> : null],
+              // The installation the attempt ran on and its home: its path, never anything read from it.
+              [
+                t("executions.detail.installation"),
+                a.installation ? (
+                  <span className="mono">
+                    {a.installation}
+                    {a.installationHome ? <span className="muted"> · {a.installationHome}</span> : null}
+                  </span>
+                ) : null,
+              ],
               [t("executions.detail.reason"), fieldText(a.reason, a.reasonKey, a.reasonParams) ?? null],
               [t("executions.detail.started"), formatDateTime(a.startedAt, locale)],
               [t("executions.detail.duration"), <Elapsed start={a.startedAt} end={a.endedAt} locale={locale} />],

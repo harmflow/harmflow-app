@@ -2926,6 +2926,15 @@ button.queue-item:hover,
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto 32px;
 }
 
+/* A harness with installations by home adds their choice beside the provider. */
+.grid-profile--installation {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 32px;
+}
+
+.grid-profile--installation.grid-profile--session {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto 32px;
+}
+
 .grid-profile__note {
   grid-column: 1 / -1;
 }

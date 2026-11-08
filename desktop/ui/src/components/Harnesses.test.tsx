@@ -557,3 +557,43 @@ describe("a long-lived token", () => {
     expect(host!.textContent).not.toContain(i18n.t("harness.token"));
   });
 });
+
+// harmflow-app#475: Codex's card lists each home as an installation of its own, by the identifier a task names it by,
+// each with its own readiness, sign-in, plan, and models, the one in use marked; a harness without homes has no row.
+describe("HarnessInventory of Codex homes", () => {
+  const home = (id: string, over: Partial<Harness>): Harness => ({
+    ...ready,
+    id: "codex",
+    name: "Codex",
+    path: "/opt/homebrew/bin/codex",
+    installationId: id,
+    home: `/Users/someone/${id.slice(2)}`,
+    ...over,
+  });
+  const signedIn = home("~/.codex", {
+    models: [{ id: "default" }, { id: "model-a" }],
+    account: { signInMethod: "chatgpt", plan: "plus" },
+    managedRequirements: { managed: false, approvalPolicies: null, approvalsReviewers: null, permissionProfiles: null },
+  });
+  const signedOut = home("~/.codex-b", { models: [{ id: "default" }, { id: "model-b" }], authentication: "invalid", readiness: "not_ready" });
+
+  it("lists each home with what its own probes read, the one in use marked", () => {
+    const html = renderToString(<HarnessInventory harness={{ ...signedOut, homes: [signedIn, signedOut] }} locale="en-US" />);
+    const shown = rows(html);
+    expect(shown[i18n.t("harness.homes")]).toBe(
+      "~/.codex" +
+        i18n.t("harness.readiness.ready") +
+        `Authentication: ${i18n.t("harness.authentication.valid")} · Plan: plus · Managed requirements: Not managed · Models: default, model-a` +
+        "~/.codex-b" +
+        i18n.t("harness.readiness.not_ready") +
+        i18n.t("harness.inUse") +
+        `Authentication: ${i18n.t("harness.authentication.invalid")} · Models: default, model-b` +
+        i18n.t("harness.homesHint"),
+    );
+    expect(html).toContain('title="/Users/someone/.codex-b"');
+  });
+
+  it("shows no homes row for a harness that has none", () => {
+    expect(rows(renderToString(<HarnessInventory harness={ready} locale="en-US" />))).not.toHaveProperty(i18n.t("harness.homes"));
+  });
+});

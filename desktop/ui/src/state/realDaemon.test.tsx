@@ -167,11 +167,15 @@ const button = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>(
 const radio = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((b) => b.textContent === label)!;
 const chips = (label: string) => [...field(label)!.querySelectorAll(".name-chip > .mono")].map((c) => c.textContent);
 const repository = () => [...host!.querySelector(".grid-repo:not(.row-list__head)")!.querySelectorAll("input")];
-/** The preferred harness, then each fallback: its harness, model, and effort controls. */
+/**
+ * The preferred harness, then each fallback: its harness, model, and effort controls, each by its label within the
+ * profile's row, since a harness with homes adds an Installation select to the row.
+ */
 const profiles = () =>
   [...host!.querySelectorAll("#section-harness .grid-profile")].map((p) => {
-    const [harness, effort] = p.querySelectorAll("select");
-    return { harness: harness!, model: p.querySelector("input")!, effort: effort! };
+    const within = <E extends Element>(label: string) =>
+      [...p.querySelectorAll(".field")].find((f) => f.querySelector(".field__label")?.textContent === label)!.querySelector<E>("input, select")!;
+    return { harness: within<HTMLSelectElement>("AI tool"), model: within<HTMLInputElement>("Model"), effort: within<HTMLSelectElement>("Effort") };
   });
 const dialog = () => document.querySelector<HTMLElement>('[role="dialog"]');
 const dialogButton = (label: string) => [...dialog()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === label);
