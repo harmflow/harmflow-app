@@ -107,15 +107,6 @@ type HarnessInfo struct {
 	PathSource          string            `json:"pathSource,omitempty"`
 	Installations       []string          `json:"installations"`
 	Installation        string            `json:"installation,omitempty"` // the entry of Installations in use
-	// InstallationID is what a task's harness profile names this installation by, in its installation key; empty for a
-	// harness whose installations are its binaries alone.
-	InstallationID string `json:"installationId,omitempty"`
-	// Home is the folder of the installation's own configuration and sign-in, which its probes and attempts run with;
-	// empty for a harness that has none.
-	Home string `json:"home,omitempty"`
-	// Homes are the installations of the binary in use, one per home detection found, each with what its own probes
-	// read; the one in use is among them, and none has Homes of its own. Empty for a harness without homes.
-	Homes               []HarnessInfo     `json:"homes,omitempty"`
 	Version             string            `json:"version,omitempty"`
 	VersionSupport      string            `json:"versionSupport,omitempty"`
 	Authentication      string            `json:"authentication"`
@@ -139,7 +130,16 @@ type HarnessInfo struct {
 	Account *HarnessAccount `json:"account,omitempty"`
 	// ManagedRequirements are the settings an administrator allows the harness; nil when it could not say.
 	ManagedRequirements *ManagedRequirements `json:"managedRequirements,omitempty"`
-	Features            map[string]bool      `json:"-"`
+	// InstallationID is what a task's harness profile names this installation by, in its installation key; empty for a
+	// harness whose installations are its binaries alone.
+	InstallationID string `json:"installationId,omitempty"`
+	// Home is the folder of the installation's own configuration and sign-in, which its probes and attempts run with;
+	// empty for a harness that has none.
+	Home string `json:"home,omitempty"`
+	// Homes are the installations of the binary in use, one per home detection found, each with what its own probes
+	// read; the one in use is among them, and none has Homes of its own. Empty for a harness without homes.
+	Homes    []HarnessInfo   `json:"homes,omitempty"`
+	Features map[string]bool `json:"-"`
 	// FeaturesUnknown is true when the help that lists the CLI's flags could not be read within its check's limit, so
 	// Features cannot tell a flag the CLI lacks from one the help did not get to.
 	FeaturesUnknown bool `json:"-"`

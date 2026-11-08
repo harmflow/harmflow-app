@@ -344,6 +344,8 @@ export const ptBR: Resources = {
       "a lista de modelos do Codex não pôde ser lida, então o modelo e o esforço não foram verificados",
     harness_not_detected: "{{harness}} não foi detectado nesta máquina",
     harness_not_ready: "{{harness}} não está pronto: {{detail}}",
+    harness_installation_missing: "o {{harness}} não tem a instalação \"{{installation}}\" neste computador",
+    harness_installation_signed_out: "a instalação \"{{installation}}\" do {{harness}} não está conectada",
     agent_not_found: 'o agente "{{name}}" não foi encontrado para {{harness}} ($t(itemSource.{{source}}))',
     skill_not_found: 'a skill "{{name}}" não foi encontrada para {{harness}} ($t(itemSource.{{source}}))',
     agent_missing: 'o agente "{{name}}" não existe nesta máquina para {{harness}} ($t(itemSource.{{source}}))',

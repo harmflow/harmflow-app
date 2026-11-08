@@ -100,6 +100,7 @@
       "additionalProperties": false,
       "properties": {
         "provider": { "$ref": "task.schema.json#/$defs/harnessProfile/properties/provider" },
+        "installation": { "$ref": "task.schema.json#/$defs/harnessProfile/properties/installation" },
         "model": { "$ref": "task.schema.json#/$defs/harnessProfile/properties/model" },
         "effort": { "$ref": "task.schema.json#/$defs/harnessProfile/properties/effort" },
         "ephemeral": { "$ref": "task.schema.json#/$defs/harnessProfile/properties/ephemeral" }

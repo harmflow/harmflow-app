@@ -338,6 +338,8 @@ export const enUS = {
     codex_profile_unchecked: "Codex's list of models could not be read, so the model and effort were not checked",
     harness_not_detected: "{{harness}} was not detected on this machine",
     harness_not_ready: "{{harness}} is not ready: {{detail}}",
+    harness_installation_missing: "{{harness}} has no installation \"{{installation}}\" on this machine",
+    harness_installation_signed_out: "{{harness}}'s installation \"{{installation}}\" is not signed in",
     agent_not_found: 'agent "{{name}}" cannot be found for {{harness}} ($t(itemSource.{{source}}))',
     skill_not_found: 'skill "{{name}}" cannot be found for {{harness}} ($t(itemSource.{{source}}))',
     agent_missing: 'agent "{{name}}" is missing on this machine for {{harness}} ($t(itemSource.{{source}}))',

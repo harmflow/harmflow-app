@@ -103,6 +103,11 @@ type fakeHarness struct {
 	// restrictions are what Prepare reports, at a save's policy check and at each attempt; none by default, as a harness
 	// that enforces everything.
 	restrictions []ports.Restriction
+	// homes, when set, are the installations Detect lists, by identifier, each with its home under /homes; the first is
+	// the one in use, and one in signedOut reads signed out. preparedOn are the homes each attempt was prepared with.
+	homes      []string
+	signedOut  map[string]bool
+	preparedOn []string
 }
 
 var _ ports.HarnessAdapter = (*fakeHarness)(nil)
@@ -145,6 +150,19 @@ func (f *fakeHarness) Detect(ctx context.Context, _ string) ports.HarnessInfo {
 		info.Readiness, info.Authentication = "not_ready", "invalid"
 		info.SetDiagnostic(domain.T("not_signed_in", "{{name}} is not signed in; run `{{command}}` in a terminal",
 			"name", f.id, "command", "login"))
+	}
+	if len(f.homes) > 0 && info.Detected {
+		var homes []ports.HarnessInfo
+		for _, id := range f.homes {
+			h := info
+			h.InstallationID, h.Home = id, filepath.Join("/homes", id)
+			if f.signedOut[id] {
+				h.Readiness, h.Authentication = "not_ready", "invalid"
+			}
+			homes = append(homes, h)
+		}
+		info = homes[0]
+		info.Homes = homes
 	}
 	return info
 }
@@ -190,7 +208,7 @@ func (f *fakeHarness) UserItem(_ context.Context, _ ports.HarnessInfo, kind, nam
 func (f *fakeHarness) UserItems(context.Context, ports.HarnessInfo, string, string, []string) ([]ports.ResolvedItem, []ports.DiscoveryError, error) {
 	return nil, nil, nil
 }
-func (f *fakeHarness) Prepare(_ ports.HarnessInfo, req ports.RunRequest) (ports.Invocation, ports.OutputParser, error) {
+func (f *fakeHarness) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.Invocation, ports.OutputParser, error) {
 	f.mu.Lock()
 	parser := &fakeParser{}
 	path := "/bin/sh"
@@ -199,6 +217,7 @@ func (f *fakeHarness) Prepare(_ ports.HarnessInfo, req ports.RunRequest) (ports.
 	}
 	if req.Prompt != "" { // validation's policy check prepares with no prompt
 		f.prompts = append(f.prompts, req.Prompt)
+		f.preparedOn = append(f.preparedOn, info.Home)
 	}
 	// An attempt whose program cannot start never reaches its parser's Finish, so it never counts as live.
 	if req.Prompt != "" && path == "/bin/sh" {

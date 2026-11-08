@@ -496,7 +496,12 @@ func (r *run) attempts(ctx context.Context, start func(harness string) error) (d
 		}
 		profile := chain[idx]
 		ad := a.adapters[profile.Provider]
-		info := a.detect(ctx, profile.Provider) // revalidate before every attempt
+		// Revalidate before every attempt, on the installation the profile names.
+		info, found := a.detect(ctx, profile.Provider).InstallationNamed(profile.Installation)
+		if !found {
+			info = ports.HarnessInfo{ID: profile.Provider, Readiness: "not_installed"}
+			info.SetDiagnostic(installationMissing(ad.Name(), profile.Installation))
+		}
 		var end domain.AttemptEnd
 		var mark *ports.WorkspaceMark // set when an attempt ran in this pass and a switch can follow it
 		if !info.Ready() {
@@ -655,7 +660,7 @@ func (r *run) chain(ctx context.Context) ([]domain.HarnessProfile, []domain.Text
 		if !ok {
 			continue
 		}
-		missing := r.a.missingItems(ctx, r.def, p.Provider, r.itemWorkspace(), r.addedFolders())
+		missing := r.a.missingItems(ctx, r.def, p.Provider, p.Installation, r.itemWorkspace(), r.addedFolders())
 		if missing = slices.DeleteFunc(missing, missingItem.leftUnverified); len(missing) > 0 {
 			invalid = append(invalid, missing[0].invalidFallback(ad.Name()))
 			continue
@@ -698,7 +703,7 @@ func warningEvent(w domain.Warning, eventType string) domain.Event {
 func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info ports.HarnessInfo, p domain.HarnessProfile, reason domain.Text,
 	prev []previousAttempt) (domain.AttemptEnd, bool) {
 	a := r.a
-	agents, skills, warnings, err := r.resolve(ctx, ad)
+	agents, skills, warnings, err := r.resolve(ctx, ad, p.Installation)
 	if err != nil {
 		return domain.AttemptEnd{Class: domain.ClassTaskError, Error: domain.TextOf(err)}, false
 	}
@@ -713,8 +718,9 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 	// Read at each attempt, so a change in Settings reaches the next one with no restart.
 	general := a.settings.SystemPrompt
 	// The model and effort used stay unreported until the harness reports them.
-	at := domain.Attempt{Number: n, Harness: p.Provider, HarnessVersion: info.Version, ConfiguredModel: p.Model,
-		ConfiguredEffort: p.Effort, StartedAt: now, Outcome: domain.AttemptRunning}
+	at := domain.Attempt{Number: n, Harness: p.Provider, HarnessVersion: info.Version, Installation: info.InstallationID,
+		InstallationHome: info.Home, ConfiguredModel: p.Model, ConfiguredEffort: p.Effort, StartedAt: now,
+		Outcome: domain.AttemptRunning}
 	at.SetReason(reason)
 	r.x.Attempts = append(r.x.Attempts, at)
 	r.x.Harness, r.x.Model = p.Provider, ""
@@ -940,11 +946,12 @@ func attemptOutcome(c domain.ErrorClass) domain.AttemptOutcome {
 	}
 }
 
-// resolve finds the task's agents and skills for one harness, as it finds them for the execution's working directory.
+// resolve finds the task's agents and skills for one installation of a harness, the one in use for an empty one, as it
+// finds them for the execution's working directory.
 // When the harness loads the task's items of a kind itself and could not give its list of them, those items are passed
 // through by name, unverified, and the warning validation gives says so; the list is not asked for again for the rest
 // of them. A list that could not be read fails the attempt for any other harness or kind, as a missing item does.
-func (r *run) resolve(ctx context.Context, ad ports.HarnessAdapter) (agents, skills []ports.ResolvedItem, warnings []domain.Warning,
+func (r *run) resolve(ctx context.Context, ad ports.HarnessAdapter, installation string) (agents, skills []ports.ResolvedItem, warnings []domain.Warning,
 	err error) {
 	for _, kind := range []string{"agent", "skill"} {
 		names, code, path := r.eff.Spec.Agents, domain.WarningMissingAgent, "/spec/agents"
@@ -957,7 +964,7 @@ func (r *run) resolve(ctx context.Context, ad ports.HarnessAdapter) (agents, ski
 			if unverified && !strings.HasPrefix(name, BuiltinPrefix) {
 				it = ports.ResolvedItem{Name: name, Kind: kind}
 			} else {
-				l := r.a.resolveItem(ctx, kind, name, ad.ID(), r.itemWorkspace(), r.addedFolders())
+				l := r.a.resolveItem(ctx, kind, name, ad.ID(), installation, r.itemWorkspace(), r.addedFolders())
 				if l.unreadable != nil {
 					l.missing.unreadable = l.unreadable
 				}

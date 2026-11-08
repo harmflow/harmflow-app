@@ -151,7 +151,7 @@ func TestCodexSkillsComeFromItsSkillList(t *testing.T) {
 	if len(chain) != 2 || len(invalid) != 0 {
 		t.Errorf("chain() = %v, invalid %v; want Claude Code then Codex", chain, invalid)
 	}
-	_, skills, _, err := r.resolve(ctx, a.adapters[domain.HarnessCodex])
+	_, skills, _, err := r.resolve(ctx, a.adapters[domain.HarnessCodex], "")
 	if err != nil || len(skills) != 1 || skills[0].Path != filepath.Dir(skill) {
 		t.Errorf("resolve(codex) = %+v, %v; want review-notes at %s", skills, err, filepath.Dir(skill))
 	}
@@ -270,7 +270,7 @@ func TestCodexPluginSkills(t *testing.T) {
 		t.Fatalf("Validate(plugins) errors = %+v, want none", res.Errors)
 	}
 	r := &run{a: a, def: *res.doc, eff: res.doc.Effective(), work: t.TempDir()}
-	_, skills, _, err := r.resolve(ctx, a.adapters[domain.HarnessCodex])
+	_, skills, _, err := r.resolve(ctx, a.adapters[domain.HarnessCodex], "")
 	if err != nil || len(skills) != 1 || skills[0].Name != "presentations:Presentations" || skills[0].Path != "/p/presentations" {
 		t.Errorf("resolve(codex) = %+v, %v; want presentations:Presentations at /p/presentations", skills, err)
 	}
@@ -309,7 +309,7 @@ func TestUnreadableSkillListIsNotAMissingSkill(t *testing.T) {
 		t.Fatalf("Validate(unread) errors = %+v, want none", res.Errors)
 	}
 	r := &run{a: a, def: *res.doc, eff: res.doc.Effective(), work: t.TempDir()}
-	_, _, _, err = r.resolve(ctx, a.adapters[domain.HarnessCodex])
+	_, _, _, err = r.resolve(ctx, a.adapters[domain.HarnessCodex], "")
 	var te *domain.TextError
 	if !errors.As(err, &te) || te.Key != "skill_list_unreadable" {
 		t.Errorf("resolve(codex) = %v, want skill_list_unreadable", err)
@@ -468,7 +468,7 @@ func TestClaudeCodeSkillsComeFromItsSkillList(t *testing.T) {
 	}
 	resolvedExtra, _ := domain.ResolvePath(extra)
 	r := &run{a: a, def: *res.doc, eff: res.doc.Effective(), work: other, writable: []string{resolvedExtra}}
-	if _, skills, _, err := r.resolve(ctx, a.adapters[domain.HarnessClaudeCode]); err != nil || len(skills) != 1 ||
+	if _, skills, _, err := r.resolve(ctx, a.adapters[domain.HarnessClaudeCode], ""); err != nil || len(skills) != 1 ||
 		skills[0].Name != "simplify" {
 		t.Errorf("resolve(claude-code) in %s = %+v, %v; want simplify", other, skills, err)
 	}
@@ -746,7 +746,7 @@ func TestClaudeCodeAttemptStartsWithUnverifiedSkills(t *testing.T) {
 			}
 			r := &run{a: a, def: *res.doc, eff: res.doc.Effective(), work: t.TempDir()}
 			before := len(listings(t, log))
-			_, skills, warnings, err := r.resolve(ctx, cc)
+			_, skills, warnings, err := r.resolve(ctx, cc, "")
 			want := []ports.ResolvedItem{{Name: "review-notes", Kind: "skill"},
 				{Name: "hf-notes", Kind: "skill", Builtin: true, Path: builtin, Description: "A skill."},
 				{Name: "pdf:pdf", Kind: "skill"}}

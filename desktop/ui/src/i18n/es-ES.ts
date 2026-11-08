@@ -345,6 +345,8 @@ export const esES: Resources = {
       "no se pudo leer la lista de modelos de Codex, así que el modelo y el esfuerzo no se comprobaron",
     harness_not_detected: "{{harness}} no se detectó en esta máquina",
     harness_not_ready: "{{harness}} no está listo: {{detail}}",
+    harness_installation_missing: "{{harness}} no tiene la instalación \"{{installation}}\" en este equipo",
+    harness_installation_signed_out: "la instalación \"{{installation}}\" de {{harness}} no tiene la sesión iniciada",
     agent_not_found: 'no se encuentra el agente "{{name}}" para {{harness}} ($t(itemSource.{{source}}))',
     skill_not_found: 'no se encuentra la skill "{{name}}" para {{harness}} ($t(itemSource.{{source}}))',
     agent_missing: 'el agente "{{name}}" no existe en esta máquina para {{harness}} ($t(itemSource.{{source}}))',
