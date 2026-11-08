@@ -64,7 +64,8 @@ async fn daemon_start(state: Shared<'_>, replacing: Option<u32>) -> Result<Daemo
         daemon::wait_gone(pid, Duration::from_secs(30)).await?;
     }
     let current = state.daemon.status().await;
-    if current.running {
+    // A daemon that runs but does not answer yet holds the data directory: another one would find it taken.
+    if current.running || current.not_answering {
         return Ok(current);
     }
     daemon::spawn_daemon()?;

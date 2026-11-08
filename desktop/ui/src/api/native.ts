@@ -4,6 +4,11 @@ import { isTauri } from "./transport";
 export interface DaemonStatus {
   /** The runtime file exists and GET /health answered. */
   running: boolean;
+  /**
+   * The daemon runs but did not answer in time: GET /health timed out once its port took the connection, while the pid
+   * of the runtime file is alive. A busy daemon, not a stopped one; absent otherwise.
+   */
+  notAnswering?: boolean;
   address?: string;
   pid?: number;
   version?: string;

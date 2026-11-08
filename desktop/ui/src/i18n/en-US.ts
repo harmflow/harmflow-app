@@ -72,7 +72,9 @@ export const enUS = {
     reconnecting: "Reconnecting to the daemon",
     disconnected: "Connection to the daemon lost",
     daemon_stopped: "Daemon not running",
+    not_answering: "Not answering",
     lastUpdate: "Last update: {{time}}",
+    notAnsweringHint: "The daemon is running but not answering yet. The desktop keeps trying.",
     lostHint:
       "The connection to the daemon was lost. Executions keep running in the daemon; the dashboard reconnects and replays the events it missed.",
     versionMismatch:

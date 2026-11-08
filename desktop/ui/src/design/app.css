@@ -532,7 +532,8 @@ body:has([aria-modal="true"]) .tooltip {
 }
 
 .conn-pill--connecting,
-.conn-pill--reconnecting {
+.conn-pill--reconnecting,
+.conn-pill--not_answering {
   color: var(--hf-color-warning);
   border-color: rgba(var(--hf-rgb-warning), 0.3);
 }

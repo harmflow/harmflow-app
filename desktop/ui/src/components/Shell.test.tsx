@@ -2,7 +2,8 @@
 // The topbar's warning for a daemon of another version, its banner for a window and a daemon built from different
 // commits, and that banner's restart of the daemon on the window's build, driven in a DOM against a stand-in for the
 // daemon's local API. And the More actions menu's Stop daemon…, whose question names one running execution in the
-// singular and more in the plural. And the sidebar's gauges, read from /system only while the sidebar is expanded.
+// singular and more in the plural. And the sidebar's gauges, read from /system only while the sidebar is expanded. And
+// the topbar's state of a daemon that runs but does not answer, apart from a stopped one.
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -78,6 +79,28 @@ describe("commitsDiffer", () => {
     expect(commitsDiffer("", "f4dbab4")).toBe(false);
     expect(commitsDiffer("13bd5f9", "")).toBe(false);
     expect(commitsDiffer("13bd5f9", undefined)).toBe(false);
+  });
+});
+
+// harmflow-app#908: a daemon whose health check timed out while its process lives is not answering, not stopped.
+describe("the topbar's state of a daemon that does not answer", () => {
+  it("names it in the status pill and says, in a banner, that the daemon runs and the desktop keeps trying", async () => {
+    patchStateForTests({ connection: "not_answering", appCommit: "" });
+    await show();
+
+    const pill = host!.querySelector('[role="status"]');
+    expect(pill?.className).toContain("conn-pill--not_answering");
+    expect(pill?.textContent).toBe("Not answering");
+    expect(text()).toContain("The daemon is running but not answering yet. The desktop keeps trying.");
+    expect(text()).not.toContain("Daemon not running");
+  });
+
+  it("shows neither for a stopped daemon", async () => {
+    patchStateForTests({ connection: "daemon_stopped", appCommit: "" });
+    await show();
+
+    expect(host!.querySelector('[role="status"]')?.textContent).toBe("Daemon not running");
+    expect(text()).not.toContain("not answering yet");
   });
 });
 
