@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -159,6 +160,112 @@ func TestWorkspaceWriteRealClaudeCodeEditsOnlyItsWorkspace(t *testing.T) {
 		t.Errorf("the execution's unenforced restrictions are %v, want the one for restrictToWorkspace, about the shell",
 			r.unenforced)
 	}
+}
+
+// A workspace_write task on the real Claude Code, whose workspace's project settings name the folder beside it in
+// permissions.additionalDirectories, asks the session to write, with the Write tool, one file inside its workspace and
+// one in that folder. Claude Code does not add a project settings' entry to the directories where it approves edits:
+// the file inside is written, no editing tool's call to the file outside succeeds, that file is absent, and the
+// execution carries no warning that the edit directories are not enforced naming the project settings. The log gives
+// Claude Code's version and, for each Write call outside, what refused it in the harness's own words. The entry lives
+// in the workspace alone, which the test removes when it ends: the user's own settings files keep their bytes.
+func TestWorkspaceWriteRealClaudeCodeRefusesAProjectAddedDirectory(t *testing.T) {
+	h := claudeForPermissions(t)
+	w := newWriteTargets(t)
+	user := realHarness{id: "claude-code", config: claudeConfigDir(t), files: []string{"settings.json", "settings.local.json"}}
+	before := snapshotConfig(t, user)
+	settings := filepath.Join(w.work, ".claude", "settings.json")
+	if err := os.Mkdir(filepath.Dir(settings), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	entry := mustJSON(map[string]any{"permissions": map[string]any{"additionalDirectories": []any{filepath.Dir(w.outside)}}})
+	if err := os.WriteFile(settings, []byte(entry), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := runWithProfile(t, h, "workspace_write", w, w.prompt("the Write tool"))
+
+	t.Logf("Claude Code %v", r.harness["version"])
+	r.wantAttemptAtOutside(t, w)
+	w.wantWritten(t)
+	wrote := false
+	for _, c := range r.calls {
+		switch {
+		case !c.names(w.outside) || !slices.Contains(editingTools, c.tool):
+		case c.status == "succeeded":
+			t.Errorf("a workspace_write Claude Code session's %s call to %s succeeded, want the project settings' "+
+				"additional directory refused", c.tool, w.outside)
+		case c.tool == "Write":
+			wrote = true
+			why := claudeRefusal(r.output, c.id)
+			if len(why) == 0 {
+				t.Logf("Claude Code's output says nothing of what refused the Write call %s to %s", c.id, w.outside)
+			}
+			for _, line := range why {
+				t.Logf("what refused the Write call %s: %.1000s", c.id, line)
+			}
+		}
+	}
+	if !wrote {
+		t.Errorf("the session made no Write call to %s that was refused, so the run shows no refusal", w.outside)
+	}
+	wantAbsent(t, w.outside)
+	if slices.ContainsFunc(r.unenforced, func(u unenforced) bool {
+		return u.key == "restriction_claude_edit_rules" && slices.Contains(strings.Split(u.sources, "_"), "project")
+	}) {
+		t.Errorf("the execution's unenforced restrictions are %v, want none for edit_directories naming the project "+
+			"settings", r.unenforced)
+	}
+	if after := snapshotConfig(t, user); !maps.Equal(after, before) {
+		t.Errorf("after the execution, the user's Claude Code settings in %s are %v, want them unchanged, %v",
+			user.config, after, before)
+	}
+}
+
+// claudeRefusal is what Claude Code's JSON output says of the tool call id that it refused, in its own words: the
+// reason and the message of its permission_denied notice, and the text of the tool result it gave the session. A call
+// it declined carries no output of its own in the call's events, so this is where the refusal is told.
+func claudeRefusal(output, id string) []string {
+	var why []string
+	for line := range strings.Lines(output) {
+		var l struct {
+			Type           string          `json:"type"`
+			Subtype        string          `json:"subtype"`
+			ToolUseID      string          `json:"tool_use_id"`
+			DecisionReason string          `json:"decision_reason"`
+			Message        json.RawMessage `json:"message"`
+		}
+		if json.Unmarshal([]byte(line), &l) != nil {
+			continue
+		}
+		switch {
+		case l.Type == "system" && l.Subtype == "permission_denied" && l.ToolUseID == id:
+			var message string
+			_ = json.Unmarshal(l.Message, &message)
+			why = append(why, fmt.Sprintf("permission_denied: %s: %s", l.DecisionReason, message))
+		case l.Type == "user":
+			var m struct {
+				Content []struct {
+					Type      string          `json:"type"`
+					ToolUseID string          `json:"tool_use_id"`
+					Content   json.RawMessage `json:"content"`
+				} `json:"content"`
+			}
+			if json.Unmarshal(l.Message, &m) != nil {
+				continue
+			}
+			for _, c := range m.Content {
+				if c.Type != "tool_result" || c.ToolUseID != id {
+					continue
+				}
+				var text string
+				if json.Unmarshal(c.Content, &text) != nil {
+					text = string(c.Content)
+				}
+				why = append(why, "tool result: "+text)
+			}
+		}
+	}
+	return why
 }
 
 // codexSandboxReport asks a Codex session, before its writes, to print the variables Codex sets on a command it runs in
@@ -370,7 +477,9 @@ func runWithPermissions(t *testing.T, h realHarness, permissions map[string]any,
 		if warning, _ := raw.(map[string]any); warning["code"] == "policy_unenforced" {
 			subject, _ := warning["subject"].(string)
 			key, _ := warning["messageKey"].(string)
-			r.unenforced = append(r.unenforced, unenforced{subject: subject, key: key})
+			params, _ := warning["params"].(map[string]any)
+			sources, _ := params["sources"].(string)
+			r.unenforced = append(r.unenforced, unenforced{subject: subject, key: key, sources: sources})
 		}
 	}
 	attempts, _ := d.call("GET", "/executions/"+run+"/output", nil, 200)["attempts"].([]any)
@@ -407,8 +516,9 @@ func (r permissionRun) wantEnforced(t *testing.T, restrictions ...string) {
 	}
 }
 
-// unenforced is a restriction an execution's policy_unenforced warning names, with the key of its text.
-type unenforced struct{ subject, key string }
+// unenforced is a restriction an execution's policy_unenforced warning names, with the key of its text and the settings
+// sources it names, joined by "_" as in "user_project", when it names any.
+type unenforced struct{ subject, key, sources string }
 
 // toolCall is a tool the session called, from its tool.started event, with the status and the output its
 // tool.completed event gave.
