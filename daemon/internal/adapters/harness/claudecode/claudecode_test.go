@@ -567,7 +567,7 @@ func TestPrepareReportsEditRulesThatReachOutside(t *testing.T) {
 			user: `{"permissions":{"allow":["Edit(~/out/**)"]}}`, policyCheck: true, want: "user"},
 		{name: "an additional directory outside the workspace", user: etc, want: "user"},
 		{name: "additional directories within the workspace and the added directories",
-			project: `{"permissions":{"additionalDirectories":["<work>","<work>/src","<added>/docs"]}}`},
+			local: `{"permissions":{"additionalDirectories":["<work>","<work>/src","<added>/docs"]}}`},
 		{name: "the execution folder as an additional directory", local: `{"permissions":{"additionalDirectories":["<exec>"]}}`},
 		{name: "an additional directory beside the workspace",
 			local: `{"permissions":{"additionalDirectories":["<work>-other"]}}`, want: "local"},
