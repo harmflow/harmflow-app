@@ -134,6 +134,60 @@ describe("Detect again", () => {
   });
 });
 
+// harmflow-app#929: the stream brings every execution's live events, never the history before the dashboard opened, so
+// a detail opened after one of them reached the store reads the execution's stored history from its start, once.
+describe("a detail opened after a live event of its execution", () => {
+  const id = "exec-late";
+  const route = `/executions/${id}/events`;
+  const event = (n: number, type: string): HarmflowEvent => ({
+    id: n,
+    schemaVersion: "1",
+    timestamp: "2026-11-07T22:00:00Z",
+    type,
+    severity: "info",
+    executionId: id,
+    payload: {},
+  });
+  const history = [
+    event(1, "execution.created"),
+    event(2, "execution.started"),
+    event(3, "harness.started"),
+    event(4, "harness.message"),
+    event(5, "harness.message"),
+  ];
+  const idsAndTypes = (events: readonly HarmflowEvent[] | undefined) => (events ?? []).map((e) => `${e.id} ${e.type}`);
+  const eventsReads = () => daemon.requests.filter((r) => r.startsWith(`GET ${route}`));
+
+  afterEach(() => daemon.answers.clear());
+
+  it("holds the execution's whole history, then the live event once and in order", async () => {
+    startSync();
+    daemon.requests.length = 0;
+    daemon.answers.set(route, { events: history, logExpired: false });
+
+    daemon.stream!.onEvent(event(5, "harness.message"));
+    await actions.loadEvents(id);
+
+    expect(eventsReads()).toEqual([`GET ${route}?limit=5000`]);
+    expect(idsAndTypes(getState().events[id])).toEqual(idsAndTypes(history));
+  });
+
+  it("reads after the last event held once the history was read", async () => {
+    startSync();
+    daemon.stream!.onEvent(event(5, "harness.message"));
+    daemon.answers.set(route, { events: history, logExpired: false });
+    await actions.loadEvents(id);
+    daemon.requests.length = 0;
+    daemon.answers.set(route, { events: [], logExpired: false });
+
+    daemon.stream!.onEvent(event(6, "harness.message"));
+    await actions.loadEvents(id);
+
+    expect(eventsReads()).toEqual([`GET ${route}?after=6&limit=5000`]);
+    expect(idsAndTypes(getState().events[id])).toEqual(idsAndTypes([...history, event(6, "harness.message")]));
+  });
+});
+
 describe("execution lists", () => {
   afterEach(() => {
     daemon.answers.clear();

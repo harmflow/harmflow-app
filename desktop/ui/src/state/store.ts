@@ -74,6 +74,9 @@ export type DaemonRestart = "idle" | "restarting" | "refused";
 
 const MAX_EVENTS_PER_EXECUTION = 5000;
 
+/** The executions whose stored history the store read from its start; the stream alone brings only live events. */
+const historyRead = new Set<string>();
+
 let state: State = {
   connection: "connecting",
   daemonRunning: null,
@@ -291,12 +294,17 @@ export const actions = {
     return detail;
   },
 
-  /** Loads the stored events of an execution after the last one already held (replay). */
+  /**
+   * Loads the stored events of an execution (replay): its whole history the first time, whatever live events the
+   * stream already brought, which may follow events emitted before the dashboard opened; after the last one held from
+   * then on.
+   */
   async loadEvents(id: string) {
     const held = state.events[id] ?? [];
-    const after = held.length ? held[held.length - 1].id : 0;
+    const after = historyRead.has(id) && held.length ? held[held.length - 1].id : 0;
     try {
       const res = await api.executionEvents(id, after);
+      historyRead.add(id);
       setState((s) => ({
         events: { ...s.events, [id]: mergeEvents(s.events[id] ?? [], res.events) },
         logExpired: { ...s.logExpired, [id]: res.logExpired },
