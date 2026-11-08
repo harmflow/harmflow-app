@@ -351,6 +351,18 @@ export const ptBR: Resources = {
     skill_not_found: 'a skill "{{name}}" não foi encontrada para {{harness}} ($t(itemSource.{{source}}))',
     agent_missing: 'o agente "{{name}}" não existe nesta máquina para {{harness}} ($t(itemSource.{{source}}))',
     skill_missing: 'a skill "{{name}}" não existe nesta máquina para {{harness}} ($t(itemSource.{{source}}))',
+    parameter_required: '{{kind}} "{{item}}" precisa de um valor para o parâmetro "{{name}}"',
+    parameter_wrong_type: 'o parâmetro "{{name}}" de {{kind}} "{{item}}" deve ser do tipo {{type}}',
+    parameter_schema_mismatch: 'o parâmetro "{{name}}" de {{kind}} "{{item}}" não segue o seu schema: {{detail}}',
+    parameter_schema_invalid:
+      'o schema que {{kind}} "{{item}}" declara para o parâmetro "{{name}}" não pode ser usado, então o valor não é verificado: {{detail}}',
+    parameter_schema_missing: '{{kind}} "{{item}}" declara o parâmetro de objeto "{{name}}" sem schema, então o parâmetro é ignorado',
+    parameter_type_unknown:
+      '{{kind}} "{{item}}" declara o parâmetro "{{name}}" com o tipo desconhecido "{{type}}", então o parâmetro é ignorado',
+    parameter_undeclared:
+      'nenhum {{kind}} "{{item}}" citado declara o parâmetro "{{name}}", então o valor fica fora da sessão e é removido ao salvar',
+    parameters_unverified:
+      'o arquivo de {{kind}} "{{item}}" não pode ser lido, então os valores dos parâmetros seguem como a tarefa os dá, sem verificação',
     fallback_agent_missing:
       '{{harness}} não é um fallback válido: o agente "{{name}}" não foi encontrado para ele ($t(itemSource.{{source}}))',
     fallback_skill_missing:
@@ -1119,6 +1131,15 @@ export const ptBR: Resources = {
       permissions: "Permissões",
       execution: "Limites",
       notifications: "Notificações",
+      parameters: "Parâmetros das skills e dos agentes",
+    },
+    paramTypes: {
+      text: "texto",
+      number: "número",
+      boolean: "sim ou não",
+      text_list: "lista de textos, um por linha",
+      repository: "repositório, dono/nome",
+      object: "YAML, em JSON",
     },
     agent: {
       label: "Agente",
@@ -1223,6 +1244,11 @@ export const ptBR: Resources = {
         "Uso cobrado além do que o plano da ferramenta de IA inclui. Desligado, uma tentativa não começa numa ferramenta de IA cujo plano se esgotou, e uma tentativa do Claude Code que passa a usar uso extra é encerrada. Ligado, nenhuma dessas verificações segura uma tentativa.",
       notificationsEnabled: "Notificações nativas",
       notificationEvents: "Notificar sobre",
+      parametersOf: {
+        skill: "Skill {{name}}",
+        agent: "Agente {{name}}",
+      },
+      parameterUnreadable: "Ainda não é YAML válido em JSON; o último valor válido é mantido",
       programKind: "O que executa",
       programCommand: "Um programa",
       programInline: "Um script inline",

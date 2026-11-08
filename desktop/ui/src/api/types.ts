@@ -15,6 +15,7 @@ export type HarnessId = Harness["id"];
 export type Tool = S["Tool"];
 export type Catalog = S["Catalog"];
 export type CatalogEntry = S["CatalogEntry"];
+export type ParameterDeclaration = S["ParameterDeclaration"];
 export type Template = S["Template"];
 export type LocalizedText = S["LocalizedText"];
 export type NewTask = S["NewTask"];

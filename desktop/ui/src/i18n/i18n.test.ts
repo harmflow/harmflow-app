@@ -157,6 +157,8 @@ const BUILT_KEYS: Record<string, (written: string[]) => readonly BuiltValue[]> =
   "tools.${}": () => contractEnum("Tool", "id"),
   "tasks.types.${}": () => schemaEnum(["spec", "type"]),
   "tasks.fields.${}": () => [...CUSTOM_LISTS, ...COPIED_FIELDS.map((f) => f.field)],
+  "tasks.fields.parametersOf.${}": () => ["skill", "agent"],
+  "tasks.paramTypes.${}": () => contractEnum("ParameterDeclaration", "properties", "type"),
   "tasks.options.${}.${}": () => Object.entries(OPTION_FIELDS).flatMap(([key, path]) => schemaEnum(path).map((v) => [key, v])),
   "tasks.options.fallbackOn.${}": () => schemaEnum(["spec", "harness", "fallback", "on"]),
   "tasks.options.notifiable.${}": () => NOTIFIABLE_EVENTS,
