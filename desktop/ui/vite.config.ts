@@ -16,6 +16,7 @@ export const DAEMON_TESTS = [
   "src/state/state.test.ts",
   "src/state/realDaemon.test.tsx",
   "src/screens/ExecutionsScreen.test.tsx",
+  "src/api/transport.test.ts",
 ];
 
 // In a plain browser the dashboard reaches the daemon through this dev server: /api is forwarded to the address in
