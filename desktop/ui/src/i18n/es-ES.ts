@@ -1355,10 +1355,6 @@ export const esES: Resources = {
     stopConfirmTitle: "¿Detener el daemon?",
     stopConfirm:
       "Ninguna programación se dispara con el daemon detenido; los disparos perdidos siguen la política de ejecuciones perdidas de cada tarea.",
-    stopConfirmRunning_one:
-      "{{count}} ejecución está en curso. Detener el daemon ahora la interrumpe; quedará registrada como interrumpida.",
-    stopConfirmRunning_other:
-      "Hay {{count}} ejecuciones en curso. Detener el daemon ahora las interrumpe; quedarán registradas como interrumpidas.",
     stopChoiceRunning_one:
       "{{count}} ejecución está en curso. Espera a que termine, y el daemon se detiene entonces, en 30 minutos como máximo; o cancélala ahora, y quedará registrada como interrumpida.",
     stopChoiceRunning_other:

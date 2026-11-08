@@ -971,17 +971,19 @@ describe("settings from the app menu", () => {
     }
   });
 
-  it("sends the shell both forms of the stop confirmation, each with its count left for the shell to fill", async () => {
+  it("sends the shell both forms of the stop's question, each with its count left for the shell to fill, and its buttons", async () => {
     const labels = vi.spyOn(native, "setTrayLabels");
     try {
       await launch();
       const sent = labels.mock.lastCall?.[0];
-      expect(sent?.stopConfirmRunning_one).toBe(
-        "{{count}} execution is running. Stopping the daemon now interrupts it; it will be recorded as interrupted.",
+      expect(sent?.stopChoiceRunning_one).toBe(
+        "{{count}} execution is running. Wait for it to finish, and the daemon stops then, within 30 minutes at most; or cancel it now, and it will be recorded as interrupted.",
       );
-      expect(sent?.stopConfirmRunning_other).toBe(
-        "{{count}} executions are running. Stopping the daemon now interrupts them; they will be recorded as interrupted.",
+      expect(sent?.stopChoiceRunning_other).toBe(
+        "{{count}} executions are running. Wait for them to finish, and the daemon stops then, within 30 minutes at most; or cancel them now, and they will be recorded as interrupted.",
       );
+      expect([sent?.stopWait_one, sent?.stopWait_other]).toEqual(["Wait for it", "Wait for them"]);
+      expect([sent?.stopCancelRunning_one, sent?.stopCancelRunning_other]).toEqual(["Cancel it", "Cancel them"]);
     } finally {
       labels.mockRestore();
     }

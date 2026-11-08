@@ -111,8 +111,9 @@ fn read_tray_settings(app: tauri::AppHandle) {
 }
 
 /// Tray texts in the interface's language: idle, active ({{count}}), open, quit, stop, stopTitle, stopConfirm,
-/// stopConfirmRunning_one and stopConfirmRunning_other ({{count}}), stopOk, stopFailedTitle, stopFailedOk, cancel; and
-/// the app menu's settings.
+/// stopChoiceRunning_one and stopChoiceRunning_other ({{count}}), stopWait_one and stopWait_other,
+/// stopCancelRunning_one and stopCancelRunning_other, stopOk, stopFailedTitle, stopFailedOk, cancel; and the app menu's
+/// settings.
 #[tauri::command]
 fn set_tray_labels(app: tauri::AppHandle, state: Shared<'_>, labels: HashMap<String, String>) {
     if let Ok(mut current) = state.tray_labels.lock() {
