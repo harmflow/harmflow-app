@@ -57,6 +57,7 @@ const fresh: Settings = {
   allowedFolders: [],
   onboardingCompleted: false,
   quota: {},
+  systemPrompt: "",
 };
 
 let root: Root | undefined;

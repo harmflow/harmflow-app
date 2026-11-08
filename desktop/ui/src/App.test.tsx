@@ -99,6 +99,7 @@ const settings: Settings = {
   allowedFolders: [],
   onboardingCompleted: true,
   quota: {},
+  systemPrompt: "",
 };
 
 /** A template as GET /templates lists it, valid unless a test says otherwise. */

@@ -707,6 +707,8 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 	n := len(r.x.Attempts) + 1
 	r.attempt = n
 	r.items = r.continuedItems(prev)
+	// Read at each attempt, so a change in Settings reaches the next one with no restart.
+	general := a.settings.SystemPrompt
 	// The model and effort used stay unreported until the harness reports them.
 	at := domain.Attempt{Number: n, Harness: p.Provider, HarnessVersion: info.Version, ConfiguredModel: p.Model,
 		ConfiguredEffort: p.Effort, StartedAt: now, Outcome: domain.AttemptRunning}
@@ -720,7 +722,7 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 
 	req := ports.RunRequest{
 		ExecutionID: r.x.ID, TaskID: r.x.TaskID, Attempt: n, Prompt: r.eff.Spec.Prompt,
-		Context: r.harmflowContext(n, prev), Agents: agents, Skills: skills, Model: p.Model, Effort: p.Effort,
+		Context: sessionContext(general, r.harmflowContext(n, prev)), Agents: agents, Skills: skills, Model: p.Model, Effort: p.Effort,
 		KeepSession: p.KeepsSession(), WorkDir: r.work, AdditionalDirs: r.extra, Permissions: r.permissions(), ExecutionDir: r.dir,
 		Env: r.env(),
 	}
@@ -994,6 +996,18 @@ func (r *run) addedFolders() []string {
 		return out
 	}
 	return r.a.addedFolders(r.def)
+}
+
+// sessionContext is the session's system context. With general instructions from the settings, they come first, under
+// a heading that names them as the user's, and HarmFlow's orchestration context follows, whole and last, under a
+// heading of its own, so that nothing after the user's text reads as part of it. With none, a text of blanks
+// included, it is HarmFlow's orchestration context alone.
+func sessionContext(general, harmflow string) string {
+	general = strings.TrimSpace(general)
+	if general == "" {
+		return harmflow
+	}
+	return "## The user's general instructions\n\n" + general + "\n\n## HarmFlow's orchestration context\n\n" + harmflow
 }
 
 // harmflowContext is HarmFlow's orchestration context for the session: where to find the task's parameters and

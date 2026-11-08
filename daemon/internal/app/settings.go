@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"regexp"
+	"unicode/utf8"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 )
@@ -32,7 +33,13 @@ type Settings struct {
 	// Quota is the share of each harness's quota HarmFlow may spend, keyed by the harness's identifier. A harness it
 	// leaves out may spend the whole of each window.
 	Quota map[string]QuotaShare `json:"quota"`
+	// SystemPrompt is the user's general instructions, which every harness session receives before HarmFlow's own
+	// context. Empty by default, and then a session receives nothing of it.
+	SystemPrompt string `json:"systemPrompt"`
 }
+
+// maxSystemPromptLength is the most characters the general system prompt may hold.
+const maxSystemPromptLength = 20000
 
 // QuotaShare is the share of each of a harness's quota windows HarmFlow may spend, in percent: above 0 and at most
 // 100. An attempt does not start while a window is used at or above it; a running attempt is never ended by it.
@@ -69,6 +76,8 @@ type SettingsPatch struct {
 	OnboardingCompleted     *bool             `json:"onboardingCompleted"`
 	// Quota replaces the whole map of quota shares when it is set.
 	Quota map[string]QuotaShare `json:"quota"`
+	// SystemPrompt replaces the general system prompt when it is set; an empty text clears it.
+	SystemPrompt *string `json:"systemPrompt"`
 }
 
 func defaultSettings() Settings {
@@ -155,6 +164,10 @@ func (a *App) UpdateSettings(p SettingsPatch) (SettingsView, error) {
 			return SettingsView{}, err
 		}
 	}
+	if p.SystemPrompt != nil && utf8.RuneCountInString(*p.SystemPrompt) > maxSystemPromptLength {
+		text := domain.T("settings_system_prompt_too_long", "systemPrompt must be at most 20000 characters")
+		return SettingsView{}, &Error{Code: CodeValidationFailed, Text: text, Validation: fieldIssue("/systemPrompt", text)}
+	}
 	if err := a.checkPathSettings(p); err != nil {
 		return SettingsView{}, err
 	}
@@ -207,6 +220,9 @@ func (a *App) UpdateSettings(p SettingsPatch) (SettingsView, error) {
 	}
 	if p.Quota != nil {
 		s.Quota = maps.Clone(p.Quota)
+	}
+	if p.SystemPrompt != nil {
+		s.SystemPrompt = *p.SystemPrompt
 	}
 	saved := *s
 	a.mu.Unlock()

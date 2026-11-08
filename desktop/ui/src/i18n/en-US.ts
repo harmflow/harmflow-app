@@ -277,6 +277,7 @@ export const enUS = {
     settings_change_breaks_task: "this change would put {{field}} of task {{task}} outside the allowed paths: {{detail}}",
     settings_quota_harness_unknown: "quota.{{harness}} names no AI tool HarmFlow runs",
     settings_quota_share_invalid: "quota.{{harness}}.maxPercent must be above 0 and at most 100",
+    settings_system_prompt_too_long: "systemPrompt must be at most 20000 characters",
     harness_not_identified: "{{path}} is not {{harness}}: its --version output does not name it",
     template_not_found: "no template {{template}}",
     template_read_only: "{{template}} is the identifier of a built-in template: built-in templates ship with HarmFlow, which never writes one",
@@ -1286,6 +1287,7 @@ export const enUS = {
       agents: "AI tools",
       tools: "Command-line tools",
       quota: "Quota",
+      systemPrompt: "General system prompt",
       variables: "Path variables",
       allowedFolders: "Allowed folders",
       status: "Status",
@@ -1304,6 +1306,9 @@ export const enUS = {
     languages: { system: "System language", "pt-BR": "Português (Brasil)", "en-US": "English (US)", "es-ES": "Español" },
     tray: "Show HarmFlow in the menu bar",
     trayHint: "With it on, closing the window only hides it. The daemon keeps running either way.",
+    systemPrompt: "Instructions for every session",
+    systemPromptHint:
+      "Every session of a GitHub or general task receives this text on each AI tool, before HarmFlow's own instructions. Script tasks never do. At most 20,000 characters; leave it empty to send nothing.",
     showRestrictionWarnings: "Show restriction warnings",
     showRestrictionWarningsHint:
       "Shows a banner in an execution's detail for each restriction its AI tool does not enforce. The Events tab lists them either way.",

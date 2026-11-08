@@ -317,6 +317,81 @@ func TestQuotaShareRefusedOnLoadIsLogged(t *testing.T) {
 	}
 }
 
+// harmflow-app#849: the general system prompt is empty on a fresh data folder and on settings saved before it existed;
+// a patch sets it, a restart keeps it, a patch of another setting leaves it as it is, and an empty text clears it.
+func TestSystemPromptIsEmptyByDefaultAndKeepsAPatch(t *testing.T) {
+	e := newEnv(t)
+	if got := e.app.GetSettings().SystemPrompt; got != "" {
+		t.Fatalf("GetSettings().SystemPrompt = %q on a fresh data folder, want empty", got)
+	}
+
+	// Settings saved by a version without the setting.
+	if err := e.app.d.State.Save("settings", map[string]any{"schemaVersion": "1", "language": "en-US", "trayEnabled": true}); err != nil {
+		t.Fatalf("Save(settings): %v", err)
+	}
+	e = e.restart(t)
+	if v := e.app.GetSettings(); v.SystemPrompt != "" || v.Language != "en-US" {
+		t.Fatalf("GetSettings() = systemPrompt %q, language %q on settings saved without it, want empty, en-US",
+			v.SystemPrompt, v.Language)
+	}
+
+	text := "Answer in pt-BR.\nNever touch the CI credentials."
+	v, err := e.app.UpdateSettings(SettingsPatch{SystemPrompt: &text})
+	if err != nil || v.SystemPrompt != text {
+		t.Fatalf("UpdateSettings(systemPrompt) = %q, %v, want %q, nil", v.SystemPrompt, err, text)
+	}
+	lang := "pt-BR"
+	if v, err := e.app.UpdateSettings(SettingsPatch{Language: &lang}); err != nil || v.SystemPrompt != text {
+		t.Errorf("UpdateSettings(language) = systemPrompt %q, %v, want %q, nil", v.SystemPrompt, err, text)
+	}
+	e = e.restart(t)
+	if got := e.app.GetSettings().SystemPrompt; got != text {
+		t.Errorf("GetSettings().SystemPrompt = %q after a restart, want %q", got, text)
+	}
+
+	empty := ""
+	if v, err := e.app.UpdateSettings(SettingsPatch{SystemPrompt: &empty}); err != nil || v.SystemPrompt != "" {
+		t.Errorf("UpdateSettings(systemPrompt: \"\") = %q, %v, want empty, nil", v.SystemPrompt, err)
+	}
+	e = e.restart(t)
+	if got := e.app.GetSettings().SystemPrompt; got != "" {
+		t.Errorf("GetSettings().SystemPrompt = %q after clearing it and a restart, want empty", got)
+	}
+}
+
+// harmflow-app#849: the general system prompt holds at most 20,000 characters, counted as characters, not bytes; a
+// longer text is refused with settings_system_prompt_too_long on the field, and the saved text stays.
+func TestSystemPromptLengthLimit(t *testing.T) {
+	e := newEnv(t)
+	// Each "é" is two bytes, so a limit counted in bytes would refuse this text.
+	most := strings.Repeat("é", 20000)
+	if v, err := e.app.UpdateSettings(SettingsPatch{SystemPrompt: &most}); err != nil || v.SystemPrompt != most {
+		t.Fatalf("UpdateSettings(systemPrompt of 20000 characters) = %d characters, %v, want 20000, nil",
+			len([]rune(v.SystemPrompt)), err)
+	}
+	for _, tc := range []struct {
+		name string
+		text string
+	}{
+		{"one character more", strings.Repeat("é", 20001)},
+		{"one ASCII character more", strings.Repeat("a", 20001)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := e.app.UpdateSettings(SettingsPatch{SystemPrompt: &tc.text})
+			var ae *Error
+			if !errors.As(err, &ae) || ae.Code != CodeValidationFailed || ae.Key != "settings_system_prompt_too_long" ||
+				ae.Validation == nil || len(ae.Validation.Errors) != 1 || ae.Validation.Errors[0].Path != "/systemPrompt" {
+				t.Fatalf("UpdateSettings(systemPrompt of %d characters) = %v, want settings_system_prompt_too_long at /systemPrompt",
+					len([]rune(tc.text)), err)
+			}
+			if got := e.app.GetSettings().SystemPrompt; got != most {
+				t.Errorf("after a refused change, GetSettings().SystemPrompt holds %d characters, want the 20000 saved",
+					len([]rune(got)))
+			}
+		})
+	}
+}
+
 // The restriction warnings of an execution's detail show on a fresh data folder and on one saved before the setting
 // existed; a patch turns them off, and that outlives a restart of the daemon.
 func TestShowRestrictionWarningsIsOnByDefaultAndKeepsAPatch(t *testing.T) {

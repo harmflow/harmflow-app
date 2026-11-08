@@ -967,6 +967,37 @@ func TestPrepareModelAndEffort(t *testing.T) {
 	}
 }
 
+// harmflow-app#849: the session's system context, the user's general instructions before HarmFlow's orchestration
+// context, reaches Claude Code whole as --append-system-prompt, apart from the task's prompt; an empty context passes
+// no flag.
+func TestPrepareAppendsTheSessionContext(t *testing.T) {
+	a := &Adapter{Home: t.TempDir()}
+	info := ports.HarnessInfo{Path: "/bin/claude"}
+	perm := *domain.TaskDocument{}.Effective().Spec.Permissions
+	context := "## The user's general instructions\n\nAnswer in pt-BR.\n\n" +
+		"## HarmFlow's orchestration context\n\nThis session is run by HarmFlow, a local scheduler.\n"
+	inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, ExecutionDir: t.TempDir(),
+		Prompt: "Do the work.", Context: context})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, passed := flagValue(inv.Args, "--append-system-prompt"); got != context {
+		t.Errorf("--append-system-prompt = %q (passed %t), want %q", got, passed, context)
+	}
+	if strings.Contains(inv.Stdin, "Answer in pt-BR.") {
+		t.Errorf("the session's input %q holds the general instructions, want them in the system prompt alone", inv.Stdin)
+	}
+
+	inv, _, err = a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, ExecutionDir: t.TempDir(),
+		Prompt: "Do the work."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, passed := flagValue(inv.Args, "--append-system-prompt"); passed {
+		t.Errorf("--append-system-prompt %q was passed with no context: %q", got, inv.Args)
+	}
+}
+
 // flagValue is the argument that follows flag, and whether flag was passed at all.
 func flagValue(args []string, flag string) (string, bool) {
 	for i, arg := range args {
