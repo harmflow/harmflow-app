@@ -57,8 +57,16 @@ type shell struct {
 // such as the --hidden the login item starts it with.
 func startShell(t *testing.T, bin string, d *daemon, args ...string) *shell {
 	t.Helper()
+	return startShellWith(t, bin, d, nil, args...)
+}
+
+// startShellWith is startShell with env applied after the shell's own variables, as daemonEnv applies it, such as a
+// throwaway HOME for the login item the shell writes there.
+func startShellWith(t *testing.T, bin string, d *daemon, env []string, args ...string) *shell {
+	t.Helper()
 	cmd := exec.Command(bin, args...)
-	cmd.Env = daemonEnv([]string{"HARMFLOW_HOME=" + d.home, "HARMFLOW_TEST_SHELL_CONTROL=1", "HARMFLOW_DAEMON_BIN=" + binary})
+	own := []string{"HARMFLOW_HOME=" + d.home, "HARMFLOW_TEST_SHELL_CONTROL=1", "HARMFLOW_DAEMON_BIN=" + binary}
+	cmd.Env = daemonEnv(append(own, env...))
 	in, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
