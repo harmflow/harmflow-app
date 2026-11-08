@@ -1371,9 +1371,15 @@ func (r *run) outcomeFromReport() (domain.ExecutionStatus, domain.Text) {
 	eventlog.RedactFields(&rep) // the agent's words, before the record, the ledger, or the reason take any of them
 	r.applyReport(&rep)
 	status := domain.StatusForReport(&rep)
-	if key, ok := rep.PullRequestNotOpened(); ok {
+	// A report of one work item keeps its own key; a report of several names every item whose pull request was not
+	// opened.
+	switch keys := rep.PullRequestNotOpened(); {
+	case len(keys) == 1 && len(rep.WorkItems) == 1:
 		return status, domain.T("pull_request_not_opened", "the pull request of {{workItem}} was not opened",
-			"workItem", key)
+			"workItem", keys[0])
+	case len(keys) > 0:
+		return status, domain.T("pull_requests_not_opened", "no pull request was opened for {{workItems}}",
+			"workItems", strings.Join(keys, ", "))
 	}
 	var reason domain.Text // the agent's own summary, as it wrote it
 	if status == domain.StatusFailed || status == domain.StatusNeedsAttention {

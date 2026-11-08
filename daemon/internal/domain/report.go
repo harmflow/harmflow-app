@@ -33,28 +33,35 @@ type ProgressLine struct {
 	Repository string `json:"repository,omitempty"`
 }
 
-// PullRequestNotOpened is the key of the report's work item whose pull request could not be opened: the report's one
-// work item, failed, with no pull request. A report with several work items names none, whatever their outcomes.
-func (r *ExecutionReport) PullRequestNotOpened() (string, bool) {
-	if r == nil || len(r.WorkItems) != 1 {
-		return "", false
+// PullRequestNotOpened lists, in the report's order, the keys of the work items whose pull request could not be
+// opened: each work item failed with no pull request. It is empty when the report names none.
+func (r *ExecutionReport) PullRequestNotOpened() []string {
+	if r == nil {
+		return nil
 	}
-	w := r.WorkItems[0]
-	if w.Outcome != "failed" || (w.PullRequest != nil && w.PullRequest.URL != "") {
-		return "", false
+	var keys []string
+	for _, w := range r.WorkItems {
+		if w.Outcome == "failed" && (w.PullRequest == nil || w.PullRequest.URL == "") {
+			keys = append(keys, w.Key)
+		}
 	}
-	return w.Key, true
+	return keys
 }
 
 // StatusForReport maps a report's outcome to the execution's terminal status; no report means the harness
-// finished without one, which is a completed execution. A report whose one work item's pull request could not be
-// opened is a failed execution, whatever its outcome says: a draft created with failing tests is not.
+// finished without one, which is a completed execution. A report whose every work item failed with no pull request
+// is a failed execution, whatever its outcome says. A report of several work items, only some of them failed with no
+// pull request, needs attention, unless its outcome is failed: part of the work was delivered. A draft created with
+// failing tests is a pull request opened.
 func StatusForReport(r *ExecutionReport) ExecutionStatus {
 	if r == nil {
 		return StatusCompleted
 	}
-	if _, ok := r.PullRequestNotOpened(); ok {
-		return StatusFailed
+	if n := len(r.PullRequestNotOpened()); n > 0 {
+		if n == len(r.WorkItems) || r.Outcome == "failed" {
+			return StatusFailed
+		}
+		return StatusNeedsAttention
 	}
 	switch r.Outcome {
 	case "no_work":

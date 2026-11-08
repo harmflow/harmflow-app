@@ -422,6 +422,7 @@ export const ptBR: Resources = {
     work_item_key_invalid:
       'o item de trabalho "{{workItem}}" não é uma chave da forma owner/repo#<número>; a sua seleção foi ignorada',
     pull_request_not_opened: "o pull request de {{workItem}} não foi aberto",
+    pull_requests_not_opened: "nenhum pull request foi aberto para {{workItems}}",
     step_checking_harness: "Verificando a ferramenta de IA",
     step_preparing_workspace: "Preparando o workspace",
     step_starting_harness: "Iniciando {{harness}}",

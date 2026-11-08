@@ -72,11 +72,12 @@ func savedItems(t *testing.T, e *env, name string) map[string]map[string]*domain
 }
 
 // harmflow-app#341: the queue leaves out an item as soon as it closes, completed, needing attention, or closed, and
-// lists the items still in play. The ledger keeps every item, and context.json still lists the closed ones.
+// lists the items still in play. The ledger keeps every item, and context.json still lists the closed ones. The
+// execution needs attention: o/r#6 failed with no pull request (harmflow-app#892).
 func TestQueueLeavesOutClosedItems(t *testing.T) {
 	e := newEnv(t)
 	e.create("closer", "")
-	x := runTask(e, "closer", domain.StatusCompleted, selectTwo(e.app.d.Paths.Logs)+withReport(`{"outcome":"completed",`+
+	x := runTask(e, "closer", domain.StatusNeedsAttention, selectTwo(e.app.d.Paths.Logs)+withReport(`{"outcome":"completed",`+
 		`"workItems":[{"key":"o/r#1","outcome":"completed"},{"key":"o/r#3","outcome":"needs_attention"},`+
 		`{"key":"o/r#4","outcome":"closed"},{"key":"o/r#5","outcome":"completed","tests":{"status":"failed","summary":"1 failed"}},`+
 		`{"key":"o/r#6","outcome":"failed"}]}`))
@@ -116,11 +117,12 @@ func TestQueueLeavesOutClosedItems(t *testing.T) {
 
 // harmflow-app#341: a closed item moves from the file of the items in play to the archive beside it, and a change to an
 // item in play rewrites only the first file. An archived item stays there, and one selected again comes back to the
-// first file; after a restart the ledger holds every item, each as it was last saved.
+// first file; after a restart the ledger holds every item, each as it was last saved. The execution needs attention:
+// o/r#2 failed with no pull request (harmflow-app#892).
 func TestClosedItemsMoveToTheArchive(t *testing.T) {
 	e := newEnv(t)
 	e.create("archiver", "")
-	runTask(e, "archiver", domain.StatusCompleted, selectTwo(e.app.d.Paths.Logs)+withReport(`{"outcome":"completed",`+
+	runTask(e, "archiver", domain.StatusNeedsAttention, selectTwo(e.app.d.Paths.Logs)+withReport(`{"outcome":"completed",`+
 		`"workItems":[{"key":"o/r#1","outcome":"completed"},{"key":"o/r#2","outcome":"failed"}]}`))
 
 	open, archive := savedItems(t, e, ledgerName), savedItems(t, e, archiveName)

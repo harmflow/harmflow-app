@@ -423,6 +423,7 @@ export const esES: Resources = {
     work_item_key_invalid:
       'el elemento de trabajo "{{workItem}}" no es una clave de la forma owner/repo#<número>; su selección se ignoró',
     pull_request_not_opened: "el pull request de {{workItem}} no se abrió",
+    pull_requests_not_opened: "no se abrió ningún pull request para {{workItems}}",
     step_checking_harness: "Comprobando la herramienta de IA",
     step_preparing_workspace: "Preparando el espacio de trabajo",
     step_starting_harness: "Iniciando {{harness}}",
