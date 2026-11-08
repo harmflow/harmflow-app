@@ -37,9 +37,10 @@ const (
 var requiredFlags = []string{"--json", "--sandbox", "--cd", "--skip-git-repo-check"}
 
 // Adapter is the HarnessAdapter of the Codex CLI. It looks for the CLI on PathEnv, then in KnownLocations, and runs its
-// probes with Env, each within ProbeTimeout; the user's agents, its models cache, and its configuration are read from
-// the Codex home under Home, or CODEX_HOME. The user's skills are the ones Codex's app server lists, from one server it
-// keeps running until Close.
+// probes with Env, each within ProbeTimeout. Each Codex home it finds, `.codex` under Home and the one the daemon's
+// CODEX_HOME names, is an installation of its own: its sign-in, models cache, configuration, and agents are read from
+// that home, and its probes and attempts run with it as CODEX_HOME. The user's skills are the ones Codex's app server
+// lists, from one server per home that it keeps running until Close.
 type Adapter struct {
 	Home    string
 	PathEnv string
@@ -53,8 +54,9 @@ type Adapter struct {
 	ProbeTimeout time.Duration
 
 	mu          sync.Mutex
-	server      *appServer
-	reload      bool          // the next skills/list carries forceReload
+	servers     map[string]*appServer // by the home each runs with
+	reload      bool                  // the next skills/list of each home not in reloaded carries forceReload
+	reloaded    map[string]bool       // the homes whose skills/list carried forceReload since ReloadUserItems
 	listTimeout time.Duration // a call to the app server; zero is defaultListTimeout
 	helpTimeout time.Duration // each help check, `exec --help` and the top-level --help; zero is the probe's own limit
 	signInStep  time.Duration // the wait for `codex login` to reach its browser's step; zero is defaultSignInStep
@@ -77,11 +79,71 @@ func (a *Adapter) ID() string { return ID }
 // Name implements ports.HarnessAdapter: the harness's display name.
 func (a *Adapter) Name() string { return Name }
 
+// codexHome is the home of the installation in use: the one the daemon's CODEX_HOME names, or `.codex` under Home.
 func (a *Adapter) codexHome() string {
 	if d := os.Getenv("CODEX_HOME"); d != "" {
 		return d
 	}
 	return filepath.Join(a.Home, ".codex")
+}
+
+// homes are the Codex homes detection lists, each once: `.codex` under Home, then the one the daemon's CODEX_HOME names
+// when it is another. `.codex` is left out only while it is no folder and CODEX_HOME names another home, so a Mac whose
+// one home is elsewhere lists no empty one.
+func (a *Adapter) homes() []string {
+	def := filepath.Join(a.Home, ".codex")
+	env := os.Getenv("CODEX_HOME")
+	if env == "" || sameDir(env, def) {
+		return []string{def}
+	}
+	if st, err := os.Stat(def); err == nil && st.IsDir() {
+		return []string{def, filepath.Clean(env)}
+	}
+	return []string{filepath.Clean(env)}
+}
+
+// sameDir reports whether two paths name one folder, once cleaned and, where they exist, with their links resolved.
+func sameDir(a, b string) bool {
+	resolve := func(p string) string {
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			return r
+		}
+		return filepath.Clean(p)
+	}
+	return resolve(a) == resolve(b)
+}
+
+// installationID is what a task names the installation of a home by: the home's path, written from `~` when it is
+// under Home, so a task file reads the same on another Mac with the same folders.
+func (a *Adapter) installationID(home string) string {
+	if a.Home != "" {
+		if rel, err := filepath.Rel(a.Home, home); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+			return "~/" + filepath.ToSlash(rel)
+		}
+	}
+	return filepath.Clean(home)
+}
+
+// homeOf is the home an installation runs with: its own, or the home in use for one detection did not give.
+func (a *Adapter) homeOf(info ports.HarnessInfo) string {
+	if info.Home != "" {
+		return info.Home
+	}
+	return a.codexHome()
+}
+
+// envWith is env, or the daemon's own environment when env is nil, with CODEX_HOME set to home, and to nothing else.
+func envWith(env []string, home string) []string {
+	if env == nil {
+		env = os.Environ()
+	}
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, "CODEX_HOME=") {
+			out = append(out, kv)
+		}
+	}
+	return append(out, "CODEX_HOME="+home)
 }
 
 func (a *Adapter) knownLocations() []string {
@@ -200,12 +262,34 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 			info.VersionSupport = "untested_newer"
 		}
 	}
-	info.Models, info.Efforts, info.CapabilitySource = a.models()
 	info.EnforceableControls = []string{"sandbox_read_only", "sandbox_workspace_write", "network_access", "writable_roots"}
+
+	// Each home is an installation of the binary, read by probes that run with it alone: the one in use is the
+	// harness's own reading, and every one is listed in Homes.
+	inUse := a.codexHome()
+	var homes []ports.HarnessInfo
+	used := 0
+	for i, home := range a.homes() {
+		if sameDir(home, inUse) {
+			used = i
+		}
+		homes = append(homes, a.probeHome(ctx, info, home, helpTimedOut))
+	}
+	info = homes[used]
+	info.Homes = homes
+	return info
+}
+
+// probeHome is what the binary info describes reads as the installation of one Codex home: its models and efforts, its
+// sign-in, its managed requirements, and its account, each probe run with home as CODEX_HOME.
+func (a *Adapter) probeHome(ctx context.Context, info ports.HarnessInfo, home string, helpTimedOut bool) ports.HarnessInfo {
+	info.Home, info.InstallationID = home, a.installationID(home)
+	info.Models, info.Efforts, info.CapabilitySource = a.models(home)
 
 	// Signed out only when the CLI says so, which it does exiting 1; a probe killed at its timeout, or failing
 	// otherwise, leaves the sign-in unknown.
-	status, statusErr, err := procutil.Output(ctx, a.probeTimeout(20*time.Second), a.Env, info.Path, "login", "status")
+	status, statusErr, err := procutil.Output(ctx, a.probeTimeout(20*time.Second), envWith(a.Env, home), info.Path,
+		"login", "status")
 	switch {
 	case strings.Contains(strings.ToLower(status+statusErr), "not logged in"):
 		info.Authentication = "invalid"
@@ -368,11 +452,11 @@ func (a *Adapter) firstIdentified(ctx context.Context, candidates []string) (str
 	return "", candidates[0], first
 }
 
-// models reads the model list the CLI itself caches, with the efforts each accepts.
-func (a *Adapter) models() ([]ports.ModelInfo, []string, string) {
+// models reads the model list the CLI itself caches in home, with the efforts each accepts.
+func (a *Adapter) models(home string) ([]ports.ModelInfo, []string, string) {
 	defaults := []string{domain.DefaultEffort}
 	models := []ports.ModelInfo{{ID: domain.DefaultModel, Efforts: defaults}}
-	data, err := os.ReadFile(filepath.Join(a.codexHome(), "models_cache.json"))
+	data, err := os.ReadFile(filepath.Join(home, "models_cache.json"))
 	if err != nil {
 		return models, defaults, "declared"
 	}
@@ -471,14 +555,14 @@ func (a *Adapter) ProfileWarning(info ports.HarnessInfo, model, effort string) (
 		"Codex's list of models could not be read, so the model and effort were not checked"), true
 }
 
-func (a *Adapter) userDir() catalog.Dir { return catalog.Dir{Root: a.codexHome()} }
+func (a *Adapter) userDir(info ports.HarnessInfo) catalog.Dir { return catalog.Dir{Root: a.homeOf(info)} }
 
 // UserItem implements ports.HarnessAdapter: a skill is the first of that name in the installed Codex's skill list, an
-// agent is looked up in the Codex home. The list is the installation's, so the workspace and the added folders change
-// nothing.
+// agent is looked up in the installation's Codex home. The list is the installation's, so the workspace and the added
+// folders change nothing.
 func (a *Adapter) UserItem(ctx context.Context, info ports.HarnessInfo, kind, name, _ string, _ []string) (ports.ResolvedItem, bool, []ports.DiscoveryError, error) {
 	if kind != "skill" {
-		it, ok := a.userDir().Item(kind, name)
+		it, ok := a.userDir(info).Item(kind, name)
 		return it, ok, nil, nil
 	}
 	items, problems, err := a.skills(ctx, info)
@@ -493,11 +577,11 @@ func (a *Adapter) UserItem(ctx context.Context, info ports.HarnessInfo, kind, na
 	return ports.ResolvedItem{}, false, problems, nil
 }
 
-// UserItems implements ports.HarnessAdapter: the skills of the installed Codex's skill list, or the agents of the Codex
-// home; the workspace and the added folders change nothing.
+// UserItems implements ports.HarnessAdapter: the skills of the installed Codex's skill list, or the agents of the
+// installation's Codex home; the workspace and the added folders change nothing.
 func (a *Adapter) UserItems(ctx context.Context, info ports.HarnessInfo, kind, _ string, _ []string) ([]ports.ResolvedItem, []ports.DiscoveryError, error) {
 	if kind != "skill" {
-		return a.userDir().Items(kind), nil, nil
+		return a.userDir(info).Items(kind), nil, nil
 	}
 	return a.skills(ctx, info)
 }
@@ -506,10 +590,9 @@ func (a *Adapter) UserItems(ctx context.Context, info ports.HarnessInfo, kind, _
 // sessions folder.
 func (a *Adapter) KeepsSessions() bool { return true }
 
-// sessionsDir is the folder where Codex keeps its sessions: under the CODEX_HOME the attempt's environment sets, or the
-// adapter's own Codex home.
-func (a *Adapter) sessionsDir(env []string) string {
-	home := a.codexHome()
+// sessionsDir is the folder where Codex keeps its sessions: under the CODEX_HOME the attempt's environment sets, or
+// home.
+func sessionsDir(env []string, home string) string {
 	for _, kv := range env {
 		if v, ok := strings.CutPrefix(kv, "CODEX_HOME="); ok && v != "" {
 			home = v
@@ -521,8 +604,13 @@ func (a *Adapter) sessionsDir(env []string) string {
 // Prepare implements ports.HarnessAdapter: a `codex exec --json` invocation with the model and effort asked for and the
 // permission profile translated to a sandbox, with the restrictions it enforces and those it cannot. Its stdin is the
 // instructions, which name the built-ins as copied into the execution's directory. The session is ephemeral unless the
-// request keeps it; a Codex without --ephemeral keeps every session, which a restriction not enforced says.
+// request keeps it; a Codex without --ephemeral keeps every session, which a restriction not enforced says. The
+// installation's home is the process's CODEX_HOME, in place of any the request's environment carries.
 func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.Invocation, ports.OutputParser, error) {
+	home := a.homeOf(info)
+	if info.Home != "" {
+		req.Env = envWith(req.Env, info.Home)
+	}
 	args := []string{"exec", "--json", "--skip-git-repo-check", "--cd", req.WorkDir}
 	var restrictions []ports.Restriction
 	ephemeral := info.HasFeature("--ephemeral")
@@ -608,11 +696,11 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 		Restrictions: restrictions}
 	p := &parser{model: req.Model, modelSource: domain.ModelFromTask}
 	if !ephemeral || req.KeepSession {
-		p.sessionDir = a.sessionsDir(req.Env)
+		p.sessionDir = sessionsDir(req.Env, home)
 	}
 	if req.Model == "" || req.Model == domain.DefaultModel {
 		// Codex's output never names its model: a task left at the default runs the one its configuration sets.
-		p.model, p.modelSource = a.configModel(), domain.ModelFromConfig
+		p.model, p.modelSource = configModel(home), domain.ModelFromConfig
 		if p.model == "" {
 			p.modelSource = ""
 		}
@@ -637,10 +725,10 @@ func readOnlyRestriction(m *ports.ManagedRequirements) ports.Restriction {
 
 var configModelRe = regexp.MustCompile(`^\s*model\s*=\s*(?:"([^"]*)"|'([^']*)')`)
 
-// configModel is the top-level `model` of $CODEX_HOME/config.toml, the model Codex runs when none is asked for; the
-// keys of a table, such as a profile's, are not read.
-func (a *Adapter) configModel() string {
-	data, err := os.ReadFile(filepath.Join(a.codexHome(), "config.toml"))
+// configModel is the top-level `model` of home's config.toml, the model Codex runs when none is asked for; the keys of
+// a table, such as a profile's, are not read.
+func configModel(home string) string {
+	data, err := os.ReadFile(filepath.Join(home, "config.toml"))
 	if err != nil {
 		return ""
 	}

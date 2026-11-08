@@ -107,6 +107,15 @@ type HarnessInfo struct {
 	PathSource          string            `json:"pathSource,omitempty"`
 	Installations       []string          `json:"installations"`
 	Installation        string            `json:"installation,omitempty"` // the entry of Installations in use
+	// InstallationID is what a task's harness profile names this installation by, in its installation key; empty for a
+	// harness whose installations are its binaries alone.
+	InstallationID string `json:"installationId,omitempty"`
+	// Home is the folder of the installation's own configuration and sign-in, which its probes and attempts run with;
+	// empty for a harness that has none.
+	Home string `json:"home,omitempty"`
+	// Homes are the installations of the binary in use, one per home detection found, each with what its own probes
+	// read; the one in use is among them, and none has Homes of its own. Empty for a harness without homes.
+	Homes               []HarnessInfo     `json:"homes,omitempty"`
 	Version             string            `json:"version,omitempty"`
 	VersionSupport      string            `json:"versionSupport,omitempty"`
 	Authentication      string            `json:"authentication"`
@@ -191,6 +200,20 @@ type ModelInfo struct {
 
 // Ready reports whether an execution may start on the harness.
 func (h HarnessInfo) Ready() bool { return h.Readiness == "ready" }
+
+// InstallationNamed is the installation of the harness that a profile's installation key id names: the one in use, h
+// itself, for an empty id, and otherwise the entry of Homes with that InstallationID. found is false when none has it.
+func (h HarnessInfo) InstallationNamed(id string) (inst HarnessInfo, found bool) {
+	if id == "" {
+		return h, true
+	}
+	for _, home := range h.Homes {
+		if home.InstallationID == id {
+			return home, true
+		}
+	}
+	return HarnessInfo{}, false
+}
 
 // Resolved agent or skill, delivered to the harness.
 type ResolvedItem struct {

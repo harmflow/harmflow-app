@@ -892,7 +892,7 @@ func TestModelsFromCache(t *testing.T) {
 		{"slug":"m-2","supported_reasoning_levels":[{"effort":"low"}]}]}`), 0o600)
 	t.Setenv("CODEX_HOME", "")
 	a := &Adapter{Home: home}
-	models, efforts, src := a.models()
+	models, efforts, src := a.models(a.codexHome())
 	if src != "reported" || len(models) != 3 || strings.Join(efforts, ",") != "default,low,high" {
 		t.Fatalf("models %v efforts %v source %s", models, efforts, src)
 	}
@@ -912,7 +912,7 @@ func TestProfileWarningWithoutTheModelsCache(t *testing.T) {
 	t.Setenv("CODEX_HOME", codexHome)
 	a := &Adapter{Home: t.TempDir()}
 	info := ports.HarnessInfo{Detected: true, Version: "0.163.0"}
-	info.Models, info.Efforts, info.CapabilitySource = a.models()
+	info.Models, info.Efforts, info.CapabilitySource = a.models(a.codexHome())
 	if info.CapabilitySource != "declared" {
 		t.Fatalf("source %q without the cache", info.CapabilitySource)
 	}
@@ -936,7 +936,7 @@ func TestProfileWarningWithoutTheModelsCache(t *testing.T) {
 
 	_ = os.WriteFile(filepath.Join(codexHome, "models_cache.json"), []byte(`{"models":[
 		{"slug":"gpt-test","supported_reasoning_levels":[{"effort":"low"},{"effort":"high"}]}]}`), 0o600)
-	info.Models, info.Efforts, info.CapabilitySource = a.models()
+	info.Models, info.Efforts, info.CapabilitySource = a.models(a.codexHome())
 	if w, ok := a.ProfileWarning(info, "no-such-model", "ultra"); ok {
 		t.Errorf("a checked profile warns: %+v", w)
 	}
@@ -1001,5 +1001,40 @@ func TestDetectSkipsAFileThatIsNotCodex(t *testing.T) {
 				t.Errorf("Identify(%s) = %q, want %q", c.path, got, c.key)
 			}
 		})
+	}
+}
+
+// harmflow-app#475: an attempt on an installation runs with that installation's home as CODEX_HOME, in place of the one
+// the daemon's environment carries, and keeps its session and reads its configured model there.
+func TestPrepareRunsWithTheInstallationsHome(t *testing.T) {
+	daemonHome, home := t.TempDir(), t.TempDir()
+	t.Setenv("CODEX_HOME", daemonHome)
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(`model = "model-of-the-home"`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := &Adapter{Home: t.TempDir()}
+	info := ports.HarnessInfo{Path: "/bin/codex", Home: home, InstallationID: "~/other",
+		Features: map[string]bool{"--ephemeral": true}}
+	perm := *domain.TaskDocument{}.Effective().Spec.Permissions
+	inv, out, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, Prompt: "do it",
+		KeepSession: true, Env: []string{"PATH=/bin", "CODEX_HOME=" + daemonHome}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var homes []string
+	for _, kv := range inv.Env {
+		if v, ok := strings.CutPrefix(kv, "CODEX_HOME="); ok {
+			homes = append(homes, v)
+		}
+	}
+	if !slices.Equal(homes, []string{home}) || !slices.Contains(inv.Env, "PATH=/bin") {
+		t.Errorf("Prepare env %q, want PATH kept and CODEX_HOME %q alone", inv.Env, home)
+	}
+	events := out.Line([]byte(`{"type":"thread.started","thread_id":"thread-1"}`))
+	if len(events) != 1 || events[0].SessionDir != filepath.Join(home, "sessions") {
+		t.Errorf("thread.started = %+v, want the session kept under %q", events, home)
+	}
+	if p, ok := out.(*parser); !ok || p.model != "model-of-the-home" || p.modelSource != domain.ModelFromConfig {
+		t.Errorf("Prepare parser = %+v, want the model of the home's configuration", out)
 	}
 }

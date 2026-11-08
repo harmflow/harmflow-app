@@ -31,11 +31,11 @@ const browserStep = "navigate to this URL to authenticate"
 const maxSignInOutput = 64 * 1024
 
 // SignIn implements ports.SignInDriver: it runs the detected codex's own browser sign-in, `codex login`, in dir with
-// the user's environment, the Codex home it names included, its input empty and its output on pipes. It waits for the
-// CLI to say its browser sign-in waits for the user, then for the CLI to exit, which it does once the user approved
-// the sign-in in the browser it opened: an exit of 0 is a sign-in that succeeded. It drives no other method, neither
-// a device code nor an API key, and types nothing. Output that does not reach the browser's step is returned, its
-// secrets masked.
+// the user's environment, the Codex home it names included, or the installation's own home when detection gave it one,
+// its input empty and its output on pipes. It waits for the CLI to say its browser sign-in waits for the user, then
+// for the CLI to exit, which it does once the user approved the sign-in in the browser it opened: an exit of 0 is a
+// sign-in that succeeded. It drives no other method, neither a device code nor an API key, and types nothing. Output
+// that does not reach the browser's step is returned, its secrets masked.
 func (a *Adapter) SignIn(ctx context.Context, info ports.HarnessInfo, dir string) ports.SignInResult {
 	if info.Path == "" {
 		return ports.SignInResult{Outcome: ports.SignInEnded}
@@ -43,8 +43,12 @@ func (a *Adapter) SignIn(ctx context.Context, info ports.HarnessInfo, dir string
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return ports.SignInResult{Outcome: ports.SignInEnded, Err: err}
 	}
+	env := a.Env
+	if info.Home != "" {
+		env = envWith(env, info.Home)
+	}
 	out := &signInOutput{changed: make(chan struct{}, 1)}
-	p, err := procutil.StartLines(ports.Invocation{Path: info.Path, Args: []string{"login"}, Env: a.Env, Dir: dir}, nil,
+	p, err := procutil.StartLines(ports.Invocation{Path: info.Path, Args: []string{"login"}, Env: env, Dir: dir}, nil,
 		out.add, out.add)
 	if err != nil {
 		return ports.SignInResult{Outcome: ports.SignInEnded, Err: err}
