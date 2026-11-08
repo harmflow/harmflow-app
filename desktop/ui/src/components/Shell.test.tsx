@@ -310,6 +310,26 @@ describe("stopping the daemon from the More actions menu", () => {
     expect(confirm).toHaveBeenCalledTimes(1);
     expect(posts()).toEqual([{ method: "POST", path: "/daemon/stop", body: { force: false } }]);
   });
+
+  it("offers to wait for or cancel the executions the daemon names when its executions_running refusal finds the count behind", async () => {
+    vi.spyOn(native, "confirm").mockResolvedValue(true);
+    const choose = vi.spyOn(native, "choose").mockResolvedValue("first");
+    daemon.answers.set("POST /daemon/stop", {
+      status: 409,
+      body: {
+        error: {
+          code: "executions_running",
+          message: "2 executions are running; confirm to stop the daemon and cancel them",
+          messageKey: "executions_running",
+          params: { count: "2" },
+        },
+      },
+    });
+    patchStateForTests({ stats: stats(0) });
+    await stopFromMenu();
+    expect(choose.mock.calls.map((c) => c.slice(2, 4))).toEqual([["Wait for them", "Cancel them"]]);
+    expect(posts().map((r) => r.body)).toEqual([{ force: false }, { drain: true }]);
+  });
 });
 
 describe("the draining state", () => {

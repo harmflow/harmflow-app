@@ -74,6 +74,11 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Accepted" }
+        "400":
+          description: The drain's deadline is not a whole number of seconds above zero (drain_deadline_invalid).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "409": { $ref: "#/components/responses/Conflict" }
 
   /diagnostics:
