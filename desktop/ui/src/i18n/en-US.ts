@@ -74,6 +74,8 @@ export const enUS = {
     daemon_stopped: "Daemon not running",
     not_answering: "Not answering",
     lastUpdate: "Last update: {{time}}",
+    draining_one: "Stopping: the daemon waits for {{count}} running execution, and cancels it at {{time}} if it has not finished.",
+    draining_other: "Stopping: the daemon waits for {{count}} running executions, and cancels those left at {{time}}.",
     notAnsweringHint: "The daemon is running but not answering yet. The desktop keeps trying.",
     lostHint:
       "The connection to the daemon was lost. Executions keep running in the daemon; the dashboard reconnects and replays the events it missed.",
@@ -267,6 +269,7 @@ export const enUS = {
     execution_ended: "the execution already ended ($t(status.{{status}}))",
     executions_running_one: "{{count}} execution is running; confirm to stop the daemon and cancel it",
     executions_running_other: "{{count}} executions are running; confirm to stop the daemon and cancel them",
+    drain_deadline_invalid: "the drain's deadline must be a whole number of seconds above zero",
     harness_path_not_absolute: "the path must be absolute",
     harness_path_not_executable: "no executable file at {{path}}",
     settings_language_invalid: "language must be pt-BR, en-US, es-ES, or system",
@@ -428,6 +431,8 @@ export const enUS = {
     daemon_started: "HarmFlow daemon {{version}} started",
     daemon_signal: "the daemon received {{signal}}",
     daemon_stop_requested: "stopped at the user's request",
+    daemon_drained: "the running executions ended, so the daemon stopped",
+    drain_deadline_passed: "the drain's deadline passed before the running executions ended",
     local_api_stopped: "the local API stopped",
     task_delete_pending: "deletion waits for the running execution",
     task_checked: "the task was checked against its harnesses",
@@ -1327,6 +1332,15 @@ export const enUS = {
       "{{count}} execution is running. Stopping the daemon now interrupts it; it will be recorded as interrupted.",
     stopConfirmRunning_other:
       "{{count}} executions are running. Stopping the daemon now interrupts them; they will be recorded as interrupted.",
+    stopChoiceRunning_one:
+      "{{count}} execution is running. Wait for it to finish, and the daemon stops then, within 30 minutes at most; or cancel it now, and it will be recorded as interrupted.",
+    stopChoiceRunning_other:
+      "{{count}} executions are running. Wait for them to finish, and the daemon stops then, within 30 minutes at most; or cancel them now, and they will be recorded as interrupted.",
+    stopWait_one: "Wait for it",
+    stopWait_other: "Wait for them",
+    stopCancelRunning_one: "Cancel it",
+    stopCancelRunning_other: "Cancel them",
+    draining: "The daemon stops once the running executions finish.",
     stopped: "The daemon is stopping.",
     stopFailedTitle: "The daemon did not stop",
     stopFailedOk: "OK",

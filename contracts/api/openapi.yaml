@@ -50,7 +50,12 @@ paths:
       tags: [daemon]
       operationId: stopDaemon
       summary: Stop the daemon
-      description: Refused with 409 while executions run, unless force is set; the desktop asks for confirmation first.
+      description: >-
+        Refused with 409 while executions run, unless force or drain is set; the desktop asks for confirmation first.
+        A forced stop cancels the running executions. A draining stop starts no firing from then on, lets the running
+        executions end on their own outcome, and stops the daemon once none is left, or cancels those left once its
+        deadline passes; queued firings stay queued for the next start. Health shows a drain under way. A forced stop,
+        in the same request or during a drain, stops at once; a second drain keeps the first one's deadline.
       requestBody:
         content:
           application/json:
@@ -58,9 +63,14 @@ paths:
               type: object
               properties:
                 force: { type: boolean, default: false }
+                drain: { type: boolean, default: false }
+                deadline:
+                  type: integer
+                  minimum: 1
+                  description: The drain's deadline, in seconds after it is accepted; 1800 (30 minutes) by default. Read only with drain.
       responses:
         "202":
-          description: The daemon is stopping.
+          description: The daemon is stopping, or draining.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Accepted" }
@@ -928,6 +938,7 @@ components:
         - daemon_stopping
         - execution_ended
         - executions_running
+        - drain_deadline_invalid
         - harness_path_not_absolute
         - harness_path_not_executable
         - settings_language_invalid
@@ -1068,6 +1079,8 @@ components:
         - daemon_started
         - daemon_signal
         - daemon_stop_requested
+        - daemon_drained
+        - drain_deadline_passed
         - local_api_stopped
         - task_delete_pending
         - task_checked
@@ -1210,6 +1223,13 @@ components:
         pid: { type: integer }
         startedAt: { type: string, format: date-time }
         acceptingFirings: { type: boolean }
+        draining:
+          description: The draining stop under way; left out while none is.
+          type: object
+          required: [executions, deadlineAt]
+          properties:
+            executions: { type: integer, description: "The running executions the drain still waits for." }
+            deadlineAt: { type: string, format: date-time, description: "When the drain cancels the executions left." }
 
     Diagnostics:
       type: object

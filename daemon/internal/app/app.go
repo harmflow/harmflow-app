@@ -176,7 +176,9 @@ type App struct {
 	notifications []Notification
 	accepting     bool
 	stopping      bool
-	adapters      map[string]ports.HarnessAdapter
+	// drain is the draining stop under way, nil while none was asked for; accepting is false while it is set.
+	drain    *drainState
+	adapters map[string]ports.HarnessAdapter
 	// quotas holds each harness's last quota reading, by harness id, and quotaReads runs one read of a harness at a time.
 	quotas     map[string]quotaReading
 	quotaReads map[string]*sync.Mutex
@@ -228,9 +230,13 @@ type App struct {
 	// announce and announces, and Stop holds it for writing to announce the stop, so a detection an API request or an
 	// execution started either announces first or sees the daemon stopping and announces nothing.
 	announceMu sync.RWMutex
-	// ShutdownRequested is closed when the API asks the daemon to stop.
+	// ShutdownRequested is closed when the API asks the daemon to stop, or a drain has ended; shutdownReason, guarded by
+	// mu, says which.
 	ShutdownRequested chan struct{}
 	shutdownOnce      sync.Once
+	shutdownReason    domain.Text
+	// drainStop is closed when Stop begins, so the drain's watcher returns.
+	drainStop chan struct{}
 }
 
 // New builds the use cases over d, with its defaults filled in, and creates the directories they write to; it loads
@@ -277,7 +283,7 @@ func New(d Deps) (*App, error) {
 		applied: map[string][]string{}, accepting: true,
 		adapters: map[string]ports.HarnessAdapter{}, quotas: map[string]quotaReading{}, quotaReads: map[string]*sync.Mutex{},
 		signIns: map[string]*signInState{}, tokens: map[string]*tokenRecord{}, records: map[string]*recordLock{},
-		redetect: make(chan struct{}, 1), ShutdownRequested: make(chan struct{}),
+		redetect: make(chan struct{}, 1), ShutdownRequested: make(chan struct{}), drainStop: make(chan struct{}),
 	}
 	for _, h := range d.Harnesses {
 		a.adapters[h.ID()] = h
@@ -359,6 +365,7 @@ func (a *App) Stop(reason domain.Text) {
 			dones = append(dones, h.done)
 		}
 		a.mu.Unlock()
+		close(a.drainStop)
 		if stopDetection != nil {
 			stopDetection()
 		}
@@ -390,7 +397,8 @@ func (a *App) Stop(reason domain.Text) {
 	})
 }
 
-// RequestShutdown asks main to stop the daemon; with running executions it needs force.
+// RequestShutdown asks main to stop the daemon; with running executions it needs force. A forced stop also ends a
+// drain under way at once.
 func (a *App) RequestShutdown(force bool) error {
 	a.mu.Lock()
 	n := 0
@@ -409,7 +417,7 @@ func (a *App) RequestShutdown(force bool) error {
 	}
 	a.accepting = false
 	a.mu.Unlock()
-	a.shutdownOnce.Do(func() { close(a.ShutdownRequested) })
+	a.requestStop(stopRequested())
 	return nil
 }
 

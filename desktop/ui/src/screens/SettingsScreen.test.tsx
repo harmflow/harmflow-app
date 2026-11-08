@@ -81,6 +81,7 @@ vi.mock("../api/transport", () => ({
         return { status: 200, body: daemon.settings };
       }
       if (method === "POST" && path === "/workspaces/clean" && daemon.clean) return daemon.clean();
+      if (method === "POST" && path === "/daemon/stop") return { status: 202, body: { ok: true, message: "accepted" } };
       return { status: 404, body: null };
     },
     requestText: async () => (daemon.up ? { status: 404, text: "" } : { status: 0, text: "" }),
@@ -651,16 +652,46 @@ describe("the Daemon section's Stop daemon control", () => {
 
   afterEach(() => patchStateForTests({ stats: undefined, connection: "connecting" }));
 
+  const posts = () => daemon.requests.filter((r) => r.method === "POST");
+
   it.each([
-    [1, "1 execution is running. Stopping the daemon now interrupts it; it will be recorded as interrupted."],
-    [2, "2 executions are running. Stopping the daemon now interrupts them; they will be recorded as interrupted."],
-  ])("asks before stopping with %i running, in the number's form", async (running, message) => {
-    const confirm = vi.spyOn(native, "confirm").mockResolvedValue(false);
+    [
+      1,
+      "1 execution is running. Wait for it to finish, and the daemon stops then, within 30 minutes at most; or cancel it now, and it will be recorded as interrupted.",
+      "Wait for it",
+      "Cancel it",
+    ],
+    [
+      2,
+      "2 executions are running. Wait for them to finish, and the daemon stops then, within 30 minutes at most; or cancel them now, and they will be recorded as interrupted.",
+      "Wait for them",
+      "Cancel them",
+    ],
+  ])("offers to wait for or cancel %i running, in the number's form", async (running, message, wait, cancel) => {
+    const choose = vi.spyOn(native, "choose").mockResolvedValue("cancel");
     patchStateForTests({ connection: "connected", stats: stats(running) });
     await open("daemon");
     await click(stopButton());
-    expect(confirm.mock.calls).toEqual([[message, "Stop the daemon?", "Stop daemon", "Cancel"]]);
-    expect(daemon.requests.filter((r) => r.method === "POST")).toEqual([]);
+    expect(choose.mock.calls).toEqual([[message, "Stop the daemon?", wait, cancel, "Cancel"]]);
+    expect(posts()).toEqual([]);
+  });
+
+  it("asks for a draining stop when the user waits for the running executions, and says so", async () => {
+    vi.spyOn(native, "choose").mockResolvedValue("first");
+    patchStateForTests({ connection: "connected", stats: stats(2) });
+    await open("daemon");
+    await click(stopButton());
+    expect(posts()).toEqual([{ method: "POST", path: "/daemon/stop", body: { drain: true } }]);
+    expect(toasts()).toEqual([{ tone: "warning", text: "The daemon stops once the running executions finish." }]);
+  });
+
+  it("stops at once, cancelling the running executions, when the user cancels them", async () => {
+    vi.spyOn(native, "choose").mockResolvedValue("second");
+    patchStateForTests({ connection: "connected", stats: stats(1) });
+    await open("daemon");
+    await click(stopButton());
+    expect(posts()).toEqual([{ method: "POST", path: "/daemon/stop", body: { force: true } }]);
+    expect(toasts()).toEqual([{ tone: "warning", text: "The daemon is stopping." }]);
   });
 });
 

@@ -74,6 +74,8 @@ export const esES: Resources = {
     daemon_stopped: "Daemon detenido",
     not_answering: "Sin respuesta",
     lastUpdate: "Última actualización: {{time}}",
+    draining_one: "Deteniéndose: el daemon espera {{count}} ejecución en curso y la cancela a las {{time}} si no ha terminado.",
+    draining_other: "Deteniéndose: el daemon espera {{count}} ejecuciones en curso y cancela las restantes a las {{time}}.",
     notAnsweringHint:
       "El daemon está en ejecución, pero aún no responde. La aplicación de escritorio sigue intentándolo.",
     lostHint:
@@ -267,6 +269,7 @@ export const esES: Resources = {
     execution_ended: "la ejecución ya terminó ($t(status.{{status}}))",
     executions_running_one: "{{count}} ejecución está en curso; confirma para detener el daemon y cancelarla",
     executions_running_other: "{{count}} ejecuciones están en curso; confirma para detener el daemon y cancelarlas",
+    drain_deadline_invalid: "el plazo de espera debe ser un número entero de segundos mayor que cero",
     harness_path_not_absolute: "la ruta debe ser absoluta",
     harness_path_not_executable: "no hay ningún archivo ejecutable en {{path}}",
     settings_language_invalid: "language debe ser pt-BR, en-US, es-ES o system",
@@ -438,6 +441,8 @@ export const esES: Resources = {
     daemon_started: "daemon de HarmFlow {{version}} iniciado",
     daemon_signal: "el daemon recibió {{signal}}",
     daemon_stop_requested: "detenido a petición del usuario",
+    daemon_drained: "las ejecuciones en curso terminaron, así que el daemon se detuvo",
+    drain_deadline_passed: "el plazo de espera pasó antes de que terminaran las ejecuciones en curso",
     local_api_stopped: "la API local se detuvo",
     task_delete_pending: "la eliminación espera a la ejecución en curso",
     task_checked: "la tarea se verificó con sus harnesses",
@@ -1354,6 +1359,15 @@ export const esES: Resources = {
       "{{count}} ejecución está en curso. Detener el daemon ahora la interrumpe; quedará registrada como interrumpida.",
     stopConfirmRunning_other:
       "Hay {{count}} ejecuciones en curso. Detener el daemon ahora las interrumpe; quedarán registradas como interrumpidas.",
+    stopChoiceRunning_one:
+      "{{count}} ejecución está en curso. Espera a que termine, y el daemon se detiene entonces, en 30 minutos como máximo; o cancélala ahora, y quedará registrada como interrumpida.",
+    stopChoiceRunning_other:
+      "Hay {{count}} ejecuciones en curso. Espera a que terminen, y el daemon se detiene entonces, en 30 minutos como máximo; o cancélalas ahora, y quedarán registradas como interrumpidas.",
+    stopWait_one: "Esperar a la ejecución",
+    stopWait_other: "Esperar a las ejecuciones",
+    stopCancelRunning_one: "Cancelar la ejecución",
+    stopCancelRunning_other: "Cancelar las ejecuciones",
+    draining: "El daemon se detiene en cuanto terminen las ejecuciones en curso.",
     stopped: "El daemon se está deteniendo.",
     stopFailedTitle: "El daemon no se detuvo",
     stopFailedOk: "Aceptar",

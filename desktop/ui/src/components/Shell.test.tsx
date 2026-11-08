@@ -10,6 +10,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { native, type DaemonStatus } from "../api/native";
 import type { Health, Stats, SystemGauges } from "../api/types";
 import i18n from "../i18n";
+import { formatTime } from "../lib/format";
 import { getState, patchStateForTests } from "../state/store";
 import { Header, Sidebar, commitsDiffer } from "./Shell";
 import { Toasts } from "./toast";
@@ -253,17 +254,80 @@ describe("stopping the daemon from the More actions menu", () => {
 
   afterEach(() => patchStateForTests({ stats: undefined }));
 
-  it.each([
-    [1, "1 execution is running. Stopping the daemon now interrupts it; it will be recorded as interrupted."],
-    [2, "2 executions are running. Stopping the daemon now interrupts them; they will be recorded as interrupted."],
-  ])("asks before stopping with %i running, in the number's form", async (running, message) => {
-    const confirm = vi.spyOn(native, "confirm").mockResolvedValue(false);
-    patchStateForTests({ stats: stats(running) });
+  async function stopFromMenu() {
     await show();
     await act(async () => host!.querySelector<HTMLButtonElement>('button[aria-label="More actions"]')!.click());
     await act(async () => [...host!.querySelectorAll<HTMLButtonElement>(".popover button")].find((b) => b.textContent === "Stop daemon…")!.click());
-    expect(confirm.mock.calls).toEqual([[message, "Stop the daemon?", "Stop daemon", "Cancel"]]);
-    expect(daemon.requests.filter((r) => r.method === "POST")).toEqual([]);
+  }
+
+  const posts = () => daemon.requests.filter((r) => r.method === "POST");
+
+  it.each([
+    [
+      1,
+      "1 execution is running. Wait for it to finish, and the daemon stops then, within 30 minutes at most; or cancel it now, and it will be recorded as interrupted.",
+      "Wait for it",
+      "Cancel it",
+    ],
+    [
+      2,
+      "2 executions are running. Wait for them to finish, and the daemon stops then, within 30 minutes at most; or cancel them now, and they will be recorded as interrupted.",
+      "Wait for them",
+      "Cancel them",
+    ],
+  ])("offers to wait for or cancel %i running, in the number's form", async (running, message, wait, cancel) => {
+    const choose = vi.spyOn(native, "choose").mockResolvedValue("cancel");
+    patchStateForTests({ stats: stats(running) });
+    await stopFromMenu();
+    expect(choose.mock.calls).toEqual([[message, "Stop the daemon?", wait, cancel, "Cancel"]]);
+    expect(posts()).toEqual([]);
+  });
+
+  it("asks for a draining stop when the user waits for the running executions, and shows the drain at once", async () => {
+    vi.spyOn(native, "choose").mockResolvedValue("first");
+    daemon.answers.set("POST /daemon/stop", { status: 202, body: { ok: true, message: "the daemon stops once its running executions end" } });
+    patchStateForTests({ stats: stats(2) });
+    await stopFromMenu();
+    expect(posts()).toEqual([{ method: "POST", path: "/daemon/stop", body: { drain: true } }]);
+    expect(daemon.requests.some((r) => r.method === "GET" && r.path === "/health")).toBe(true);
+  });
+
+  it("stops at once, cancelling the running executions, when the user cancels them", async () => {
+    vi.spyOn(native, "choose").mockResolvedValue("second");
+    daemon.answers.set("POST /daemon/stop", { status: 202, body: { ok: true, message: "the daemon is stopping" } });
+    patchStateForTests({ stats: stats(1) });
+    await stopFromMenu();
+    expect(posts()).toEqual([{ method: "POST", path: "/daemon/stop", body: { force: true } }]);
+  });
+
+  it("asks a plain question, and stops without force, when nothing runs", async () => {
+    const choose = vi.spyOn(native, "choose");
+    const confirm = vi.spyOn(native, "confirm").mockResolvedValue(true);
+    daemon.answers.set("POST /daemon/stop", { status: 202, body: { ok: true, message: "the daemon is stopping" } });
+    patchStateForTests({ stats: stats(0) });
+    await stopFromMenu();
+    expect(choose).not.toHaveBeenCalled();
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(posts()).toEqual([{ method: "POST", path: "/daemon/stop", body: { force: false } }]);
+  });
+});
+
+describe("the draining state", () => {
+  it.each([
+    [1, "Stopping: the daemon waits for 1 running execution, and cancels it at"],
+    [3, "Stopping: the daemon waits for 3 running executions, and cancels those left at"],
+  ])("shows a drain waiting for %i executions, and when its deadline passes", async (executions, words) => {
+    const deadlineAt = "2026-10-23T09:30:00Z";
+    patchStateForTests({ health: { ...health, acceptingFirings: false, draining: { executions, deadlineAt } } });
+    await show();
+    const shown = [...host!.querySelectorAll(".banner")].map((b) => b.textContent ?? "").find((s) => s.includes("Stopping:"));
+    expect(shown).toContain(words);
+    expect(shown).toContain(formatTime(deadlineAt, "en-US", false));
+  });
+
+  it("shows no drain while none is under way", async () => {
+    await show();
+    expect(text()).not.toContain("Stopping:");
   });
 });
 

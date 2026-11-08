@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { api } from "../api/client";
 import { native } from "../api/native";
 import type { Notification } from "../api/types";
+import { askAndStopDaemon } from "../lib/daemonStop";
 import { translateNested } from "../lib/daemonText";
 import { errorMessage } from "../lib/errorMessage";
 import { formatBytes, formatNumber, formatRelative, formatTime } from "../lib/format";
@@ -318,6 +318,16 @@ export function Header({
           </Banner>
         </div>
       ) : null}
+      {health?.draining ? (
+        <div className="topbar__banner">
+          <Banner tone="warning" icon="power">
+            {t("connection.draining", {
+              count: health.draining.executions,
+              time: formatTime(health.draining.deadlineAt, i18n.language, false),
+            })}
+          </Banner>
+        </div>
+      ) : null}
       {connection === "disconnected" || connection === "reconnecting" ? (
         <div className="topbar__banner">
           <Banner tone="blue" icon="refresh">
@@ -438,9 +448,8 @@ function MoreMenu({ onNavigate }: { onNavigate: (s: ScreenRoute) => void }) {
 
   const stop = async () => {
     setOpen(false);
-    const message = running > 0 ? t("settings.stopConfirmRunning", { count: running }) : t("settings.stopConfirm");
-    if (!(await native.confirm(message, t("settings.stopConfirmTitle"), t("settings.stopDaemon"), t("common.cancel")))) return;
-    await api.stopDaemon(running > 0).catch(() => undefined);
+    const choice = await askAndStopDaemon(t, running).catch(() => null);
+    if (choice === "drain") void actions.refreshHealth(); // the topbar shows the drain at once
   };
 
   return (

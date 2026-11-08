@@ -13,6 +13,7 @@ import type { LeaveCheck } from "../components/TaskEditor";
 import { toast } from "../components/toast";
 import { Banner, Button, Chip, Field, IconButton, KeyValue, NumberInput, Panel, Select, TextArea, TextInput, Toggle, cx } from "../components/ui";
 import { applyLanguage } from "../i18n";
+import { askAndStopDaemon } from "../lib/daemonStop";
 import { errorMessage } from "../lib/errorMessage";
 import { formatBytes, formatDateTime, formatDuration } from "../lib/format";
 import { useDraft, useNow, type DraftReport } from "../lib/hooks";
@@ -520,11 +521,12 @@ function DaemonSection() {
   };
 
   const stopDaemon = async () => {
-    const message = running > 0 ? t("settings.stopConfirmRunning", { count: running }) : t("settings.stopConfirm");
-    if (!(await native.confirm(message, t("settings.stopConfirmTitle"), t("settings.stopDaemon"), t("common.cancel")))) return;
     try {
-      await api.stopDaemon(running > 0);
-      toast(t("settings.stopped"), "warning");
+      const choice = await askAndStopDaemon(t, running);
+      if (choice === "drain") {
+        toast(t("settings.draining"), "warning");
+        void actions.refreshHealth(); // the topbar shows the drain at once
+      } else if (choice) toast(t("settings.stopped"), "warning");
     } catch (err) {
       toast((err as Error).message, "danger");
     }

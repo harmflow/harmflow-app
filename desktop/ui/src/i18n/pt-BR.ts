@@ -74,6 +74,8 @@ export const ptBR: Resources = {
     daemon_stopped: "Daemon parado",
     not_answering: "Sem resposta",
     lastUpdate: "Última atualização: {{time}}",
+    draining_one: "Parando: o daemon aguarda {{count}} execução em andamento e a cancela às {{time}} se ela não tiver terminado.",
+    draining_other: "Parando: o daemon aguarda {{count}} execuções em andamento e cancela as restantes às {{time}}.",
     notAnsweringHint:
       "O daemon está em execução, mas ainda não responde. O aplicativo de desktop continua tentando.",
     lostHint:
@@ -267,6 +269,7 @@ export const ptBR: Resources = {
     execution_ended: "a execução já terminou ($t(status.{{status}}))",
     executions_running_one: "{{count}} execução está em andamento; confirme para parar o daemon e cancelá-la",
     executions_running_other: "{{count}} execuções estão em andamento; confirme para parar o daemon e cancelá-las",
+    drain_deadline_invalid: "o prazo de espera deve ser um número inteiro de segundos acima de zero",
     harness_path_not_absolute: "o caminho deve ser absoluto",
     harness_path_not_executable: "não há arquivo executável em {{path}}",
     settings_language_invalid: "language deve ser pt-BR, en-US, es-ES ou system",
@@ -437,6 +440,8 @@ export const ptBR: Resources = {
     daemon_started: "daemon do HarmFlow {{version}} iniciado",
     daemon_signal: "o daemon recebeu {{signal}}",
     daemon_stop_requested: "parado a pedido do usuário",
+    daemon_drained: "as execuções em andamento terminaram, então o daemon parou",
+    drain_deadline_passed: "o prazo de espera passou antes de as execuções em andamento terminarem",
     local_api_stopped: "a API local parou",
     task_delete_pending: "a exclusão aguarda a execução em andamento",
     task_checked: "a tarefa foi verificada com os seus harnesses",
@@ -1355,6 +1360,15 @@ export const ptBR: Resources = {
       "{{count}} execução está em andamento. Parar o daemon agora a interrompe; ela será registrada como interrompida.",
     stopConfirmRunning_other:
       "{{count}} execuções estão em andamento. Parar o daemon agora as interrompe; elas serão registradas como interrompidas.",
+    stopChoiceRunning_one:
+      "{{count}} execução está em andamento. Aguarde-a terminar, e o daemon para em seguida, em no máximo 30 minutos; ou cancele-a agora, e ela será registrada como interrompida.",
+    stopChoiceRunning_other:
+      "{{count}} execuções estão em andamento. Aguarde-as terminar, e o daemon para em seguida, em no máximo 30 minutos; ou cancele-as agora, e elas serão registradas como interrompidas.",
+    stopWait_one: "Aguardar a execução",
+    stopWait_other: "Aguardar as execuções",
+    stopCancelRunning_one: "Cancelar a execução",
+    stopCancelRunning_other: "Cancelar as execuções",
+    draining: "O daemon para assim que as execuções em andamento terminarem.",
     stopped: "O daemon está parando.",
     stopFailedTitle: "O daemon não parou",
     stopFailedOk: "OK",
