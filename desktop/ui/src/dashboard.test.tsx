@@ -58,6 +58,7 @@ const settings: Settings = {
   allowedFolders: [],
   onboardingCompleted: true,
   quota: {},
+  systemPrompt: "",
 };
 
 function StubScreen() {

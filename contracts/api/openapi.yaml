@@ -938,6 +938,7 @@ components:
         - settings_change_breaks_task
         - settings_quota_harness_unknown
         - settings_quota_share_invalid
+        - settings_system_prompt_too_long
         - harness_not_identified
         - template_not_found
         - template_read_only
@@ -2004,7 +2005,7 @@ components:
     Settings:
       type: object
       required: [language, trayEnabled, keepTrayOnQuit, showRestrictionWarnings, notificationLevel, logRetentionDays,
-        autostart, pathVariables, allowedFolders, onboardingCompleted, quota]
+        autostart, pathVariables, allowedFolders, onboardingCompleted, quota, systemPrompt]
       properties:
         language: { type: string, enum: [pt-BR, en-US, es-ES, system] }
         trayEnabled: { type: boolean, default: true }
@@ -2051,6 +2052,14 @@ components:
           type: object
           propertyNames: { enum: [claude-code, codex] }
           additionalProperties: { $ref: "#/components/schemas/QuotaShare" }
+        systemPrompt:
+          description: >-
+            The user's general instructions, which every harness session of a github or general task receives in its
+            system context, before HarmFlow's orchestration context and under a heading of their own. Empty, a session
+            receives nothing of it; a script task never does.
+          type: string
+          maxLength: 20000
+          default: ""
 
     QuotaShare:
       type: object
@@ -2086,6 +2095,12 @@ components:
           type: object
           propertyNames: { enum: [claude-code, codex] }
           additionalProperties: { $ref: "#/components/schemas/QuotaShare" }
+        systemPrompt:
+          description: >-
+            Replaces the general system prompt; an empty text clears it. A text of more than 20,000 characters is
+            refused with a validation error on the field.
+          type: string
+          maxLength: 20000
 
     CleanResult:
       type: object

@@ -277,6 +277,7 @@ export const esES: Resources = {
     settings_change_breaks_task: "este cambio dejaría {{field}} de la tarea {{task}} fuera de las rutas permitidas: {{detail}}",
     settings_quota_harness_unknown: "quota.{{harness}} no es una herramienta de IA que HarmFlow ejecute",
     settings_quota_share_invalid: "quota.{{harness}}.maxPercent debe ser mayor que 0 y como máximo 100",
+    settings_system_prompt_too_long: "systemPrompt debe tener como máximo 20000 caracteres",
     harness_not_identified: "{{path}} no es {{harness}}: la salida de --version no lo nombra",
     template_not_found: "no hay ninguna plantilla {{template}}",
     template_read_only: "{{template}} es el identificador de una plantilla integrada: las plantillas integradas vienen con HarmFlow, que nunca escribe ninguna",
@@ -1311,6 +1312,7 @@ export const esES: Resources = {
       agents: "Herramientas de IA",
       tools: "Herramientas de línea de comandos",
       quota: "Cuota",
+      systemPrompt: "Prompt de sistema general",
       variables: "Variables de ruta",
       allowedFolders: "Carpetas permitidas",
       status: "Estado",
@@ -1329,6 +1331,9 @@ export const esES: Resources = {
     languages: { system: "Idioma del sistema", "pt-BR": "Português (Brasil)", "en-US": "English (US)", "es-ES": "Español" },
     tray: "Mostrar HarmFlow en la barra de menús",
     trayHint: "Activado, cerrar la ventana solo la oculta. El daemon sigue en ejecución en cualquier caso.",
+    systemPrompt: "Instrucciones para todas las sesiones",
+    systemPromptHint:
+      "Cada sesión de una tarea de GitHub o general recibe este texto en cada herramienta de IA, antes de las instrucciones propias de HarmFlow. Las tareas de script nunca lo reciben. Como máximo 20.000 caracteres; déjalo vacío para no enviar nada.",
     showRestrictionWarnings: "Mostrar avisos de restricción",
     showRestrictionWarningsHint:
       "Muestra un aviso en el detalle de una ejecución por cada restricción que la herramienta de IA no aplica. La pestaña Eventos las lista de todos modos.",

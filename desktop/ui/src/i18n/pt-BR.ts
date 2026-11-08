@@ -277,6 +277,7 @@ export const ptBR: Resources = {
     settings_change_breaks_task: "esta mudança deixaria {{field}} da tarefa {{task}} fora dos caminhos permitidos: {{detail}}",
     settings_quota_harness_unknown: "quota.{{harness}} não é uma ferramenta de IA que o HarmFlow executa",
     settings_quota_share_invalid: "quota.{{harness}}.maxPercent deve ser maior que 0 e no máximo 100",
+    settings_system_prompt_too_long: "systemPrompt deve ter no máximo 20000 caracteres",
     harness_not_identified: "{{path}} não é o {{harness}}: a saída de --version não o nomeia",
     template_not_found: "não há modelo {{template}}",
     template_read_only: "{{template}} é o identificador de um modelo embutido: os modelos embutidos vêm com o HarmFlow, que nunca grava um",
@@ -1313,6 +1314,7 @@ export const ptBR: Resources = {
       agents: "Ferramentas de IA",
       tools: "Ferramentas de linha de comando",
       quota: "Cota",
+      systemPrompt: "Prompt de sistema geral",
       variables: "Variáveis de caminho",
       allowedFolders: "Pastas permitidas",
       status: "Estado",
@@ -1331,6 +1333,9 @@ export const ptBR: Resources = {
     languages: { system: "Idioma do sistema", "pt-BR": "Português (Brasil)", "en-US": "English (US)", "es-ES": "Español" },
     tray: "Mostrar o HarmFlow na barra de menus",
     trayHint: "Ativado, fechar a janela apenas a oculta. O daemon continua rodando de qualquer forma.",
+    systemPrompt: "Instruções para todas as sessões",
+    systemPromptHint:
+      "Toda sessão de uma tarefa do GitHub ou geral recebe este texto em cada ferramenta de IA, antes das instruções do próprio HarmFlow. Tarefas de script nunca o recebem. No máximo 20.000 caracteres; deixe vazio para não enviar nada.",
     showRestrictionWarnings: "Mostrar avisos de restrição",
     showRestrictionWarningsHint:
       "Mostra um aviso no detalhe de uma execução para cada restrição que a ferramenta de IA não aplica. A aba Eventos as lista de qualquer forma.",

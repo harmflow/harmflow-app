@@ -1,5 +1,5 @@
 // Settings, divided into sections: a list of them on the left, and the open one beside it. Interface: the language, the
-// menu bar, notifications, and the keyboard shortcuts. Execution: the AI tools and the command-line tools, and the paths a task may use. This
+// menu bar, notifications, and the keyboard shortcuts. Execution: the AI tools, the general system prompt, and the command-line tools, and the paths a task may use. This
 // computer: the daemon, storage, and local API security. About stands alone at the foot of the list.
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
@@ -11,7 +11,7 @@ import { Icon, type IconName } from "../components/Icon";
 import { tipBeside, useTooltip } from "../components/Shell";
 import type { LeaveCheck } from "../components/TaskEditor";
 import { toast } from "../components/toast";
-import { Banner, Button, Chip, IconButton, KeyValue, NumberInput, Panel, Select, TextInput, Toggle, cx } from "../components/ui";
+import { Banner, Button, Chip, Field, IconButton, KeyValue, NumberInput, Panel, Select, TextArea, TextInput, Toggle, cx } from "../components/ui";
 import { applyLanguage } from "../i18n";
 import { errorMessage } from "../lib/errorMessage";
 import { formatBytes, formatDateTime, formatDuration } from "../lib/format";
@@ -94,8 +94,8 @@ export function SettingsScreen({
     void actions.refreshHarnesses();
   }, []);
 
-  // Three settings keep a draft until confirmed: the path variables and the allowed folders (Save), the log retention
-  // (Apply), and a harness's path set by hand (its Save). While one is held, every way out of the section asks first,
+  // Four settings keep a draft until confirmed: the path variables and the allowed folders (Save), the log retention
+  // (Apply), a harness's path set by hand (its Save), and the general system prompt (Save). While one is held, every way out of the section asks first,
   // for another section or another screen, as leaving a task's editor with unsaved changes does.
   const [drafts, setDrafts] = useState<ReadonlySet<string>>(() => new Set());
   const report = useCallback<DraftReport>(
@@ -353,12 +353,64 @@ function AgentsSection({ report }: { report: DraftReport }) {
           </SettingRow>
         ))}
       </Panel>
+      <Panel title={t("settings.subheads.systemPrompt")}>
+        <SystemPromptField value={settings?.systemPrompt ?? ""} onDraft={report} />
+      </Panel>
       <Panel title={t("settings.subheads.tools")}>
         {tools.map((tool) => (
           <ToolRow key={tool.id} tool={tool} />
         ))}
       </Panel>
     </>
+  );
+}
+
+/**
+ * The general system prompt, which every harness session of a GitHub or general task receives. It stays a draft until
+ * Save, which sends the text whole, an emptied one included; a text the daemon refuses shows the daemon's error on the
+ * field and stays a draft.
+ */
+function SystemPromptField({ value, onDraft }: { value: string; onDraft: DraftReport }) {
+  const { t } = useTranslation();
+  const [text, setText] = useState(value);
+  const [error, setError] = useState<string>();
+  const [saving, setSaving] = useState(false);
+  useEffect(() => setText(value), [value]);
+  const changed = text !== value;
+  useDraft(onDraft, "systemPrompt", changed);
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.updateSettings({ systemPrompt: text });
+      await actions.refreshSettings();
+      setError(undefined);
+      toast(t("settings.saved"));
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="row-list">
+      <Field label={t("settings.systemPrompt")} hint={t("settings.systemPromptHint")} error={error}>
+        <TextArea
+          id="settings-system-prompt"
+          rows={6}
+          value={text}
+          aria-invalid={error ? true : undefined}
+          onChange={(e) => {
+            setText(e.target.value);
+            setError(undefined);
+          }}
+        />
+      </Field>
+      <div className="inline-actions">
+        <Button size="sm" variant="primary" disabled={!changed || saving} onClick={() => void save()}>
+          {t("common.save")}
+        </Button>
+      </div>
+    </div>
   );
 }
 

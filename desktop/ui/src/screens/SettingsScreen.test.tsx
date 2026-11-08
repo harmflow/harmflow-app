@@ -4,6 +4,8 @@
 // with the setting — its bounds, its default, and its persistence across a restart — is app › TestLogRetentionSetting's.
 // Drives the same section's Clean workspaces control too: one clean-up request, no second click while it runs, and
 // what the daemon removed and kept, or its error. Which worktrees the daemon removes is app › CleanWorkspaces' tests'.
+// Drives the AI tools section's general system prompt too: a draft until Save, the text sent alone, an emptied field
+// that clears it, and a text the daemon refuses shown on the field.
 // Then shows what AI tools, Security, and Storage read from the harnesses, the tools, and the diagnostics in the store:
 // each harness's readiness and path, the command-line tools, the token store, the disk used, and the directories with
 // their Show in Finder buttons, which ask the desktop's bridge to open the row's path. And the Daemon section's Stop
@@ -50,6 +52,18 @@ vi.mock("../api/transport", () => ({
       if (method === "PATCH" && path === "/settings") {
         const { autostart, ...rest } = body as SettingsPatch;
         const days = rest.logRetentionDays;
+        if (rest.systemPrompt !== undefined && [...rest.systemPrompt].length > 20000) {
+          return {
+            status: 422,
+            body: {
+              error: {
+                code: "validation_failed",
+                message: "systemPrompt must be at most 20000 characters",
+                messageKey: "settings_system_prompt_too_long",
+              },
+            },
+          };
+        }
         if (days !== undefined && (days < 1 || days > 3650)) {
           return {
             status: 422,
@@ -92,6 +106,7 @@ const saved: Settings = {
   allowedFolders: [],
   onboardingCompleted: true,
   quota: {},
+  systemPrompt: "",
 };
 
 let root: Root | undefined;
@@ -493,6 +508,90 @@ describe("the AI tools section's quota shares", () => {
     await act(async () => slider("claude-code").dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
     await settle();
     expect(updates()).toHaveLength(1);
+  });
+});
+
+// harmflow-app#849: the general system prompt's field, in the AI tools section. What the daemon does with the text —
+// its bounds, its default, and its delivery to each session — is app › TestSystemPrompt* and
+// app › TestEveryAttemptReceivesTheGeneralSystemPrompt's.
+describe("the AI tools section's general system prompt", () => {
+  const area = () => host!.querySelector<HTMLTextAreaElement>("#settings-system-prompt")!;
+  const save = () => area().closest(".row-list")!.querySelector<HTMLButtonElement>(".inline-actions button")!;
+  const fieldError = () => text(area().closest(".field")!.querySelector(".field__error"));
+
+  /** Types into the text area as React sees it. */
+  async function write(value: string) {
+    const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+    await act(async () => {
+      setValue.call(area(), value);
+      area().dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+
+  it("reads empty on settings without the text, with its label, its help, and Save disabled", async () => {
+    patchStateForTests({ harnesses: [claudeCode, codex], tools });
+    await open("agents");
+    expect(text(panel("General system prompt")?.querySelector(".field__label"))).toBe("Instructions for every session");
+    expect(text(area().closest(".field")!.querySelector(".field__hint"))).toBe(enUS.settings.systemPromptHint);
+    expect(area().value).toBe("");
+    expect(save().disabled).toBe(true);
+    expect(leaveCheck).toBeNull();
+  });
+
+  it("holds a draft until Save, then sends the text alone, reads the settings again, and shows it saved", async () => {
+    patchStateForTests({ harnesses: [claudeCode, codex], tools });
+    await open("agents");
+    const written = "Answer in pt-BR.\nNever touch the CI credentials.";
+    await write(written);
+    expect(save().disabled).toBe(false);
+    expect(leaveCheck).not.toBeNull();
+
+    daemon.requests.length = 0;
+    await click(save());
+    expect(updates().map((r) => r.body)).toStrictEqual([{ systemPrompt: written }]);
+    const after = daemon.requests.slice(daemon.requests.indexOf(updates()[0]) + 1);
+    expect(after).toContainEqual({ method: "GET", path: "/settings", body: undefined });
+    expect(daemon.settings.systemPrompt).toBe(written);
+    expect(toasts()).toEqual([{ tone: "success", text: "Settings saved." }]);
+    expect(area().value).toBe(written);
+    expect(save().disabled).toBe(true);
+    expect(leaveCheck).toBeNull();
+  });
+
+  it("clears the text when the emptied field is saved", async () => {
+    daemon.settings = { ...daemon.settings, systemPrompt: "Answer in pt-BR." };
+    patchStateForTests({ harnesses: [claudeCode, codex], tools });
+    await open("agents");
+    expect(area().value).toBe("Answer in pt-BR.");
+
+    await write("");
+    daemon.requests.length = 0;
+    await click(save());
+    expect(updates().map((r) => r.body)).toStrictEqual([{ systemPrompt: "" }]);
+    expect(daemon.settings.systemPrompt).toBe("");
+    expect(area().value).toBe("");
+    expect(save().disabled).toBe(true);
+  });
+
+  it("saves a text of 20,000 characters, and shows the refusal of one more on the field, keeping it a draft", async () => {
+    patchStateForTests({ harnesses: [claudeCode, codex], tools });
+    await open("agents");
+    const most = "é".repeat(20000);
+    await write(most);
+    await click(save());
+    expect(daemon.settings.systemPrompt).toBe(most);
+    expect(fieldError()).toBeUndefined();
+
+    await write(most + "é");
+    daemon.requests.length = 0;
+    await click(save());
+    expect(updates().map((r) => r.body)).toStrictEqual([{ systemPrompt: most + "é" }]);
+    expect(daemon.settings.systemPrompt).toBe(most);
+    expect(fieldError()).toBe("systemPrompt must be at most 20000 characters");
+    expect(area().getAttribute("aria-invalid")).toBe("true");
+    expect(area().value).toBe(most + "é");
+    expect(save().disabled).toBe(false);
+    expect(leaveCheck).not.toBeNull();
   });
 });
 

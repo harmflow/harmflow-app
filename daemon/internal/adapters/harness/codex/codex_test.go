@@ -736,6 +736,24 @@ func TestPrepareLeavesTheDefaultsToCodex(t *testing.T) {
 	}
 }
 
+// harmflow-app#849: the session's system context, the user's general instructions before HarmFlow's orchestration
+// context, opens Codex's input whole, and the task's prompt follows under its own heading.
+func TestPrepareOpensTheInputWithTheSessionContext(t *testing.T) {
+	t.Setenv("CODEX_HOME", "")
+	a := &Adapter{Home: t.TempDir()}
+	info := ports.HarnessInfo{Path: "/bin/codex", Features: map[string]bool{"--add-dir": true}}
+	context := "## The user's general instructions\n\nAnswer in pt-BR.\n\n" +
+		"## HarmFlow's orchestration context\n\nThis session is run by HarmFlow, a local scheduler.\n"
+	inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", ExecutionDir: t.TempDir(), Prompt: "Do the work.",
+		Context: context, Permissions: *domain.TaskDocument{}.Effective().Spec.Permissions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := context + "\n\n## Task\n\nDo the work.\n"; inv.Stdin != want {
+		t.Errorf("Prepare instructions =\n%s\nwant\n%s", inv.Stdin, want)
+	}
+}
+
 // Built-ins are read from copies in the execution's directory, never from the app; the user's own items stay put. No
 // agent is inlined as the session's role: each one is listed by name, and the task's prompt carries the role.
 func TestPrepareDeliversBuiltins(t *testing.T) {

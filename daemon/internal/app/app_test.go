@@ -3267,6 +3267,140 @@ func TestContextRedactedInTheRecord(t *testing.T) {
 	}
 }
 
+// harmflow-app#849: the session context puts the user's general instructions first, under their own heading, and
+// HarmFlow's orchestration context after them, whole and last, under its own; with no instructions, or only blanks, it
+// is HarmFlow's context alone, with no heading.
+func TestSessionContextPutsTheGeneralSystemPromptFirst(t *testing.T) {
+	harmflow := "This session is run by HarmFlow, a local scheduler.\n- report.json: write it once, at the end.\n"
+	got := sessionContext("\nAnswer in pt-BR.\nNever touch CI.\n\n", harmflow)
+	want := "## The user's general instructions\n\nAnswer in pt-BR.\nNever touch CI.\n\n" +
+		"## HarmFlow's orchestration context\n\n" + harmflow
+	if got != want {
+		t.Errorf("sessionContext(text, harmflow) =\n%s\nwant\n%s", got, want)
+	}
+	if !strings.HasSuffix(got, harmflow) {
+		t.Errorf("sessionContext(text, harmflow) does not end with HarmFlow's context, whole:\n%s", got)
+	}
+	for _, empty := range []string{"", " \n\t\n"} {
+		if got := sessionContext(empty, harmflow); got != harmflow {
+			t.Errorf("sessionContext(%q, harmflow) =\n%s\nwant HarmFlow's context alone\n%s", empty, got, harmflow)
+		}
+	}
+}
+
+// harmflow-app#849: every attempt of a general task and of a github task, on Claude Code and on Codex after a
+// failover, receives the general system prompt as saved when the attempt starts, before HarmFlow's orchestration
+// context, and records the context it sent. A change in Settings during the first attempt reaches the second with no
+// restart; once the text is emptied, the next execution's context is HarmFlow's alone.
+func TestEveryAttemptReceivesTheGeneralSystemPrompt(t *testing.T) {
+	const heading, plumbing = "## The user's general instructions\n\n", "\n\n## HarmFlow's orchestration context\n\n"
+	for _, tc := range []struct {
+		name string
+		yaml func(t *testing.T, e *env) string
+	}{
+		{"general", func(*testing.T, *env) string { return taskYAML("guided", codexFallback) }},
+		{"github", func(t *testing.T, e *env) string {
+			repo := mkdir(t, filepath.Join(e.app.Paths().UserHome, "repo"))
+			return strings.Replace(taskYAML("guided", codexFallback+
+				fmt.Sprintf("  github:\n    repositories:\n      - name: o/r\n        localPath: %q\n", repo)),
+				"type: general", "type: github", 1)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: tc.yaml(t, e)}); err != nil {
+				t.Fatalf("CreateTask(guided): %v", err)
+			}
+			first, second := "Answer in pt-BR.", "Answer in es-ES."
+			if _, err := e.app.UpdateSettings(SettingsPatch{SystemPrompt: &first}); err != nil {
+				t.Fatalf("UpdateSettings(systemPrompt): %v", err)
+			}
+			var q requests
+			e.claude.setScript(func(req ports.RunRequest) string {
+				if req.Prompt != "" { // validation's policy check prepares with no prompt
+					q.add(req)
+					// Saved while the first attempt runs: the failover's attempt reads it.
+					if _, err := e.app.UpdateSettings(SettingsPatch{SystemPrompt: &second}); err != nil {
+						t.Errorf("UpdateSettings(systemPrompt) during the first attempt: %v", err)
+					}
+				}
+				return "echo 'END quota'"
+			})
+			e.codex.setScript(func(req ports.RunRequest) string { q.add(req); return "echo 'END ok'" })
+			r, _ := e.app.RunTask("guided")
+			x := e.wait(r.ExecutionID, domain.StatusCompleted)
+			e.idle("guided")
+			sent := q.all()
+			if len(sent) != 2 || len(x.Attempts) != 2 || x.Attempts[1].Harness != domain.HarnessCodex {
+				t.Fatalf("%d requests, attempts %+v; want 2, the second on Codex", len(sent), x.Attempts)
+			}
+			for i, text := range []string{first, second} {
+				ctx := sent[i].Context
+				if !strings.HasPrefix(ctx, heading+text+plumbing+"This session is run by HarmFlow") {
+					t.Errorf("attempt %d's context does not start with the text %q under its heading, then HarmFlow's:\n%s",
+						i+1, text, ctx)
+				}
+				if !strings.Contains(ctx, "report.json") || strings.Index(ctx, "report.json") < strings.Index(ctx, plumbing) {
+					t.Errorf("attempt %d's context does not keep HarmFlow's plumbing after the text:\n%s", i+1, ctx)
+				}
+				if x.Attempts[i].SessionContext != ctx {
+					t.Errorf("attempt %d records the context\n%s\nwant the one the harness received\n%s", i+1,
+						x.Attempts[i].SessionContext, ctx)
+				}
+			}
+			if strings.Contains(sent[1].Context, first) {
+				t.Errorf("the second attempt's context still holds the text saved before:\n%s", sent[1].Context)
+			}
+
+			empty := ""
+			if _, err := e.app.UpdateSettings(SettingsPatch{SystemPrompt: &empty}); err != nil {
+				t.Fatalf("UpdateSettings(systemPrompt: \"\"): %v", err)
+			}
+			var bare requests
+			e.claude.setScript(func(req ports.RunRequest) string { bare.add(req); return "echo 'END ok'" })
+			r, _ = e.app.RunTask("guided")
+			e.wait(r.ExecutionID, domain.StatusCompleted)
+			e.idle("guided")
+			got := bare.all()
+			if len(got) != 1 || !strings.HasPrefix(got[0].Context, "This session is run by HarmFlow") ||
+				strings.Contains(got[0].Context, "## ") {
+				var contexts []string
+				for _, req := range got {
+					contexts = append(contexts, req.Context)
+				}
+				t.Errorf("with an empty text, the contexts sent are %q, want one, HarmFlow's alone with no heading", contexts)
+			}
+		})
+	}
+}
+
+// harmflow-app#849: a script task runs no harness, so it never receives the general system prompt: neither its
+// program's environment nor its arguments hold it, and no harness is prepared.
+func TestScriptTaskReceivesNoGeneralSystemPrompt(t *testing.T) {
+	e := newEnv(t)
+	text := "General instructions for every session."
+	if _, err := e.app.UpdateSettings(SettingsPatch{SystemPrompt: &text}); err != nil {
+		t.Fatalf("UpdateSettings(systemPrompt): %v", err)
+	}
+	var q requests
+	e.claude.setScript(func(req ports.RunRequest) string { q.add(req); return "echo 'END ok'" })
+	e.codex.setScript(func(req ports.RunRequest) string { q.add(req); return "echo 'END ok'" })
+	e.createScript("plain", "  script:\n    inline:\n      interpreter: [/bin/sh]\n      source: |\n        env\n        echo \"args=$*\"\n")
+	x := e.runScript("plain", domain.StatusCompleted)
+	lines := e.output(x.ID)
+	if !contains(lines, "stdout: args=") {
+		t.Fatalf("the script's output %q lacks its arguments' line", lines)
+	}
+	for _, l := range lines {
+		if strings.Contains(l, text) {
+			t.Errorf("the script's output holds the general system prompt: %q", l)
+		}
+	}
+	if got := q.all(); len(got) != 0 {
+		t.Errorf("a script task prepared %d harness sessions, want none", len(got))
+	}
+}
+
 // What the agent writes — its progress, its last message, its report — is redacted before HarmFlow keeps or relays
 // it: in the record and the API, the work-item ledger, context.json, the event log, and the next attempt's context. It
 // is redacted before it is trimmed, so a token cut short by a trim leaves no prefix behind.

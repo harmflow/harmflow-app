@@ -157,6 +157,7 @@ const settings: Settings = {
   allowedFolders: ["/srv/repos"],
   onboardingCompleted: true,
   quota: {},
+  systemPrompt: "",
 };
 
 beforeAll(async () => {
@@ -1261,7 +1262,11 @@ describe("settings sections", () => {
       ["Em todo o painel", "Zoom, também nos diálogos", "Editor de tarefas", "Tela de tarefas", "Tela de execuções", "Linha do tempo da execução", "Diálogos e menus"],
       ["Nova tarefa", "Salvar a tarefa", "Evento anterior", "Fechar o diálogo ou o menu"],
     ],
-    ["agents", ["Ferramentas de IA", "Cota", "Ferramentas de linha de comando"], ["Detectar de novo", "Claude Code", "Definir caminho", "parte de cada janela da cota"]],
+    [
+      "agents",
+      ["Ferramentas de IA", "Cota", "Prompt de sistema geral", "Ferramentas de linha de comando"],
+      ["Detectar de novo", "Claude Code", "Definir caminho", "parte de cada janela da cota", "Instruções para todas as sessões"],
+    ],
     ["paths", ["Variáveis de caminho", "Pastas permitidas"], ["PROJECTS_ROOT", "/srv/repos", "Adicionar variável", "Adicionar pasta"]],
     ["daemon", ["Estado", "Inicialização"], ["Em execução agora", "Parar o daemon", "Iniciar o daemon automaticamente com o sistema"]],
     ["storage", ["Logs", "Workspaces", "Diretórios"], ["Manter logs de execução por (dias)", "Limpar workspaces", "Disco usado pelo HarmFlow"]],
