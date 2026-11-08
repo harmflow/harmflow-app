@@ -55,28 +55,7 @@ func TestResumedDraftContext(t *testing.T) {
 	gitCommands, graphql, permission := resumedDraftCommands(t)
 	wt := worktreeWithTwoCommits(t)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		login, isPermission := strings.CutPrefix(r.URL.Path, "/repos/harmflow/example/collaborators/")
-		login, isPermission = strings.CutSuffix(login, "/permission")
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/graphql":
-			if !draftQueryAsked(t, r) {
-				http.Error(w, `{"message":"Bad request"}`, http.StatusBadRequest)
-				return
-			}
-			_, _ = w.Write([]byte(draftAnswer))
-		case r.Method == http.MethodGet && isPermission && permissions[login] != "":
-			_, _ = w.Write([]byte(`{"permission":"` + permissions[login] + `","user":{"login":"` + login + `"}}`))
-		case r.Method == http.MethodGet && isPermission:
-			w.WriteHeader(http.StatusNotFound)
-			_, _ = w.Write([]byte(`{"message":"Not Found"}`))
-		default:
-			t.Errorf("gh asked for %s %s, which the reading does not read", r.Method, r.URL)
-			w.WriteHeader(http.StatusNotFound)
-			_, _ = w.Write([]byte(`{"message":"Not Found"}`))
-		}
-	}))
+	srv := draftStub(t, []byte(draftAnswer))
 	defer srv.Close()
 
 	var read strings.Builder
@@ -141,7 +120,6 @@ func TestResumedDraftTestReport(t *testing.T) {
 		t.Fatalf("the reading runs gh api, and gh is not on PATH: %v", err)
 	}
 	_, graphql, _ := resumedDraftCommands(t)
-	wt := worktreeWithTwoCommits(t)
 	const failed = "Tests: failed — TestRetryLimit: got 5, want 3"
 	// template is a body under the headings of the pull request template, with section before ## Checklist.
 	template := func(section string) string {
@@ -188,23 +166,10 @@ func TestResumedDraftTestReport(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				if r.Method != http.MethodPost || r.URL.Path != "/graphql" {
-					t.Errorf("gh asked for %s %s, which the reading of the test report does not read", r.Method, r.URL)
-					w.WriteHeader(http.StatusNotFound)
-					_, _ = w.Write([]byte(`{"message":"Not Found"}`))
-					return
-				}
-				if !draftQueryAsked(t, r) {
-					http.Error(w, `{"message":"Bad request"}`, http.StatusBadRequest)
-					return
-				}
-				_, _ = w.Write(answer)
-			}))
+			srv := draftStub(t, answer)
 			defer srv.Close()
 
-			out := ghRead(t, gh, srv.URL, fillResumed(t, graphql, wt, ""), false)
+			out := ghRead(t, gh, srv.URL, fillResumed(t, graphql, "", ""), false)
 			var ctx struct {
 				Tests *string `json:"tests"`
 			}
@@ -225,6 +190,34 @@ func TestResumedDraftTestReport(t *testing.T) {
 
 // ptr is a pointer to s, for a test report a case wants.
 func ptr(s string) *string { return &s }
+
+// draftStub is a stub of GitHub for the resumed draft of harmflow/example: it answers the skill's query for the draft
+// with answer, and an author's permission as permissions holds it; any other request fails the test.
+func draftStub(t *testing.T, answer []byte) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		login, isPermission := strings.CutPrefix(r.URL.Path, "/repos/harmflow/example/collaborators/")
+		login, isPermission = strings.CutSuffix(login, "/permission")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/graphql":
+			if !draftQueryAsked(t, r) {
+				http.Error(w, `{"message":"Bad request"}`, http.StatusBadRequest)
+				return
+			}
+			_, _ = w.Write(answer)
+		case r.Method == http.MethodGet && isPermission && permissions[login] != "":
+			_, _ = w.Write([]byte(`{"permission":"` + permissions[login] + `","user":{"login":"` + login + `"}}`))
+		case r.Method == http.MethodGet && isPermission:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"Not Found"}`))
+		default:
+			t.Errorf("gh asked for %s %s, which the reading does not read", r.Method, r.URL)
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"Not Found"}`))
+		}
+	}))
+}
 
 // draftAnswer is what GitHub answers for the resumed draft: its last push on 2026-11-02 at noon; a thread on a line of
 // retry.go, open and current, beside a resolved one and an outdated one; and conversation comments from before and
