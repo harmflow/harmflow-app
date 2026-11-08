@@ -552,7 +552,9 @@ func (a *Adapter) allowlistRestriction(req ports.RunRequest, covered []string) p
 // additional directory that may reach outside those directories lifts the limit. In doubt, either reaches outside:
 // only one whose path lies within the working directory or an added directory stays inside, and a bare rule, or a list
 // of additional directories that cannot be read, does not. The directories are compared resolved, as the rules' and
-// the additional directories' paths are, so a link on either side does not decide.
+// the additional directories' paths are, so a link on either side does not decide. The project settings' additional
+// directories are not read: Claude Code refuses edits in the folders they name, as a real run showed. The user's and
+// the local settings' ones still count until a real run shows the same of them.
 func (a *Adapter) editRestriction(req ports.RunRequest) ports.Restriction {
 	var roots []string
 	for _, d := range append([]string{req.ExecutionDir, req.WorkDir}, req.AdditionalDirs...) {
@@ -561,11 +563,15 @@ func (a *Adapter) editRestriction(req ports.RunRequest) ports.Restriction {
 		}
 	}
 	widening := a.wideningSources(req, func(source string, s claudeSettings) bool {
-		dirs, ok := s.additionalDirs()
-		return !ok || slices.ContainsFunc(dirs, func(d string) bool { return !dirInside(d, roots) }) ||
-			slices.ContainsFunc(s.Permissions.Allow, func(r string) bool {
-				return containsStr(editTools, toolName(r)) && !a.editRuleInside(r, source != "user", roots)
-			})
+		if source != "project" {
+			dirs, ok := s.additionalDirs()
+			if !ok || slices.ContainsFunc(dirs, func(d string) bool { return !dirInside(d, roots) }) {
+				return true
+			}
+		}
+		return slices.ContainsFunc(s.Permissions.Allow, func(r string) bool {
+			return containsStr(editTools, toolName(r)) && !a.editRuleInside(r, source != "user", roots)
+		})
 	})
 	if len(widening) == 0 {
 		return ports.Restriction{Name: "edit_directories", Enforced: true,

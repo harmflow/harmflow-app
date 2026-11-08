@@ -512,7 +512,8 @@ func TestPrepareReadsTheUserSettingsOfTheConfigurationDirectory(t *testing.T) {
 // folder outside through a link does not (harmflow-app#449). An additional directory in the same sources is a folder
 // where acceptEdits approves edits, so it lifts the limit as such a rule does, read the same way: only an absolute path
 // within those directories stays inside, and a relative or ~ path, and a value that is not a list of strings, null
-// included, do not (harmflow-app#426).
+// included, do not (harmflow-app#426). The project settings' additional directories are the exception: the real Claude
+// Code refuses edits in the folders they name, so they lift no limit, whatever they hold (harmflow-app#909).
 func TestPrepareReportsEditRulesThatReachOutside(t *testing.T) {
 	const bareWrite = `{"permissions":{"allow":["Write"]}}`
 	const etc = `{"permissions":{"additionalDirectories":["/etc"]}}`
@@ -572,15 +573,24 @@ func TestPrepareReportsEditRulesThatReachOutside(t *testing.T) {
 			local: `{"permissions":{"additionalDirectories":["<work>-other"]}}`, want: "local"},
 		{name: "the workspace's parent as an additional directory",
 			user: `{"permissions":{"additionalDirectories":["<work>/.."]}}`, want: "user"},
-		{name: "a relative additional directory", project: `{"permissions":{"additionalDirectories":["src"]}}`,
-			want: "project"},
+		{name: "a relative additional directory", local: `{"permissions":{"additionalDirectories":["src"]}}`,
+			want: "local"},
+		{name: "an additional directory outside in the project settings", project: etc},
+		{name: "a relative additional directory in the project settings",
+			project: `{"permissions":{"additionalDirectories":["src"]}}`},
+		{name: "an additional directory outside in the project settings beside a bare Write rule",
+			project: `{"permissions":{"allow":["Write"],"additionalDirectories":["/etc"]}}`, want: "project"},
+		{name: "additional directories outside in every source", user: etc, project: etc, local: etc,
+			want: "user_local"},
 		{name: "an additional directory from the home folder", user: `{"permissions":{"additionalDirectories":["~/repo"]}}`,
 			want: "user"},
 		{name: "an empty additional directory", local: `{"permissions":{"additionalDirectories":[""]}}`, want: "local"},
 		{name: "additional directories that are not a list", user: `{"permissions":{"additionalDirectories":"/etc"}}`,
 			want: "user"},
-		{name: "an additional directory that is not a string", project: `{"permissions":{"additionalDirectories":[1]}}`,
-			want: "project"},
+		{name: "an additional directory that is not a string", local: `{"permissions":{"additionalDirectories":[1]}}`,
+			want: "local"},
+		{name: "an additional directory that is not a string in the project settings",
+			project: `{"permissions":{"additionalDirectories":[1]}}`},
 		{name: "null additional directories", user: `{"permissions":{"additionalDirectories":null}}`, want: "user"},
 		{name: "an empty list of additional directories", user: `{"permissions":{"additionalDirectories":[]}}`},
 		{name: "an additional directory outside beside an editing rule inside",
