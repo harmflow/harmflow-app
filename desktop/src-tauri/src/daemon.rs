@@ -163,11 +163,16 @@ impl Failure {
         matches!(self, Failure::Http(err) if err.is_timeout() && !err.is_connect())
     }
 
-    /// The connection was refused, not left waiting: nothing listens at the address any longer, so the daemon stopped
-    /// or restarted on another port. A connection that timed out is a busy daemon's, and no reason to read it again.
+    /// The connection was refused: `connection_refused`.
     fn refused(&self) -> bool {
-        matches!(self, Failure::Http(err) if err.is_connect() && !err.is_timeout())
+        matches!(self, Failure::Http(err) if connection_refused(err))
     }
+}
+
+/// The connection was refused, not left waiting: nothing listens at the address any longer, so the daemon stopped or
+/// restarted on another port. A connection that timed out is a busy daemon's, and no reason to read it again.
+pub fn connection_refused(err: &reqwest::Error) -> bool {
+    err.is_connect() && !err.is_timeout()
 }
 
 /// The response the webview receives for a request that failed: status 0, and the reason as an internal error.
