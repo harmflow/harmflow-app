@@ -62,6 +62,20 @@ func quotaKey(harness, installation string) string {
 	return harness + " " + installation
 }
 
+// installationQuota is the reading as Settings shows it.
+func (r quotaReading) installationQuota() *ports.InstallationQuota {
+	out := &ports.InstallationQuota{Windows: []ports.QuotaWindowInfo{}, ReadAt: r.at}
+	for _, w := range r.quota.Windows {
+		win := ports.QuotaWindowInfo{Name: w.Name, UsedPercent: w.UsedPercent}
+		if !w.ResetsAt.IsZero() {
+			resets := w.ResetsAt
+			win.ResetsAt = &resets
+		}
+		out.Windows = append(out.Windows, win)
+	}
+	return out
+}
+
 // storeQuota keeps an installation's quota reading, under its quotaKey, read before an attempt or reported by a running
 // one.
 func (a *App) storeQuota(key string, q domain.Quota) {

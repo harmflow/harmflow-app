@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -24,7 +25,7 @@ func (a *App) Harnesses() []ports.HarnessInfo {
 	out := []ports.HarnessInfo{}
 	for _, id := range a.adapterIDs() {
 		if info, ok := a.inventory[id]; ok {
-			out = append(out, a.withTokenLocked(id, a.withSignInLocked(id, info)))
+			out = append(out, a.withTokenLocked(id, a.withSignInLocked(id, a.withHomeQuotasLocked(id, info))))
 		} else {
 			ad := a.adapters[id]
 			info := ports.HarnessInfo{ID: id, Name: ad.Name(), Authentication: "unknown", Readiness: "checking",
@@ -109,6 +110,7 @@ func (a *App) detect(ctx context.Context, id string) ports.HarnessInfo {
 		// The harness rejected its saved token: check it again without, on its own sign-in.
 		info = ad.Detect(ctx, manual)
 	}
+	info = a.withHomeSkills(ctx, ad, info)
 	info.LastCheckedAt = a.now()
 	// Taken only once Detect returns, so a slow check never holds up Stop; see announceMu.
 	a.announceMu.RLock()
@@ -120,12 +122,51 @@ func (a *App) detect(ctx context.Context, id string) ports.HarnessInfo {
 	}
 	a.signInDiagnosticLocked(id, &info)
 	a.inventory[id] = info
-	info = a.withTokenLocked(id, a.withSignInLocked(id, info))
+	info = a.withTokenLocked(id, a.withSignInLocked(id, a.withHomeQuotasLocked(id, info)))
 	a.mu.Unlock()
 	a.emit(domain.Event{Type: domain.EventHarnessChecked, Harness: id, Severity: domain.SeverityInfo,
 		Payload: map[string]any{"readiness": info.Readiness}})
 	if info.Authentication == "invalid" {
 		a.signInWhenSignedOut(id)
+	}
+	return info
+}
+
+// withHomeSkills gives each installation among info's Homes the skills its own list holds, which Settings shows beside
+// what its probes read and the task form offers. A list that cannot be read is left out, and a harness without homes is
+// left as it is.
+func (a *App) withHomeSkills(ctx context.Context, ad ports.HarnessAdapter, info ports.HarnessInfo) ports.HarnessInfo {
+	if len(info.Homes) == 0 {
+		return info
+	}
+	info.Homes = slices.Clone(info.Homes)
+	workspace := a.taskFolder("", "")
+	for i := range info.Homes {
+		home := &info.Homes[i]
+		if items, _, err := ad.UserItems(ctx, *home, "skill", workspace, nil); err == nil {
+			for _, it := range items {
+				if !strings.HasPrefix(it.Name, BuiltinPrefix) && a.citable("skill", it.Name) {
+					home.Skills = append(home.Skills, it.Name)
+				}
+			}
+			slices.Sort(home.Skills)
+		}
+	}
+	return info
+}
+
+// withHomeQuotasLocked gives each installation among info's Homes the last reading of its own quota HarmFlow kept: the
+// one the check before an attempt on it read, or the one a running attempt on it reported. One never read has none.
+// a.mu is held.
+func (a *App) withHomeQuotasLocked(id string, info ports.HarnessInfo) ports.HarnessInfo {
+	if len(info.Homes) == 0 {
+		return info
+	}
+	info.Homes = slices.Clone(info.Homes)
+	for i := range info.Homes {
+		if r, ok := a.quotas[quotaKey(id, info.Homes[i].InstallationID)]; ok {
+			info.Homes[i].Quota = r.installationQuota()
+		}
 	}
 	return info
 }

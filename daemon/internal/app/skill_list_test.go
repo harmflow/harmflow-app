@@ -861,7 +861,9 @@ func TestRefreshReloadsCodexSkills(t *testing.T) {
 	for _, p := range listParams(t, received) {
 		reloads = append(reloads, p["forceReload"] == true)
 	}
-	if want := []bool{false, true, false}; !slices.Equal(reloads, want) {
+	// Detection lists the skills of each home too: the first Catalog's detection and its own list read without a reload,
+	// RefreshHarnesses' detection reads with one, and the two Catalogs after it without.
+	if want := []bool{false, false, true, false, false}; !slices.Equal(reloads, want) {
 		t.Errorf(`Catalog(ctx, "", ""), before and after RefreshHarnesses, sent forceReload %v, want %v`, reloads, want)
 	}
 	data, _ := os.ReadFile(received)

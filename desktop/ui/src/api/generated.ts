@@ -876,8 +876,21 @@ export interface components {
             installationId?: string;
             /** @description The folder of the installation's own configuration and sign-in, which its probes and attempts run with, such as a Codex home; absent for a harness that has none. */
             home?: string;
-            /** @description The installations of the binary in use, one per home detection found, each with what its own probes read: its sign-in, plan, managed requirements, models, and efforts. The one in use is among them, with the installationId of the harness itself, and none has homes of its own. Absent for a harness without homes. */
+            /** @description The installations of the binary in use, one per home detection found, each with what its own probes read: its sign-in, plan, managed requirements, models, efforts, skills, and quota. The one in use is among them, with the installationId of the harness itself, and none has homes of its own. Absent for a harness without homes. */
             homes?: components["schemas"]["Harness"][];
+            /** @description The skills an entry of homes finds in its own list, by the names a task cites them by, sorted, the built-ins left out. Absent when the list could not be read or holds none, and on the harness itself. */
+            skills?: string[];
+            /** @description The last reading of an entry of homes' own quota: its plan windows, each with the share of it used and when it resets, and when it was read, by the quota check before an attempt on that installation or by a running one's report. Absent before any, and on the harness itself. */
+            quota?: {
+                windows: {
+                    name: string;
+                    usedPercent: number;
+                    /** Format: date-time */
+                    resetsAt?: string;
+                }[];
+                /** Format: date-time */
+                readAt: string;
+            };
             version?: string;
             /** @enum {string} */
             versionSupport?: "supported" | "untested_newer" | "below_minimum" | "unknown";

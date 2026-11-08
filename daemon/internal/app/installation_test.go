@@ -112,8 +112,9 @@ func TestModelIsCheckedAgainstTheNamedInstallation(t *testing.T) {
 	}
 }
 
-// harmflow-app#475: saving a task whose installation key names one the harness does not list, or one that says it is
-// signed out, fails at the key; importing it keeps it, with a warning there, as a missing skill is.
+// harmflow-app#475: validation fails a task whose installation key names one the harness does not list, or one that
+// says it is signed out, at the key: on save, on import, and when the daemon checks the task files it loaded, so a task
+// saved on an installation that has signed out since loads as invalid.
 func TestInstallationKeyIsValidated(t *testing.T) {
 	a, first, _ := newCodexHomesApp(t)
 	const path = "/spec/harness/preferred/installation"
@@ -121,12 +122,17 @@ func TestInstallationKeyIsValidated(t *testing.T) {
 	if !refusedAt(err, path, "harness_installation_missing") {
 		t.Errorf("CreateTask(an installation not listed) error = %v, want harness_installation_missing at %s", err, path)
 	}
-	imported, err := a.ImportTask(t.Context(), codexTaskYAML("gone", "      installation: \"~/.nowhere\"\n"), false)
-	if err != nil || !slices.ContainsFunc(imported.Warnings, func(w domain.Warning) bool {
-		return w.Key == "harness_installation_missing" && w.Subject == path
-	}) {
-		t.Errorf("ImportTask(an installation not listed) = %+v, %v; want it kept with a warning at %s", imported.Warnings,
-			err, path)
+	_, err = a.ImportTask(t.Context(), codexTaskYAML("gone", "      installation: \"~/.nowhere\"\n"), false)
+	if !refusedAt(err, path, "harness_installation_missing") {
+		t.Errorf("ImportTask(an installation not listed) error = %v, want harness_installation_missing at %s", err, path)
+	}
+	if _, err := a.CreateTask(t.Context(), TaskInput{YAML: codexTaskYAML("saved", "      installation: \"~/.codex\"\n")}); err != nil {
+		t.Fatalf("CreateTask(~/.codex, signed in) error = %v, want none", err)
+	}
+	// The check once the harnesses are detected validates again only the files loaded at start (#950), so the task
+	// saved on ~/.codex is loaded as the daemon loads it at start.
+	if err := a.loadTasks(t.Context()); err != nil {
+		t.Fatalf("loadTasks() error = %v, want none", err)
 	}
 
 	if err := os.Remove(filepath.Join(first, "signed-in")); err != nil {
@@ -139,6 +145,75 @@ func TestInstallationKeyIsValidated(t *testing.T) {
 	_, err = a.CreateTask(t.Context(), TaskInput{YAML: codexTaskYAML("signed-out", "      installation: \"~/.codex\"\n")})
 	if !refusedAt(err, path, "harness_installation_signed_out") {
 		t.Errorf("CreateTask(a signed-out installation) error = %v, want harness_installation_signed_out at %s", err, path)
+	}
+	_, err = a.ImportTask(t.Context(), codexTaskYAML("signed-out", "      installation: \"~/.codex\"\n"), false)
+	if !refusedAt(err, path, "harness_installation_signed_out") {
+		t.Errorf("ImportTask(a signed-out installation) error = %v, want harness_installation_signed_out at %s", err, path)
+	}
+	a.checkTasks(t.Context())
+	a.mu.Lock()
+	invalid := a.tasks["saved"].invalid
+	a.mu.Unlock()
+	if invalid == nil || !slices.ContainsFunc(invalid.Errors, func(is schema.Issue) bool {
+		return is.Path == path && is.Params["detailKey"] == "harness_installation_signed_out"
+	}) {
+		t.Errorf("checkTasks() after ~/.codex signed out left the task saved on it with errors %+v, want "+
+			"harness_installation_signed_out at %s", invalid, path)
+	}
+}
+
+// harmflow-app#475: each installation shows the skills its own list holds, read with its home at detection, and the
+// quota the check before an attempt on it read with its home, and none of another's.
+func TestEachInstallationShowsItsSkillsAndQuota(t *testing.T) {
+	resets := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+	e := newEnv(t, func(e *env) {
+		e.codex.homes = []string{"~/.codex", "~/.codex-b"}
+		e.codex.homeSkills = map[string][]string{"/homes/~/.codex": {"release-notes", "pdf"}, "/homes/~/.codex-b": {"triage"}}
+		e.codex.quota = func() (domain.Quota, error) {
+			return domain.Quota{Windows: []domain.QuotaWindow{{Name: "primary", UsedPercent: 40, ResetsAt: resets}}}, nil
+		}
+	})
+	e.app.RefreshHarnesses(t.Context())
+	for _, c := range []struct{ task, extra string }{{"named", "      installation: \"~/.codex-b\"\n"}, {"unnamed", ""}} {
+		if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: codexTaskYAML(c.task, c.extra)}); err != nil {
+			t.Fatalf("CreateTask(%s) error = %v, want none", c.task, err)
+		}
+		r, err := e.app.RunTask(c.task)
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.wait(r.ExecutionID, domain.StatusCompleted)
+	}
+	var codexInfo ports.HarnessInfo
+	for _, h := range e.app.Harnesses() {
+		if h.ID == domain.HarnessCodex {
+			codexInfo = h
+		}
+	}
+	want := map[string][]string{"~/.codex": {"pdf", "release-notes"}, "~/.codex-b": {"triage"}}
+	if len(codexInfo.Homes) != 2 {
+		t.Fatalf("Harnesses() lists Codex homes %+v, want two", codexInfo.Homes)
+	}
+	for _, home := range codexInfo.Homes {
+		if !slices.Equal(home.Skills, want[home.InstallationID]) {
+			t.Errorf("Harnesses() gives %s the skills %q, want %q", home.InstallationID, home.Skills, want[home.InstallationID])
+		}
+		if q := home.Quota; q == nil || len(q.Windows) != 1 || q.Windows[0].Name != "primary" ||
+			q.Windows[0].UsedPercent != 40 || q.Windows[0].ResetsAt == nil || !q.Windows[0].ResetsAt.Equal(resets) ||
+			q.ReadAt.IsZero() {
+			t.Errorf("Harnesses() gives %s the quota %+v, want the primary window at 40%% resetting at %v", home.InstallationID,
+				q, resets)
+		}
+	}
+	e.codex.mu.Lock()
+	read := slices.Sorted(slices.Values(e.codex.quotaHomes))
+	e.codex.mu.Unlock()
+	if !slices.Equal(read, []string{"/homes/~/.codex", "/homes/~/.codex-b"}) {
+		t.Errorf("the quota was read with the homes %q, want each home once, by the check before its attempt", read)
+	}
+	if codexInfo.Skills != nil || codexInfo.Quota != nil {
+		t.Errorf("Harnesses() gives the harness itself skills %q and quota %+v, want them on its homes alone",
+			codexInfo.Skills, codexInfo.Quota)
 	}
 }
 

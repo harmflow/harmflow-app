@@ -108,6 +108,10 @@ type fakeHarness struct {
 	homes      []string
 	signedOut  map[string]bool
 	preparedOn []string
+	// homeSkills are the skills UserItems lists for an installation, by its home; none for one it leaves out. quotaHomes
+	// are the homes ReadQuota read with, one per read.
+	homeSkills map[string][]string
+	quotaHomes []string
 }
 
 var _ ports.HarnessAdapter = (*fakeHarness)(nil)
@@ -175,10 +179,13 @@ func (f *fakeHarness) ReportsExtraUsage() bool { return f.id == domain.HarnessCl
 // KeepsSessions says what the real adapter of the same harness says: only Codex can keep a session.
 func (f *fakeHarness) KeepsSessions() bool { return f.id == domain.HarnessCodex }
 
-func (f *fakeHarness) ReadQuota(context.Context, ports.HarnessInfo) (domain.Quota, error) {
+func (f *fakeHarness) ReadQuota(_ context.Context, info ports.HarnessInfo) (domain.Quota, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.quotaReads++
+	if info.Home != "" {
+		f.quotaHomes = append(f.quotaHomes, info.Home)
+	}
 	if f.quota == nil {
 		return domain.Quota{}, nil
 	}
@@ -205,8 +212,17 @@ func (f *fakeHarness) UserItem(_ context.Context, _ ports.HarnessInfo, kind, nam
 	}
 	return ports.ResolvedItem{Name: name, Kind: kind, Path: filepath.Join("/", f.id, kind+"s", name)}, true, nil, nil
 }
-func (f *fakeHarness) UserItems(context.Context, ports.HarnessInfo, string, string, []string) ([]ports.ResolvedItem, []ports.DiscoveryError, error) {
-	return nil, nil, nil
+func (f *fakeHarness) UserItems(_ context.Context, info ports.HarnessInfo, kind, _ string, _ []string) ([]ports.ResolvedItem, []ports.DiscoveryError, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if kind != "skill" || info.Home == "" {
+		return nil, nil, nil
+	}
+	var items []ports.ResolvedItem
+	for _, name := range f.homeSkills[info.Home] {
+		items = append(items, ports.ResolvedItem{Name: name, Kind: kind, Path: filepath.Join(info.Home, "skills", name)})
+	}
+	return items, nil, nil
 }
 func (f *fakeHarness) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.Invocation, ports.OutputParser, error) {
 	f.mu.Lock()
