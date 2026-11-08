@@ -64,7 +64,47 @@ export interface State {
   daemonRestart: DaemonRestart;
   /** The latest event that asked the interface to show something: a navigation target, a Settings section included. */
   navigation?: NavigationTarget & { nonce: number };
+  /** What History showed when the user left it, for its next visit; undefined until it is first opened. */
+  history?: HistoryKept;
 }
+
+/** History's filters as the user set them, the search text as typed. */
+export interface HistoryFilters {
+  status: string;
+  taskId: string;
+  trigger: string;
+  search: string;
+  from: string;
+  to: string;
+}
+
+/**
+ * What History showed, kept in memory until the app quits and never written to disk, so that opening it again shows it
+ * at once and then brings it up to date.
+ */
+export interface HistoryKept {
+  filters: HistoryFilters;
+  /** The rows shown, the pages Load more added included. */
+  rows: ExecutionSummary[];
+  total?: number;
+  exhausted: boolean;
+  /** The last event id read when the latest fetch of the rows from their first page began; null before one ended. */
+  eventId: number | null;
+  /**
+   * Whether the rows may not be the filters' as the daemon holds them though no event came since: the filters changed
+   * and no fetch under them ended yet, or the connection was lost or the stream reported a gap, which may have hidden
+   * events.
+   */
+  stale: boolean;
+}
+
+const NOTHING_KEPT: HistoryKept = {
+  filters: { status: "", taskId: "", trigger: "", search: "", from: "", to: "" },
+  rows: [],
+  exhausted: false,
+  eventId: null,
+  stale: false,
+};
 
 /** What the interface is asked to show: an execution, or a screen, with a section of Settings when it names one. */
 export type NavigationTarget = { executionId?: string; screen?: string; section?: string };
@@ -369,6 +409,11 @@ export const actions = {
   clearNavigation() {
     setState({ navigation: undefined });
   },
+
+  /** Keeps part of what History shows, for its next visit in this app session. */
+  keepHistory(patch: Partial<HistoryKept>) {
+    setState((s) => ({ history: { ...NOTHING_KEPT, ...s.history, ...patch } }));
+  },
 };
 
 function mergeEvents(held: HarmflowEvent[], incoming: HarmflowEvent[]): HarmflowEvent[] {
@@ -393,8 +438,12 @@ function debounce(key: string, fn: () => void, ms = 250) {
   );
 }
 
-/** Refetches whatever a gap in the stream may have hidden: lists, and the events of each execution held. */
+/**
+ * Refetches whatever a gap in the stream may have hidden: lists, and the events of each execution held. History's kept
+ * rows are fetched again on its next visit, whatever the events seen.
+ */
 function recover() {
+  if (state.history) setState((s) => ({ history: s.history && { ...s.history, stale: true } }));
   void actions.refreshAll();
   for (const id of Object.keys(state.events)) void actions.loadEvents(id);
   for (const id of Object.keys(state.details)) void actions.loadExecution(id);

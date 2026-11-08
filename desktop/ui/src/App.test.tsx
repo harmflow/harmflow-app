@@ -173,6 +173,8 @@ beforeEach(() => {
     },
     system: { cpuPercent: 12, memoryUsedBytes: 2.1e9, memoryTotalBytes: 16e9, diskUsedBytes: 48e9, diskTotalBytes: 500e9 },
     templates,
+    // A new launch keeps nothing of History.
+    history: undefined,
   });
   answerDrafts();
 });
