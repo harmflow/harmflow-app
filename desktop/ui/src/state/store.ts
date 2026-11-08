@@ -462,8 +462,14 @@ export function startSync() {
     onEvent: handleEvent,
     onConnection: (connection) => {
       streamConnection = connection;
+      // A daemon that does not answer stays shown so while its stream only waits or reconnects, never as reconnecting:
+      // only its answer or its stop replaces that state.
+      const shown =
+        state.connection === "not_answering" && connection !== "connected" && connection !== "daemon_stopped"
+          ? "not_answering"
+          : connection;
       // A lost connection may have missed a check's announcement, or the daemon stopped and ended the detection.
-      setState(connection === "connected" ? { connection } : { connection, redetecting: null });
+      setState(connection === "connected" ? { connection } : { connection: shown, redetecting: null });
       if (connection === "connected") {
         setState({ daemonRunning: true });
         if (previous !== "connected") recover();
