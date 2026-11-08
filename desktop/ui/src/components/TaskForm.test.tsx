@@ -1323,17 +1323,30 @@ describe("task form installation", () => {
     efforts: ["default", effort],
     lastCheckedAt: "2026-11-08T09:00:00Z",
   });
-  const first = codexHome("~/.codex", "model-a", "low");
-  const second = codexHome("~/.codex-b", "model-b", "high");
+  const first = { ...codexHome("~/.codex", "model-a", "low"), skills: ["pdf"] };
+  const second = { ...codexHome("~/.codex-b", "model-b", "high"), skills: ["triage"] };
   const harnesses: Harness[] = [
-    { ...second, homes: [first, second] },
+    { ...codexHome("~/.codex-b", "model-b", "high"), homes: [first, second] },
     { id: "claude-code", name: "Claude Code", detected: true, installations: [], authentication: "valid", readiness: "ready", models: [{ id: "sonnet" }], efforts: ["default"], lastCheckedAt: "2026-11-08T09:00:00Z" },
   ];
+  // The catalog lists the skills of the installation in use, ~/.codex-b, and Claude Code's.
+  const catalog: Catalog = {
+    agents: [],
+    skills: [
+      { name: "hf-github-draft-pr", kind: "skill", source: "builtin", harnesses: ["claude-code", "codex"] },
+      { name: "review-notes", kind: "skill", source: "user", harnesses: ["claude-code"] },
+      { name: "triage", kind: "skill", source: "user", harnesses: ["codex"] },
+    ],
+    taskTypes: [],
+    problems: [],
+  };
 
   function Form({ doc }: { doc: Doc }) {
     const [value, setValue] = useState(doc);
     current = value;
-    return <TaskForm doc={value} onChange={(d) => setValue((current = d))} mode="edit" harnesses={harnesses} errorPaths={new Set()} />;
+    return (
+      <TaskForm doc={value} onChange={(d) => setValue((current = d))} mode="edit" catalog={catalog} harnesses={harnesses} errorPaths={new Set()} />
+    );
   }
 
   async function openForm(doc: Doc) {
@@ -1372,6 +1385,32 @@ describe("task form installation", () => {
     expect(preferred()).toStrictEqual({ provider: "codex", installation: "~/.codex" });
     expect(models(0)).toStrictEqual(["default", "model-a"]);
     expect(efforts(0)).toStrictEqual(["", "default", "low"]);
+  });
+
+  it("offers the skills of the installation chosen, or of the one in use while none is", async () => {
+    const skills = () =>
+      options(
+        [...host!.querySelectorAll(".field")]
+          .find((f) => f.querySelector(".field__label")?.textContent === "Skills")
+          ?.querySelector("datalist"),
+      );
+    await openForm(withProfiles({ provider: "codex" }));
+    expect(skills()).toStrictEqual(["hf-github-draft-pr", "triage"]);
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(installation(0), "~/.codex");
+      installation(0)!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await settle();
+    expect(skills()).toStrictEqual(["hf-github-draft-pr", "pdf"]);
+
+    const provider = fieldOf(0, "AI tool")!.querySelector("select")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(provider, "claude-code");
+      provider.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await settle();
+    expect(skills()).toStrictEqual(["hf-github-draft-pr", "review-notes", "triage"]);
   });
 
   it("keeps an installation this machine lacks, saying so, and drops it when the harness changes", async () => {

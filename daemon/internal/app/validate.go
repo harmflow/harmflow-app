@@ -181,7 +181,7 @@ func (a *App) semanticChecks(ctx context.Context, r *ValidationResult, doc domai
 		asks := mode != catalogStart
 		var info ports.HarnessInfo
 		if asks {
-			info = a.profileInstallation(ctx, r, ad, p, path, mode)
+			info = a.profileInstallation(ctx, r, ad, p, path)
 			if err := ad.ValidateProfile(info, p.Model, p.Effort); err != nil {
 				r.addError(path, domain.TextOf(err))
 			} else if w, ok := ad.(ports.ProfileWarner); ok {
@@ -372,32 +372,25 @@ func (m missingItem) params(harness string) []string {
 }
 
 // profileInstallation is what detection found of the installation a profile at path runs on, which its model and
-// effort are checked against. An installation key the detected harness lists no installation by is an error on save
-// and a warning otherwise, as a missing skill is, and the profile is then checked against the installation in use. A
-// named installation that says it is signed out is one too: only the save refuses it, so a sign-in that expires after
-// the save leaves the task valid, and its attempts there fail over or fail. A harness not detected is warned about on
-// its own.
+// effort are checked against. An installation key the detected harness lists no installation by fails validation, and
+// the profile is then checked against the installation in use; so does one that names an installation that says it is
+// signed out. Both fail it in every mode that asks the harness: the save, an import, and the check of the task files
+// once the daemon has started, so a task whose installation is gone, or no longer signed in, since it was saved loads
+// as invalid. A harness not detected is warned about on its own.
 func (a *App) profileInstallation(ctx context.Context, r *ValidationResult, ad ports.HarnessAdapter, p domain.HarnessProfile,
-	path string, mode catalogMode) ports.HarnessInfo {
+	path string) ports.HarnessInfo {
 	info := a.harnessInfo(ctx, p.Provider)
 	if p.Installation == "" || !info.Detected {
 		return info
 	}
-	add := func(text domain.Text) {
-		if mode == catalogStrict {
-			r.addError(path+"/installation", text)
-		} else {
-			r.addWarning(path+"/installation", domain.WarningHarnessNotReady, text)
-		}
-	}
 	inst, found := info.InstallationNamed(p.Installation)
 	if !found {
-		add(installationMissing(ad.Name(), p.Installation))
+		r.addError(path+"/installation", installationMissing(ad.Name(), p.Installation))
 		return info
 	}
 	if inst.Authentication == "invalid" {
-		add(domain.T("harness_installation_signed_out", `{{harness}}'s installation "{{installation}}" is not signed in`,
-			"harness", ad.Name(), "installation", p.Installation))
+		r.addError(path+"/installation", domain.T("harness_installation_signed_out",
+			`{{harness}}'s installation "{{installation}}" is not signed in`, "harness", ad.Name(), "installation", p.Installation))
 	}
 	return inst
 }

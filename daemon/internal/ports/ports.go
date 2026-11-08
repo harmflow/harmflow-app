@@ -138,8 +138,14 @@ type HarnessInfo struct {
 	Home string `json:"home,omitempty"`
 	// Homes are the installations of the binary in use, one per home detection found, each with what its own probes
 	// read; the one in use is among them, and none has Homes of its own. Empty for a harness without homes.
-	Homes    []HarnessInfo   `json:"homes,omitempty"`
-	Features map[string]bool `json:"-"`
+	Homes []HarnessInfo `json:"homes,omitempty"`
+	// Skills are the names of the skills an entry of Homes finds in its own list that a task can cite, sorted, the
+	// built-ins left out; empty when the list could not be read or holds none, and on the harness itself.
+	Skills []string `json:"skills,omitempty"`
+	// Quota is the last reading of an entry of Homes' own quota, by the check before an attempt on it or a running
+	// one's report; nil before any, and on the harness itself.
+	Quota    *InstallationQuota `json:"quota,omitempty"`
+	Features map[string]bool    `json:"-"`
 	// FeaturesUnknown is true when the help that lists the CLI's flags could not be read within its check's limit, so
 	// Features cannot tell a flag the CLI lacks from one the help did not get to.
 	FeaturesUnknown bool `json:"-"`
@@ -163,6 +169,21 @@ type HarnessAccount struct {
 func (a *HarnessAccount) SetPlanUnknown(why domain.Text) {
 	a.Plan = "unknown"
 	a.PlanReason, a.PlanReasonKey, a.PlanReasonParams = why.Message, why.Key, why.Params
+}
+
+// InstallationQuota is a reading of an installation's quota as Settings shows it: its plan windows, and when it was
+// read.
+type InstallationQuota struct {
+	Windows []QuotaWindowInfo `json:"windows"`
+	ReadAt  time.Time         `json:"readAt"`
+}
+
+// QuotaWindowInfo is one plan window of an InstallationQuota: its name, as the harness names it, the share of it used,
+// in percent, and when it resets, nil when the harness gives no time.
+type QuotaWindowInfo struct {
+	Name        string     `json:"name"`
+	UsedPercent float64    `json:"usedPercent"`
+	ResetsAt    *time.Time `json:"resetsAt,omitempty"`
 }
 
 // ManagedRequirements are the settings an administrator allows a harness: whether one manages them, and the approval

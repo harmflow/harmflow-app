@@ -156,7 +156,8 @@ function authenticationTone(h: Harness): Tone {
 
 /**
  * The installations of a harness's binary, one per home: each by the identifier a task names it by, its home, how ready
- * it is, and what its own probes read — its sign-in, plan, managed requirements, and models. The one in use is marked.
+ * it is, and what its own probes read — its sign-in, plan, managed requirements, models, efforts, skills, and the share
+ * of each quota window used. The one in use is marked.
  */
 function HomeList({ harness }: { harness: Harness }) {
   const { t } = useTranslation();
@@ -172,6 +173,12 @@ function HomeList({ harness }: { harness: Harness }) {
             home.account ? `${t("harness.requirements")}: ${t(`harness.requirementsState.${!requirements ? "unknown" : requirements.managed ? "managed" : "none"}`)}` : "",
             home.models.length ? `${t("harness.models")}: ${home.models.map((m) => m.id).join(", ")}` : "",
             home.efforts.length ? `${t("harness.efforts")}: ${home.efforts.join(", ")}` : "",
+            home.skills?.length ? `${t("harness.skills")}: ${home.skills.join(", ")}` : "",
+            home.quota?.windows.length
+              ? `${t("harness.quota")}: ${home.quota.windows
+                  .map((w) => t("harness.quotaWindow", { window: w.name, percent: Math.round(w.usedPercent) }))
+                  .join(", ")}`
+              : "",
           ].filter(Boolean);
           return (
             <li key={home.installationId} className="installations__item" title={home.home}>
