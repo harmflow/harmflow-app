@@ -55,7 +55,7 @@ type ExecutionRef struct {
 
 // loadTasks reads every task file at start; a file that fails validation is listed as invalid and never fires, and is
 // reported as one the watcher finds. It asks no harness (catalogStart): checkTasks completes the validation once the
-// daemon has started.
+// daemon has started, for each file still at the revision loadTasks recorded.
 func (a *App) loadTasks(ctx context.Context) error {
 	files, err := a.d.Tasks.List()
 	if err != nil {
@@ -64,6 +64,7 @@ func (a *App) loadTasks(ctx context.Context) error {
 	for _, f := range files {
 		e := a.loadTaskFile(ctx, f, catalogStart)
 		a.mu.Lock()
+		e.loadedRevision = f.Revision
 		invalid := e.invalid
 		a.mu.Unlock()
 		if invalid != nil {
@@ -89,14 +90,15 @@ func invalidEvent(f ports.TaskFile, r *ValidationResult, text domain.Text) domai
 }
 
 // checkTasks validates again, with the checks that ask the harnesses, every task file loadTasks loaded and found valid,
-// one after another, until ctx ends. A file that changed since was validated in full by whatever changed it, and is
-// left as it is. A task found invalid is announced as the watcher announces one, and keeps its last valid definition;
-// one whose warnings changed is announced as updated, so the dashboard reads it again.
+// one after another, until ctx ends. A file created, changed, or written by the daemon since, before the check runs or
+// while it does, was validated in full by whatever did it, and is left as it is. A task found invalid is announced as
+// the watcher announces one, and keeps its last valid definition; one whose warnings changed is announced as updated,
+// so the dashboard reads it again.
 func (a *App) checkTasks(ctx context.Context) {
 	a.mu.Lock()
 	var files []ports.TaskFile
 	for _, e := range a.tasks {
-		if e.invalid == nil {
+		if e.invalid == nil && e.loadedRevision != "" && e.file.Revision == e.loadedRevision {
 			files = append(files, e.file)
 		}
 	}
@@ -109,7 +111,7 @@ func (a *App) checkTasks(ctx context.Context) {
 		}
 		a.mu.Lock()
 		e := a.tasks[f.ID]
-		if e == nil || e.file.Revision != f.Revision || e.invalid != nil {
+		if e == nil || e.file.Revision != f.Revision || e.loadedRevision != f.Revision || e.invalid != nil {
 			a.mu.Unlock()
 			continue
 		}
@@ -144,6 +146,9 @@ func (a *App) applyValidationLocked(f ports.TaskFile, r *ValidationResult) *task
 	if e == nil {
 		e = &taskEntry{}
 		a.tasks[f.ID] = e
+	}
+	if e.file.Revision != f.Revision {
+		e.loadedRevision = "" // a change from outside, validated in full by the watcher
 	}
 	e.file = f
 	if r.Valid && r.doc.Metadata.ID != f.ID {
@@ -402,6 +407,7 @@ func (a *App) afterWrite(f ports.TaskFile, eventType string, r *ValidationResult
 	e.invalid = nil
 	e.warnings = issuesToWarnings(r.Warnings)
 	e.selfRevision = f.Revision
+	e.loadedRevision = "" // validated in full before it was written
 	enabled := e.doc.IsEnabled()
 	a.mu.Unlock()
 	a.rescheduleTask(f.ID)
