@@ -97,7 +97,8 @@ gh api graphql -F owner=OWNER -F repo=REPO -F n=<number> -f query='query($owner:
       comments(first: 100) { nodes { author { login } body } } } }
     comments(last: 100) { nodes { author { login } body createdAt } } } } }' --jq '.data.repository.pullRequest
   | .commits.nodes[0].commit.committedDate as $pushed
-  | {tests: ([("\n" + .body) | gsub("\r\n"; "\n") | split("\n## ")[] | select(startswith("Tests\n")) | "## " + .] | first),
+  | {tests: ([("\n" + .body) | gsub("\r\n"; "\n") | split("\n## ")[] | "## " + .]
+       | map(select(startswith("## Tests\n"))) + map(select(startswith("## Testing\n"))) | first),
      threads: [.reviewThreads.nodes[] | select((.isResolved or .isOutdated) | not)
        | {path, line, comments: [.comments.nodes[] | {author: .author.login, body}]}],
      comments: [.comments.nodes[] | select(.createdAt > $pushed) | {author: .author.login, createdAt, body}]}'
@@ -106,8 +107,11 @@ gh api repos/OWNER/REPO/collaborators/<login>/permission --jq .permission
 
 - **The commits and the diff** are the work the draft already holds: continue from them, and never redo or revert
   them without a reason the pull request's body then gives.
-- **The last test report** is `tests`, the `## Tests` section hf-github-draft-pr §4 wrote: which tests failed, and
-  how. Fix those first.
+- **The last test report** is `tests`: which tests failed, and how. Fix those first. It is the section headed
+  exactly `## Tests`, the heading hf-github-draft-pr §4 writes, or, when the body has none, the one headed exactly
+  `## Testing`, the heading of a pull request template; either runs to the next `## ` heading. A heading that only
+  begins with either word (`## Testing notes`, `## Tests run elsewhere`) is not read, and a body with neither section
+  gives `null`.
 - **The relevant comments** are the review threads that are neither resolved nor outdated (`threads`, each with its
   file, its line, and its comments), and the conversation comments left after the last push, the head commit's date
   (`comments`). Run the last command for each author they name, `<login>`: keep only the comments of an author whose

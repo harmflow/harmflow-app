@@ -130,6 +130,102 @@ func TestResumedDraftContext(t *testing.T) {
 	}
 }
 
+// The test report hf-github-worktree §2 gives a resumed draft's session, for bodies in other layouts than the ## Tests
+// section of TestResumedDraftContext: the skill's gh api graphql command, through the real gh, against a stub that
+// answers with each body. A body in the layout of the organization's pull request template gives its ## Testing
+// section, from its heading to the next ## heading; ## Tests keeps precedence over ## Testing; and a body with
+// neither heading, or whose only heading begins with either word followed by others, gives null.
+func TestResumedDraftTestReport(t *testing.T) {
+	gh, err := exec.LookPath("gh")
+	if err != nil {
+		t.Fatalf("the reading runs gh api, and gh is not on PATH: %v", err)
+	}
+	_, graphql, _ := resumedDraftCommands(t)
+	wt := worktreeWithTwoCommits(t)
+	const failed = "Tests: failed — TestRetryLimit: got 5, want 3"
+	// template is a body under the headings of the pull request template, with section before ## Checklist.
+	template := func(section string) string {
+		return "## Summary\r\nAdds a retry limit.\r\n\r\n## Linked Issue\r\nCloses #42\r\n\r\n## Type of Change\r\n" +
+			"- [x] Bug fix\r\n\r\n" + section + "## Checklist\r\n- [x] Tests added\r\n\r\nManaged by HarmFlow task example."
+	}
+	for _, tc := range []struct {
+		name string
+		body string
+		want *string
+	}{
+		{
+			name: "the template's ## Testing section",
+			body: template("## Testing\r\n- `go test ./retry`: TestRetryLimit fails.\r\n\r\n" + failed + "\r\n\r\n"),
+			want: ptr("## Testing\n- `go test ./retry`: TestRetryLimit fails.\n\n" + failed + "\n"),
+		},
+		{
+			name: "## Tests before ## Testing",
+			body: template("## Testing\r\nSee below.\r\n\r\n## Tests\r\n" + failed + "\r\n\r\n"),
+			want: ptr("## Tests\n" + failed + "\n"),
+		},
+		{
+			name: "neither heading",
+			body: template(""),
+		},
+		{
+			name: "a heading that begins with Testing",
+			body: template("## Testing notes\r\n" + failed + "\r\n\r\n"),
+		},
+		{
+			name: "a heading that begins with Tests",
+			body: template("## Tests run elsewhere\r\n" + failed + "\r\n\r\n"),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			answer, err := json.Marshal(map[string]any{"data": map[string]any{"repository": map[string]any{
+				"pullRequest": map[string]any{
+					"body":          tc.body,
+					"commits":       map[string]any{"nodes": []any{map[string]any{"commit": map[string]any{"committedDate": "2026-11-02T12:00:00Z"}}}},
+					"reviewThreads": map[string]any{"nodes": []any{}},
+					"comments":      map[string]any{"nodes": []any{}},
+				},
+			}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.Method != http.MethodPost || r.URL.Path != "/graphql" {
+					t.Errorf("gh asked for %s %s, which the reading of the test report does not read", r.Method, r.URL)
+					w.WriteHeader(http.StatusNotFound)
+					_, _ = w.Write([]byte(`{"message":"Not Found"}`))
+					return
+				}
+				if !draftQueryAsked(t, r) {
+					http.Error(w, `{"message":"Bad request"}`, http.StatusBadRequest)
+					return
+				}
+				_, _ = w.Write(answer)
+			}))
+			defer srv.Close()
+
+			out := ghRead(t, gh, srv.URL, fillResumed(t, graphql, wt, ""), false)
+			var ctx struct {
+				Tests *string `json:"tests"`
+			}
+			if err := json.Unmarshal([]byte(out), &ctx); err != nil {
+				t.Fatalf("the gh api graphql command printed %q, which is not the draft's context: %v", out, err)
+			}
+			switch {
+			case tc.want == nil && ctx.Tests != nil:
+				t.Errorf("the test report of the body\n%s\nreads %q, want null", tc.body, *ctx.Tests)
+			case tc.want != nil && ctx.Tests == nil:
+				t.Errorf("the test report of the body\n%s\nreads null, want %q", tc.body, *tc.want)
+			case tc.want != nil && *ctx.Tests != *tc.want:
+				t.Errorf("the test report of the body\n%s\nreads %q, want %q", tc.body, *ctx.Tests, *tc.want)
+			}
+		})
+	}
+}
+
+// ptr is a pointer to s, for a test report a case wants.
+func ptr(s string) *string { return &s }
+
 // draftAnswer is what GitHub answers for the resumed draft: its last push on 2026-11-02 at noon; a thread on a line of
 // retry.go, open and current, beside a resolved one and an outdated one; and conversation comments from before and
 // after that push, one of them from a passer-by without write access.
