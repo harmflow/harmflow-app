@@ -309,3 +309,123 @@ func TestDetectOffersThePathSetByHand(t *testing.T) {
 		})
 	}
 }
+
+// homesStandIn writes a stand-in for the codex CLI that reads everything from the home its CODEX_HOME names: `login
+// status` is signed in while the home holds a file signed-in, and its app server's account/read answers the plan the
+// home's file plan holds.
+func homesStandIn(t *testing.T) string {
+	t.Helper()
+	script := `#!/bin/bash
+case "$1" in
+  --version) echo "codex-cli 0.163.0" ;;
+  --help) echo "Commands: exec app-server login" ;;
+  exec) echo "Usage: codex exec --json --sandbox <MODE> --cd <DIR> --skip-git-repo-check" ;;
+  login)
+    if [ -f "$CODEX_HOME/signed-in" ]; then echo "Logged in using ChatGPT" >&2; else echo "Not logged in" >&2; exit 1; fi ;;
+  app-server)
+    while IFS= read -r line; do
+      id=$(printf '%s' "$line" | sed -n 's/^{"id":\([0-9]*\),.*/\1/p')
+      case "$line" in
+        *'"method":"initialize"'*) printf '{"id":%s,"result":{}}\n' "$id" ;;
+        *'"method":"configRequirements/read"'*) printf '{"id":%s,"result":{"requirements":null}}\n' "$id" ;;
+        *'"method":"account/read"'*)
+          printf '{"id":%s,"result":{"account":{"type":"chatgpt","planType":"%s"}}}\n' "$id" "$(cat "$CODEX_HOME/plan")" ;;
+      esac
+    done ;;
+esac
+`
+	path := filepath.Join(tempDir(t), "codex")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("os.WriteFile(%s) = %v, want no error", path, err)
+	}
+	return path
+}
+
+// codexHomeAt makes a Codex home at dir: its models cache lists model, its plan is plan, and it is signed in when
+// signedIn is true.
+func codexHomeAt(t *testing.T, dir, model, plan string, signedIn bool) string {
+	t.Helper()
+	files := map[string]string{
+		"models_cache.json": `{"models":[{"slug":"` + model + `","supported_reasoning_levels":[{"effort":"low"}]}]}`,
+		"plan":              plan,
+	}
+	if signedIn {
+		files["signed-in"] = ""
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// harmflow-app#475: each Codex home detection finds is an installation of the binary, read by probes that run with
+// that home alone, and named by its path from ~. Detection finds ~/.codex and the daemon's CODEX_HOME; a CODEX_HOME
+// that names ~/.codex is that one home, listed once, and the one CODEX_HOME names is the one in use.
+func TestDetectListsEachCodexHome(t *testing.T) {
+	codex := homesStandIn(t)
+	user := tempDir(t)
+	def := codexHomeAt(t, filepath.Join(user, ".codex"), "model-a", "plus", true)
+	other := codexHomeAt(t, filepath.Join(user, ".codex-secondary"), "model-b", "business", false)
+	type home struct{ id, home, auth, readiness, plan, model string }
+	signedIn := home{"~/.codex", def, "valid", "ready", "plus", "model-a"}
+	signedOut := home{"~/.codex-secondary", other, "invalid", "not_ready", "", "model-b"}
+	for _, c := range []struct {
+		name, codexHome string
+		want            []home
+		inUse           string
+	}{
+		{"CODEX_HOME unset", "", []home{signedIn}, "~/.codex"},
+		{"CODEX_HOME naming ~/.codex", def + "/", []home{signedIn}, "~/.codex"},
+		{"CODEX_HOME naming another home", other, []home{signedIn, signedOut}, "~/.codex-secondary"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("CODEX_HOME", c.codexHome)
+			a := &Adapter{Home: user, PathEnv: filepath.Dir(codex), KnownLocations: []string{}}
+			t.Cleanup(a.Close)
+			info := a.Detect(context.Background(), "")
+			var got []home
+			for _, h := range info.Homes {
+				plan := ""
+				if h.Account != nil {
+					plan = h.Account.Plan
+				}
+				model := ""
+				if len(h.Models) > 1 {
+					model = h.Models[1].ID
+				}
+				if h.Path != codex || len(h.Homes) != 0 {
+					t.Errorf("home %s: path %q, %d homes of its own; want %q and none", h.InstallationID, h.Path, len(h.Homes),
+						codex)
+				}
+				got = append(got, home{h.InstallationID, h.Home, h.Authentication, h.Readiness, plan, model})
+			}
+			if !slices.Equal(got, c.want) {
+				t.Errorf("Detect() homes = %+v, want %+v", got, c.want)
+			}
+			if info.InstallationID != c.inUse || len(info.Homes) != len(c.want) {
+				t.Errorf("Detect() in use = %q with %d homes, want %q with %d", info.InstallationID, len(info.Homes),
+					c.inUse, len(c.want))
+			}
+		})
+	}
+}
+
+// harmflow-app#475: ~/.codex that is no folder is not listed beside the home the daemon's CODEX_HOME names, so a Mac
+// whose one home is elsewhere lists no empty one.
+func TestDetectLeavesOutAMissingDefaultHome(t *testing.T) {
+	codex := homesStandIn(t)
+	user := tempDir(t)
+	other := codexHomeAt(t, filepath.Join(tempDir(t), "codex-home"), "model-b", "plus", true)
+	t.Setenv("CODEX_HOME", other)
+	a := &Adapter{Home: user, PathEnv: filepath.Dir(codex), KnownLocations: []string{}}
+	t.Cleanup(a.Close)
+	info := a.Detect(context.Background(), "")
+	if len(info.Homes) != 1 || info.Homes[0].Home != other || info.InstallationID != other {
+		t.Errorf("Detect() homes %+v, in use %q; want only %q, by its path", info.Homes, info.InstallationID, other)
+	}
+}

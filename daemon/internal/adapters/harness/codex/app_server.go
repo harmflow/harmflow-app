@@ -197,21 +197,29 @@ func startFailed(err error) error {
 }
 
 // listSkills asks the app server for the skills the installed Codex has in the user's home folder, which are its own,
-// the user's, and its system and admin scopes', whatever a task's workspace. The first list after ReloadUserItems
-// carries forceReload.
+// the user's, and its system and admin scopes', whatever a task's workspace. The first list of each home after
+// ReloadUserItems carries forceReload.
 func (a *Adapter) listSkills(ctx context.Context, info ports.HarnessInfo) (skillsList, error) {
 	var list skillsList
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	params := map[string]any{"cwds": []string{a.Home}, "forceReload": a.reload}
+	home := a.homeOf(info)
+	force := a.reload && !a.reloaded[home]
+	params := map[string]any{"cwds": []string{a.Home}, "forceReload": force}
 	if err := a.callLocked(ctx, info, "skills/list", params, &list); err != nil {
 		return skillsList{}, err
 	}
-	a.reload = false
+	if force {
+		if a.reloaded == nil {
+			a.reloaded = map[string]bool{}
+		}
+		a.reloaded[home] = true
+	}
 	return list, nil
 }
 
-// callLocked sends one request to the app server, starting it on first use and again once it broke; a.mu is held.
+// callLocked sends one request to the app server of the installation's home, starting it on first use and again once
+// it broke; a.mu is held. The server runs with that home as CODEX_HOME, so what it answers is that installation's.
 func (a *Adapter) callLocked(ctx context.Context, info ports.HarnessInfo, method string, params, result any) error {
 	if !info.Detected || info.Path == "" {
 		return domain.TextErr("harness_not_detected", "{{harness}} was not detected on this machine", "harness", Name)
@@ -224,22 +232,33 @@ func (a *Adapter) callLocked(ctx context.Context, info ports.HarnessInfo, method
 	if timeout == 0 {
 		timeout = defaultListTimeout
 	}
-	if a.server != nil && a.server.path != info.Path {
-		a.server.close()
-		a.server = nil
+	home := a.homeOf(info)
+	s := a.servers[home]
+	if s != nil && s.path != info.Path {
+		s.close()
+		s = nil
+		delete(a.servers, home)
 	}
-	if a.server == nil {
-		s, err := startAppServer(ctx, info.Path, a.Env, a.ClientVersion, timeout)
+	if s == nil {
+		env := a.Env
+		if info.Home != "" {
+			env = envWith(env, info.Home)
+		}
+		started, err := startAppServer(ctx, info.Path, env, a.ClientVersion, timeout)
 		if err != nil {
 			return err
 		}
-		a.server = s
+		if a.servers == nil {
+			a.servers = map[string]*appServer{}
+		}
+		s = started
+		a.servers[home] = s
 	}
-	err := a.server.call(ctx, timeout, method, params, result)
+	err := s.call(ctx, timeout, method, params, result)
 	var se *serverError
 	if errors.As(err, &se) && se.broken {
-		a.server.close()
-		a.server = nil
+		s.close()
+		delete(a.servers, home)
 	}
 	return err
 }
@@ -372,19 +391,20 @@ func (a *Adapter) skills(ctx context.Context, info ports.HarnessInfo) ([]ports.R
 // the Codex home.
 func (a *Adapter) ListsInstallation(kind string) bool { return kind == "skill" }
 
-// ReloadUserItems implements ports.ItemReloader: the next skills/list asks Codex to read its skills from disk again.
+// ReloadUserItems implements ports.ItemReloader: the next skills/list of each home asks Codex to read its skills from
+// disk again.
 func (a *Adapter) ReloadUserItems() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.reload = true
+	a.reload, a.reloaded = true, nil
 }
 
-// Close implements ports.HarnessCloser: it ends the app server, if one runs.
+// Close implements ports.HarnessCloser: it ends the app server of every home, where one runs.
 func (a *Adapter) Close() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.server != nil {
-		a.server.close()
-		a.server = nil
+	for home, s := range a.servers {
+		s.close()
+		delete(a.servers, home)
 	}
 }
