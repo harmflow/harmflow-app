@@ -93,15 +93,26 @@ func TestCitedUserItemsReachARealCodex(t *testing.T) {
 // reads the user's own Codex home, so the daemon runs with it, and the test compares that one, and writes nothing into
 // it.
 func TestBuiltinSkillLoadsInARealCodex(t *testing.T) {
-	codex := realCodex(t)
+	builtinSkillLoads(t, realCodexHarness(t, realCodex(t)), false)
+}
+
+// A built-in skill whose front matter declares a parameter still loads in the real Codex, and the value the task gives
+// the parameter reaches the session in context.json, where the skill's instructions read it.
+func TestDeclaringSkillLoadsInARealCodex(t *testing.T) {
+	builtinSkillLoads(t, realCodexHarness(t, realCodex(t)), true)
+}
+
+// realCodexHarness is the installed Codex at path, run with the user's own Codex home.
+func realCodexHarness(t *testing.T, path string) realHarness {
+	t.Helper()
 	home := codexHome(t)
-	builtinSkillLoads(t, realHarness{
+	return realHarness{
 		id:   "codex",
-		path: codex,
+		path: path,
 		// The model Codex's configuration sets, at the effort low, as in TestCitedUserItemsReachARealCodex.
 		preferred: map[string]any{"provider": "codex", "effort": "low"},
 		config:    home,
 		files:     []string{"config.toml", "agents", "skills"},
 		env:       []string{"CODEX_HOME=" + home},
-	})
+	}
 }

@@ -425,17 +425,28 @@ func (d *daemon) skillListLog(folders [][]string) string {
 // and the plugins. The signed-in Claude Code reads the user's own configuration directory, so the test compares that
 // one, and writes nothing into it.
 func TestBuiltinSkillLoadsInARealClaudeCode(t *testing.T) {
-	claude := realClaude(t)
-	builtinSkillLoads(t, realHarness{
+	builtinSkillLoads(t, realClaudeHarness(t, realClaude(t)), false)
+}
+
+// A built-in skill whose front matter declares a parameter still loads in the real Claude Code, and the value the task
+// gives the parameter reaches the session in context.json, where the skill's instructions read it.
+func TestDeclaringSkillLoadsInARealClaudeCode(t *testing.T) {
+	builtinSkillLoads(t, realClaudeHarness(t, realClaude(t)), true)
+}
+
+// realClaudeHarness is the installed Claude Code at path, run with the user's own configuration directory.
+func realClaudeHarness(t *testing.T, path string) realHarness {
+	t.Helper()
+	return realHarness{
 		id:        "claude-code",
-		path:      claude,
+		path:      path,
 		preferred: map[string]any{"provider": "claude-code", "model": "haiku", "effort": "low"},
 		config:    claudeConfigDir(t),
 		files:     []string{"settings.json", "CLAUDE.md", "agents", "skills", "plugins"},
 		// The plugins an organization manages for the account, which the signed-in Claude Code fetches again when a
 		// session starts: the list it received, with its etag, and the round of the fetch.
 		state: []string{filepath.Join("plugins", "synced")},
-	})
+	}
 }
 
 // realHarness is a real CLI that a test runs a task on, and the user's configuration that the daemon runs it with.
@@ -454,10 +465,12 @@ type realHarness struct {
 
 // builtinSkillLoads runs a task citing a built-in skill on the real harness h, through a daemon whose built-ins are the
 // test's own. The skill's instructions tell the session to write a marker in the workspace, with a content only they
-// hold, and the task's prompt only names the skill. The session must follow the skill, and the files of the user's
+// hold, and the task's prompt only names the skill. A declaring skill declares a required text parameter in its front
+// matter instead, which the task gives the marker's content as its value, and its instructions tell the session to
+// write the value context.json gives it. The session must follow the skill, and the files of the user's
 // configuration must be as they were before the daemon started: none added, none removed, each with its bytes. A
 // session writes its own state on every run, such as its transcripts, history, and caches, outside those files.
-func builtinSkillLoads(t *testing.T, h realHarness) {
+func builtinSkillLoads(t *testing.T, h realHarness, declaring bool) {
 	t.Helper()
 	const skill = "hf-test-marker"
 	work, err := filepath.EvalSymlinks(t.TempDir())
@@ -466,7 +479,14 @@ func builtinSkillLoads(t *testing.T, h realHarness) {
 	}
 	m := newMarker(work, skill)
 	builtins := t.TempDir()
-	writeTemp(t, filepath.Join(builtins, "skills", skill, "SKILL.md"), itemFile(skill, "Writes a marker file.", m.instruction()))
+	skillFile := itemFile(skill, "Writes a marker file.", m.instruction())
+	if declaring {
+		skillFile = fmt.Sprintf("---\nname: %s\ndescription: Writes a marker file.\nparameters:\n"+
+			"  - {name: marker, type: text, description: The line the marker holds, required: true}\n---\n"+
+			"Read the file context.json in the execution directory HarmFlow names. Write a file at %s that holds the value "+
+			"of task.declaredParameters.skills.%s.marker in it, exactly, and nothing else.\n", skill, m.path, skill)
+	}
+	writeTemp(t, filepath.Join(builtins, "skills", skill, "SKILL.md"), skillFile)
 	// Before the daemon starts, so that what its detection of the harness writes is caught too.
 	before := snapshotConfig(t, h)
 
@@ -484,6 +504,9 @@ func builtinSkillLoads(t *testing.T, h realHarness) {
 			"workspace": map[string]any{"path": work},
 			"execution": map[string]any{"timeoutMinutes": 5},
 		}}
+	if declaring {
+		doc["spec"].(map[string]any)["parameters"] = map[string]any{"skills": map[string]any{skill: map[string]any{"marker": m.content}}}
+	}
 	d.call("POST", "/tasks", map[string]any{"document": doc}, 201)
 	run := d.call("POST", "/tasks/"+id+"/run", nil, 202)["executionId"].(string)
 	// Longer than the task's timeout, so that the execution's own end says why a session ran too long.
