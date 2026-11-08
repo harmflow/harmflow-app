@@ -227,3 +227,36 @@ func TestTaskOnARemovedInstallationDoesNotStart(t *testing.T) {
 		t.Errorf("attempts prepared on %q, want none", e.codex.preparedOn)
 	}
 }
+
+// harmflow-app#475: the sign-in the daemon starts is the one of the installation in use, so an attempt that ends
+// signed out on another installation starts none, which would sign the wrong home in; one on the installation in use
+// still starts it.
+func TestSignedOutAttemptOnAnotherInstallationStartsNoSignIn(t *testing.T) {
+	signer := newCodexSigningHarness(true)
+	signer.homes = []string{"~/.codex", "~/.codex-b"}
+	e := signInEnv(t, signer, 0)
+	signer.setScript(func(ports.RunRequest) string { return "echo 'END unavailable'" })
+	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: codexTaskYAML("other", "      installation: \"~/.codex-b\"\n")}); err != nil {
+		t.Fatal(err)
+	}
+	r, err := e.app.RunTask("other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.wait(r.ExecutionID, domain.StatusFailed)
+	time.Sleep(200 * time.Millisecond) // a sign-in starts on a goroutine of its own
+	if n := signer.started(); n != 0 {
+		t.Errorf("%d sign-ins started after a signed-out attempt on ~/.codex-b, want none", n)
+	}
+
+	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: codexTaskYAML("in-use", "")}); err != nil {
+		t.Fatal(err)
+	}
+	if r, err = e.app.RunTask("in-use"); err != nil {
+		t.Fatal(err)
+	}
+	e.wait(r.ExecutionID, domain.StatusFailed)
+	e.waitSignIns(signer, 1)
+	signer.end <- ports.SignInResult{Outcome: ports.SignInSucceeded}
+	e.waitPublished(domain.EventHarnessSignInCompleted)
+}
