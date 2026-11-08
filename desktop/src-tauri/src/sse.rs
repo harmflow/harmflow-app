@@ -118,15 +118,21 @@ async fn stream_once(app: &AppHandle, state: &AppState) -> Result<(), StreamEnd>
     if last_id > 0 {
         req = req.header("Last-Event-ID", last_id.to_string());
     }
+    // Only a refused connection or a 401 says the address or the token changed, and only they are read again. A
+    // timeout is a busy daemon's, and anything else leaves both as they are (#908).
     let res = match req.send().await {
         Ok(r) => r,
         Err(e) => {
-            client.invalidate();
+            if crate::daemon::connection_refused(&e) {
+                client.invalidate();
+            }
             return Err(if e.is_connect() { StreamEnd::DaemonStopped } else { StreamEnd::Lost });
         }
     };
-    if !res.status().is_success() {
+    if res.status() == reqwest::StatusCode::UNAUTHORIZED {
         client.invalidate();
+    }
+    if !res.status().is_success() {
         return Err(StreamEnd::Lost);
     }
     set_connection(app, state, "connected");
@@ -138,12 +144,10 @@ async fn stream_once(app: &AppHandle, state: &AppState) -> Result<(), StreamEnd>
             Ok(n) => n,
             Err(_) => return Err(StreamEnd::Lost),
         };
+        // A cut stream keeps the address and the token: the reconnect reads them again only if it is refused.
         let chunk = match next {
             Some(Ok(bytes)) => bytes,
-            Some(Err(_)) | None => {
-                client.invalidate();
-                return Err(StreamEnd::Lost);
-            }
+            Some(Err(_)) | None => return Err(StreamEnd::Lost),
         };
         for msg in parser.push(&String::from_utf8_lossy(&chunk)) {
             if msg.event.as_deref() == Some("replay_gap") {
