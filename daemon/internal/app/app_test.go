@@ -3489,6 +3489,24 @@ func TestAgentTextRedactedEverywhere(t *testing.T) {
 // HarmFlow's context never names the task, since a prompt may name the same thing as the task's id or name, and it
 // points at context.json only once the file holds a previous attempt, work items, or parameters.
 func TestContextNeverNamesTheTask(t *testing.T) {
+	contextNeverNamesTheTask(t, nil)
+}
+
+// harmflow-app#949: the daemon checks its task files against the harnesses once every harness is detected, which on a
+// loaded machine can come after the test created its task. That check prepares the preferred harness with no prompt,
+// for its policy, and is no attempt: the test counts three attempts all the same. The hook runs the check where it
+// raced, once the harnesses' scripts are set and before the first execution.
+func TestContextCountsNoPolicyCheck(t *testing.T) {
+	if n := contextNeverNamesTheTask(t, func(e *env) { e.app.checkTasks(t.Context()) }); n == 0 {
+		t.Errorf("checkTasks prepared no harness for the task, so the test raced nothing")
+	}
+}
+
+// contextNeverNamesTheTask runs a general task twice, its first execution failing over from Claude Code to Codex and
+// its second ending on Claude Code, and checks the context of each of the three attempts. between, when set, runs once
+// the harnesses' scripts are set, before the first execution. It returns how many policy checks the harnesses received.
+func contextNeverNamesTheTask(t *testing.T, between func(*env)) int {
+	t.Helper()
 	e := newEnv(t)
 	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: `apiVersion: harmflow/v1alpha1
 kind: Task
@@ -3507,39 +3525,61 @@ spec:
 `}); err != nil {
 		t.Fatal(err)
 	}
-	var mu sync.Mutex
-	var contexts []string
-	capture := func(req ports.RunRequest) {
-		mu.Lock()
-		contexts = append(contexts, req.Context)
-		mu.Unlock()
+	// attempt is what a harness was prepared for in an execution.
+	type attempt struct {
+		harness, execution, context string
 	}
-	e.claude.setScript(func(req ports.RunRequest) string { capture(req); return "echo 'END quota'" })
+	var mu sync.Mutex
+	var attempts []attempt
+	policyChecks := 0
+	capture := func(harness string, req ports.RunRequest) {
+		mu.Lock()
+		defer mu.Unlock()
+		if req.Prompt == "" { // validation's policy check prepares with no prompt
+			policyChecks++
+			return
+		}
+		attempts = append(attempts, attempt{harness: harness, execution: filepath.Base(req.ExecutionDir), context: req.Context})
+	}
+	e.claude.setScript(func(req ports.RunRequest) string { capture(domain.HarnessClaudeCode, req); return "echo 'END quota'" })
 	e.codex.setScript(func(req ports.RunRequest) string {
-		capture(req)
+		capture(domain.HarnessCodex, req)
 		return fmt.Sprintf(`printf '{"outcome":"completed","workItems":[{"key":"o/r#1"}]}' > %s/report.json; echo 'END ok'`,
 			req.ExecutionDir)
 	})
-	r, _ := e.app.RunTask("napoleon")
+	if between != nil {
+		between(e)
+	}
+	r, err := e.app.RunTask("napoleon")
+	if err != nil {
+		t.Fatalf("RunTask(napoleon), the first execution: %v", err)
+	}
 	x := e.wait(r.ExecutionID, domain.StatusCompleted)
-	e.claude.setScript(func(req ports.RunRequest) string { capture(req); return "echo 'END ok'" })
-	r, _ = e.app.RunTask("napoleon")
+	e.claude.setScript(func(req ports.RunRequest) string { capture(domain.HarnessClaudeCode, req); return "echo 'END ok'" })
+	r, err = e.app.RunTask("napoleon")
+	if err != nil {
+		t.Fatalf("RunTask(napoleon), the second execution: %v", err)
+	}
 	e.wait(r.ExecutionID, domain.StatusCompleted)
 	mu.Lock()
 	defer mu.Unlock()
-	if len(contexts) != 3 {
-		t.Fatalf("%d attempts, want 3", len(contexts))
+	if len(attempts) != 3 {
+		seen := make([]string, len(attempts))
+		for i, at := range attempts {
+			seen[i] = fmt.Sprintf("%s in %q", at.harness, at.execution)
+		}
+		t.Fatalf("%d attempts (%s), want 3", len(attempts), strings.Join(seen, ", "))
 	}
 	// The default workspace is named after the task id, and the harness shows it as the working directory anyway.
-	first := strings.ReplaceAll(contexts[0], x.WorkspacePath, "")
+	first := strings.ReplaceAll(attempts[0].context, x.WorkspacePath, "")
 	if strings.Contains(strings.ToLower(first), "napoleon") || strings.Contains(first, "context.json") {
-		t.Errorf("the first attempt of a general task with no history names the task or context.json:\n%s", contexts[0])
+		t.Errorf("the first attempt of a general task with no history names the task or context.json:\n%s", attempts[0].context)
 	}
-	if !strings.Contains(contexts[1], "context.json") {
-		t.Errorf("an attempt after a previous one does not point at context.json:\n%s", contexts[1])
+	if !strings.Contains(attempts[1].context, "context.json") {
+		t.Errorf("an attempt after a previous one does not point at context.json:\n%s", attempts[1].context)
 	}
-	if !strings.Contains(contexts[2], "context.json") {
-		t.Errorf("an execution of a task with work items does not point at context.json:\n%s", contexts[2])
+	if !strings.Contains(attempts[2].context, "context.json") {
+		t.Errorf("an execution of a task with work items does not point at context.json:\n%s", attempts[2].context)
 	}
 	// context.json still carries the task's identity for the skills that sign their work with it.
 	data, err := os.ReadFile(filepath.Join(x.ExecutionDir, "context.json"))
@@ -3552,6 +3592,7 @@ spec:
 	if err := json.Unmarshal(data, &doc); err != nil || doc.Task.ID != "napoleon" {
 		t.Errorf("context.json task id %q (%v)", doc.Task.ID, err)
 	}
+	return policyChecks
 }
 
 // A record is saved from a copy taken under the lock, since the executor may change it at the same time: a queued
