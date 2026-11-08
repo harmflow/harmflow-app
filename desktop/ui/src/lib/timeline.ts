@@ -1,7 +1,7 @@
 // Turns normalized events into the steps of the execution timeline. The label of each type and the daemon's own
 // messages are translated; the agent's text, commands, and tool output stay as the harness produced them.
 import type { HarmflowEvent } from "../api/types";
-import type { Tone } from "../design/tokens";
+import type { Tone } from "../design/theme";
 import { eventText } from "./daemonText";
 
 export type TimelineIcon =

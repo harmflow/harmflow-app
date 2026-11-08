@@ -1,6 +1,6 @@
 // Immediate feedback for saves and commands (desktop-ux.md, UX quality bar).
 import { useSyncExternalStore } from "react";
-import type { Tone } from "../design/tokens";
+import type { Tone } from "../design/theme";
 import { Icon } from "./Icon";
 import { cx } from "./ui";
 

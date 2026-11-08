@@ -291,7 +291,7 @@ describe("SpendBand's marks, columns, and tooltip", () => {
 
 const designDir = join(__dirname, "..", "design");
 const appCss = readFileSync(join(designDir, "app.css"), "utf8");
-const tokensCss = readFileSync(join(designDir, "tokens.css"), "utf8");
+const themeCss = readFileSync(join(designDir, "theme.css"), "utf8");
 
 /** The declarations of a selector's first rule in a stylesheet. */
 function rule(css: string, selector: string): Record<string, string> {
@@ -308,10 +308,10 @@ function rule(css: string, selector: string): Record<string, string> {
   );
 }
 
-/** A length in pixels: `0`, `<n>px`, or a token of tokens.css that holds one. */
+/** A length in pixels: `0`, `<n>px`, or a token of theme.css that holds one. */
 function px(value: string): number {
   const token = /^var\((--[\w-]+)\)$/.exec(value);
-  if (token) return px(rule(tokensCss, ":root")[token[1]]);
+  if (token) return px(rule(themeCss, ":root")[token[1]]);
   if (value === "0") return 0;
   const length = /^(\d+(?:\.\d+)?)px$/.exec(value);
   if (!length) throw new Error(`not a length in pixels: ${value}`);

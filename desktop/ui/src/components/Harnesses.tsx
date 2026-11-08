@@ -4,7 +4,7 @@ import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
 import type { Harness, Tool } from "../api/types";
-import type { Tone } from "../design/tokens";
+import type { Tone } from "../design/theme";
 import { fieldText } from "../lib/daemonText";
 import { formatDateTime, formatRelative } from "../lib/format";
 import { useDraft, type DraftReport } from "../lib/hooks";

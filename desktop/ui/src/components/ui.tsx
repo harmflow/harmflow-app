@@ -11,7 +11,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import type { ExecutionStatus } from "../api/types";
-import { toneColor, type Tone } from "../design/tokens";
+import { toneColor, type Tone } from "../design/theme";
 import { formatElapsed } from "../lib/format";
 import { useNow } from "../lib/hooks";
 import { matches } from "../lib/shortcuts";
