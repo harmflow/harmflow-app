@@ -40,6 +40,8 @@ export class ApiError extends Error {
   readonly code: ApiErrorCode | "network";
   readonly validation?: ValidationResult;
   readonly currentRevision?: string;
+  /** The params of the daemon's text, such as the count of an executions_running refusal. */
+  readonly params?: Record<string, string>;
 
   constructor(status: number, body: unknown) {
     const err = (body as ApiErrorBody | null)?.error;
@@ -48,6 +50,7 @@ export class ApiError extends Error {
     this.code = err?.code ?? (status === 0 ? "network" : "internal");
     this.validation = err?.validation;
     this.currentRevision = err?.currentRevision;
+    this.params = err?.params;
   }
 }
 

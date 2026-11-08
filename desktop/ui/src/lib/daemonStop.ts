@@ -2,7 +2,7 @@
 // for them — a draining stop, which the daemon ends once they have finished or its deadline has passed — or cancels
 // them; with none, the daemon stops at once.
 import type { useTranslation } from "react-i18next";
-import { api } from "../api/client";
+import { ApiError, api } from "../api/client";
 import { native } from "../api/native";
 
 type TFn = ReturnType<typeof useTranslation>["t"];
@@ -30,7 +30,16 @@ export async function askAndStopDaemon(translate: TFn, running: number): Promise
     if (answer === "first") choice = "drain";
     else if (answer === "second") choice = "force";
   } else if (await native.confirm(t("settings.stopConfirm"), t("settings.stopConfirmTitle"), t("settings.stopDaemon"), t("common.cancel"))) {
-    choice = "stop";
+    try {
+      await api.stopDaemon(false);
+      return "stop";
+    } catch (err) {
+      // The window's count was behind the daemon's: it refuses with the executions it runs, and the user chooses
+      // between waiting for them and cancelling them as with a count that was current.
+      const count = Number(err instanceof ApiError && err.code === "executions_running" ? err.params?.count : NaN);
+      if (!(count > 0)) throw err;
+      return askAndStopDaemon(translate, count);
+    }
   }
   if (choice) await api.stopDaemon(choice === "force", choice === "drain");
   return choice;

@@ -30,12 +30,14 @@ func conflictKey(err error) string {
 	return ae.Key
 }
 
-// A drain lets the running execution end on its own outcome, refuses every new firing meanwhile, shows how many
-// executions it waits for and when its deadline passes, and asks main to stop the daemon once none is left.
+// A drain lets the running execution end on its own outcome, refuses every new firing meanwhile, manual or scheduled,
+// shows how many executions it waits for and when its deadline passes, and asks main to stop the daemon once none is
+// left.
 func TestDrainEndsOnItsOwn(t *testing.T) {
 	e := newEnv(t)
 	e.create("busy", "")
 	e.create("other", "")
+	e.create("timed", "  schedule:\n    interval: 1h\n")
 	e.claude.setScript(func(ports.RunRequest) string { return "sleep 1; echo 'END ok'" })
 	r, err := e.app.RunTask("busy")
 	if err != nil {
@@ -55,6 +57,11 @@ func TestDrainEndsOnItsOwn(t *testing.T) {
 	}
 	if _, err := e.app.RunTask("other"); conflictKey(err) != "daemon_stopping" {
 		t.Errorf("RunTask(%q) during a drain = %v, want the daemon_stopping conflict", "other", err)
+	}
+	e.clock.Advance(61 * time.Minute) // the scheduled task's firing comes due
+	e.app.Tick()
+	if got := e.executions("timed"); len(got) != 0 {
+		t.Errorf("executions of the scheduled task due during the drain: %d, want none", len(got))
 	}
 	if e.shutdownRequested() {
 		t.Error("ShutdownRequested is closed while the execution still runs, want it open")

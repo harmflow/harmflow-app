@@ -1637,6 +1637,15 @@ export interface operations {
                     "application/json": components["schemas"]["Accepted"];
                 };
             };
+            /** @description The drain's deadline is not a whole number of seconds above zero (drain_deadline_invalid). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             409: components["responses"]["Conflict"];
         };
     };
