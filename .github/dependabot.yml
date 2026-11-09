@@ -34,9 +34,12 @@ updates:
       prefix: chore
       include: scope
 
-  # Dependabot reads the pnpm workspace (`ui` included) through `pnpm-lock.yaml`.
+  # Dependabot reads the pnpm workspace (`ui` included) through `pnpm-lock.yaml`. The generator's package, `codegen`, has
+  # an entry of its own below, because an `ignore` applies to its whole entry.
   - package-ecosystem: npm
     directory: "/desktop"
+    exclude-paths:
+      - "codegen/**"
     schedule:
       interval: monthly
     groups:
@@ -48,6 +51,27 @@ updates:
         patterns:
           - "@tauri-apps/*"
       npm-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    commit-message:
+      prefix: chore
+      include: scope
+
+  # The API types' generator runs on its own TypeScript: openapi-typescript builds its output with the compiler API
+  # (`ts.factory`, `ts.createPrinter`), which TypeScript 7 no longer ships, so this package stays on 5.9 while the
+  # interface moves on. Drop the ignore once a generator release runs on TypeScript 7.
+  - package-ecosystem: npm
+    directory: "/desktop/codegen"
+    schedule:
+      interval: monthly
+    ignore:
+      - dependency-name: "typescript"
+        versions: [">=6"]
+    groups:
+      codegen-minor-and-patch:
         patterns:
           - "*"
         update-types:
