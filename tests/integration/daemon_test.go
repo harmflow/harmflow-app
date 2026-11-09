@@ -1459,17 +1459,8 @@ func TestDisablingLetsTheRunningExecutionFinish(t *testing.T) {
 		"  notifications:\n    native:\n      events: []\n")}, 201)
 	id := d.call("POST", "/tasks/midway/run", nil, 202)["executionId"].(string)
 	d.waitStatus(id, "running")
+	d.waitHarnessMessage(id)
 	logPath := filepath.Join(d.home, "logs", id+".jsonl")
-	for p := newExecutionProgress(); ; time.Sleep(100 * time.Millisecond) {
-		lines := readLog(t, logPath)
-		if slices.ContainsFunc(lines, func(l logLine) bool { return l.Type == "harness.message" }) {
-			break
-		}
-		p.see(lines, nil)
-		if limit := p.over(); limit != "" {
-			t.Fatalf("execution %s logged no harness.message after %s; %v", id, limit, p)
-		}
-	}
 
 	disabled := d.call("POST", "/tasks/midway/disable", nil, 200)
 	if disabled["enabled"] != false {
@@ -1544,6 +1535,127 @@ func TestDisablingLetsTheRunningExecutionFinish(t *testing.T) {
 	}
 	if runs := d.list("/executions?taskId=midway"); len(runs) != 1 || runs[0]["id"] != id {
 		t.Errorf("the disabled task's executions are %v, want only %s", runs, id)
+	}
+}
+
+// A real SIGQUIT, sent to the daemon's process while one execution runs, starts a draining stop with the default
+// deadline: the daemon keeps answering and refuses a manual run, the execution goes on to its own outcome, and the
+// daemon then exits by itself, with status 0, leaving no runtime file. A SIGQUIT the daemon did not take would reach
+// the Go runtime's default action instead, a goroutine dump and an exit with status 2. The signal goes to the
+// daemon's process alone, never to the test's own, which go test dumps on SIGQUIT.
+func TestSIGQUITDrainsTheRunningExecution(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	d := startDaemon(t, home)
+	// The stand-in sends a message every half second for five seconds, then succeeds.
+	d.call("POST", "/tasks", map[string]any{"yaml": task("drained", "SCENARIO=ticks",
+		"  notifications:\n    native:\n      events: []\n")}, 201)
+	id := d.call("POST", "/tasks/drained/run", nil, 202)["executionId"].(string)
+	d.waitStatus(id, "running")
+	d.waitHarnessMessage(id)
+
+	sent := time.Now()
+	if err := d.cmd.Process.Signal(syscall.SIGQUIT); err != nil {
+		t.Fatalf("sending SIGQUIT to the daemon: %v", err)
+	}
+	// The daemon takes the signal on a channel of its own, so the drain shows a moment after the signal was sent.
+	var health map[string]any
+	for deadline := time.Now().Add(executionSilence); ; time.Sleep(100 * time.Millisecond) {
+		if health = d.call("GET", "/health", nil, 200); health["draining"] != nil || time.Now().After(deadline) {
+			break
+		}
+	}
+	answered := time.Now()
+	drain, _ := health["draining"].(map[string]any)
+	if drain == nil {
+		t.Fatalf("GET /health after SIGQUIT = %v, want a draining stop under way", health)
+	}
+	// The default deadline is 30 minutes from when the daemon took the signal; a minute either way covers the clocks.
+	deadlineAt, err := time.Parse(time.RFC3339Nano, fmt.Sprint(drain["deadlineAt"]))
+	if err != nil || deadlineAt.Before(sent.Add(29*time.Minute)) || deadlineAt.After(answered.Add(31*time.Minute)) {
+		t.Errorf("GET /health after SIGQUIT has the drain's deadline %v (%v), want 30 minutes after %v",
+			drain["deadlineAt"], err, sent)
+	}
+	if drain["executions"] != float64(1) || health["acceptingFirings"] != false {
+		t.Errorf("GET /health after SIGQUIT = %v, want a drain waiting for 1 execution and no firing accepted", health)
+	}
+	refused := d.call("POST", "/tasks/drained/run", nil, 409)
+	if e, _ := refused["error"].(map[string]any); e["code"] != "conflict" || e["messageKey"] != "daemon_stopping" {
+		t.Errorf("POST /tasks/drained/run during the drain answered %v, want the error conflict with daemon_stopping",
+			refused)
+	}
+
+	state := d.waitExit()
+	if !state.Success() {
+		t.Errorf("the daemon exited %v after the drain, want status 0; its log ends:\n%s", state, daemonLogTail(home))
+	}
+	if _, err := os.Stat(filepath.Join(home, "run", "daemon.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("after the drain, stat run/daemon.json = %v, want it gone", err)
+	}
+	d2 := startDaemon(t, home)
+	if x := d2.call("GET", "/executions/"+id, nil, 200); x["status"] != "completed" {
+		t.Errorf("after the drain, execution %s is %v (%v), want completed", id, x["status"], x["errorKey"])
+	}
+}
+
+// A real SIGTERM, sent to the daemon's process while one execution runs, stops the daemon at once: it exits, with
+// status 0, and the execution it cancelled reads interrupted once a daemon is started again on the same home. The
+// stand-in waits five minutes, so only the stop can end the execution while the test runs.
+func TestSIGTERMInterruptsTheRunningExecution(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	d := startDaemon(t, home)
+	d.call("POST", "/tasks", map[string]any{"yaml": task("stopped", "SCENARIO=slow",
+		"  execution:\n    cancelGraceSeconds: 1\n")}, 201)
+	id := d.call("POST", "/tasks/stopped/run", nil, 202)["executionId"].(string)
+	dir := d.waitStatus(id, "running")["executionDir"].(string)
+	// The stand-in has started once its child runs; whatever the stop leaves, no stand-in outlives the test.
+	killHarnessGroup(t, dir)
+
+	if err := d.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("sending SIGTERM to the daemon: %v", err)
+	}
+	if state := d.waitExit(); !state.Success() {
+		t.Errorf("the daemon exited %v on SIGTERM, want status 0; its log ends:\n%s", state, daemonLogTail(home))
+	}
+	d2 := startDaemon(t, home)
+	if x := d2.call("GET", "/executions/"+id, nil, 200); x["status"] != "interrupted" {
+		t.Errorf("after SIGTERM, execution %s is %v (%v), want interrupted", id, x["status"], x["errorKey"])
+	}
+}
+
+// waitHarnessMessage waits until the execution's log holds a harness.message, while the execution progresses
+// (executionSilence).
+func (d *daemon) waitHarnessMessage(id string) {
+	d.t.Helper()
+	logPath := filepath.Join(d.home, "logs", id+".jsonl")
+	for p := newExecutionProgress(); ; time.Sleep(100 * time.Millisecond) {
+		lines := readLog(d.t, logPath)
+		if slices.ContainsFunc(lines, func(l logLine) bool { return l.Type == "harness.message" }) {
+			return
+		}
+		p.see(lines, nil)
+		if limit := p.over(); limit != "" {
+			d.t.Fatalf("execution %s logged no harness.message after %s; %v", id, limit, p)
+		}
+	}
+}
+
+// waitExit waits for the daemon's process to exit by itself, and returns how it exited. A daemon still running after
+// executionCeiling is killed, and fails the test.
+func (d *daemon) waitExit() *os.ProcessState {
+	d.t.Helper()
+	done := make(chan struct{})
+	go func() { _ = d.cmd.Wait(); close(done) }()
+	select {
+	case <-done:
+		return d.cmd.ProcessState
+	case <-time.After(executionCeiling):
+		_ = d.cmd.Process.Kill()
+		<-done
+		d.t.Fatalf("the daemon still ran %v after the signal, and was killed; its log ends:\n%s", executionCeiling,
+			daemonLogTail(d.home))
+		return nil
 	}
 }
 
