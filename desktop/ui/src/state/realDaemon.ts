@@ -51,8 +51,13 @@ interface StreamMessage {
  * uses — onopen and onerror, listeners by event type, readyState, and close — with plain objects for events. It never
  * reconnects on its own: a stream that fails or ends is closed, and the transport opens the next one, as it does when
  * the daemon answers with an error.
+ *
+ * A test that cuts the connection uses it for a second reason. Node's EventSource before undici 7.11 (Node 22, and
+ * Node 24 before 24.4) fires error while it still reads as connecting after a refused retry, then closes itself
+ * (nodejs/undici#4247). A browser either retries or reads as closed when it fires error, and the transport reopens
+ * only a stream that reads as closed, so on such a Node it would never connect again.
  */
-class StreamSource {
+export class StreamSource {
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;
   static readonly CLOSED = 2;
