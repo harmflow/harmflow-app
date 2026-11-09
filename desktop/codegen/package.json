@@ -1,0 +1,13 @@
+{
+  "name": "@harmflow/codegen",
+  "private": true,
+  "description": "Generates the interface's API types from contracts/api/openapi.yaml. It pins TypeScript 5.9 because openapi-typescript builds its output with the compiler API (ts.factory, ts.createPrinter), which TypeScript 7 no longer ships; the interface compiles with TypeScript 7. Revisit once a generator release runs on TypeScript 7.",
+  "type": "module",
+  "scripts": {
+    "generate": "openapi-typescript ../../contracts/api/openapi.yaml -o ../ui/src/api/generated.ts"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.13.0",
+    "typescript": "~5.9.3"
+  }
+}
