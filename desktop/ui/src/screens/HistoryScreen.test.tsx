@@ -7,7 +7,8 @@
 // whose tests failed as Completed, with its Tests failed and PR chips, never as Failed. Its filter bar gives
 // the date fields the class that keeps them on the filters' line. Opened again in the same app session, the screen
 // shows its kept rows and filters before any request answers, then refreshes them in the background only when an event
-// came since, or the connection was lost.
+// came since, or the connection was lost. Opened after a new launch, it keeps none of that: no filter is set and it loads
+// its first page, and no visit wrote its rows or filters to the browser's storage or sent them to the daemon.
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -15,17 +16,19 @@ import { native } from "../api/native";
 import type { StreamHandlers } from "../api/transport";
 import type { Execution, ExecutionOutput, ExecutionSummary, HarmflowEvent, TaskSummary } from "../api/types";
 import i18n from "../i18n";
-import { patchStateForTests, startSync } from "../state/store";
+import { getState, patchStateForTests, startSync } from "../state/store";
 import { HistoryScreen } from "./HistoryScreen";
 
 // The daemon as the client sees it: `GET /executions` lists the executions it holds, of one task, fired by one trigger,
 // and holding a search text in the task's name when the query names them, newest first, a page of at most `limit`
 // created before `before`, with how many the filters match in its total, or fails while `failing`, or waits for
-// `release` while `holding`; every other route has its answer; every request it received; and the stream it feeds.
+// `release` while `holding`; every other route has its answer; every request it received, and the ones that carried a
+// body; and the stream it feeds.
 const daemon = vi.hoisted(() => ({
   executions: [] as ExecutionSummary[],
   answers: new Map<string, unknown>(),
   requests: [] as string[],
+  bodies: [] as Array<{ request: string; body: unknown }>,
   failing: false,
   holding: false,
   waiting: [] as Array<() => void>,
@@ -40,8 +43,9 @@ vi.mock("../api/transport", () => ({
   EVENT_TYPES: [],
   transport: {
     mode: "http",
-    request: async (method: string, path: string) => {
+    request: async (method: string, path: string, body?: unknown) => {
       daemon.requests.push(`${method} ${path}`);
+      if (body !== undefined) daemon.bodies.push({ request: `${method} ${path}`, body });
       const [route, search] = path.split("?");
       if (method === "GET" && route === "/executions") {
         if (daemon.failing) return { status: 500, body: null };
@@ -168,6 +172,7 @@ afterEach(() => {
   daemon.executions = [];
   daemon.answers.clear();
   daemon.requests.length = 0;
+  daemon.bodies.length = 0;
   daemon.failing = false;
   release();
   // As a new launch of the app: nothing of History is kept.
@@ -480,6 +485,80 @@ describe("the filter bar", () => {
       expect(date.classList.contains("input"), date.getAttribute("aria-label")!).toBe(true);
       expect(date.classList.contains("filters__date"), date.getAttribute("aria-label")!).toBe(true);
     }
+  });
+});
+
+describe("History opened after a new launch of the app", () => {
+  /** The instant `minutes` after 09:00, as the daemon writes it. */
+  const at = (minutes: number) => new Date(Date.UTC(2026, 6, 1, 9, minutes)).toISOString();
+  /** The standup's nth execution counting back from the newest: 80 of them make a full page and part of a second. */
+  const nth = (n: number): ExecutionSummary => ({ ...other, id: `exec-${String(n).padStart(3, "0")}`, createdAt: at(100 - n), startedAt: at(100 - n), endedAt: at(100 - n) });
+  const footer = () => host!.querySelector(".table__footer")!.textContent;
+  const filter = (label: string) => host!.querySelector<HTMLInputElement | HTMLSelectElement>(`[aria-label="${label}"]`)!.value;
+  const ids = () => rows().map((r) => r.querySelector("td:nth-child(2) .mono")!.textContent);
+
+  /** Every key and value the browser's storage holds, of both kinds, whatever the key. */
+  function stored(): string[] {
+    return [localStorage, sessionStorage].flatMap((storage) =>
+      Array.from({ length: storage.length }, (_, i) => storage.key(i)!).flatMap((key) => [key, storage.getItem(key) ?? ""]),
+    );
+  }
+
+  it("sets no filter and loads the first page, and the visit before wrote nothing of what it kept", async () => {
+    daemon.executions = [...Array.from({ length: 80 }, (_, n) => nth(n)), aged];
+    const searchText = "Standup notes";
+    await open();
+    await choose("Status", "completed");
+    await choose("Task", standup.id);
+    await type(searchText);
+    const more = [...host!.querySelectorAll<HTMLButtonElement>(".table__footer button")].find((b) => b.textContent === "Load older executions")!;
+    await act(async () => more.click());
+    await settle();
+    expect(rows()).toHaveLength(80);
+    expect(footer()).toBe("Showing 80 / 80No older executions.");
+    const shown = ids();
+
+    // In this app session, the store keeps what History showed: the filters and both pages.
+    const kept = getState().history!;
+    expect(kept.filters).toMatchObject({ status: "completed", taskId: standup.id, search: searchText });
+    expect(kept.rows.map((r) => r.id)).toEqual(shown);
+    act(() => root!.unmount());
+    host!.remove();
+
+    // Nothing of it reached the browser's storage: no key or value holds the search text, a filter's value, or an
+    // execution shown.
+    const written = stored();
+    for (const value of [searchText, "completed", standup.id, ...shown]) {
+      expect(written.filter((s) => s.includes(value)), value).toEqual([]);
+    }
+
+    // Nor the daemon: every request was a read of the executions, and none carried a body.
+    expect(daemon.requests.length).toBeGreaterThan(0);
+    expect(daemon.requests.filter((r) => !/^GET \/executions\?/.test(r))).toEqual([]);
+    expect(daemon.bodies).toEqual([]);
+
+    // A new launch: the app loads its store, and the screen with it, anew.
+    vi.resetModules();
+    const relaunched = await import("../state/store");
+    const { HistoryScreen: History } = await import("./HistoryScreen");
+    expect(relaunched.getState().history).toBeUndefined();
+    function Relaunched() {
+      const [openId, setOpenId] = useState<string | null>(null);
+      return <History openId={openId} onOpen={setOpenId} />;
+    }
+    relaunched.patchStateForTests({ tasks: [issues, standup] });
+    daemon.requests.length = 0;
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(<Relaunched />));
+    await settle();
+
+    // No filter is set, the one request asks for the first page with none, and the rows and the count are its answer's.
+    for (const label of ["Search", "Status", "Task", "Trigger", "From", "To"]) expect(filter(label), label).toBe("");
+    expect(daemon.requests).toEqual(["GET /executions?limit=50"]);
+    expect(ids()).toEqual(daemon.executions.slice(0, 50).map((x) => x.id));
+    expect(footer()).toBe("Showing 50 / 81Load older executions");
+    expect(daemon.bodies).toEqual([]);
   });
 });
 
