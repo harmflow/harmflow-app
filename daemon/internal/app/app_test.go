@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"maps"
 	"os"
@@ -21,6 +22,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -7483,7 +7485,7 @@ func (e *env) crashAt(task string, crash func(domain.Event) bool) (*env, string)
 			// A record is saved whole or not at all: a save of the execution in progress finishes first, and the next waits
 			// for the copy.
 			defer e.app.lockRecord(ev.ExecutionID)()
-			copied <- os.CopyFS(home, os.DirFS(e.home))
+			copied <- copyHome(home, os.DirFS(e.home))
 		})
 	})
 	r, err := e.app.RunTask(task)
@@ -7505,6 +7507,179 @@ func (e *env) crashAt(task string, crash func(domain.Event) bool) (*env, string)
 		e.t.Fatalf("copying the home: %v", copyErr)
 	}
 	return openEnv(e.t, home), r.ExecutionID
+}
+
+// copyHome copies fsys into dir as os.CopyFS does, while the daemon that owns fsys goes on writing to it. A file or a
+// folder the walk lists but that is gone when the copy opens it, such as the temporary file of a save renamed over its
+// target meanwhile, is not on disk at that moment, so the copy leaves it out; any other error stops the copy.
+func copyHome(dir string, fsys fs.FS) error {
+	return fs.WalkDir(fsys, ".", func(name string, d fs.DirEntry, err error) error {
+		target := filepath.Join(dir, filepath.FromSlash(name))
+		if err != nil {
+			if name != "." && d != nil && d.IsDir() && errors.Is(err, fs.ErrNotExist) {
+				// The folder went after the walk made it in the copy: what is left of it there is empty.
+				return os.Remove(target)
+			}
+			return err
+		}
+		switch d.Type() {
+		case fs.ModeDir:
+			return os.MkdirAll(target, 0o777)
+		case fs.ModeSymlink:
+			link, err := fs.ReadLink(fsys, name)
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			return os.Symlink(link, target)
+		case 0:
+			return copyHomeFile(target, fsys, name)
+		default:
+			return &fs.PathError{Op: "copyHome", Path: name, Err: fs.ErrInvalid}
+		}
+	})
+}
+
+// copyHomeFile copies the regular file name of fsys to target, unless it is gone when opened. It opens the source
+// first, so a file that vanished leaves nothing in the copy.
+func copyHomeFile(target string, fsys fs.FS, name string) error {
+	r, err := fsys.Open(name)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	info, err := r.Stat()
+	if err != nil {
+		return err
+	}
+	w, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o666|info.Mode()&0o777)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(w, r); err != nil {
+		w.Close()
+		return fmt.Errorf("copy %s: %w", name, err)
+	}
+	return w.Close()
+}
+
+// vanishingFS lists every entry of files in its folders, but fails to open the entry gone names as one renamed or
+// removed after the listing does, and the entry denied names with a permission error.
+type vanishingFS struct {
+	files        fstest.MapFS
+	gone, denied string
+}
+
+func (v vanishingFS) Open(name string) (fs.File, error) {
+	switch name {
+	case v.gone:
+		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
+	case v.denied:
+		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrPermission}
+	}
+	return v.files.Open(name)
+}
+
+func (v vanishingFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	f, err := v.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	f.Close()
+	return v.files.ReadDir(name)
+}
+
+func TestCopyHomeLeavesOutWhatVanishedDuringTheWalk(t *testing.T) {
+	files := fstest.MapFS{
+		"state/notifications.json":             {Data: []byte(`{"notices":[]}`), Mode: 0o644},
+		"state/.notifications.json.tmp-391180": {Data: []byte(`{"notices":[1]}`), Mode: 0o644},
+		"runs/exec-1/record.json":              {Data: []byte(`{"id":"exec-1"}`), Mode: 0o644},
+		"runs/exec-1/hook.sh":                  {Data: []byte("#!/bin/sh\n"), Mode: 0o755},
+		"runs/exec-2/record.json":              {Data: []byte(`{"id":"exec-2"}`), Mode: 0o644},
+	}
+	for _, tc := range []struct {
+		name         string
+		gone, denied string
+		want         []string // the files the copy holds
+		wantErr      error
+	}{
+		{
+			name: "a file renamed before its open",
+			gone: "state/.notifications.json.tmp-391180",
+			want: []string{"runs/exec-1/hook.sh", "runs/exec-1/record.json", "runs/exec-2/record.json",
+				"state/notifications.json"},
+		},
+		{
+			name: "a folder removed before its read",
+			gone: "runs/exec-2",
+			want: []string{"runs/exec-1/hook.sh", "runs/exec-1/record.json", "state/.notifications.json.tmp-391180",
+				"state/notifications.json"},
+		},
+		{
+			name: "nothing gone",
+			want: []string{"runs/exec-1/hook.sh", "runs/exec-1/record.json", "runs/exec-2/record.json",
+				"state/.notifications.json.tmp-391180", "state/notifications.json"},
+		},
+		{
+			name:    "a file that cannot be opened for another reason",
+			denied:  "runs/exec-1/record.json",
+			wantErr: fs.ErrPermission,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "home")
+			err := copyHome(dir, vanishingFS{files: files, gone: tc.gone, denied: tc.denied})
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("copyHome() = %v, want %v", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("copyHome() = %v, want nil", err)
+			}
+			var got []string
+			if err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+				if err != nil || d.IsDir() {
+					return err
+				}
+				rel, _ := filepath.Rel(dir, path)
+				got = append(got, filepath.ToSlash(rel))
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("copyHome() copied %q, want %q", got, tc.want)
+			}
+			for _, name := range got {
+				data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(name)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(data, files[name].Data) {
+					t.Errorf("copyHome() copied %s as %q, want %q", name, data, files[name].Data)
+				}
+			}
+			if tc.gone != "" {
+				if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(tc.gone))); !errors.Is(err, fs.ErrNotExist) {
+					t.Errorf("copyHome() left %s in the copy (stat: %v), want it absent", tc.gone, err)
+				}
+			}
+			info, err := os.Stat(filepath.Join(dir, "runs", "exec-1", "hook.sh"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Mode()&0o111 == 0 {
+				t.Errorf("copyHome() copied runs/exec-1/hook.sh with mode %v, want it executable", info.Mode())
+			}
+		})
+	}
 }
 
 // countedExecutions is an execution repository that counts the saves of each record and keeps none. The first save of
