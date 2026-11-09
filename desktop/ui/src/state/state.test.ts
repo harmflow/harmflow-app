@@ -17,6 +17,7 @@ import { createServer, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { HarmflowEvent } from "../api/types";
 import { buildTimeline } from "../lib/timeline";
+import { StreamSource } from "./realDaemon";
 import { actions, getState, startSync } from "./store";
 
 const ui = fileURLToPath(new URL("../..", import.meta.url));
@@ -58,7 +59,7 @@ const fetchNative = globalThis.fetch;
 let daemon: RealDaemon;
 let server: ViteDevServer;
 let proxy: CuttableProxy;
-const streams: EventSource[] = [];
+const streams: StreamSource[] = [];
 /** The paths of the requests the dashboard sent through its transport, with their bodies once read. */
 const requests: Array<{ path: string; body: Promise<unknown> }> = [];
 
@@ -210,16 +211,13 @@ beforeAll(async () => {
   proxy = await startProxy(port);
   const origin = proxy.origin;
 
-  if (typeof EventSource !== "function") {
-    throw new Error("this Node has no EventSource; vitest.daemon.config.ts passes --experimental-eventsource where it needs one");
-  }
-  const NodeEventSource = EventSource;
-  // A browser on the dev server's origin resolves the transport's relative URLs against it.
+  // A browser on the dev server's origin resolves the transport's relative URLs against it. The stream is the daemon
+  // tests' own, not Node's EventSource, which on some Nodes stops for good after a refused retry (realDaemon.ts).
   vi.stubGlobal(
     "EventSource",
-    class extends NodeEventSource {
-      constructor(url: string | URL, init?: EventSourceInit) {
-        super(new URL(url, origin), init);
+    class extends StreamSource {
+      constructor(url: string | URL) {
+        super(new URL(url, origin).href);
         streams.push(this);
       }
     },
