@@ -55,7 +55,7 @@ jobs:
           }
           for part in contracts daemon integration desktop; do
             case $part in
-              contracts)   pattern='^(contracts/|daemon/internal/contracts/|desktop/ui/src/api/generated\.ts$)' ;;
+              contracts)   pattern='^(contracts/|daemon/internal/contracts/|desktop/ui/src/api/generated\.ts$|desktop/codegen/|desktop/pnpm-lock\.yaml$|desktop/pnpm-workspace\.yaml$)' ;;
               daemon)      pattern='^(daemon/|templates/|agents/)' ;;
               integration) pattern='^(daemon/|tests/|agents/|skills/|templates/)' ;;
               desktop)     pattern='^(desktop/|agents/|skills/|templates/)' ;;
