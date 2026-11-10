@@ -13,7 +13,7 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind, MessageDialogResult};
 
-use crate::daemon::{ApiResponse, DaemonStatus};
+use crate::daemon::{ApiResponse, DaemonStatus, Sent};
 use crate::state::{ActiveExecution, AppState, DaemonState};
 
 pub(crate) const TRAY_ID: &str = "main";
@@ -399,22 +399,73 @@ fn ask_stop<R: Runtime>(app: &AppHandle<R>, state: Arc<AppState>, count: usize) 
         });
 }
 
-/// Sends the stop and follows the daemon's answer: a refusal is never dropped (harmflow-app#630).
+/// How long the tray follows a stop the daemon took and left unanswered: longer than the daemon's own stop takes at
+/// most, its waits for the detection and the executions and its local API's shutdown included.
+const UNANSWERED_STOP_WAIT: Duration = Duration::from_secs(120);
+
+/// Sends the stop and follows the daemon's answer: a refusal is never dropped (harmflow-app#630), and a stop left
+/// unanswered is followed until the daemon is gone (harmflow-app#995).
 async fn stop<R: Runtime>(app: AppHandle<R>, state: Arc<AppState>, request: Request) {
     let chosen = ["force", "drain"].iter().any(|key| request.body.get(*key).and_then(Value::as_bool).unwrap_or(false));
-    let res = state.daemon.request(request.method, request.path, Some(request.body)).await;
-    match after_stop(&res, chosen) {
+    let sent = state.daemon.request_sent(request.method, request.path, Some(request.body)).await;
+    match after_sent(&sent, chosen) {
         AfterStop::Stopping => {}
         AfterStop::ConfirmRunning(count) => ask_stop(&app, state, count),
-        AfterStop::Failed(message) => {
-            let ok = state.label("stopFailedOk", "OK");
-            app.dialog()
-                .message(message)
-                .title(state.label("stopFailedTitle", "The daemon did not stop"))
-                .kind(MessageDialogKind::Warning)
-                .buttons(MessageDialogButtons::OkCustom(ok))
-                .show(|_| {});
-        }
+        AfterStop::Failed(message) => stop_failed(&app, &state, message),
+        AfterStop::Unanswered(cause) => follow_unanswered(&app, &state, cause).await,
+    }
+}
+
+/// Shows that the daemon did not stop, and why.
+fn stop_failed<R: Runtime>(app: &AppHandle<R>, state: &AppState, message: String) {
+    notice(app, state, state.label("stopFailedTitle", "The daemon did not stop"), message);
+}
+
+/// Shows a dialog with one OK button.
+fn notice<R: Runtime>(app: &AppHandle<R>, state: &AppState, title: String, message: String) {
+    let ok = state.label("stopFailedOk", "OK");
+    app.dialog()
+        .message(message)
+        .title(title)
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCustom(ok))
+        .show(|_| {});
+}
+
+/// Says that the stop was sent and the daemon is not answering yet, as the status polls do (harmflow-app#908), then
+/// waits for the pid of the runtime file to be gone and says so, or shows the failure, with the request's cause, when
+/// the daemon answers that it is not stopping or the pid outlives the wait.
+async fn follow_unanswered<R: Runtime>(app: &AppHandle<R>, state: &AppState, cause: String) {
+    notice(
+        app,
+        state,
+        state.label("stopUnansweredTitle", "The daemon is not answering yet"),
+        state.label(
+            "stopUnanswered",
+            "The stop was sent, and the daemon has not answered yet. HarmFlow tells you once it has stopped.",
+        ),
+    );
+    let pid = state.daemon.connection().ok().and_then(|c| c.runtime.pid);
+    let waited = match pid {
+        Some(pid) => state.daemon.wait_stopped(pid, UNANSWERED_STOP_WAIT).await,
+        None => Err("the runtime file names no daemon pid".to_string()),
+    };
+    match waited {
+        Ok(()) => notice(
+            app,
+            state,
+            state.label("stopDoneTitle", "The daemon stopped"),
+            state.label("stopDone", "The daemon stopped after the stop you sent."),
+        ),
+        Err(reason) => stop_failed(app, state, format!("{cause}; {reason}")),
+    }
+}
+
+/// What the tray does after a stop was sent: `after_stop` for an answer, and a stop left unanswered is followed.
+fn after_sent(sent: &Sent, chosen: bool) -> AfterStop {
+    match sent {
+        Sent::Answered(res) => after_stop(res, chosen),
+        Sent::Unanswered(cause) => AfterStop::Unanswered(cause.clone()),
     }
 }
 
@@ -426,8 +477,11 @@ enum AfterStop {
     /// The daemon refused a plain stop while executions run: ask again with its count, whether to wait for them or
     /// cancel them.
     ConfirmRunning(usize),
-    /// Any other answer, or no answer: show the daemon's message, or the request's error.
+    /// Any other answer, or a request that failed: show the daemon's message, or the request's error.
     Failed(String),
+    /// The daemon took the stop and did not answer within the request's timeout, which is no sign that it did not
+    /// stop: say so, and follow the daemon until it is gone. Holds the request's error, its cause included.
+    Unanswered(String),
 }
 
 /// `chosen` is true for a stop that already answered for running executions, forced or draining: a refusal of it is
@@ -890,6 +944,27 @@ mod tests {
         // DaemonClient::request answers status 0 with the request's error when nothing answers.
         let res = answer(0, json!({ "error": { "code": "internal", "message": "error sending request" } }));
         assert_eq!(after_stop(&res, false), AfterStop::Failed("error sending request".into()));
+    }
+
+    /// harmflow-app#995: a stop the daemon took and left unanswered is not reported as one that did not stop: the tray
+    /// says the daemon is not answering yet and follows it, keeping the request's cause for a failure it may show later.
+    #[test]
+    fn an_unanswered_stop_is_followed_not_reported_as_failed() {
+        let cause = "error sending request for url (http://127.0.0.1:7000/api/v1/daemon/stop): operation timed out";
+        assert_eq!(after_sent(&Sent::Unanswered(cause.into()), true), AfterStop::Unanswered(cause.into()));
+        assert_eq!(after_sent(&Sent::Unanswered(cause.into()), false), AfterStop::Unanswered(cause.into()));
+    }
+
+    /// An answered stop, a refusal included, keeps what `after_stop` makes of it (harmflow-app#630).
+    #[test]
+    fn an_answered_stop_keeps_its_reading() {
+        assert_eq!(after_sent(&Sent::Answered(answer(202, Value::Null)), true), AfterStop::Stopping);
+        assert_eq!(after_sent(&Sent::Answered(refused_running("2")), false), AfterStop::ConfirmRunning(2));
+        let refused = answer(0, json!({ "error": { "code": "internal", "message": "error sending request: connection refused" } }));
+        assert_eq!(
+            after_sent(&Sent::Answered(refused), true),
+            AfterStop::Failed("error sending request: connection refused".into())
+        );
     }
 
     #[test]

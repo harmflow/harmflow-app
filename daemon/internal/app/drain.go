@@ -36,7 +36,7 @@ func (a *App) RequestDrain(deadline time.Duration) error {
 		a.mu.Unlock()
 		return nil
 	}
-	if !a.accepting || a.stopping {
+	if !a.acceptingLocked() || a.stopping {
 		a.mu.Unlock()
 		return newError(CodeConflict, domain.T("daemon_stopping", "the daemon is stopping"))
 	}
@@ -76,7 +76,7 @@ func (a *App) watchDrain(deadline time.Duration) {
 			a.mu.Unlock()
 			a.requestStop(drainDeadlinePassed())
 			return
-		case <-a.drainStop:
+		case <-a.stopBegun:
 			return
 		}
 	}
@@ -92,24 +92,21 @@ func (a *App) Draining() (DrainView, bool) {
 	return DrainView{Executions: len(a.running), DeadlineAt: a.drain.until}, true
 }
 
-// requestStop asks main to stop the daemon, for reason; only the first request counts.
+// requestStop asks main to stop the daemon, for reason; only the first request counts. It takes no lock, so a forced
+// stop asks at once.
 func (a *App) requestStop(reason domain.Text) {
 	a.shutdownOnce.Do(func() {
-		a.mu.Lock()
-		a.shutdownReason = reason
-		a.mu.Unlock()
+		a.shutdownReason.Store(&reason)
 		close(a.ShutdownRequested)
 	})
 }
 
 // ShutdownReason is why ShutdownRequested was closed: the user's request, or the end of a drain.
 func (a *App) ShutdownReason() domain.Text {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.shutdownReason.Key == "" {
-		return stopRequested()
+	if reason := a.shutdownReason.Load(); reason != nil && reason.Key != "" {
+		return *reason
 	}
-	return a.shutdownReason
+	return stopRequested()
 }
 
 // stopRequested is why the daemon stops when the user asked it to.

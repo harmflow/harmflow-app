@@ -128,7 +128,7 @@ fn status_from_health(body: &Value, address: Option<String>) -> DaemonStatus {
 
 /// One response of the local API, as the webview receives it. `total` is the response's `X-Total-Count`, how many
 /// items a list's filters match, when the daemon sent one: the only header the webview needs.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ApiResponse {
     pub status: u16,
     pub body: Value,
@@ -151,10 +151,12 @@ enum Failure {
 }
 
 impl Failure {
+    /// The failure's text, with its causes: reqwest's own text leaves them out, so a timeout or a reset would read
+    /// only "error sending request for url (…)".
     fn message(&self) -> String {
         match self {
             Failure::Setup(message) => message.clone(),
-            Failure::Http(err) => err.to_string(),
+            Failure::Http(err) => with_causes(err),
         }
     }
 
@@ -167,6 +169,32 @@ impl Failure {
     fn refused(&self) -> bool {
         matches!(self, Failure::Http(err) if connection_refused(err))
     }
+}
+
+/// The text of `err` followed by each of its causes, as "error sending request for url (…): operation timed out"; a
+/// cause whose text the message already holds is not repeated.
+fn with_causes(err: &dyn std::error::Error) -> String {
+    let mut message = err.to_string();
+    let mut cause = err.source();
+    while let Some(c) = cause {
+        let text = c.to_string();
+        if !text.is_empty() && !message.contains(&text) {
+            message.push_str(": ");
+            message.push_str(&text);
+        }
+        cause = c.source();
+    }
+    message
+}
+
+/// A request's outcome for a caller that tells a daemon too busy to answer from a request that failed.
+#[derive(Debug, PartialEq)]
+pub enum Sent {
+    /// The daemon's answer, or the response of a request that failed (status 0), as `request` gives them.
+    Answered(ApiResponse),
+    /// The daemon's port took the request and no answer came within the timeout (`Failure::unanswered`): the daemon
+    /// may still act on it. Holds the failure's text, its causes included.
+    Unanswered(String),
 }
 
 /// The connection was refused, not left waiting: nothing listens at the address any longer, so the daemon stopped or
@@ -288,6 +316,38 @@ impl DaemonClient {
         match self.exchange(method, path, body).await {
             Ok(res) => api_response(res).await,
             Err(failure) => failed_response(&failure),
+        }
+    }
+
+    /// Sends a request as `request` does, and tells a request the daemon took and left unanswered from any other.
+    pub async fn request_sent(&self, method: &str, path: &str, body: Option<Value>) -> Sent {
+        match self.exchange(method, path, body).await {
+            Ok(res) => Sent::Answered(api_response(res).await),
+            Err(failure) if failure.unanswered() => Sent::Unanswered(failure.message()),
+            Err(failure) => Sent::Answered(failed_response(&failure)),
+        }
+    }
+
+    /// Follows a stop the daemon took and left unanswered: waits up to `limit` for process `pid` to exit, as
+    /// `wait_gone` does. A daemon that answers GET /health meanwhile and still accepts firings is not stopping, so the
+    /// stop did not take: that is an error at once, as a pid that outlives `limit` is.
+    pub async fn wait_stopped(&self, pid: u32, limit: Duration) -> Result<(), String> {
+        let deadline = tokio::time::Instant::now() + limit;
+        loop {
+            if process_gone(pid)? {
+                return Ok(());
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(format!(
+                    "daemon pid {pid} did not exit within {} seconds; see logs/daemon.log in the HarmFlow folder",
+                    limit.as_secs()
+                ));
+            }
+            let health = self.request("GET", "/health", None).await;
+            if health.status == 200 && health.body.get("acceptingFirings").and_then(Value::as_bool) == Some(true) {
+                return Err("the daemon answers and is not stopping".to_string());
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
         }
     }
 
@@ -719,6 +779,60 @@ mod tests {
         assert_eq!(status.pid, Some(std::process::id()));
         assert_eq!(status.address.as_deref(), Some(daemon.address.as_str()));
         assert_eq!(serde_json::to_value(&status).unwrap()["notAnswering"], true);
+    }
+
+    /// harmflow-app#995: a request the daemon takes and never answers is told apart from one that failed, and its text
+    /// keeps its cause, the timeout, not only reqwest's "error sending request for url (…)".
+    #[tokio::test]
+    async fn an_unanswered_request_says_so_and_keeps_its_cause() {
+        let daemon = StandIn::start(&[]);
+        let home = runtime_home("unanswered-stop", &daemon.address, std::process::id(), "first");
+        let client = DaemonClient::with(Some(home.clone()), Duration::from_millis(300));
+
+        let sent = client.request_sent("POST", "/daemon/stop", Some(serde_json::json!({ "force": true }))).await;
+        let plain = client.send("POST", "/daemon/stop", None).await;
+        std::fs::remove_dir_all(&home).ok();
+
+        let Sent::Unanswered(message) = sent else { panic!("request_sent = {sent:?}, want Unanswered") };
+        assert!(message.starts_with("error sending request for url"), "message {message:?}");
+        assert!(message.contains("timed out"), "message {message:?} lost its cause, the timeout");
+        let Err(plain) = plain else { panic!("a request that never got an answer succeeded") };
+        assert!(plain.contains("timed out"), "send's message {plain:?} lost its cause, the timeout");
+    }
+
+    /// A refused request is no unanswered one: it is answered with status 0 and its reason, as `request` gives it.
+    #[tokio::test]
+    async fn a_refused_request_is_answered_with_its_failure() {
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().to_string();
+        let home = runtime_home("refused-stop", &closed, std::process::id(), "first");
+        let client = DaemonClient::with(Some(home.clone()), Duration::from_millis(300));
+
+        let sent = client.request_sent("POST", "/daemon/stop", None).await;
+        std::fs::remove_dir_all(&home).ok();
+
+        let Sent::Answered(res) = sent else { panic!("request_sent = {sent:?}, want Answered") };
+        assert_eq!(res.status, 0);
+    }
+
+    /// harmflow-app#995: a stop left unanswered is followed until the daemon's pid is gone, or until the daemon answers
+    /// that it still accepts firings, which says the stop did not take.
+    #[tokio::test]
+    async fn wait_stopped_follows_the_pid_and_the_daemon_answers() {
+        let mut exited = Command::new("/usr/bin/true").spawn().unwrap();
+        exited.wait().unwrap();
+        const ACCEPTING: &str = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 25\r\nConnection: close\r\n\r\n{\"acceptingFirings\":true}";
+        let daemon = StandIn::start(&[ACCEPTING]);
+        let home = runtime_home("wait-stopped", &daemon.address, std::process::id(), "first");
+        let client = DaemonClient::with(Some(home.clone()), Duration::from_secs(5));
+
+        let gone = client.wait_stopped(exited.id(), Duration::from_secs(5)).await;
+        let answering = client.wait_stopped(std::process::id(), Duration::from_secs(5)).await;
+        let outlived = client.wait_stopped(std::process::id(), Duration::ZERO).await;
+        std::fs::remove_dir_all(&home).ok();
+
+        assert_eq!(gone, Ok(()));
+        assert_eq!(answering, Err("the daemon answers and is not stopping".to_string()));
+        assert!(outlived.is_err_and(|e| e.contains("did not exit")), "a pid that outlives the wait reads as stopped");
     }
 
     /// harmflow-app#908: a timeout whose runtime file names a pid that is gone reads as a stopped daemon, as before.

@@ -194,7 +194,7 @@ func (a *App) Tick() {
 	if woke {
 		a.unavailableUntil = wake // the machine slept until then
 	}
-	if !a.accepting {
+	if !a.acceptingLocked() {
 		a.mu.Unlock()
 		return
 	}
@@ -363,7 +363,7 @@ func (a *App) RunTask(id string) (FiringResult, error) {
 	a.mu.Lock()
 	enabled := e.doc.IsEnabled() && e.invalid == nil
 	pending := e.deletePending
-	accepting := a.accepting
+	accepting := a.acceptingLocked()
 	a.mu.Unlock()
 	if !accepting {
 		return FiringResult{}, newError(CodeConflict,
@@ -491,7 +491,7 @@ func (a *App) startQueued() {
 	var start []*domain.Execution
 	var handles []*runHandle
 	var drops []droppedFiring
-	if a.accepting {
+	if a.acceptingLocked() {
 		var queued []*domain.Execution
 		for _, x := range a.executions {
 			if x.Status == domain.StatusQueued {
