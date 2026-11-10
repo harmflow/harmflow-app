@@ -61,6 +61,11 @@ async fn daemon_status(state: Shared<'_>) -> Result<DaemonStatus, String> {
 /// first.
 #[tauri::command]
 async fn daemon_start(state: Shared<'_>, replacing: Option<u32>) -> Result<DaemonStatus, String> {
+    start_daemon(&state, replacing).await
+}
+
+/// The start behind `daemon_start`, which the tray's Start daemon takes too, so both start the daemon the same way.
+pub(crate) async fn start_daemon(state: &AppState, replacing: Option<u32>) -> Result<DaemonStatus, String> {
     if let Some(pid) = replacing {
         daemon::wait_gone(pid, Duration::from_secs(30)).await?;
     }
@@ -111,10 +116,10 @@ fn read_tray_settings(app: tauri::AppHandle) {
     });
 }
 
-/// Tray texts in the interface's language: idle, active ({{count}}), open, quit, stop, stopTitle, stopConfirm,
-/// stopChoiceRunning_one and stopChoiceRunning_other ({{count}}), stopWait_one and stopWait_other,
-/// stopCancelRunning_one and stopCancelRunning_other, stopOk, stopFailedTitle, stopFailedOk, cancel; and the app menu's
-/// settings.
+/// Tray texts in the interface's language: idle, active ({{count}}), open, quit, stop, start, notAnswering, stopTitle,
+/// stopConfirm, stopChoiceRunning_one and stopChoiceRunning_other ({{count}}), stopWait_one and stopWait_other,
+/// stopCancelRunning_one and stopCancelRunning_other, stopOk, stopFailedTitle, stopFailedOk, startFailedTitle,
+/// startFailed ({{message}}), cancel; and the app menu's settings.
 #[tauri::command]
 fn set_tray_labels(app: tauri::AppHandle, state: Shared<'_>, labels: HashMap<String, String>) {
     if let Ok(mut current) = state.tray_labels.lock() {
@@ -188,6 +193,7 @@ pub fn run_with(registrations: Vec<Registration>) {
             notice::listen(app.handle())?;
             sse::spawn(app.handle().clone());
             tray::schedule_refresh(app.handle().clone());
+            tray::follow_status(app.handle().clone());
             #[cfg(all(debug_assertions, target_os = "macos"))]
             test_control::listen(app.handle());
             // A normal start shows the window once the interface has painted, not before (harmflow-app#96).

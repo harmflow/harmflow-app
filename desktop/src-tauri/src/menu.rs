@@ -35,6 +35,8 @@ pub enum Action<'a> {
     OpenDashboard,
     /// The tray's Stop daemon…, which asks first.
     StopDaemon,
+    /// The tray's Start daemon, shown while the daemon is stopped, which asks nothing.
+    StartDaemon,
     /// The tray's Quit interface: the desktop ends, and the daemon keeps running.
     QuitInterface,
     /// A running execution the tray lists.
@@ -42,7 +44,7 @@ pub enum Action<'a> {
 }
 
 /// The action of a menu item, by its id. None for the items macOS handles itself (About, Edit, Window…) and for the
-/// tray's header, which only reads.
+/// tray's header and its not-answering item, which only read.
 pub fn action(id: &str) -> Option<Action<'_>> {
     match id {
         SETTINGS => Some(Action::Settings),
@@ -50,6 +52,7 @@ pub fn action(id: &str) -> Option<Action<'_>> {
         QUIT => Some(Action::Quit),
         tray::OPEN => Some(Action::OpenDashboard),
         tray::STOP => Some(Action::StopDaemon),
+        tray::START => Some(Action::StartDaemon),
         tray::QUIT => Some(Action::QuitInterface),
         other => other.strip_prefix(tray::EXECUTION_PREFIX).map(Action::Execution),
     }
@@ -76,6 +79,7 @@ pub fn on_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
         }
         Some(Action::OpenDashboard) => window::show_main(app),
         Some(Action::StopDaemon) => tray::confirm_stop(app),
+        Some(Action::StartDaemon) => tray::start(app),
         Some(Action::QuitInterface) => app.exit(0),
         Some(Action::Execution(execution_id)) => window::show_execution(app, execution_id),
         None => {}
@@ -182,6 +186,7 @@ mod tests {
     fn the_trays_items_keep_their_actions() {
         assert_eq!(action("open"), Some(Action::OpenDashboard));
         assert_eq!(action("stop"), Some(Action::StopDaemon));
+        assert_eq!(action("start"), Some(Action::StartDaemon));
         assert_eq!(action("quit"), Some(Action::QuitInterface));
         assert_eq!(action("exec:exec-8f3a2c"), Some(Action::Execution("exec-8f3a2c")));
     }

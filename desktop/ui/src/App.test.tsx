@@ -988,6 +988,26 @@ describe("settings from the app menu", () => {
       labels.mockRestore();
     }
   });
+
+  it("sends the shell the daemon item's start, its not-answering text, and a failed start's message, in each language", async () => {
+    const labels = vi.spyOn(native, "setTrayLabels");
+    try {
+      await launch();
+      for (const [language, start, notAnswering, startFailed] of [
+        ["en-US", "Start daemon", "Not answering", "The daemon did not start: {{message}}"],
+        ["pt-BR", "Iniciar o daemon", "Sem resposta", "O daemon não iniciou: {{message}}"],
+        ["es-ES", "Iniciar el daemon", "Sin respuesta", "El daemon no se inició: {{message}}"],
+      ]) {
+        await act(async () => void i18n.changeLanguage(language));
+        const sent = labels.mock.lastCall?.[0];
+        expect([sent?.start, sent?.notAnswering, sent?.startFailed]).toEqual([start, notAnswering, startFailed]);
+        expect(sent?.startFailedTitle).toBe(i18n.t("daemonDown.title"));
+      }
+    } finally {
+      await act(async () => void i18n.changeLanguage("en-US"));
+      labels.mockRestore();
+    }
+  });
 });
 
 // The Help menu's Keyboard Shortcuts reaches the interface as a navigation to Settings, on its Shortcuts section, under

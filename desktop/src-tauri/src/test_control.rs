@@ -132,7 +132,7 @@ fn run<R: Runtime>(app: &AppHandle<R>, command: Command) -> Value {
         Command::AppMenu => app_menu(app),
         Command::ChooseAppMenu(id) => choose_app_menu(app, id),
         Command::ChooseTray(id) => {
-            if ![tray::OPEN, tray::STOP, tray::QUIT].contains(&id) {
+            if ![tray::OPEN, tray::STOP, tray::START, tray::QUIT].contains(&id) {
                 return json!({ "error": format!("no tray item {id}") });
             }
             menu::on_event(app, id);
