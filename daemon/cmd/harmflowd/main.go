@@ -4,6 +4,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/harmflowd"
+	"github.com/harmflow/harmflow-app/daemon/internal/adapters/launchd"
 )
 
 // Version is set at build time; desktop and daemon always ship at the same version.
@@ -35,8 +37,20 @@ func main() {
 		Commit: buildCommit(), BuiltAt: buildTime(BuiltAt)}
 	if err := harmflowd.Run(cfg); err != nil {
 		fmt.Fprintln(os.Stderr, "harmflowd:", err)
-		os.Exit(1)
+		os.Exit(exitStatus(err, os.Getenv("XPC_SERVICE_NAME")))
 	}
+}
+
+// exitStatus is the status harmflowd exits with once Run failed with err; service is $XPC_SERVICE_NAME. A daemon that
+// launchd started as the login agent, and that found the data directory held by a running daemon, exits with 0: the
+// agent's KeepAlive restarts only a job that failed, so launchd does not start it again every 10 seconds for as long
+// as the other daemon runs (harmflow-app#978). launchd sets $XPC_SERVICE_NAME to the label of the job it starts, and a
+// process inherits it from whatever started it, so only the agent's exact label counts. Any other failure exits with 1.
+func exitStatus(err error, service string) int {
+	if errors.Is(err, harmflowd.ErrAlreadyRunning) && service == launchd.Label {
+		return 0
+	}
+	return 1
 }
 
 // buildCommit is the Commit make set, or else the one go build stamped in the binary; see commitOf.

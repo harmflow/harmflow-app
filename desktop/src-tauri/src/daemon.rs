@@ -403,11 +403,103 @@ fn target_triple() -> &'static str {
     }
 }
 
-/// Starts the daemon detached in its own process group, so it outlives the window and the app.
-pub fn spawn_daemon() -> Result<(), String> {
+/// The launchd label of the login agent the daemon writes when the user turns Autostart on.
+const AGENT_LABEL: &str = "com.harmflow.daemon";
+
+/// Starts the daemon: through launchd while the login agent serves this data directory with this harmflowd, so that
+/// launchd keeps supervising it and no second daemon competes for the directory (harmflow-app#978); otherwise the
+/// binary itself, detached in its own process group, so it outlives the window and the app.
+pub fn start_daemon() -> Result<(), String> {
     let bin = daemon_binary().ok_or_else(|| "the harmflowd binary was not found".to_string())?;
     let home = std::env::var_os("HARMFLOW_HOME").filter(|v| !v.is_empty());
-    spawn_detached(&bin, home.as_deref()).map(|_| ())
+    start(LaunchAgent::of_user().as_ref(), &bin, &harmflow_home(), home.as_deref()).map(|_| ())
+}
+
+/// Starts `bin` on the data directory `home` through `agent` when it serves both, and directly otherwise, with
+/// `--home home_arg` when one is given: the process started directly, or `None` when launchd started the agent's job.
+/// A kickstart that fails starts the binary directly, as before the agent existed.
+fn start(agent: Option<&LaunchAgent>, bin: &Path, home: &Path, home_arg: Option<&OsStr>) -> Result<Option<Child>, String> {
+    if let Some(agent) = agent.filter(|agent| agent.serves(bin, home)) {
+        if agent.kickstart().is_ok() {
+            return Ok(None);
+        }
+    }
+    spawn_detached(bin, home_arg).map(Some)
+}
+
+/// The user's login agent, and the tools that read it: launchctl for the job launchd loaded, plutil for its plist.
+struct LaunchAgent {
+    launchctl: PathBuf,
+    plutil: PathBuf,
+    plist: PathBuf,
+    /// The job's service target, `gui/<uid>/<label>`.
+    target: String,
+    /// The data directory a daemon started without `--home` uses: `~/Library/Application Support/HarmFlow`.
+    default_home: PathBuf,
+}
+
+impl LaunchAgent {
+    /// The agent of the user running the app, its plist in `~/Library/LaunchAgents`; `None` when the user's home or
+    /// id cannot be read. Where launchctl does not exist, as off macOS, it serves nothing.
+    fn of_user() -> Option<Self> {
+        let user_home = dirs::home_dir()?;
+        let uid = tool_output(Path::new("/usr/bin/id"), &[OsStr::new("-u")])?;
+        let uid = uid.trim();
+        if uid.is_empty() {
+            return None;
+        }
+        Some(Self {
+            launchctl: PathBuf::from("/bin/launchctl"),
+            plutil: PathBuf::from("/usr/bin/plutil"),
+            plist: user_home.join("Library").join("LaunchAgents").join(format!("{AGENT_LABEL}.plist")),
+            target: format!("gui/{uid}/{AGENT_LABEL}"),
+            default_home: user_home.join("Library").join("Application Support").join("HarmFlow"),
+        })
+    }
+
+    /// Whether launchd loaded the agent and it starts `bin` on `home`, as `make update-app` checks before it kickstarts
+    /// the agent: its plist exists, its program is `bin`, and it serves `home` by its `--home`, or the default data
+    /// directory without one; and the program launchd loaded, which it keeps until the next login, is `bin` too.
+    fn serves(&self, bin: &Path, home: &Path) -> bool {
+        let Some(loaded) = tool_output(&self.launchctl, &[OsStr::new("print"), OsStr::new(&self.target)]) else {
+            return false;
+        };
+        let mut extract = ["-extract", "ProgramArguments", "json", "-o", "-"].map(OsStr::new).to_vec();
+        extract.push(self.plist.as_os_str());
+        let Some(json) = tool_output(&self.plutil, &extract) else {
+            return false;
+        };
+        let Ok(args) = serde_json::from_str::<Vec<String>>(&json) else {
+            return false;
+        };
+        let agent_home = args
+            .windows(2)
+            .find(|pair| pair[0] == "--home")
+            .map_or_else(|| self.default_home.clone(), |pair| PathBuf::from(&pair[1]));
+        let loaded_program = loaded.lines().find_map(|line| line.trim_start().strip_prefix("program = "));
+        args.first().is_some_and(|program| same_path(Path::new(program), bin))
+            && same_path(&agent_home, home)
+            && loaded_program.is_some_and(|program| same_path(Path::new(program.trim()), bin))
+    }
+
+    /// Asks launchd to start the agent's job now.
+    fn kickstart(&self) -> Result<(), String> {
+        tool_output(&self.launchctl, &[OsStr::new("kickstart"), OsStr::new(&self.target)])
+            .map(|_| ())
+            .ok_or_else(|| format!("launchctl kickstart {} failed", self.target))
+    }
+}
+
+/// The standard output of `program` run with `args`, when it exits with success.
+fn tool_output(program: &Path, args: &[&OsStr]) -> Option<String> {
+    let out = Command::new(program).args(args).stdin(Stdio::null()).stderr(Stdio::null()).output().ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Whether two paths name the same file, their symbolic links resolved where they exist.
+fn same_path(a: &Path, b: &Path) -> bool {
+    let canonical = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    canonical(a) == canonical(b)
 }
 
 /// Starts `bin` in a process group of its own, with its standard streams closed, so neither the app's exit nor a
@@ -730,6 +822,189 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(group, Some(child.id()), "the child's process group is not its own");
         assert!(own.is_some() && own != group, "the child shares the test's process group {own:?}");
+    }
+
+    /// Writes `text` to `path` as an executable script, from a shell of its own, for the reason
+    /// `daemon_starts_in_its_own_process_group` gives.
+    #[cfg(unix)]
+    fn write_script(path: &Path, text: &str) {
+        let wrote = Command::new("/bin/sh")
+            .args(["-c", r#"printf '%s' "$2" > "$1" && chmod 755 "$1""#, "sh"])
+            .arg(path)
+            .arg(text)
+            .status()
+            .unwrap();
+        assert!(wrote.success(), "{} was not written", path.display());
+    }
+
+    /// What the stand-in tools of a `LaunchAgent` answer: whether launchd loaded the job, the program it loaded, the
+    /// plist's ProgramArguments (`None` for no plist), and whether a kickstart succeeds.
+    #[cfg(unix)]
+    struct Agent<'a> {
+        loaded: bool,
+        loaded_program: &'a str,
+        program_arguments: Option<Vec<&'a str>>,
+        kickstart_ok: bool,
+    }
+
+    /// A folder of its own holding a stand-in harmflowd, and a `LaunchAgent` whose launchctl and plutil are stand-ins
+    /// answering as `agent` says, its launchctl logging each call to `calls`. `{bin}` and `{home}` in what `agent`
+    /// gives stand for the stand-in harmflowd and the folder's data directory.
+    #[cfg(unix)]
+    fn stand_in_agent(name: &str, agent: &Agent) -> (PathBuf, LaunchAgent) {
+        let dir = std::env::temp_dir().join(format!("harmflow-agent-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("home")).unwrap();
+        let bin = dir.join("harmflowd");
+        let fill = |s: &str| s.replace("{bin}", bin.to_str().unwrap()).replace("{home}", dir.join("home").to_str().unwrap());
+        write_script(&bin, "#!/bin/sh\nexec sleep 60\n");
+        let launchctl = format!(
+            "#!/bin/sh\necho \"$*\" >> '{calls}'\ncase \"$1\" in\nprint) printf '\\tprogram = %s\\n' '{program}'; {print_exit} ;;\nkickstart) {kick_exit} ;;\nesac\nexit 64\n",
+            calls = dir.join("calls").display(),
+            program = fill(agent.loaded_program),
+            print_exit = if agent.loaded { "exit 0" } else { "exit 113" },
+            kick_exit = if agent.kickstart_ok { "exit 0" } else { "exit 1" },
+        );
+        write_script(&dir.join("launchctl"), &launchctl);
+        let plutil = match &agent.program_arguments {
+            Some(args) => {
+                let args: Vec<String> = args.iter().map(|a| fill(a)).collect();
+                format!("#!/bin/sh\nprintf '%s\\n' '{}'\n", serde_json::to_string(&args).unwrap())
+            }
+            None => "#!/bin/sh\nexit 1\n".to_string(),
+        };
+        write_script(&dir.join("plutil"), &plutil);
+        let agent = LaunchAgent {
+            launchctl: dir.join("launchctl"),
+            plutil: dir.join("plutil"),
+            plist: dir.join("com.harmflow.daemon.plist"),
+            target: "gui/501/com.harmflow.daemon".into(),
+            default_home: dir.join("home"),
+        };
+        (dir, agent)
+    }
+
+    /// The launchctl calls the stand-in logged, one per line.
+    #[cfg(unix)]
+    fn launchctl_calls(dir: &Path) -> Vec<String> {
+        std::fs::read_to_string(dir.join("calls")).unwrap_or_default().lines().map(str::to_string).collect()
+    }
+
+    /// harmflow-app#978: while the login agent serves this data directory with this harmflowd, the daemon starts through
+    /// `launchctl kickstart`, so launchd keeps supervising it, and no harmflowd of the app's own competes with it.
+    #[cfg(unix)]
+    #[test]
+    fn a_loaded_login_agent_starts_the_daemon_through_launchd() {
+        for (name, args) in [
+            ("agent-home", vec!["{bin}", "--home", "{home}", "--builtins", "/builtins"]),
+            ("agent-default-home", vec!["{bin}", "--builtins", "/builtins"]),
+        ] {
+            let (dir, agent) = stand_in_agent(
+                name,
+                &Agent { loaded: true, loaded_program: "{bin}", program_arguments: Some(args), kickstart_ok: true },
+            );
+            let started = start(Some(&agent), &dir.join("harmflowd"), &dir.join("home"), None);
+            let calls = launchctl_calls(&dir);
+            std::fs::remove_dir_all(&dir).ok();
+            let through_launchd = match started {
+                Ok(None) => true,
+                Ok(Some(mut child)) => {
+                    child.kill().ok();
+                    child.wait().ok();
+                    false
+                }
+                Err(_) => false,
+            };
+            assert!(through_launchd, "{name}: the daemon did not start through launchd");
+            assert_eq!(
+                calls,
+                ["print gui/501/com.harmflow.daemon", "kickstart gui/501/com.harmflow.daemon"],
+                "{name}: launchctl calls"
+            );
+        }
+    }
+
+    /// harmflow-app#978: when the login agent would not start this harmflowd on this data directory, or launchd will not
+    /// start it, the app starts the binary itself, as before.
+    #[cfg(unix)]
+    #[test]
+    fn the_daemon_starts_directly_unless_the_login_agent_serves_it() {
+        let serving = || Some(vec!["{bin}", "--home", "{home}"]);
+        let cases = [
+            ("not-loaded", Agent { loaded: false, loaded_program: "", program_arguments: serving(), kickstart_ok: true }, false),
+            ("no-plist", Agent { loaded: true, loaded_program: "{bin}", program_arguments: None, kickstart_ok: true }, false),
+            (
+                "other-program",
+                Agent {
+                    loaded: true,
+                    loaded_program: "{bin}",
+                    program_arguments: Some(vec!["/elsewhere/harmflowd", "--home", "{home}"]),
+                    kickstart_ok: true,
+                },
+                false,
+            ),
+            (
+                "other-home",
+                Agent {
+                    loaded: true,
+                    loaded_program: "{bin}",
+                    program_arguments: Some(vec!["{bin}", "--home", "/elsewhere/HarmFlow"]),
+                    kickstart_ok: true,
+                },
+                false,
+            ),
+            (
+                "loaded-before-it-changed",
+                Agent {
+                    loaded: true,
+                    loaded_program: "/elsewhere/harmflowd",
+                    program_arguments: serving(),
+                    kickstart_ok: true,
+                },
+                false,
+            ),
+            ("kickstart-fails", Agent { loaded: true, loaded_program: "{bin}", program_arguments: serving(), kickstart_ok: false }, true),
+        ];
+        for (name, agent, kickstarted) in cases {
+            let (dir, agent) = stand_in_agent(name, &agent);
+            let started = start(Some(&agent), &dir.join("harmflowd"), &dir.join("home"), None);
+            let calls = launchctl_calls(&dir);
+            let direct = match started {
+                Ok(Some(mut child)) => {
+                    child.kill().ok();
+                    child.wait().ok();
+                    true
+                }
+                _ => false,
+            };
+            std::fs::remove_dir_all(&dir).ok();
+            assert!(direct, "{name}: the binary was not started directly");
+            assert_eq!(
+                calls.iter().any(|c| c.starts_with("kickstart")),
+                kickstarted,
+                "{name}: launchctl calls {calls:?}"
+            );
+        }
+    }
+
+    /// With no login agent at all, the binary starts directly.
+    #[cfg(unix)]
+    #[test]
+    fn without_a_login_agent_the_daemon_starts_directly() {
+        let dir = std::env::temp_dir().join(format!("harmflow-no-agent-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bin = dir.join("harmflowd");
+        write_script(&bin, "#!/bin/sh\nexec sleep 60\n");
+        let started = start(None, &bin, &dir, Some(dir.as_os_str()));
+        let direct = match started {
+            Ok(Some(mut child)) => {
+                child.kill().ok();
+                child.wait().ok();
+                true
+            }
+            _ => false,
+        };
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(direct, "the binary was not started directly");
     }
 
     /// A keychain file made for one test, unlocked, and named by `$HARMFLOW_KEYCHAIN` once `point_here` runs. Dropping

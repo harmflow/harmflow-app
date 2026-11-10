@@ -14,7 +14,8 @@ import (
 	"go.uber.org/goleak"
 )
 
-// A lock another holder has means a daemon is running on the data directory.
+// A lock another holder has means a daemon is running on the data directory: ErrAlreadyRunning, which command
+// harmflowd matches to pick its exit status (harmflow-app#978).
 func TestAcquireLockSeesARunningDaemon(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "daemon.lock")
 	held, err := acquireLock(path, syscall.Flock)
@@ -25,8 +26,8 @@ func TestAcquireLockSeesARunningDaemon(t *testing.T) {
 	if f, err := acquireLock(path, syscall.Flock); err == nil {
 		f.Close()
 		t.Fatalf("acquireLock(%s) took a lock already held", path)
-	} else if !strings.Contains(err.Error(), "already running") {
-		t.Errorf("acquireLock(%s) = %v, want that another daemon is running", path, err)
+	} else if !errors.Is(err, ErrAlreadyRunning) || !strings.Contains(err.Error(), "already running") {
+		t.Errorf("acquireLock(%s) = %v, want %v", path, err, ErrAlreadyRunning)
 	}
 }
 
@@ -40,7 +41,7 @@ func TestAcquireLockReportsOtherFailures(t *testing.T) {
 		f.Close()
 		t.Fatalf("acquireLock(%s) took a lock the file system refused", path)
 	}
-	if !errors.Is(err, syscall.ENOTSUP) || !strings.Contains(err.Error(), path) || strings.Contains(err.Error(), "already running") {
+	if !errors.Is(err, syscall.ENOTSUP) || !strings.Contains(err.Error(), path) || errors.Is(err, ErrAlreadyRunning) {
 		t.Errorf("acquireLock(%s) = %v, want an error naming the file and wrapping %v", path, err, syscall.ENOTSUP)
 	}
 }
