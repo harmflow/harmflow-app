@@ -38,8 +38,11 @@ type Server struct {
 	// Routes are added to the API's own routes, behind the same checks; Prepare refuses one that cannot be added.
 	Routes []Route
 
-	mu       sync.RWMutex
-	token    string
+	mu    sync.RWMutex
+	token string
+	// stopping, guarded by mu and made on first use, is closed when Shutdown starts: it ends the open event streams,
+	// which http.Server.Shutdown would otherwise wait for until its deadline.
+	stopping chan struct{}
 	listener net.Listener
 	port     int
 	srv      *http.Server
@@ -132,14 +135,33 @@ func (s *Server) Serve() error {
 	return err
 }
 
-// Shutdown stops serving, then records the rejected requests no entry has counted yet.
+// Shutdown ends the open event streams and stops serving, then records the rejected requests no entry has counted yet.
+// Any other request still running holds it until ctx ends, and it then returns ctx's error.
 func (s *Server) Shutdown(ctx context.Context) error {
+	stopping := s.stoppingCh()
+	s.mu.Lock()
+	select {
+	case <-stopping:
+	default:
+		close(stopping)
+	}
+	s.mu.Unlock()
 	var err error
 	if s.srv != nil {
 		err = s.srv.Shutdown(ctx)
 	}
 	s.flushRejections()
 	return err
+}
+
+// stoppingCh is the channel Shutdown closes when it starts.
+func (s *Server) stoppingCh() chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopping == nil {
+		s.stopping = make(chan struct{})
+	}
+	return s.stopping
 }
 
 // Handler routes the API's requests, Routes' included, every one through the Host, Origin, and token checks. Like
@@ -642,8 +664,10 @@ func (s *Server) executionOutput(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, v)
 }
 
-// stream serves the SSE stream: buffered events after Last-Event-ID first, then live ones, with a heartbeat.
+// stream serves the SSE stream: buffered events after Last-Event-ID first, then live ones, with a heartbeat. It ends
+// when Shutdown starts, and the client reconnects with Last-Event-ID, as it does when the daemon's process exits.
 func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
+	stopping := s.stoppingCh()
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeError(w, 500, "internal", domain.Text{Message: "streaming is not supported"})
@@ -672,6 +696,8 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-r.Context().Done():
+			return
+		case <-stopping:
 			return
 		case <-ping.C:
 			fmt.Fprint(w, ": ping\n\n")

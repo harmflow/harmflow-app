@@ -13,6 +13,7 @@ This package serves the daemon's authenticated loopback HTTP API and event strea
 
 - `Listen` binds only to `127.0.0.1`. `[server.go:Listen]`
 - The handler routes requests through Host, Origin, and token checks; an unset token rejects every request. `[server.go:Handler]` `[server.go:SetToken]`
+- `Shutdown` ends the open event streams when it starts, so it waits only for the other requests, until its caller's deadline. `[server.go:Shutdown]` `[server.go:stream]`
 
 ## Side Effects
 
