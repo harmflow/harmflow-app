@@ -651,7 +651,9 @@ describe("task form document", () => {
   }
 
   const chips = (label: string) => [...field(label).querySelectorAll(".name-chip > .mono")].map((c) => c.textContent);
-  const repository = () => [...host!.querySelector(".grid-repo:not(.row-list__head)")!.querySelectorAll("input")];
+  /** The first repository row's fields, each by its column's name. */
+  const repository = () =>
+    ["Repository (owner/repo)", "Local path", "Base branch"].map((name) => host!.querySelector<HTMLInputElement>(`input[aria-label="${name}"]`)!);
   /** The preferred harness, then each fallback: its harness, model, and effort controls. */
   const profiles = () =>
     [...host!.querySelectorAll("#section-harness .grid-profile")].map((p) => {
