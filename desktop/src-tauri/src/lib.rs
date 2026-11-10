@@ -56,8 +56,9 @@ async fn daemon_status(state: Shared<'_>) -> Result<DaemonStatus, String> {
     Ok(state.daemon.status().await)
 }
 
-/// Starts the bundled daemon when none answers, then waits until it does. `replacing` is the pid of a daemon asked to
-/// stop, whose process exits first.
+/// Starts the bundled daemon when none answers, then waits until it does: through launchd while the login agent serves
+/// this data directory, and directly otherwise. `replacing` is the pid of a daemon asked to stop, whose process exits
+/// first.
 #[tauri::command]
 async fn daemon_start(state: Shared<'_>, replacing: Option<u32>) -> Result<DaemonStatus, String> {
     if let Some(pid) = replacing {
@@ -68,7 +69,7 @@ async fn daemon_start(state: Shared<'_>, replacing: Option<u32>) -> Result<Daemo
     if current.running || current.not_answering {
         return Ok(current);
     }
-    daemon::spawn_daemon()?;
+    daemon::start_daemon()?;
     for _ in 0..40 {
         tokio::time::sleep(Duration::from_millis(250)).await;
         let status = state.daemon.status().await;

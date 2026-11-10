@@ -339,9 +339,13 @@ func writeRuntime(path string, srv *httpapi.Server, store, version string) error
 	return fsstore.WriteAtomic(path, append(data, '\n'), 0o600)
 }
 
+// ErrAlreadyRunning is the error Run returns when another process holds the data directory's lock: a daemon already
+// runs on that directory, and this one started nothing.
+var ErrAlreadyRunning = errors.New("another HarmFlow daemon is already running on this data directory")
+
 // acquireLock keeps a second daemon from running on the same data directory, with flock, which is syscall.Flock
-// outside tests. Only a lock another process holds means that a daemon is running; any other failure is returned as
-// it is, naming the lock file.
+// outside tests. Only a lock another process holds means that a daemon is running, and returns ErrAlreadyRunning; any
+// other failure is returned as it is, naming the lock file.
 func acquireLock(path string, flock func(fd, how int) error) (*os.File, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
@@ -350,7 +354,7 @@ func acquireLock(path string, flock func(fd, how int) error) (*os.File, error) {
 	if err := flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		f.Close() // the file was only opened, and held nothing yet
 		if errors.Is(err, syscall.EWOULDBLOCK) {
-			return nil, errors.New("another HarmFlow daemon is already running on this data directory")
+			return nil, ErrAlreadyRunning
 		}
 		return nil, fmt.Errorf("locking %s: %w", path, err)
 	}

@@ -1,10 +1,107 @@
 package main
 
 import (
+	"bytes"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime/debug"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
+
+	"github.com/harmflow/harmflow-app/daemon/harmflowd"
+	"github.com/harmflow/harmflow-app/daemon/internal/adapters/launchd"
 )
+
+// runMainEnv, set to 1, makes this test binary run main instead of its tests, so a test can start it as harmflowd and
+// read the status it exits with.
+const runMainEnv = "HARMFLOWD_TEST_RUN_MAIN"
+
+func TestMain(m *testing.M) {
+	if os.Getenv(runMainEnv) == "1" {
+		main()
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
+// harmflow-app#978: only a daemon the login agent started, that found the data directory taken, exits with 0, which
+// launchd's KeepAlive does not restart. Any other failure, or the same one in a process launchd did not start as the
+// agent, still exits with 1.
+func TestExitStatus(t *testing.T) {
+	taken := fmt.Errorf("start: %w", harmflowd.ErrAlreadyRunning)
+	other := errors.New("locking run/daemon.lock: operation not supported")
+	cases := []struct {
+		name    string
+		err     error
+		service string
+		want    int
+	}{
+		{"taken, started by the agent", taken, launchd.Label, 0},
+		{"taken, started by no launchd job", taken, "", 1},
+		{"taken, another job's label", taken, "application.com.apple.Terminal.1234", 1},
+		{"taken, a label that only begins with the agent's", taken, launchd.Label + ".test", 1},
+		{"another failure, started by the agent", other, launchd.Label, 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := exitStatus(c.err, c.service); got != c.want {
+				t.Errorf("exitStatus(%v, %q) = %d, want %d", c.err, c.service, got, c.want)
+			}
+		})
+	}
+}
+
+// harmflow-app#978: harmflowd started on a data directory whose lock another process holds exits with 0 when
+// $XPC_SERVICE_NAME is the login agent's label, and with 1 otherwise, saying in both cases that a daemon already runs.
+func TestHarmflowdOnATakenDataDirectory(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, "run"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.OpenFile(filepath.Join(home, "run", "daemon.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatalf("flock(%s) = %v, want the lock", lock.Name(), err)
+	}
+	for _, c := range []struct {
+		service string
+		want    int
+	}{
+		{launchd.Label, 0},
+		{"", 1},
+		{"application.com.apple.Terminal.1234", 1},
+	} {
+		t.Run(fmt.Sprintf("XPC_SERVICE_NAME=%q", c.service), func(t *testing.T) {
+			cmd := exec.Command(os.Args[0], "--home", home)
+			// exec keeps the last of two values of a variable, so these override the test's own environment.
+			cmd.Env = append(os.Environ(), runMainEnv+"=1", "XPC_SERVICE_NAME="+c.service, "HARMFLOW_HOME=")
+			var stderr bytes.Buffer
+			cmd.Stderr = &stderr
+			err := cmd.Run()
+			got := 0
+			var exit *exec.ExitError
+			if errors.As(err, &exit) {
+				got = exit.ExitCode()
+			} else if err != nil {
+				t.Fatalf("running harmflowd: %v", err)
+			}
+			if got != c.want {
+				t.Errorf("harmflowd exited with %d, want %d; stderr: %s", got, c.want, stderr.String())
+			}
+			if !strings.Contains(stderr.String(), harmflowd.ErrAlreadyRunning.Error()) {
+				t.Errorf("harmflowd stderr = %q, want %q", stderr.String(), harmflowd.ErrAlreadyRunning)
+			}
+		})
+	}
+}
 
 // The commit go build stamps tells builds of the same version apart in Settings → About.
 func TestCommitOf(t *testing.T) {
