@@ -49,7 +49,7 @@ const emptyMonth: Spend = { month: "2026-11", daysInMonth: 30, days: [day("2026-
 let root: Root | undefined;
 let host: HTMLElement;
 
-function render(spend: Spend) {
+function render(spend: Spend | undefined) {
   patchStateForTests({ spend });
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -137,6 +137,42 @@ describe("SpendBand", () => {
     expect(host.querySelectorAll(".spend__grid")).toHaveLength(3);
     expect(host.querySelectorAll(".spend__slot--day")).toHaveLength(1);
     expect(host.querySelector(".spend__total")?.textContent).toContain("$0.0000");
+  });
+});
+
+describe("SpendBand's title", () => {
+  const title = () => host.querySelector(".panel__title")?.textContent;
+
+  beforeEach(() => {
+    // The clock sits in another month and year than the spend shown, so the title can only come from the spend's month.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2027-01-15T12:00:00"));
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    await i18n.changeLanguage("en-US");
+  });
+
+  it("names the month and year of the spend's month", () => {
+    render({ ...emptyMonth, month: "2026-11" });
+    expect(title()).toBe("Spend this month - Nov, 2026");
+  });
+
+  it("names a month of another year", () => {
+    render({ ...emptyMonth, month: "2025-12", daysInMonth: 31, days: [day("2025-12-01", 0, 0, 0)] });
+    expect(title()).toBe("Spend this month - Dec, 2025");
+  });
+
+  it("names the month in the interface's language", async () => {
+    await i18n.changeLanguage("pt-BR");
+    render({ ...emptyMonth, month: "2026-11" });
+    expect(title()).toMatch(/^Gasto deste mês - nov\.?, 2026$/i);
+  });
+
+  it("shows no month while the spend loads", () => {
+    render(undefined);
+    expect(title()).toBe("Spend this month");
   });
 });
 

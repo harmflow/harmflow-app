@@ -912,6 +912,7 @@ export const ptBR: Resources = {
     createFirst: "Crie sua primeira tarefa",
     spend: {
       title: "Gasto deste mês",
+      titleMonth: "Gasto deste mês - {{month}}, {{year}}",
       view: "Mostrar o gasto em",
       cost: "Custo",
       tokens: "Tokens",

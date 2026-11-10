@@ -26,17 +26,29 @@ function formatDate(date: string, locale: string): string {
   return Number.isNaN(d.getTime()) ? date : new Intl.DateTimeFormat(locale, { weekday: "short", month: "short", day: "numeric" }).format(d);
 }
 
+/**
+ * The month and year of the spend's `month` (`YYYY-MM`), read as a UTC date so the machine's time zone never moves it
+ * to another month; undefined for a value that is no month.
+ */
+function spendMonth(month: string, locale: string): { month: string; year: string } | undefined {
+  const match = /^(\d{4})-(\d{2})$/.exec(month);
+  if (!match) return undefined;
+  const first = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, 1));
+  return { month: new Intl.DateTimeFormat(locale, { month: "short", timeZone: "UTC" }).format(first), year: match[1] };
+}
+
 export function SpendBand() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const spend = useStore((s) => s.spend);
   const [view, setView] = useState<SpendView>(keptSpendView);
   const choose = (v: SpendView) => {
     setView(v);
     keepSpendView(v);
   };
+  const month = spend ? spendMonth(spend.month, i18n.language) : undefined;
   return (
     <Panel
-      title={t("overview.spend.title")}
+      title={month ? t("overview.spend.titleMonth", month) : t("overview.spend.title")}
       icon="coin"
       className="spend"
       actions={
