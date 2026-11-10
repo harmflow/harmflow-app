@@ -6,7 +6,7 @@ import { formatTime } from "../../lib/format";
 import { matching } from "../../lib/shortcuts";
 import { toolKey, type TimelineItem } from "../../lib/timeline";
 import { Icon } from "../Icon";
-import { CopyButton, EmptyState, cx } from "../ui";
+import { Checkbox, CopyButton, EmptyState, cx } from "../ui";
 
 export function Timeline({
   items,
@@ -63,10 +63,7 @@ export function Timeline({
   return (
     <div className="timeline">
       <div className="timeline__tools">
-        <label className="mini-toggle">
-          <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />
-          <span>{t("executions.detail.follow")}</span>
-        </label>
+        <Checkbox compact checked={follow} onChange={setFollow} label={t("executions.detail.follow")} />
       </div>
       <ol
         className="timeline__list"
