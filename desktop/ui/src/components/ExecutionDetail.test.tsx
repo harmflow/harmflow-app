@@ -784,6 +784,14 @@ describe("execution detail", () => {
     expect(host!.querySelector(".costs-tile--hero .costs-tile__value")!.textContent).toBe("$0.1266");
     expect(summary).toContain("An estimate at API list prices of Oct 22, 2026");
 
+    // The token mix's measure is a single choice, read as a radio group as every other one is: by cost while priced.
+    const measure = host!.querySelector<HTMLElement>('[role="radiogroup"][aria-label="Measure"]')!;
+    const option = (label: string) => [...measure.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((b) => b.textContent === label)!;
+    expect(measure.classList.contains("segmented")).toBe(true);
+    expect(["by cost", "by tokens"].map((l) => option(l).getAttribute("aria-checked"))).toEqual(["true", "false"]);
+    await act(async () => option("by tokens").click());
+    expect(["by cost", "by tokens"].map((l) => option(l).getAttribute("aria-checked"))).toEqual(["false", "true"]);
+
     // The receipt itemizes each attempt's tokens by class, at the price that made its amount.
     const receiptButton = [...host!.querySelectorAll<HTMLButtonElement>(".detail__body button")].find((b) => b.textContent === "Receipt");
     await act(async () => receiptButton!.click());
@@ -820,6 +828,10 @@ describe("execution detail", () => {
     for (const shown of ["10,866", "14,129", "so far · priced when it ends"]) expect(row()).toContain(shown);
     expect(row()).not.toContain("$");
     expect(first).toContain("the cost appears when the attempt ends");
+    // With no cost yet, the measure is by tokens, and by cost cannot be chosen.
+    const option = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>('[aria-label="Measure"] [role="radio"]')].find((b) => b.textContent === label)!;
+    expect(option("by tokens").getAttribute("aria-checked")).toBe("true");
+    expect(option("by cost").disabled).toBe(true);
 
     // A later message adds to the count; still no cost.
     const grown = { ...running, attempts: [{ ...attempt, usage: { status: "partial" as const, modelSource: "harness" as const, models: [{ model: "claude-haiku-4-5-20251001", tokens: tokens(25, 12752, 65425, 0) }] } }] };
