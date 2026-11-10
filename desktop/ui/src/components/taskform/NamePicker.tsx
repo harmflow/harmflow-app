@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { CatalogEntry } from "../../api/types";
 import { controlKey } from "../../lib/shortcuts";
-import { Chip, Field } from "../ui";
+import { Chip, Field, TextInput } from "../ui";
 
 export function NamePicker({
   label,
@@ -47,8 +47,8 @@ export function NamePicker({
             );
           })}
         </div>
-        <input
-          className="input mono"
+        <TextInput
+          mono
           list={listId}
           value={draft}
           placeholder={t("tasks.fields.addName")}

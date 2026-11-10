@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { Harness } from "../../api/types";
 import { daemonText } from "../../lib/daemonText";
 import { HARNESS_PROVIDERS } from "../../lib/schema";
-import { Button, Field, IconButton, Select, Toggle, cx } from "../ui";
+import { Button, Field, IconButton, Select, TextInput, Toggle, cx } from "../ui";
 import { cleanRow, type Item } from "./formModel";
 
 export function HarnessProfile({
@@ -68,8 +68,8 @@ export function HarnessProfile({
         </Field>
       ) : null}
       <Field label={t("tasks.fields.model")}>
-        <input
-          className="input mono"
+        <TextInput
+          mono
           list={modelListId}
           value={model}
           placeholder={t("tasks.fields.harnessDefault")}
