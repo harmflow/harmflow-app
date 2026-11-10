@@ -42,7 +42,23 @@ import {
   type Path,
 } from "../lib/taskForm";
 import { Icon, type IconName } from "./Icon";
-import { Banner, Button, Checkbox, Field, FieldGroup, IconButton, Modal, NumberInput, Select, TextArea, TextInput, Toggle, cx } from "./ui";
+import {
+  Banner,
+  Button,
+  Checkbox,
+  Field,
+  FieldGroup,
+  IconButton,
+  Modal,
+  NumberInput,
+  SegmentedControl,
+  SegmentedMultiSelect,
+  Select,
+  TextArea,
+  TextInput,
+  Toggle,
+  cx,
+} from "./ui";
 
 export interface TaskFormProps {
   doc: Doc;
@@ -474,20 +490,15 @@ function ScriptFields({ doc, onChange, set, err }: { doc: Doc; onChange: (doc: D
   const systems = getIn<string[]>(doc, ["spec", "script", "systems"]) ?? [];
   return (
     <>
-      <div className="segmented" role="radiogroup" aria-label={t("tasks.fields.programKind")}>
-        {(["command", "inline"] as const).map((k) => (
-          <button
-            key={k}
-            type="button"
-            role="radio"
-            aria-checked={kind === k}
-            className={cx("segmented__item", kind === k && "segmented__item--active")}
-            onClick={() => onChange(setProgramKind(doc, k))}
-          >
-            {k === "command" ? t("tasks.fields.programCommand") : t("tasks.fields.programInline")}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl
+        aria-label={t("tasks.fields.programKind")}
+        value={kind}
+        options={[
+          { value: "command", label: t("tasks.fields.programCommand") },
+          { value: "inline", label: t("tasks.fields.programInline") },
+        ]}
+        onChange={(k) => onChange(setProgramKind(doc, k))}
+      />
       {kind === "command" ? (
         <Field label={t("tasks.fields.command")} hint={t("tasks.fields.commandHint")} error={err(["spec", "script", "command"]) ?? err(["spec", "script", "command", 0])}>
           <ArgsArea rows={4} value={getIn(doc, ["spec", "script", "command"])} onValue={(v) => set(["spec", "script", "command"], v)} placeholder={"/usr/bin/python3\n/Users/me/jobs/audit.py\n--weekly"} />
@@ -915,20 +926,16 @@ function ScheduleFields({
 
   return (
     <>
-      <div className="segmented" role="radiogroup" aria-label={t("tasks.fields.scheduleKind")}>
-        {(["none", "cron", "interval"] as const).map((k) => (
-          <button
-            key={k}
-            type="button"
-            role="radio"
-            aria-checked={kind === k}
-            className={cx("segmented__item", kind === k && "segmented__item--active")}
-            onClick={() => onChange(setScheduleKind(doc, k))}
-          >
-            {k === "none" ? t("tasks.fields.scheduleNone") : k === "cron" ? t("tasks.fields.scheduleCron") : t("tasks.fields.scheduleInterval")}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl
+        aria-label={t("tasks.fields.scheduleKind")}
+        value={kind}
+        options={[
+          { value: "none", label: t("tasks.fields.scheduleNone") },
+          { value: "cron", label: t("tasks.fields.scheduleCron") },
+          { value: "interval", label: t("tasks.fields.scheduleInterval") },
+        ]}
+        onChange={(k) => onChange(setScheduleKind(doc, k))}
+      />
       {kind === "cron" ? (
         <CronBuilder
           cron={cron ?? ""}
@@ -1071,25 +1078,18 @@ function CronBuilder({
             <span className="field__label" id="hf-schedule-days">
               {t("tasks.fields.days")}
             </span>
-            <div className="segmented" role="group" aria-labelledby="hf-schedule-days">
-              {[0, 1, 2, 3, 4, 5, 6].map((d) => {
-                const on = guided.days.includes(d);
-                return (
-                  <button
-                    key={d}
-                    type="button"
-                    aria-pressed={on}
-                    aria-label={weekdayName(d, locale, "long")}
-                    // A weekly schedule keeps at least one day.
-                    disabled={on && guided.days.length === 1}
-                    className={cx("segmented__item", on && "segmented__item--active")}
-                    onClick={() => update({ days: on ? guided.days.filter((x) => x !== d) : [...guided.days, d] })}
-                  >
-                    {weekdayName(d, locale, "short")}
-                  </button>
-                );
-              })}
-            </div>
+            <SegmentedMultiSelect
+              aria-labelledby="hf-schedule-days"
+              values={guided.days}
+              options={[0, 1, 2, 3, 4, 5, 6].map((d) => ({
+                value: d,
+                label: weekdayName(d, locale, "short"),
+                ariaLabel: weekdayName(d, locale, "long"),
+                // A weekly schedule keeps at least one day.
+                disabled: guided.days.length === 1 && guided.days.includes(d),
+              }))}
+              onChange={(days) => update({ days })}
+            />
           </div>
         ) : null}
         {guided?.kind === "monthly" ? (

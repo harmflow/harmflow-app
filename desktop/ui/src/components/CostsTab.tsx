@@ -19,7 +19,7 @@ import { formatDuration, formatNumber } from "../lib/format";
 import { useNow } from "../lib/hooks";
 import { HarnessLabel } from "./Shell";
 import { Icon } from "./Icon";
-import { Button, Chip, CopyButton, EmptyState, cx } from "./ui";
+import { Button, Chip, CopyButton, EmptyState, SegmentedControl } from "./ui";
 
 /** How long each harness's provider keeps a cache write, which prices it: the default lifetime, and the extended one. */
 const CACHE_LIFETIMES: Record<string, { cacheWriteShort: string; cacheWriteLong: string }> = {
@@ -112,14 +112,15 @@ function Summary({ cost, active, onReceipt }: { cost: ExecutionCost; active: boo
         <section className="costs-block">
           <header className="costs-block__header">
             <h4>{t("executions.detail.costs.mixTitle")}</h4>
-            <div className="costs-seg" role="group" aria-label={t("executions.detail.costs.measure")}>
-              <button type="button" className={cx(by === "cost" && "is-on")} aria-pressed={by === "cost"} onClick={() => setBy("cost")} disabled={!cost.costs}>
-                {t("executions.detail.costs.byCost")}
-              </button>
-              <button type="button" className={cx(by === "tokens" && "is-on")} aria-pressed={by === "tokens"} onClick={() => setBy("tokens")}>
-                {t("executions.detail.costs.byTokens")}
-              </button>
-            </div>
+            <SegmentedControl
+              aria-label={t("executions.detail.costs.measure")}
+              value={by}
+              options={[
+                { value: "cost", label: t("executions.detail.costs.byCost"), disabled: !cost.costs },
+                { value: "tokens", label: t("executions.detail.costs.byTokens") },
+              ]}
+              onChange={setBy}
+            />
           </header>
           <div className="costs-mix" aria-hidden="true">
             {SUMMARY_CLASSES.map((c) =>

@@ -7,7 +7,7 @@ import { formatCompact, formatUsd } from "../lib/costs";
 import { formatNumber } from "../lib/format";
 import { SPEND_VIEWS, axisTop, dayMarks, dayValue, isEmptyMonth, keepSpendView, keptSpendView, totalValue, type SpendView } from "../lib/spend";
 import { useStore } from "../state/store";
-import { Panel, cx } from "./ui";
+import { Panel, SegmentedControl } from "./ui";
 
 /** The fractions of the axis's top that carry a grid line and a label. */
 const GRID = [1, 0.5, 0];
@@ -40,20 +40,12 @@ export function SpendBand() {
       icon="coin"
       className="spend"
       actions={
-        <div className="segmented" role="radiogroup" aria-label={t("overview.spend.view")}>
-          {SPEND_VIEWS.map((v) => (
-            <button
-              key={v}
-              type="button"
-              role="radio"
-              aria-checked={view === v}
-              className={cx("segmented__item", view === v && "segmented__item--active")}
-              onClick={() => choose(v)}
-            >
-              {t(`overview.spend.${v}`)}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          aria-label={t("overview.spend.view")}
+          value={view}
+          options={SPEND_VIEWS.map((v) => ({ value: v, label: t(`overview.spend.${v}`) }))}
+          onChange={choose}
+        />
       }
     >
       {spend ? <SpendChart spend={spend} view={view} /> : <div className="spend__plot" aria-busy="true" />}

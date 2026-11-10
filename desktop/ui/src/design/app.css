@@ -2244,32 +2244,6 @@ li:last-child .tl-item__rail::before {
   justify-content: space-between;
 }
 
-.costs-seg {
-  display: inline-flex;
-  border: 1px solid var(--hf-color-border);
-  border-radius: var(--hf-radius-pill);
-  overflow: hidden;
-}
-
-.costs-seg button {
-  padding: var(--hf-space-0-5) var(--hf-space-3);
-  border: 0;
-  background: transparent;
-  color: var(--hf-color-text-muted);
-  font-size: var(--hf-font-size-xs);
-  cursor: pointer;
-}
-
-.costs-seg button.is-on {
-  background: var(--hf-color-cyan-soft);
-  color: var(--hf-color-cyan);
-}
-
-.costs-seg button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
 .costs-mix {
   display: flex;
   gap: var(--hf-space-0-5);
@@ -3083,6 +3057,11 @@ button.queue-item:hover,
   background: var(--hf-color-cyan-soft);
   color: var(--hf-color-cyan);
   box-shadow: inset 0 0 0 1px rgba(var(--hf-rgb-cyan), 0.4);
+}
+
+/* An option that cannot be chosen (the Costs tab's Cost with no costs); the weekday picker's last day stays as chosen. */
+.segmented__item:disabled:not(.segmented__item--active) {
+  opacity: 0.4;
 }
 
 .preview {
