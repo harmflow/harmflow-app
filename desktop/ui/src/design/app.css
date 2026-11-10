@@ -61,7 +61,7 @@ ol {
 
 .mono {
   font-family: var(--hf-font-mono);
-  font-size: 0.94em;
+  font-size: var(--hf-font-size-mono);
 }
 
 .muted {
@@ -186,7 +186,7 @@ ol {
   font-variation-settings: var(--hf-font-display-settings);
   font-size: var(--hf-font-size-xl);
   font-weight: var(--hf-font-weight-bold);
-  letter-spacing: 0.01em;
+  letter-spacing: var(--hf-letter-spacing-tight);
   line-height: var(--hf-line-height-tight);
 }
 
@@ -484,7 +484,7 @@ body:has([aria-modal="true"]) .tooltip {
   font-variation-settings: var(--hf-font-display-settings);
   font-size: var(--hf-font-size-3xl);
   font-weight: var(--hf-font-weight-bold);
-  letter-spacing: 0.005em;
+  letter-spacing: var(--hf-letter-spacing-tight);
   line-height: var(--hf-line-height-tight);
 }
 
@@ -1074,7 +1074,7 @@ body:has([aria-modal="true"]) .tooltip {
   font-variation-settings: var(--hf-font-display-settings);
   font-size: var(--hf-font-size-2xl);
   font-weight: var(--hf-font-weight-bold);
-  line-height: 1.1;
+  line-height: var(--hf-line-height-tight);
 }
 
 .counter__label {
@@ -1105,7 +1105,7 @@ body:has([aria-modal="true"]) .tooltip {
   font-size: var(--hf-font-size-xs);
   font-weight: var(--hf-font-weight-medium);
   white-space: nowrap;
-  line-height: 1.3;
+  line-height: var(--hf-line-height-tight);
 }
 
 .chip--compact {
@@ -1336,7 +1336,7 @@ body:has([aria-modal="true"]) .tooltip {
   min-width: 0;
   font-size: var(--hf-font-size-lg);
   font-weight: var(--hf-font-weight-semibold);
-  line-height: 1.25;
+  line-height: var(--hf-line-height-tight);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -1882,7 +1882,7 @@ li:last-child .tl-item__rail::before {
   overflow: auto;
   color: var(--hf-color-text);
   font-size: var(--hf-font-size-xs);
-  line-height: 1.6;
+  line-height: var(--hf-line-height-relaxed);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -2136,7 +2136,7 @@ li:last-child .tl-item__rail::before {
 .chat-turn__text {
   color: var(--hf-color-text);
   font-size: var(--hf-font-size-sm);
-  line-height: 1.6;
+  line-height: var(--hf-line-height-relaxed);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -2363,7 +2363,7 @@ li:last-child .tl-item__rail::before {
 
 .costs-table__total td {
   border-top: 1px solid var(--hf-color-border-strong);
-  font-weight: 600;
+  font-weight: var(--hf-font-weight-semibold);
 }
 
 .costs-note {
@@ -2415,7 +2415,7 @@ li:last-child .tl-item__rail::before {
 .costs-receipt__brand {
   flex: 1;
   color: var(--hf-color-cyan);
-  letter-spacing: 0.08em;
+  letter-spacing: var(--hf-letter-spacing-label);
   text-transform: uppercase;
 }
 
@@ -2436,7 +2436,7 @@ li:last-child .tl-item__rail::before {
 .costs-receipt__attempt > .mono {
   color: var(--hf-color-text-muted);
   font-size: var(--hf-font-size-xs);
-  letter-spacing: 0.06em;
+  letter-spacing: var(--hf-letter-spacing-label);
   text-transform: uppercase;
 }
 
@@ -2565,7 +2565,7 @@ button.queue-item:hover,
 .history-item__title {
   font-weight: var(--hf-font-weight-semibold);
   font-size: var(--hf-font-size-sm);
-  line-height: 1.3;
+  line-height: var(--hf-line-height-tight);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -2618,7 +2618,7 @@ button.queue-item:hover,
   margin: 0;
   font-family: var(--hf-font-mono);
   font-size: var(--hf-font-size-sm);
-  line-height: 1.6;
+  line-height: var(--hf-line-height-relaxed);
   color: var(--hf-color-text);
 }
 
@@ -2794,7 +2794,7 @@ button.queue-item:hover,
 .input--area {
   resize: vertical;
   min-height: 60px;
-  line-height: 1.5;
+  line-height: var(--hf-line-height);
 }
 
 .input--prompt {
@@ -3506,7 +3506,7 @@ button.queue-item:hover,
 
 .task-group__name {
   font-size: var(--hf-font-size-sm);
-  font-weight: 600;
+  font-weight: var(--hf-font-weight-semibold);
 }
 
 .task-group__count {
