@@ -165,7 +165,9 @@ const toggle = (label: string) =>
 const boxes = (fieldLabel: string) => [...field(fieldLabel)!.querySelectorAll("label.checkbox")];
 const button = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === label)!;
 const radio = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((b) => b.textContent === label)!;
-const chips = (label: string) => [...field(label)!.querySelectorAll(".name-chip > .mono")].map((c) => c.textContent);
+/** The names a picker shows: each chip holds the name and the button named Remove. */
+const chips = (label: string) =>
+  [...field(label)!.querySelectorAll('button[aria-label="Remove"]')].map((b) => b.parentElement!.querySelector(".mono")!.textContent);
 /** The first repository row's fields, each by its column's name. */
 const repository = () =>
   ["Repository (owner/repo)", "Local path", "Base branch"].map((name) => host!.querySelector<HTMLInputElement>(`input[aria-label="${name}"]`)!);
