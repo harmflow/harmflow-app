@@ -1031,6 +1031,25 @@ describe("the events timeline from the keyboard", () => {
     expect(follow().checked).toBe(true);
     expect(scrolled).toEqual([]);
   });
+
+  // harmflow-app#992: the Follow option is the shared Checkbox, at its compact size, with its label and default kept.
+  it("draws Follow with the compact Checkbox, on by default, and turns it back on with a click once a key turned it off", async () => {
+    await open(x, steps, capture());
+    await choose("Events");
+    const option = follow().closest("label")!;
+    expect([...option.classList]).toEqual(["checkbox", "checkbox--compact"]);
+    expect(option.querySelector(".checkbox__box")).not.toBeNull();
+    expect(option.textContent).toBe("Follow");
+    expect(host!.querySelector(".mini-toggle")).toBeNull();
+    expect(follow().checked).toBe(true);
+
+    press("ArrowUp");
+    expect(follow().checked).toBe(false);
+    await act(async () => follow().click());
+    expect(follow().checked).toBe(true);
+    await act(async () => follow().click());
+    expect(follow().checked).toBe(false);
+  });
 });
 
 // A harness task's conversation alone — each attempt's prompt, then the session messages it received — read only, and

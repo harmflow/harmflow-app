@@ -1599,15 +1599,6 @@ body:has([aria-modal="true"]) .tooltip {
   z-index: 2;
 }
 
-.mini-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--hf-space-1-5);
-  color: var(--hf-color-text-faint);
-  font-size: var(--hf-font-size-2xs);
-  font-family: var(--hf-font-mono);
-}
-
 .timeline__list {
   max-height: 440px;
   overflow-y: auto;
@@ -2924,6 +2915,20 @@ button.list-row--error:hover {
   border-color: var(--hf-color-cyan);
   background: var(--hf-color-cyan);
   color: var(--hf-color-text-inverse);
+}
+
+/* A toolbar's checkbox, in its small monospace text: the event timeline's Follow option. */
+.checkbox--compact {
+  gap: var(--hf-space-1-5);
+  color: var(--hf-color-text-faint);
+  font-size: var(--hf-font-size-2xs);
+  font-family: var(--hf-font-mono);
+}
+
+.checkbox--compact .checkbox__box {
+  width: 13px;
+  height: 13px;
+  border-radius: 3px;
 }
 
 .check-row {
