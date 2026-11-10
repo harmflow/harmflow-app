@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -449,5 +450,109 @@ func TestPrepareWithNoAddedRoute(t *testing.T) {
 		if w.Code != c.want {
 			t.Errorf("GET %s: status %d, want %d", c.path, w.Code, c.want)
 		}
+	}
+}
+
+// served serves s on a free loopback port. It returns where Serve's result is sent once Serve returns, and a client of
+// its own, whose connections close when the test ends.
+func served(t *testing.T, s *Server) (<-chan error, *http.Client) {
+	t.Helper()
+	if err := s.Listen(0); err != nil {
+		t.Fatalf("Listen(0) = %v, want nil", err)
+	}
+	result := make(chan error, 1)
+	go func() { result <- s.Serve() }()
+	tr := &http.Transport{}
+	t.Cleanup(tr.CloseIdleConnections)
+	return result, &http.Client{Transport: tr}
+}
+
+// getServed sends GET path, with the token, to the server s serves.
+func getServed(client *http.Client, s *Server, path string) (*http.Response, error) {
+	r, err := http.NewRequest("GET", "http://"+s.Address()+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	r.Header.Set("Authorization", "Bearer "+validToken)
+	return client.Do(r)
+}
+
+// harmflow-app#1000: with an event stream open, Shutdown ends the stream's handler and returns nil at once, instead
+// of waiting for the stream until its deadline.
+func TestShutdownEndsAnOpenEventStream(t *testing.T) {
+	s := &Server{App: startedApp(t)}
+	s.SetToken(validToken)
+	serveErr, client := served(t, s)
+	res, err := getServed(client, s, "/api/v1/events/stream")
+	if err != nil {
+		t.Fatalf("GET /api/v1/events/stream: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("GET /api/v1/events/stream: status %d, want 200", res.StatusCode)
+	}
+	// The body ends without an error only when the handler returned: a connection closed under an open stream ends
+	// the chunked body early, with io.ErrUnexpectedEOF.
+	ended := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(io.Discard, res.Body)
+		ended <- err
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	start := time.Now()
+	err = s.Shutdown(ctx)
+	if elapsed := time.Since(start); err != nil || elapsed > time.Second {
+		t.Errorf("Shutdown(5 s) with an event stream open = %v after %v, want nil within 1 s", err, elapsed)
+	}
+	select {
+	case err := <-ended:
+		if err != nil {
+			t.Errorf("reading the event stream after Shutdown = %v, want its end", err)
+		}
+	case <-time.After(time.Second):
+		t.Error("the event stream is still open 1 s after Shutdown, want it ended")
+	}
+	if err := <-serveErr; err != nil {
+		t.Errorf("Serve() = %v, want nil", err)
+	}
+}
+
+// A request that does not end still holds Shutdown until its caller's deadline, and Shutdown then returns the
+// deadline's error.
+func TestShutdownWaitsForARequestUntilItsDeadline(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	hang := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-release
+		w.WriteHeader(204)
+	})
+	s := &Server{App: startedApp(t), Routes: []Route{{Pattern: "GET /api/v1/hang", Handler: hang}}}
+	s.SetToken(validToken)
+	serveErr, client := served(t, s)
+	answered := make(chan error, 1)
+	go func() {
+		res, err := getServed(client, s, "/api/v1/hang")
+		if err == nil {
+			res.Body.Close()
+		}
+		answered <- err
+	}()
+	if !closedWithin(started, 5*time.Second) {
+		t.Fatal("GET /api/v1/hang has not reached its handler after 5 s")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if err := s.Shutdown(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Shutdown(100 ms) with a request running = %v, want %v", err, context.DeadlineExceeded)
+	}
+	close(release)
+	if err := <-answered; err != nil {
+		t.Errorf("GET /api/v1/hang = %v, want its answer", err)
+	}
+	if err := <-serveErr; err != nil {
+		t.Errorf("Serve() = %v, want nil", err)
 	}
 }
