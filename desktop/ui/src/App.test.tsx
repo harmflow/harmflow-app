@@ -204,6 +204,11 @@ const toggle = () => sidebar().querySelector<HTMLButtonElement>(".sidebar__toggl
 const navButton = (label: string) => [...sidebar().querySelectorAll<HTMLButtonElement>(".nav__item")].find((b) => b.textContent?.startsWith(label))!;
 const contentOrCard = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>(".onboarding button")].find((b) => b.textContent?.includes(label))!;
 const tooltip = () => document.body.querySelector(".tooltip")?.textContent ?? null;
+/** The first row title of the Executions screen's queue, the panel found by its heading. */
+const firstQueued = () =>
+  [...host!.querySelectorAll("section.panel")]
+    .find((p) => p.querySelector(".panel__title")?.textContent?.startsWith("Execution queue"))
+    ?.querySelector(".list-row__title")?.textContent;
 
 /** Presses ⌘B (or the given keys) where focus is; returns whether the app took the key. */
 async function press(target: EventTarget = document.activeElement ?? document.body, keys: KeyboardEventInit = {}): Promise<boolean> {
@@ -560,7 +565,7 @@ describe("new task", () => {
       await finish();
       expect(completions()).toEqual([{ onboardingCompleted: true, autostart: true }]);
       expect(getState().tasks).toEqual([summary]);
-      expect(host!.querySelector(".queue-item__title")?.textContent).toBe("Script task");
+      expect(firstQueued()).toBe("Script task");
     });
 
     it("comes back to its last step once a task is imported", async () => {
@@ -586,7 +591,7 @@ describe("new task", () => {
       await finish();
       expect(completions()).toEqual([{ onboardingCompleted: true }]);
       expect(getState().tasks).toEqual([summary]);
-      expect(host!.querySelector(".queue-item__title")?.textContent).toBe("Script task");
+      expect(firstQueued()).toBe("Script task");
     });
 
     it("comes back to the first-task step when the editor or the import dialog is left unsaved, and Later still leads on", async () => {
@@ -1406,7 +1411,7 @@ describe("unsaved changes", () => {
       confirm.mockResolvedValue(false);
 
       await click(host!.querySelector<HTMLButtonElement>('button[aria-label="Notifications"]')!);
-      await click(host!.querySelector<HTMLButtonElement>(".notice")!);
+      await click(host!.querySelector<HTMLButtonElement>(".notice-list button")!);
       expect(asked()).toBe(1);
 
       await click(host!.querySelector<HTMLButtonElement>('button[aria-label="More actions"]')!);
@@ -2071,7 +2076,7 @@ describe("first use", () => {
     expect(host!.querySelector(".onboarding")).toBeNull();
     expect(title()).toBe("Live executions");
     expect(getState().tasks).toEqual([summary]);
-    expect(host!.querySelector(".queue-item__title")?.textContent).toBe(summary.name);
+    expect(firstQueued()).toBe(summary.name);
     expect(start).toHaveBeenCalledTimes(1);
   }
 
@@ -2222,7 +2227,7 @@ describe("notices held while no dashboard ran", () => {
       expect(bell.querySelector(".badge")?.textContent).toBe("2");
       await act(async () => bell.click());
       await settle();
-      const titles = [...host!.querySelectorAll(".notice .notice__title")].map((t) => t.textContent);
+      const titles = [...host!.querySelectorAll(".popover button .list-row__title")].map((t) => t.textContent);
       expect(titles).toEqual(["Task second failed", "Task first failed"]);
 
       expect(daemon.sent.filter((r) => r.path.startsWith("/notifications/read"))).toEqual([]);

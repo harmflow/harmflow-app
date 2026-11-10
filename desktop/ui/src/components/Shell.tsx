@@ -2,16 +2,14 @@ import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObjec
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { native } from "../api/native";
-import type { Notification } from "../api/types";
 import { askAndStopDaemon } from "../lib/daemonStop";
-import { translateNested } from "../lib/daemonText";
 import { errorMessage } from "../lib/errorMessage";
-import { formatBytes, formatNumber, formatRelative, formatTime } from "../lib/format";
-import { useNow } from "../lib/hooks";
+import { formatBytes, formatNumber, formatTime } from "../lib/format";
 import { ariaKeys, shortcutText, type ShortcutId } from "../lib/shortcuts";
 import { dynamicText, useRegistered } from "../registrations";
 import { actions, every, useStore } from "../state/store";
 import { HarnessMark, Icon, Logo, type IconName } from "./Icon";
+import { MarkAllRead, NotificationList } from "./NotificationList";
 import { toast } from "./toast";
 import { Banner, Button, Gauge, IconButton, cx } from "./ui";
 
@@ -377,16 +375,9 @@ function usePopover(): [boolean, (v: boolean) => void, RefObject<HTMLDivElement 
 }
 
 function NotificationBell({ onOpenExecution }: { onOpenExecution: (id: string) => void }) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const unread = useStore((s) => s.unread);
   const [open, setOpen, ref] = usePopover();
-  const now = useNow(30000);
-
-  const openNotice = (n: Notification) => {
-    void actions.markRead([n.id]);
-    if (n.executionId) onOpenExecution(n.executionId);
-    setOpen(false);
-  };
 
   return (
     <div className="popover-anchor" ref={ref}>
@@ -404,46 +395,19 @@ function NotificationBell({ onOpenExecution }: { onOpenExecution: (id: string) =
         <div className="popover popover--wide">
           <div className="popover__header">
             <strong>{t("header.notifications")}</strong>
-            {unread.length ? (
-              <Button variant="link" onClick={() => void actions.markRead()}>
-                {t("header.markAllRead")}
-              </Button>
-            ) : null}
+            <MarkAllRead />
           </div>
-          {unread.length === 0 ? <p className="popover__empty">{t("header.noNotifications")}</p> : null}
-          <ul className="notice-list">
-            {unread.map((n) => (
-              <li key={n.id}>
-                <button type="button" className={cx("notice", `notice--${n.severity}`)} onClick={() => openNotice(n)}>
-                  <span className="notice__title">{noticeText(t, n).title}</span>
-                  <span className="notice__body">{noticeText(t, n).body}</span>
-                  <span className="notice__time">{formatRelative(n.createdAt, i18n.language, now)}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          <NotificationList
+            onOpenExecution={onOpenExecution}
+            onOpened={() => setOpen(false)}
+            empty={<p className="popover__empty">{t("header.noNotifications")}</p>}
+            toned
+            className="notice-list"
+          />
         </div>
       ) : null}
     </div>
   );
-}
-
-type TFn = ReturnType<typeof useTranslation>["t"];
-
-/**
- * The translated text of a notice, from its event type and parameters; the daemon's text is the fallback. The reason
- * it quotes is translated too when the daemon wrote it.
- */
-export function noticeText(t: TFn, n: Notification): { title: string; body: string } {
-  const values = translateNested(n.params);
-  const params: Record<string, string> = { taskName: "", harness: "", harnessName: "", summary: "", error: "", reason: "", url: "", ...values };
-  const key = `notify.${n.eventType}`;
-  // The key is built at run time, so the typed overloads, which walk every key of the resources, are left out: past
-  // a size, checking them exceeds TypeScript's instantiation depth.
-  const translate = t as unknown as (key: string, options: Record<string, string>) => string;
-  const title = translate(`${key}.title`, { ...params, defaultValue: n.title });
-  const body = translate(`${key}.body`, { ...params, defaultValue: n.body });
-  return { title, body };
 }
 
 function MoreMenu({ onNavigate }: { onNavigate: (s: ScreenRoute) => void }) {

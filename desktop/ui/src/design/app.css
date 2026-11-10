@@ -815,45 +815,6 @@ body:has([aria-modal="true"]) .tooltip {
   overflow-y: auto;
 }
 
-.notice {
-  display: grid;
-  gap: var(--hf-space-0-5);
-  width: 100%;
-  padding: var(--hf-space-2);
-  border: none;
-  border-left: 2px solid var(--hf-color-blue);
-  border-radius: var(--hf-radius-sm);
-  background: none;
-  text-align: left;
-}
-
-.notice:hover {
-  background: var(--hf-color-surface-hover);
-}
-
-.notice--warning {
-  border-left-color: var(--hf-color-warning);
-}
-
-.notice--error {
-  border-left-color: var(--hf-color-danger);
-}
-
-.notice__title {
-  font-weight: var(--hf-font-weight-semibold);
-}
-
-.notice__body,
-.notice__time {
-  color: var(--hf-color-text-muted);
-  font-size: var(--hf-font-size-xs);
-}
-
-/* A long path breaks anywhere rather than widen the list past the popover. */
-.notice__body {
-  overflow-wrap: anywhere;
-}
-
 /* ---------- Screens ---------- */
 
 .screen {
@@ -2498,38 +2459,74 @@ li:last-child .tl-item__rail::before {
   word-break: break-word;
 }
 
-/* ---------- Aside ---------- */
+/* ---------- List rows ---------- */
 
-.aside-panel .panel__body {
-  padding-top: 0;
-}
-
-.queue-list,
-.history-list {
+.list-rows {
   display: flex;
   flex-direction: column;
+  gap: var(--hf-space-1);
+}
+
+.list-rows--loose {
   gap: var(--hf-space-2);
 }
 
-.queue-item,
-.history-item {
+.list-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--hf-space-3);
   width: 100%;
-  padding: var(--hf-space-3);
-  border: 1px solid var(--hf-color-border);
+  padding: var(--hf-space-2);
+  border: 1px solid transparent;
   border-radius: var(--hf-radius-md);
-  background: rgba(var(--hf-rgb-sunken), 0.6);
+  background: none;
   text-align: left;
 }
 
-button.queue-item:hover,
-.history-item:hover {
+button.list-row:hover {
+  background: var(--hf-color-surface-hover);
+  border-color: var(--hf-color-border);
+}
+
+.list-row--top {
+  align-items: flex-start;
+}
+
+.list-row--card {
+  padding: var(--hf-space-3);
+  border-color: var(--hf-color-border);
+  background: rgba(var(--hf-rgb-sunken), 0.6);
+}
+
+button.list-row--card:hover {
+  background: rgba(var(--hf-rgb-sunken), 0.6);
   border-color: rgba(var(--hf-rgb-cyan), 0.35);
 }
 
-.queue-item__icon {
+/* A severity's tone on the left edge, as the bell's notices show it. */
+.list-row--info,
+.list-row--warning,
+.list-row--error {
+  border: none;
+  border-left: 2px solid var(--hf-color-blue);
+  border-radius: var(--hf-radius-sm);
+}
+
+button.list-row--info:hover {
+  border-left-color: var(--hf-color-blue);
+}
+
+.list-row--warning,
+button.list-row--warning:hover {
+  border-left-color: var(--hf-color-warning);
+}
+
+.list-row--error,
+button.list-row--error:hover {
+  border-left-color: var(--hf-color-danger);
+}
+
+.list-row__icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2541,8 +2538,7 @@ button.queue-item:hover,
   color: var(--hf-color-text-muted);
 }
 
-.queue-item__text,
-.history-item__text {
+.list-row__text {
   display: flex;
   flex-direction: column;
   gap: var(--hf-space-0-5);
@@ -2550,10 +2546,8 @@ button.queue-item:hover,
   min-width: 0;
 }
 
-.queue-item__title,
-.history-item__title {
+.list-row__title {
   font-weight: var(--hf-font-weight-semibold);
-  font-size: var(--hf-font-size-sm);
   line-height: var(--hf-line-height-tight);
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -2561,8 +2555,11 @@ button.queue-item:hover,
   overflow: hidden;
 }
 
-.queue-item__sub,
-.history-item__sub {
+.list-row--card .list-row__title {
+  font-size: var(--hf-font-size-sm);
+}
+
+.list-row__sub {
   color: var(--hf-color-text-muted);
   font-size: var(--hf-font-size-xs);
   white-space: nowrap;
@@ -2570,8 +2567,14 @@ button.queue-item:hover,
   text-overflow: ellipsis;
 }
 
-/* The time goes to a line of its own when the item is narrow, as when zoomed in. */
-.queue-item__when {
+/* A long path breaks anywhere rather than widen the list past the popover. */
+.list-row__sub--wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* The time goes to a line of its own when the row is narrow, as when zoomed in. */
+.list-row__meta {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -2580,18 +2583,21 @@ button.queue-item:hover,
   font-size: var(--hf-font-size-xs);
 }
 
-.queue-item__when strong {
+.list-row__meta strong {
   color: var(--hf-color-text);
 }
 
-.history-item {
-  align-items: center;
-}
-
-.history-item__time {
+.list-row__trail {
+  flex: none;
   color: var(--hf-color-text-muted);
   font-size: var(--hf-font-size-xs);
   white-space: nowrap;
+}
+
+/* ---------- Aside ---------- */
+
+.aside-panel .panel__body {
+  padding-top: 0;
 }
 
 .quote-card {
@@ -4021,49 +4027,6 @@ button.queue-item:hover,
 .installations__item .mono {
   min-width: 0;
   overflow-wrap: anywhere;
-}
-
-.simple-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--hf-space-1);
-}
-
-.simple-row {
-  display: flex;
-  align-items: center;
-  gap: var(--hf-space-3);
-  width: 100%;
-  padding: var(--hf-space-2);
-  border: 1px solid transparent;
-  border-radius: var(--hf-radius-md);
-  background: none;
-  text-align: left;
-}
-
-.simple-row:hover {
-  background: var(--hf-color-surface-hover);
-  border-color: var(--hf-color-border);
-}
-
-.simple-row__main {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-}
-
-.simple-row__main > span {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: var(--hf-font-size-xs);
-}
-
-.simple-row__aside {
-  color: var(--hf-color-text-muted);
-  font-size: var(--hf-font-size-xs);
-  white-space: nowrap;
 }
 
 .dir-row {

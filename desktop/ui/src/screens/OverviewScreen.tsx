@@ -2,13 +2,14 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Counters } from "../components/Aside";
 import { HarnessRow, ToolRow } from "../components/Harnesses";
-import { HarnessLabel, noticeText } from "../components/Shell";
+import { MarkAllRead, NotificationList } from "../components/NotificationList";
+import { HarnessLabel } from "../components/Shell";
 import { SpendBand } from "../components/SpendBand";
-import { Button, Chip, EmptyState, Panel, StatusMark } from "../components/ui";
+import { Button, Chip, EmptyState, ListRow, ListRows, Panel, StatusMark } from "../components/ui";
 import { fieldText } from "../lib/daemonText";
 import { formatDuration, formatRelative } from "../lib/format";
 import { useNow } from "../lib/hooks";
-import { actions, useStore } from "../state/store";
+import { useStore } from "../state/store";
 
 export function OverviewScreen({
   onOpenExecution,
@@ -29,7 +30,6 @@ export function OverviewScreen({
   const tools = useStore((s) => s.tools);
   const tasks = useStore((s) => s.tasks);
   const recent = useStore((s) => s.recent);
-  const unread = useStore((s) => s.unread);
   const now = useNow(30000);
 
   const upcoming = useMemo(
@@ -102,77 +102,41 @@ export function OverviewScreen({
               }
             />
           ) : (
-            <ul className="simple-list">
+            <ListRows>
               {upcoming.map((task) => (
                 <li key={task.id}>
-                  <button type="button" className="simple-row" onClick={() => onOpenTask(task.id)}>
-                    <span className="simple-row__main">
-                      <strong>{task.name}</strong>
-                      <span className="mono muted">{task.schedule}</span>
-                    </span>
-                    <HarnessLabel harness={task.harness} taskType={task.type} />
-                    <span className="simple-row__aside">{formatRelative(task.nextFireAt, locale, now)}</span>
-                  </button>
+                  <ListRow
+                    title={task.name}
+                    secondary={<span className="mono">{task.schedule}</span>}
+                    aside={<HarnessLabel harness={task.harness} taskType={task.type} />}
+                    trailing={formatRelative(task.nextFireAt, locale, now)}
+                    onClick={() => onOpenTask(task.id)}
+                  />
                 </li>
               ))}
-            </ul>
+            </ListRows>
           )}
         </Panel>
 
         <Panel title={t("overview.attention")} icon="alert">
           {attention.length === 0 ? <EmptyState icon="check" title={t("overview.noAttention")} /> : null}
-          <ul className="simple-list">
+          <ListRows>
             {attention.map((e) => (
               <li key={e.id}>
-                <button type="button" className="simple-row" onClick={() => onOpenExecution(e.id)}>
-                  <StatusMark status={e.status} />
-                  <span className="simple-row__main">
-                    <strong>{e.taskName}</strong>
-                    <span className="mono muted">{fieldText(e.errorMessage, e.errorKey, e.errorParams) ?? e.summary ?? e.workItem ?? e.id}</span>
-                  </span>
-                  <span className="simple-row__aside">{formatRelative(e.endedAt ?? e.createdAt, locale, now)}</span>
-                </button>
+                <ListRow
+                  leading={<StatusMark status={e.status} />}
+                  title={e.taskName}
+                  secondary={<span className="mono">{fieldText(e.errorMessage, e.errorKey, e.errorParams) ?? e.summary ?? e.workItem ?? e.id}</span>}
+                  trailing={formatRelative(e.endedAt ?? e.createdAt, locale, now)}
+                  onClick={() => onOpenExecution(e.id)}
+                />
               </li>
             ))}
-          </ul>
+          </ListRows>
         </Panel>
 
-        <Panel
-          title={t("overview.unread")}
-          icon="bell"
-          className="overview-grid__wide"
-          actions={
-            unread.length ? (
-              <Button variant="link" onClick={() => void actions.markRead()}>
-                {t("header.markAllRead")}
-              </Button>
-            ) : null
-          }
-        >
-          {unread.length === 0 ? <EmptyState icon="bell" title={t("overview.noUnread")} /> : null}
-          <ul className="simple-list">
-            {unread.slice(0, 8).map((n) => {
-              const text = noticeText(t, n);
-              return (
-                <li key={n.id}>
-                  <button
-                    type="button"
-                    className="simple-row"
-                    onClick={() => {
-                      void actions.markRead([n.id]);
-                      if (n.executionId) onOpenExecution(n.executionId);
-                    }}
-                  >
-                    <span className="simple-row__main">
-                      <strong>{text.title}</strong>
-                      <span className="muted">{text.body}</span>
-                    </span>
-                    <span className="simple-row__aside">{formatRelative(n.createdAt, locale, now)}</span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+        <Panel title={t("overview.unread")} icon="bell" className="overview-grid__wide" actions={<MarkAllRead />}>
+          <NotificationList onOpenExecution={onOpenExecution} limit={8} empty={<EmptyState icon="bell" title={t("overview.noUnread")} />} />
         </Panel>
       </div>
     </div>
