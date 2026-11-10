@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","session_id":"33333333-3333-3333-3333-333333333333","model":"claude-opus-5-5"}
+{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1796083200,"overageStatus":"rejected","overageDisabledReason":"member_zero_credit_limit","isUsingOverage":false},"session_id":"33333333-3333-3333-3333-333333333333"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Your usage allocation has been disabled by your admin · run /usage-credits to ask your admin for a higher limit"}]},"error":"rate_limit","session_id":"33333333-3333-3333-3333-333333333333"}
+{"type":"result","subtype":"success","is_error":true,"result":"Your usage allocation has been disabled by your admin · run /usage-credits to ask your admin for a higher limit","session_id":"33333333-3333-3333-3333-333333333333"}

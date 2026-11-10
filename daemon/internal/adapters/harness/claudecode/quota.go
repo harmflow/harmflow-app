@@ -57,12 +57,26 @@ func parseUsageReport(out string) domain.Quota {
 // rateLimitInfo is the rate_limit_info of a rate_limit_event, which the CLI sends with each API call. A rejected status
 // with isUsingOverage set is a plan window used up and the session going on with extra usage.
 type rateLimitInfo struct {
-	Status         string                   `json:"status"`
-	ResetsAt       int64                    `json:"resetsAt"`
-	RateLimitType  string                   `json:"rateLimitType"`
-	OverageStatus  string                   `json:"overageStatus"`
-	IsUsingOverage bool                     `json:"isUsingOverage"`
-	UnifiedWindows map[string]unifiedWindow `json:"unifiedWindows"`
+	Status                string                   `json:"status"`
+	ResetsAt              int64                    `json:"resetsAt"`
+	RateLimitType         string                   `json:"rateLimitType"`
+	OverageStatus         string                   `json:"overageStatus"`
+	OverageDisabledReason string                   `json:"overageDisabledReason"`
+	IsUsingOverage        bool                     `json:"isUsingOverage"`
+	UnifiedWindows        map[string]unifiedWindow `json:"unifiedWindows"`
+}
+
+// zeroCreditLimit marks an overageDisabledReason that says the usage allocation itself is disabled: a credit limit of
+// zero, as member_zero_credit_limit. Any other reason explains only why extra usage is off, with the plan's allocation
+// still there, so it does not count, even one that says "disabled".
+const zeroCreditLimit = "zero_credit_limit"
+
+// allocationDisabled reports whether the call was rejected, on no plan window, because the account's usage allocation
+// is disabled (harmflow-app#973). No retry on this harness mends that until an admin acts, whatever text the session
+// ends with, so Finish reads it as an exhausted quota; a rejection with no such reason stays a temporary rate limit.
+func (r rateLimitInfo) allocationDisabled() bool {
+	return r.Status == "rejected" && !planWindow(r.RateLimitType) &&
+		strings.Contains(r.OverageDisabledReason, zeroCreditLimit)
 }
 
 // unifiedWindow is one plan window of a rate-limit report: its use as a fraction of 1, and when it resets.

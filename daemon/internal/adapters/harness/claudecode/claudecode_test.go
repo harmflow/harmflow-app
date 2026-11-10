@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -153,6 +154,54 @@ func TestParseQuota(t *testing.T) {
 	}
 }
 
+// harmflow-app#973: a member whose usage an admin disabled, as Claude Code 2.1.309 reported it, is rejected with no
+// plan window; the CLI's quota text makes it an exhausted quota, not a rate limit to wait out on the same harness.
+func TestParseAdminDisabledUsage(t *testing.T) {
+	p, _ := replay(t, "admin-disabled.jsonl")
+	end := p.Finish(1, "", false, false)
+	if end.Class != domain.ClassQuotaExhausted {
+		t.Errorf("Finish(1, \"\", false, false).Class = %s (%s), want quota_exhausted", end.Class, end.Error.Message)
+	}
+	if end.RetryAfter != 0 {
+		t.Errorf("Finish(1, \"\", false, false).RetryAfter = %s, want 0", end.RetryAfter)
+	}
+}
+
+// harmflow-app#973: a rejection with no plan window whose overageDisabledReason says the usage allocation is disabled
+// is an exhausted quota whatever the session ends with: a reworded text, a stderr tail alone, or nothing. Without that
+// reason it stays a temporary rate limit, which waits for its reset on the same harness.
+func TestFinishReadsADisabledAllocationAsAQuota(t *testing.T) {
+	const disabled = `,"overageDisabledReason":"member_zero_credit_limit"`
+	cases := []struct {
+		name, reason, stderr string
+		want                 domain.ErrorClass
+		waits                bool
+	}{
+		{"the reason, with a text no quota pattern matches", disabled, "Something went wrong", domain.ClassQuotaExhausted, false},
+		{"the reason, with no text", disabled, "", domain.ClassQuotaExhausted, false},
+		{"another reason", `,"overageDisabledReason":"overage_not_provisioned"`, "", domain.ClassRateLimited, true},
+		{"a reason that says only extra usage is disabled", `,"overageDisabledReason":"org_level_disabled"`, "",
+			domain.ClassRateLimited, true},
+		{"no reason", "", "", domain.ClassRateLimited, true},
+		{"no reason, with the API's rate-limit text", "", "API Error: 429 rate_limit_error", domain.ClassRateLimited, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := &parser{tools: map[string]toolUse{}}
+			p.Line([]byte(`{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":` +
+				strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10) + `,"overageStatus":"rejected"` + c.reason +
+				`,"isUsingOverage":false}}`))
+			end := p.Finish(1, c.stderr, false, false)
+			if end.Class != c.want {
+				t.Errorf("Finish(1, %q, false, false).Class = %s (%s), want %s", c.stderr, end.Class, end.Error.Message, c.want)
+			}
+			if waits := end.RetryAfter > 0; waits != c.waits {
+				t.Errorf("Finish(1, %q, false, false).RetryAfter = %s, want a wait: %t", c.stderr, end.RetryAfter, c.waits)
+			}
+		})
+	}
+}
+
 // harmflow-app#306: a plan window rejected while the session goes on with extra usage is no exhausted quota, so a
 // session that then fails for a reason of its own ends as the error its text gives, and does not fail over. The same
 // report without isUsingOverage is an exhausted quota, as before.
@@ -220,6 +269,7 @@ func TestFinishClassifiesTheCLIsOwnTexts(t *testing.T) {
 		{"Opus weekly limit reached ∙ resets Oct 27 at 10am", domain.ClassQuotaExhausted},
 		{"You're out of extra usage · resets 9pm", domain.ClassQuotaExhausted},
 		{"Your credit balance is too low to access the Anthropic API.", domain.ClassQuotaExhausted},
+		{"Your usage allocation has been disabled by your admin · run /usage-credits to ask your admin for a higher limit", domain.ClassQuotaExhausted},
 		{"Not logged in · Please run /login", domain.ClassHarnessUnavailable},
 		{"Not logged in", domain.ClassHarnessUnavailable},
 		{"the test fixture's disk quota helper failed: 3 tests failed", domain.ClassTaskError},
