@@ -129,8 +129,8 @@ export function ScheduleFields({
       {kind !== "none" ? (
         <div className="grid-2">
           <Field label={t("tasks.fields.timezone")} hint={t("tasks.fields.timezoneHint", { zone })}>
-            <input
-              className="input mono"
+            <TextInput
+              mono
               list="hf-timezones"
               value={timezone ?? ""}
               placeholder={zone}
@@ -279,9 +279,9 @@ function CronBuilder({
         ) : null}
         {guided && "hour" in guided ? (
           <Field label={t("tasks.fields.time")}>
-            <input
+            <TextInput
               type="time"
-              className="input mono"
+              mono
               required
               value={`${twoDigits(guided.hour)}:${twoDigits(guided.minute)}`}
               onChange={(e) => {
@@ -295,7 +295,7 @@ function CronBuilder({
           {guided ? (
             <output className="schedule-expression mono">{cron}</output>
           ) : (
-            <TextInput className="mono" value={cron} onChange={(e) => writeCron(e.target.value)} placeholder="0 9 * * 1-5" />
+            <TextInput mono value={cron} onChange={(e) => writeCron(e.target.value)} placeholder="0 9 * * 1-5" />
           )}
         </Field>
       </div>
@@ -312,7 +312,7 @@ function IntervalFields({ interval, write, error }: { interval: string; write: (
     return (
       <div className="grid-2">
         <Field label={t("tasks.fields.interval")} error={error}>
-          <TextInput className="mono" value={interval} onChange={(e) => write(e.target.value)} placeholder="30m" />
+          <TextInput mono value={interval} onChange={(e) => write(e.target.value)} placeholder="30m" />
         </Field>
       </div>
     );

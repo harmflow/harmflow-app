@@ -11,13 +11,14 @@
 //   a button, one without is not, and both show the same slots.
 // - Chip, with and without its remove button.
 // - Checkbox, at its regular size and compact.
+// - TextInput's mono and invalid props.
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { act, useState, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import i18n from "../i18n";
-import { Button, Checkbox, Chip, Drawer, ListRow, ListRows, Modal, SegmentedControl, SegmentedMultiSelect, type SegmentOption } from "./ui";
+import { Button, Checkbox, Chip, Drawer, ListRow, ListRows, Modal, SegmentedControl, SegmentedMultiSelect, TextInput, type SegmentOption } from "./ui";
 
 let root: Root | undefined;
 let host: HTMLElement;
@@ -464,5 +465,41 @@ describe("Checkbox", () => {
     expect(sources).toContain("components/execution/Timeline.tsx");
     const raw = sources.filter((file) => /type=["']checkbox["']/.test(readFileSync(join(src, file), "utf8")));
     expect(raw).toEqual([]);
+  });
+});
+
+/** The text field `node` draws. */
+function textInput(node: ReactNode) {
+  render(node);
+  return host.querySelector("input")!;
+}
+
+// `mono` and `invalid` add their classes and nothing else, so a field without them is drawn as before.
+describe("TextInput", () => {
+  it("draws a plain text field without the props", () => {
+    const el = textInput(<TextInput value="" onChange={() => {}} />);
+    expect(el.className).toBe("input");
+    expect(el.type).toBe("text");
+    expect(el.hasAttribute("aria-invalid")).toBe(false);
+  });
+
+  it("adds mono for mono and input--error for invalid, merged with className", () => {
+    const el = textInput(<TextInput mono invalid className="filters__search" value="" onChange={() => {}} />);
+    expect(el.className).toBe("input mono input--error filters__search");
+    expect(el.hasAttribute("mono")).toBe(false);
+    expect(el.hasAttribute("invalid")).toBe(false);
+    expect(el.hasAttribute("aria-invalid")).toBe(false);
+  });
+
+  it("draws no error class when invalid is false", () => {
+    const el = textInput(<TextInput mono invalid={false} value="" onChange={() => {}} />);
+    expect(el.className).toBe("input mono");
+  });
+
+  it("lets a type override text and passes every input attribute", () => {
+    const el = textInput(<TextInput type="time" list="zones" placeholder="09:00" value="" onChange={() => {}} />);
+    expect(el.type).toBe("time");
+    expect(el.getAttribute("list")).toBe("zones");
+    expect(el.placeholder).toBe("09:00");
   });
 });

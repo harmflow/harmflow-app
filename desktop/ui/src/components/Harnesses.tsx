@@ -141,7 +141,7 @@ export function TokenControl({ harness, locale }: { harness: Harness; locale: st
         value={value}
         placeholder={t("harness.tokenPlaceholder")}
         onChange={(e) => setValue(e.target.value)}
-        className="mono"
+        mono
       />
       <Button size="sm" variant="primary" icon="key" disabled={busy || !value.trim()} onClick={() => void run(() => api.setHarnessToken(harness.id, value.trim()))}>
         {t("harness.tokenSave")}
@@ -353,7 +353,7 @@ export function HarnessInventory({ harness, locale, onDraft }: { harness: Harnes
       />
       {editing ? (
         <div className="inline-form">
-          <TextInput value={path} placeholder={t("harness.pathPlaceholder")} onChange={(e) => setPath(e.target.value)} className="mono" />
+          <TextInput value={path} placeholder={t("harness.pathPlaceholder")} onChange={(e) => setPath(e.target.value)} mono />
           <Button variant="primary" disabled={busy || !path.trim()} onClick={() => void save(path.trim())}>
             {t("common.save")}
           </Button>

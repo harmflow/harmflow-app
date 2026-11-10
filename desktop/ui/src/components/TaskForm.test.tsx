@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Catalog, Harness, SchedulePreview, Task } from "../api/types";
 import i18n from "../i18n";
 import type { Doc } from "../lib/taskForm";
@@ -1478,5 +1478,94 @@ describe("task form installation", () => {
     await settle();
     expect(preferred()).toStrictEqual({ provider: "claude-code" });
     expect(installation(0)).toBeUndefined();
+  });
+});
+
+// The name picker, the model, the time zone, and the schedule's time are TextInputs set in the monospaced face, each
+// keeping its suggestions, its type, and its keys.
+describe("task form text fields", () => {
+  let current: Doc = {};
+  const catalog: Catalog = {
+    agents: [],
+    skills: [{ name: "review-notes", kind: "skill", source: "user", harnesses: ["claude-code"] }],
+    problems: [],
+    taskTypes: [],
+  };
+
+  function Form({ doc }: { doc: Doc }) {
+    const [value, setValue] = useState(doc);
+    current = value;
+    return <TaskForm doc={value} onChange={(d) => setValue((current = d))} mode="edit" catalog={catalog} harnesses={[]} errorPaths={new Set()} />;
+  }
+
+  async function openForm(doc: Doc) {
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(<Form doc={doc} />));
+    await settle();
+  }
+
+  const spec = () => current.spec as Doc;
+  const input = (label: string) =>
+    [...host!.querySelectorAll("label.field")]
+      .find((f) => f.querySelector(".field__label")?.textContent === label)
+      ?.querySelector<HTMLInputElement>("input") ?? null;
+  async function type(el: HTMLInputElement, value: string) {
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(el, value);
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+
+  beforeEach(() => {
+    daemon.answers.set("/schedules/preview", { occurrences: [], timezone: "America/Sao_Paulo" });
+  });
+
+  it.each([
+    ["Skills", "text"],
+    ["Model", "text"],
+    ["Time zone", "text"],
+    ["Time", "time"],
+  ])("draws %s as a monospaced TextInput of type %s", async (label, kind) => {
+    await openForm(task({ cron: "0 9 * * *", timezone: "America/Sao_Paulo" }));
+    const el = input(label)!;
+    expect(el.classList.contains("input")).toBe(true);
+    expect(el.classList.contains("mono")).toBe(true);
+    expect(el.classList.contains("input--error")).toBe(false);
+    expect(el.type).toBe(kind);
+  });
+
+  it("keeps each field's suggestions", async () => {
+    await openForm(task({ cron: "0 9 * * *", timezone: "America/Sao_Paulo" }));
+    for (const label of ["Skills", "Model", "Time zone"]) {
+      const list = input(label)!.getAttribute("list");
+      expect(list).toBeTruthy();
+      expect(host!.querySelector(`datalist[id="${list}"]`)).not.toBeNull();
+    }
+    expect(input("Time")!.hasAttribute("list")).toBe(false);
+  });
+
+  it("adds a name it suggests at once, and a name it does not on Enter", async () => {
+    await openForm(task({}));
+    await type(input("Skills")!, "review-notes");
+    expect(spec().skills).toEqual(["review-notes"]);
+
+    await type(input("Skills")!, "my-skill");
+    expect(spec().skills).toEqual(["review-notes"]);
+    await act(async () => {
+      input("Skills")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    expect(spec().skills).toEqual(["review-notes", "my-skill"]);
+    expect(input("Skills")!.value).toBe("");
+  });
+
+  it("writes the model, the time zone, and the time", async () => {
+    await openForm(task({ cron: "0 9 * * *", timezone: "America/Sao_Paulo" }));
+    await type(input("Model")!, "opus");
+    expect((spec().harness as Doc).preferred).toEqual({ provider: "claude-code", model: "opus" });
+    await type(input("Time zone")!, "Europe/Lisbon");
+    expect((spec().schedule as Doc).timezone).toBe("Europe/Lisbon");
+    await type(input("Time")!, "10:30");
+    expect((spec().schedule as Doc).cron).toBe("30 10 * * *");
   });
 });

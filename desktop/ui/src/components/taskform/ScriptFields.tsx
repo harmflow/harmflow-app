@@ -44,7 +44,7 @@ export function ScriptFields({ doc, onChange, set, err }: { doc: Doc; onChange: 
       <div className="grid-2">
         <Field label={t("tasks.fields.workingDirectory")} hint={t("tasks.fields.workingDirectoryHint")} error={err(["spec", "script", "workingDirectory"])}>
           <TextInput
-            className="mono"
+            mono
             value={getIn<string>(doc, ["spec", "script", "workingDirectory"]) ?? ""}
             placeholder="~"
             onChange={(e) => set(["spec", "script", "workingDirectory"], e.target.value)}

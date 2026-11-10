@@ -1,6 +1,6 @@
 // An editable list of rows of text fields: a remove button on each row, and an add button below.
 import type { ReactNode } from "react";
-import { Button, IconButton, TextInput, cx } from "./ui";
+import { Button, IconButton, TextInput } from "./ui";
 
 /** One column of a RowListEditor: a text field in each row. */
 export type RowListColumn<R> = {
@@ -67,7 +67,8 @@ export function RowListEditor<R>({
           {columns.map((c) => (
             <TextInput
               key={c.label}
-              className={cx(c.mono && "mono", c.error?.(row, i) && "input--error")}
+              mono={c.mono}
+              invalid={c.error?.(row, i)}
               aria-label={c.label}
               placeholder={c.placeholder}
               value={c.value(row)}

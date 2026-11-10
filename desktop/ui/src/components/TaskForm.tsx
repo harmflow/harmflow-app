@@ -97,7 +97,7 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
           </Field>
           <Field label={t("tasks.fields.id")} hint={t("tasks.fields.idHint")} error={err(["metadata", "id"])}>
             <TextInput
-              className="mono"
+              mono
               value={get<string>(["metadata", "id"]) ?? ""}
               disabled={mode === "edit"}
               onChange={(e) => {
@@ -152,7 +152,7 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
           />
         </div>
         <Field label={t("tasks.fields.workspacePath")} hint={t("tasks.fields.workspaceHint")}>
-          <TextInput className="mono" value={get<string>(["spec", "workspace", "path"]) ?? ""} onChange={(e) => set(["spec", "workspace", "path"], e.target.value)} />
+          <TextInput mono value={get<string>(["spec", "workspace", "path"]) ?? ""} onChange={(e) => set(["spec", "workspace", "path"], e.target.value)} />
         </Field>
       </Section>
       )}
