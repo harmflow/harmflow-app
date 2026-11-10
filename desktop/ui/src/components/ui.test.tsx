@@ -1,29 +1,39 @@
 // @vitest-environment happy-dom
-// The shared primitives of ui.tsx. The segmented controls: a single choice reads as a radio group, a multi-select as a
-// group of toggle buttons, and an option can be disabled on its own in either. Button's link variant
-// (harmflow-app#990), drawn with the look of a bare text-styled action and used by every one of them.
+// The shared primitives of ui.tsx:
+// - The segmented controls: a single choice reads as a radio group, a multi-select as a group of toggle buttons, and an
+//   option can be disabled on its own in either.
+// - Button's link variant (harmflow-app#990), drawn with the look of a bare text-styled action and used by every one of
+//   them.
+// - The overlays: a Drawer is a modal dialog with the label it is given, and it closes on its close button, on a click
+//   outside its card, and on the close shortcut; a Modal closes the same ways, through the same overlay. A click inside
+//   the card, or another key, closes neither.
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { act, useState, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { Button, SegmentedControl, SegmentedMultiSelect, type SegmentOption } from "./ui";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import i18n from "../i18n";
+import { Button, Drawer, Modal, SegmentedControl, SegmentedMultiSelect, type SegmentOption } from "./ui";
 
 let root: Root | undefined;
 let host: HTMLElement;
 
-function render(node: ReactNode) {
-  host = document.createElement("div");
-  document.body.appendChild(host);
-  root = createRoot(host);
-  act(() => root!.render(node));
-}
+beforeAll(async () => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  await i18n.changeLanguage("en-US");
+});
 
 afterEach(() => {
   act(() => root?.unmount());
   root = undefined;
   host?.remove();
 });
+
+function render(node: ReactNode) {
+  host = document.body.appendChild(document.createElement("div"));
+  root = createRoot(host);
+  act(() => root!.render(node));
+}
 
 const items = () => [...host.querySelectorAll<HTMLButtonElement>(".segmented__item")];
 const item = (label: string) => items().find((b) => b.textContent === label)!;
@@ -204,5 +214,93 @@ describe("Button's link variant", () => {
       .filter((file) => !file.endsWith(join("components", "ui.tsx")))
       .filter((file) => /className=["{`]+[^"}`]*\blink\b(?!-)/.test(readFileSync(file, "utf8")));
     expect(bare).toEqual([]);
+  });
+});
+
+const dialog = () => host!.querySelector<HTMLElement>('[role="dialog"]')!;
+const press = (key: string) => act(() => void window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true })));
+const mouseDown = (target: HTMLElement) => act(() => void target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })));
+const closeButton = () => dialog().querySelector<HTMLButtonElement>('button[aria-label="Close"]')!;
+
+describe("Drawer", () => {
+  it("is a modal dialog with its label, its close button, and what it holds in its card", () => {
+    render(
+      <Drawer label="Execution" onClose={() => {}}>
+        <p className="content">Detail</p>
+      </Drawer>,
+    );
+    expect(dialog().classList.contains("drawer")).toBe(true);
+    expect(dialog().getAttribute("aria-modal")).toBe("true");
+    expect(dialog().getAttribute("aria-label")).toBe("Execution");
+    expect(dialog().querySelector(".drawer__card .drawer__close button")).toBe(closeButton());
+    expect(dialog().querySelector(".drawer__card .content")!.textContent).toBe("Detail");
+  });
+
+  it("closes on its close button, on a click outside its card, and on the close shortcut", () => {
+    const onClose = vi.fn();
+    render(
+      <Drawer label="Execution" onClose={onClose}>
+        <p className="content">Detail</p>
+      </Drawer>,
+    );
+
+    act(() => closeButton().click());
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    mouseDown(dialog());
+    expect(onClose).toHaveBeenCalledTimes(2);
+
+    press("Escape");
+    expect(onClose).toHaveBeenCalledTimes(3);
+  });
+
+  it("stays open on a click inside its card and on another key", () => {
+    const onClose = vi.fn();
+    render(
+      <Drawer label="Execution" onClose={onClose}>
+        <p className="content">Detail</p>
+      </Drawer>,
+    );
+    mouseDown(dialog().querySelector<HTMLElement>(".drawer__card")!);
+    mouseDown(dialog().querySelector<HTMLElement>(".content")!);
+    press("Enter");
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("stops listening for the close shortcut once it is gone", () => {
+    const onClose = vi.fn();
+    render(
+      <Drawer label="Execution" onClose={onClose}>
+        <p>Detail</p>
+      </Drawer>,
+    );
+    act(() => root!.render(null));
+    press("Escape");
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe("Modal", () => {
+  it("closes on the close shortcut and on a click outside its card, but not on a click inside it", () => {
+    const onClose = vi.fn();
+    render(
+      <Modal title="Confirm" onClose={onClose}>
+        <p className="content">Body</p>
+      </Modal>,
+    );
+    expect(dialog().classList.contains("modal")).toBe(true);
+    expect(dialog().getAttribute("aria-modal")).toBe("true");
+
+    mouseDown(dialog().querySelector<HTMLElement>(".modal__card")!);
+    expect(onClose).not.toHaveBeenCalled();
+
+    mouseDown(dialog());
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    press("Escape");
+    expect(onClose).toHaveBeenCalledTimes(2);
+
+    act(() => closeButton().click());
+    expect(onClose).toHaveBeenCalledTimes(3);
   });
 });

@@ -478,6 +478,20 @@ export function Checkbox({ checked, onChange, label, disabled }: { checked: bool
   );
 }
 
+/** What every overlay shares: a modal dialog that closes on the close shortcut, and on a click on itself, outside its card. */
+function Overlay({ className, label, onClose, children }: { className: string; label?: string; onClose: () => void; children: ReactNode }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => matches(e, "close") && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className={className} role="dialog" aria-modal="true" aria-label={label} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      {children}
+    </div>
+  );
+}
+
 export function Modal({
   title,
   onClose,
@@ -492,13 +506,8 @@ export function Modal({
   wide?: boolean;
 }) {
   const { t } = useTranslation();
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => matches(e, "close") && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
   return (
-    <div className="modal" role="dialog" aria-modal="true" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <Overlay className="modal" onClose={onClose}>
       <div className={cx("modal__card", wide && "modal__card--wide")}>
         <header className="modal__header">
           <h2>{title}</h2>
@@ -507,7 +516,22 @@ export function Modal({
         <div className="modal__body">{children}</div>
         {footer ? <footer className="modal__footer">{footer}</footer> : null}
       </div>
-    </div>
+    </Overlay>
+  );
+}
+
+/** A panel at the window's right edge, over the screen, that closes as `Modal` does. */
+export function Drawer({ label, onClose, children }: { label: string; onClose: () => void; children: ReactNode }) {
+  const { t } = useTranslation();
+  return (
+    <Overlay className="drawer" label={label} onClose={onClose}>
+      <div className="drawer__card">
+        <div className="drawer__close">
+          <IconButton icon="x" label={t("common.close")} onClick={onClose} />
+        </div>
+        {children}
+      </div>
+    </Overlay>
   );
 }
 
