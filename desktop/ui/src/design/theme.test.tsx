@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { EmptyState, SectionTitle } from "../components/ui";
+import { Chip, EmptyState, SectionTitle } from "../components/ui";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -30,6 +30,7 @@ beforeEach(() => {
       <>
         <SectionTitle>Tasks</SectionTitle>
         <EmptyState title="Nothing yet" />
+        <Chip>Ready</Chip>
       </>,
     ),
   );
@@ -71,6 +72,9 @@ describe("a token's change", () => {
   it.each([
     ["a color token", ".section-title__prompt", "color", "--hf-color-cyan", "#123456"],
     ["a font token", ".section-title__prompt", "font-family", "--hf-font-mono", '"Test Mono", monospace'],
+    ["a font-size token", ".section-title h2", "font-size", "--hf-font-size-lg", "21px"],
+    ["a font-weight token", ".section-title h2", "font-weight", "--hf-font-weight-semibold", "800"],
+    ["a line-height token", ".chip", "line-height", "--hf-line-height-tight", "1.9"],
     ["a spacing token", ".section-title h2", "gap", "--hf-space-2", "13px"],
     ["a spacing token in a shorthand", ".empty", "padding-top", "--hf-space-5", "27px"],
   ])("reaches the component that uses %s", (_, selector, property, token, value) => {

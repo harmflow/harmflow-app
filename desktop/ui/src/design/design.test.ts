@@ -55,13 +55,16 @@ interface Declaration {
   value: string;
 }
 
-/** Every declaration of the stylesheets beside this test, with its line and the selector of the rule that holds it. */
-function declarations(): Declaration[] {
-  return readdirSync(__dirname)
+/**
+ * Every declaration of the stylesheets under a folder, beside this test by default, with its file's path from that
+ * folder, its line, and the selector of the rule that holds it.
+ */
+function declarations(dir = __dirname): Declaration[] {
+  return filesUnder(dir)
     .filter((file) => file.endsWith(".css"))
     .flatMap((file) => {
       // Comments become spaces, so that the offsets, and the lines counted from them, stay those of the file.
-      const css = readFileSync(join(__dirname, file), "utf8").replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, " "));
+      const css = readFileSync(join(dir, file), "utf8").replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, " "));
       const found: Declaration[] = [];
       const blocks: string[] = [];
       let start = 0;
@@ -156,6 +159,127 @@ describe("spacing", () => {
     });
     const defined = new Set(scale.map((d) => d.property));
     const read = found.flatMap((d) => [...d.value.matchAll(/var\((--hf-space-[\w-]+)\)/g)].map(([, token]) => token));
+    expect([...new Set(read)].filter((token) => !defined.has(token))).toEqual([]);
+  });
+});
+
+const typography = /^(?:font|font-size|font-weight|line-height|letter-spacing)$/;
+const typographyToken = /^--hf-(?:font-size|font-weight|line-height|letter-spacing)(?:-[\w-]+)?$/;
+
+/**
+ * Whether a typography value holds a literal: once its typography tokens (and, in the font shorthand, its font
+ * stacks) are taken out, a number, a named size or weight, or another custom property is left. A keyword such as
+ * inherit or normal is none.
+ */
+const typographyLiteral = (value: string) =>
+  /\d|var\(|(?<![\w-])(?:bold|bolder|lighter|medium|smaller|larger|(?:x{1,3}-)?(?:small|large))(?![\w-])/i.test(
+    value.replace(/var\(--hf-(?:font|line-height|letter-spacing)[\w-]*\)/g, ""),
+  );
+
+/**
+ * The only literal typography values: the line heights of the two badges, which follow the badge's box, not the type
+ * scale. Each is named by its selector and property.
+ */
+const badgeLineHeights = [
+  {
+    selector: '.app[data-sidebar="collapsed"] .nav__badge',
+    property: "line-height",
+    why: "the collapsed sidebar's count badge: its line height is its 16px height, which centers the count",
+  },
+  {
+    selector: ".badge",
+    property: "line-height",
+    why: "the unread notifications' badge: its line height is its 18px height, which centers the count",
+  },
+];
+
+const isBadgeLineHeight = (d: Declaration) => badgeLineHeights.some((b) => b.selector === d.selector && b.property === d.property);
+
+// The style properties of an inline style object or an editor theme that set typography, with their value up to the
+// next property, and the SVG attributes that do, with theirs.
+const typographySetting =
+  /(?<![\w$.-])(?:font|fontSize|fontWeight|lineHeight|letterSpacing|font-size|font-weight|line-height|letter-spacing)\s*(?::\s*((?:"[^"\n]*"|'[^'\n]*'|`[^`]*`|[^,;}\n"'`])*)|=\s*("[^"]*"|'[^']*'|\{[^}\n]*\}))/g;
+
+/** The literal typography values a component sets in an inline style, an editor theme, or an SVG attribute. */
+function componentTypography(file: string, source: string): Literal[] {
+  const text = withoutComments(source, /(?<![:"'`\\])\/\/[^\n]*/g);
+  return [...text.matchAll(typographySetting)]
+    .map((setting) => ({ at: setting.index, value: (setting[1] ?? setting[2]).trim() }))
+    .filter(({ value }) => typographyLiteral(value))
+    .map(({ at, value }) => ({ file, line: lineAt(text, at), value }));
+}
+
+describe("typography", () => {
+  const found = declarations(src).filter((d) => d.file !== "design/theme.css");
+
+  it("finds a literal typography value in a stylesheet's value or a component, and lets a token through", () => {
+    expect(
+      ["0.94em", "600", "1.6", "bold", "small", "var(--hf-space-2)", "calc(var(--hf-font-size-sm) * 2)"].filter(typographyLiteral),
+    ).toEqual(["0.94em", "600", "1.6", "bold", "small", "var(--hf-space-2)", "calc(var(--hf-font-size-sm) * 2)"]);
+    expect(
+      ["var(--hf-font-size-mono)", "var(--hf-line-height-relaxed)", "inherit", "normal", "var(--hf-font-weight-medium) var(--hf-font-size-sm) var(--hf-font-sans)"].filter(
+        typographyLiteral,
+      ),
+    ).toEqual([]);
+
+    const tsx = [
+      'const theme = { ".cm-scroller": { lineHeight: "1.6", fontSize: "var(--hf-font-size-sm)" } };',
+      "export function A() {",
+      '  return <svg><text fontSize={11} fontWeight="var(--hf-font-weight-bold)" /><p style={{ letterSpacing: "0.02em", gap: 4 }} /></svg>;',
+      "}",
+      '// lineHeight: "2"',
+      "type Props = { fontSize: number };",
+      'const label = { font: "600 12px Inter", fontFamily: "var(--hf-font-sans)" };',
+      'const field = { font: "inherit" };',
+    ].join("\n");
+    expect(componentTypography("A.tsx", tsx).map(describeLiteral)).toEqual([
+      'A.tsx:1: "1.6"',
+      "A.tsx:3: {11}",
+      'A.tsx:3: "0.02em"',
+      'A.tsx:7: "600 12px Inter"',
+    ]);
+  });
+
+  it("reads every font size, weight, line height, and letter spacing from the typography tokens, in every stylesheet but theme.css", () => {
+    // The @font-face weight ranges of fonts.css describe the bundled font files, not a component's style.
+    const offending = found
+      .filter((d) => typography.test(d.property) && d.selector !== "@font-face" && !isBadgeLineHeight(d) && typographyLiteral(d.value))
+      .map((d) => `${d.file}:${d.line} ${d.selector} { ${d.property}: ${d.value} }`);
+    expect(offending).toEqual([]);
+  });
+
+  it("keeps as literals only the listed badge line heights, each a length in px", () => {
+    for (const badge of badgeLineHeights) {
+      const matches = found.filter((d) => d.selector === badge.selector && d.property === badge.property);
+      expect(matches.map((d) => d.value), `${badge.selector} { ${badge.property} }: ${badge.why}`).toEqual([expect.stringMatching(/^\d+px$/)]);
+    }
+  });
+
+  it("sets no literal typography value in a component's inline style, editor theme, or SVG attribute", () => {
+    const sources = filesUnder(src).filter((file) => /\.tsx?$/.test(file) && !/\.test\.tsx?$/.test(file));
+    expect(sources).toContain("components/YamlEditor.tsx");
+    const offending = sources.flatMap((file) => componentTypography(file, readFileSync(join(src, file), "utf8")));
+    expect(offending.map(describeLiteral)).toEqual([]);
+  });
+
+  it("defines the typography scale in theme.css only, with every token the stylesheets and components read", () => {
+    const scale = declarations(src).filter((d) => typographyToken.test(d.property));
+    expect(new Set(scale.map((d) => d.file))).toEqual(new Set(["design/theme.css"]));
+    expect(Object.fromEntries(scale.map((d) => [d.property, d.value]))).toMatchObject({
+      "--hf-font-size-mono": "0.94em",
+      "--hf-line-height-tight": "1.2",
+      "--hf-line-height": "1.45",
+      "--hf-line-height-relaxed": "1.6",
+      "--hf-letter-spacing-tight": "0.01em",
+      "--hf-letter-spacing-label": "0.08em",
+    });
+    const defined = new Set(scale.map((d) => d.property));
+    const components = filesUnder(src)
+      .filter((file) => /\.tsx?$/.test(file) && !/\.test\.tsx?$/.test(file))
+      .map((file) => readFileSync(join(src, file), "utf8"));
+    const read = [...found.map((d) => d.value), ...components].flatMap((text) =>
+      [...text.matchAll(/var\((--hf-[\w-]+)\)/g)].map(([, token]) => token).filter((token) => typographyToken.test(token)),
+    );
     expect([...new Set(read)].filter((token) => !defined.has(token))).toEqual([]);
   });
 });

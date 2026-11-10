@@ -108,12 +108,16 @@
   --hf-font-size-xl: 18px;
   --hf-font-size-2xl: 22px;
   --hf-font-size-3xl: 28px;
+  /* Relative to the text around it, so that inline code keeps to the size of its line. */
+  --hf-font-size-mono: 0.94em;
   --hf-font-weight-regular: 400;
   --hf-font-weight-medium: 500;
   --hf-font-weight-semibold: 600;
   --hf-font-weight-bold: 700;
   --hf-line-height-tight: 1.2;
   --hf-line-height: 1.45;
+  --hf-line-height-relaxed: 1.6;
+  --hf-letter-spacing-tight: 0.01em;
   --hf-letter-spacing-label: 0.08em;
 
   /* Spacing. Every padding, margin, and gap of the stylesheets reads one of these (design.test.ts); the step is 4px,

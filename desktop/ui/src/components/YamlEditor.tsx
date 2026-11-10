@@ -27,7 +27,7 @@ const theme = EditorView.theme(
       fontSize: "var(--hf-font-size-sm)",
     },
     ".cm-content": { fontFamily: "var(--hf-font-mono)", caretColor: "var(--hf-color-cyan)", padding: "var(--hf-space-2) 0" },
-    ".cm-scroller": { fontFamily: "var(--hf-font-mono)", lineHeight: "1.6" },
+    ".cm-scroller": { fontFamily: "var(--hf-font-mono)", lineHeight: "var(--hf-line-height-relaxed)" },
     ".cm-gutters": {
       backgroundColor: "var(--hf-color-surface-sunken)",
       color: "var(--hf-color-text-faint)",
