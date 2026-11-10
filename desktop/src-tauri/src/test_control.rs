@@ -7,8 +7,9 @@
 //! (harmflow-app#515), and the title and the image of the tray's status item macOS shows (harmflow-app#880). It reads
 //! what the window's page shows and clicks in it, as a user's click does (harmflow-app#873), with the height each
 //! element renders at (harmflow-app#912). It reads whether the start's show is decided and whether macOS shows the
-//! tray's status item, and calls what the start's fallback calls (harmflow-app#508). A test of what else the shell
-//! does adds its own command here.
+//! tray's status item, and calls what the start's fallback calls (harmflow-app#508). It opens the tray's menu as a click
+//! does and reads it as macOS shows it, and reads which windows of the system's alert process macOS shows
+//! (harmflow-app#903). A test of what else the shell does adds its own command here.
 
 use std::io::{BufRead, Write};
 use std::sync::atomic::Ordering;
@@ -16,9 +17,12 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Duration;
 
+use block2::RcBlock;
+use objc2::runtime::AnyObject;
 use objc2::{sel, AllocAnyThread, MainThreadMarker};
-use objc2_app_kit::{NSApplication, NSBitmapImageRep, NSEventModifierFlags, NSImage, NSMenu};
-use objc2_foundation::{NSData, NSObjectNSDelayedPerforming};
+use objc2_app_kit::{NSApplication, NSBitmapImageRep, NSEventModifierFlags, NSEventTrackingRunLoopMode, NSImage, NSMenu};
+use objc2_core_graphics::{kCGNullWindowID, CGWindowListCopyWindowInfo, CGWindowListOption};
+use objc2_foundation::{ns_string, NSArray, NSData, NSDictionary, NSNumber, NSObjectNSDelayedPerforming, NSRunLoop, NSString};
 use serde_json::{json, Value};
 use tauri::menu::MenuItemKind;
 use tauri::{AppHandle, Manager, Runtime};
@@ -56,6 +60,12 @@ enum Command<'a> {
     /// The title of the tray's status item macOS shows, which of the tray's two images it shows, and whether macOS
     /// shows the item.
     Tray,
+    /// The items of the tray's menu macOS shows, opened as a click on the tray's status item opens it, in order: each
+    /// with its id, its text, and whether it is enabled, and the separators.
+    TrayMenu,
+    /// The windows macOS shows on screen for the system's alert process, which draws an alert that has no parent
+    /// window, as the tray's stop dialog has none.
+    SystemAlerts,
     /// The text, the tooltip, and the rendered height in CSS pixels of each element of the window's page that this CSS
     /// selector matches, as the page shows them, in document order.
     Read(&'a str),
@@ -78,6 +88,8 @@ fn parse(line: &str) -> Option<Command<'_>> {
         ("terminate", "") => Some(Command::Terminate),
         ("notices", "") => Some(Command::Notices),
         ("tray", "") => Some(Command::Tray),
+        ("tray-menu", "") => Some(Command::TrayMenu),
+        ("system-alerts", "") => Some(Command::SystemAlerts),
         ("read", selector) if !selector.is_empty() => Some(Command::Read(selector)),
         ("click", selector) if !selector.is_empty() => Some(Command::Click(selector)),
         _ => None,
@@ -154,6 +166,8 @@ fn run<R: Runtime>(app: &AppHandle<R>, command: Command) -> Value {
         }
         Command::Notices => delivered(),
         Command::Tray => shown_tray(app),
+        Command::TrayMenu => tray_menu(app),
+        Command::SystemAlerts => system_alerts(),
         Command::Read(selector) => in_page(
             app,
             &format!(
@@ -194,6 +208,133 @@ fn shown_tray<R: Runtime>(app: &AppHandle<R>) -> Value {
         Ok(None) => json!({ "error": "macOS shows no status item for the tray" }),
         Err(err) => json!({ "error": err.to_string() }),
     }
+}
+
+/// An item of a menu as macOS shows it: its text, whether it is enabled, and whether it is a separator.
+type Shown = (String, bool, bool);
+
+/// The tray's menu as macOS shows it. The command opens it as a click on the tray's status item opens it — tray-icon
+/// sets the menu on the item only while a click opens it, and `show_menu` takes the same steps as its click — reads the
+/// items from the item's `NSMenu` while macOS tracks it, and closes it. Each item is named by the id Tauri gave it, from
+/// the menu the tray holds (`tray::HeldMenu`), matched by position as `app_menu` matches the app menu's; its text, its
+/// enabled state, the separators, and the order are those macOS shows, not what `tray::menu_entries` asked for.
+fn tray_menu<R: Runtime>(app: &AppHandle<R>) -> Value {
+    let ids = match tray_menu_ids(app) {
+        Ok(ids) => ids,
+        Err(err) => return json!({ "error": err }),
+    };
+    let Some(tray) = app.tray_by_id(tray::TRAY_ID) else { return json!({ "error": "the app has no tray" }) };
+    let (tx, rx) = mpsc::channel::<Result<Vec<Shown>, String>>();
+    let scheduled = app.run_on_main_thread(move || {
+        // A click reaches the status item from the run loop, outside the event loop's handler this closure runs in
+        // (harmflow-app#805), and the menu it opens runs the run loop until it closes: the menu opens on the next turn
+        // of the run loop, as a click's does.
+        let open = RcBlock::new(move || {
+            let tx = tx.clone();
+            let failed = tx.clone();
+            let opened = tray.with_inner_tray_icon(move |inner| {
+                let mtm = MainThreadMarker::new().expect("the run loop's block runs on the main thread");
+                let Some(item) = inner.ns_status_item() else {
+                    let _ = tx.send(Err("macOS shows no status item for the tray".into()));
+                    return;
+                };
+                // macOS runs the run loop in its event-tracking mode while the menu is open: the block reads the menu
+                // then, and closes it, which ends the click.
+                let read = RcBlock::new(move || {
+                    let shown = item.menu(mtm).map(|menu| {
+                        let shown = shown_menu(&menu);
+                        menu.cancelTracking();
+                        shown
+                    });
+                    let _ = tx.send(shown.ok_or_else(|| "the tray's status item holds no menu while it is open".into()));
+                });
+                // SAFETY: the mode is AppKit's constant, and the main run loop runs the block on the main thread, where
+                // it was made.
+                unsafe {
+                    let modes = NSArray::from_slice(&[NSEventTrackingRunLoopMode]);
+                    NSRunLoop::mainRunLoop().performInModes_block(&modes, &read);
+                }
+                inner.show_menu();
+            });
+            if let Err(err) = opened {
+                let _ = failed.send(Err(err.to_string()));
+            }
+        });
+        // SAFETY: as above, with Foundation's constant.
+        unsafe {
+            let modes = NSArray::from_slice(&[objc2_foundation::NSDefaultRunLoopMode]);
+            NSRunLoop::mainRunLoop().performInModes_block(&modes, &open);
+        }
+    });
+    if let Err(err) = scheduled {
+        return json!({ "error": err.to_string() });
+    }
+    let shown = match rx.recv_timeout(Duration::from_secs(5)) {
+        Ok(Ok(shown)) => shown,
+        Ok(Err(err)) => return json!({ "error": err }),
+        Err(err) => return json!({ "error": format!("the tray's menu did not open: {err}") }),
+    };
+    if shown.len() != ids.len() {
+        return json!({ "error": format!("macOS shows {} items, the tray holds {}", shown.len(), ids.len()) });
+    }
+    let items: Vec<Value> = shown
+        .into_iter()
+        .zip(ids)
+        .map(|((text, enabled, separator), id)| {
+            if separator {
+                json!({ "separator": true })
+            } else {
+                json!({ "id": id, "text": text, "enabled": enabled })
+            }
+        })
+        .collect();
+    json!({ "items": items })
+}
+
+/// The ids of the tray menu's items, from the menu Tauri built and the tray holds, in the order macOS lists them.
+fn tray_menu_ids<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<String>, String> {
+    let held = app.try_state::<tray::HeldMenu<R>>().ok_or("the tray holds no menu")?;
+    let menu = held.0.lock().map_err(|e| e.to_string())?.clone().ok_or("the tray holds no menu")?;
+    let items = menu.items().map_err(|e| e.to_string())?;
+    Ok(items.iter().map(|item| item.id().as_ref().to_string()).collect())
+}
+
+/// Each item of `menu` as macOS shows it, in order.
+fn shown_menu(menu: &NSMenu) -> Vec<Shown> {
+    (0..menu.numberOfItems())
+        .filter_map(|i| menu.itemAtIndex(i))
+        .map(|item| (item.title().to_string(), item.isEnabled(), item.isSeparatorItem()))
+        .collect()
+}
+
+/// The process that draws an alert with no parent window. The dialog plugin hands macOS such a dialog, the tray's
+/// stop dialog among them, as a user notification's alert, which this agent of the system shows in windows of its own.
+const ALERT_PROCESS: &str = "UserNotificationCenter";
+
+/// The windows macOS shows on screen for `ALERT_PROCESS`, from the window list macOS gives any process: each with its
+/// process's pid and its window layer. It reads only who owns each window, never a window's title or what it shows,
+/// which would need a permission.
+fn system_alerts() -> Value {
+    let options = CGWindowListOption::OptionOnScreenOnly | CGWindowListOption::ExcludeDesktopElements;
+    let Some(list) = CGWindowListCopyWindowInfo(options, kCGNullWindowID) else {
+        return json!({ "error": "macOS gives no window list" });
+    };
+    // SAFETY: a CFArray is toll-free bridged with an NSArray, and each window of the list is a CFDictionary with
+    // CFString keys, toll-free bridged with an NSDictionary; `list` keeps them alive while `windows` is used.
+    let windows = unsafe { &*std::ptr::from_ref(&*list).cast::<NSArray<NSDictionary<NSString, AnyObject>>>() };
+    // The window list's keys are CGWindow's constants, each of which holds its own name.
+    let alerts: Vec<Value> = windows
+        .iter()
+        .filter(|window| {
+            let owner = window.objectForKey(ns_string!("kCGWindowOwnerName"));
+            owner.and_then(|o| o.downcast::<NSString>().ok()).is_some_and(|name| name.to_string() == ALERT_PROCESS)
+        })
+        .map(|window| {
+            let number = |key: &NSString| window.objectForKey(key).and_then(|o| o.downcast::<NSNumber>().ok()).map(|n| n.as_i64());
+            json!({ "pid": number(ns_string!("kCGWindowOwnerPID")), "layer": number(ns_string!("kCGWindowLayer")) })
+        })
+        .collect();
+    json!({ "alerts": alerts })
 }
 
 /// An image's pixels as AppKit holds them: its width and height in pixels, the bytes of a row, and the bytes of every
@@ -400,6 +541,8 @@ mod tests {
         assert_eq!(parse("terminate"), Some(Command::Terminate));
         assert_eq!(parse("notices\n"), Some(Command::Notices));
         assert_eq!(parse(" tray\n"), Some(Command::Tray));
+        assert_eq!(parse("tray-menu\n"), Some(Command::TrayMenu));
+        assert_eq!(parse(" system-alerts "), Some(Command::SystemAlerts));
         assert_eq!(parse("read .detail__alerts .banner\n"), Some(Command::Read(".detail__alerts .banner")));
         assert_eq!(parse("click  #settings-restriction-warnings "), Some(Command::Click("#settings-restriction-warnings")));
     }
@@ -408,7 +551,8 @@ mod tests {
     fn an_unknown_line_is_no_command() {
         for line in [
             "", "quit", "Close", "open dashboard", "state now", "choose-app-menu", "choose-tray ", "terminate x", "notice", "notices x", "tray x",
-            "Tray", "read", "read ", "click", "Click #x", "fallback", "fallback-show now", "Fallback-show",
+            "Tray", "read", "read ", "click", "Click #x", "fallback", "fallback-show now", "Fallback-show", "tray-menu x",
+            "tray menu", "Tray-menu", "system-alerts now", "system-alert", "alerts",
         ] {
             assert_eq!(parse(line), None, "{line:?}");
         }

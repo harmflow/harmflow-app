@@ -31,12 +31,14 @@ dirs = "7"
 tauri = { version = "2.12", features = ["tray-icon", "image-png", "test"] }
 
 # The debug build's test control channel reads the app menu macOS shows, quits as the Dock does, reads back the
-# notices macOS delivered, and reads the tray's status item macOS shows (src/test_control.rs). All three are already
-# in the lockfile through Tauri.
+# notices macOS delivered, reads the tray's status item and its menu macOS shows, and reads the window list
+# (src/test_control.rs). All of them are already in the lockfile through Tauri.
 [target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSBitmapImageRep", "NSButton", "NSControl", "NSEvent", "NSImage", "NSImageRep", "NSMenu", "NSMenuItem", "NSResponder", "NSStatusBarButton", "NSStatusItem", "NSView"] }
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSBundle", "NSData", "NSDate", "NSEnumerator", "NSRunLoop", "NSString", "NSUserNotification"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGWindow"] }
+objc2-foundation = { version = "0.3", features = ["block2", "NSArray", "NSBundle", "NSData", "NSDate", "NSDictionary", "NSEnumerator", "NSObjCRuntime", "NSRunLoop", "NSString", "NSUserNotification", "NSValue"] }
 
 # The tests of the tray command encode the tray's images as the tray-icon crate hands them to macOS. Already in the
 # lockfile through Tauri.

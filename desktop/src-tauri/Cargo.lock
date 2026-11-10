@@ -1470,10 +1470,12 @@ dependencies = [
 name = "harmflow-desktop"
 version = "0.1.0"
 dependencies = [
+ "block2",
  "dirs 7.0.0",
  "futures-util",
  "objc2",
  "objc2-app-kit",
+ "objc2-core-graphics",
  "objc2-foundation",
  "png",
  "reqwest 0.12.28",

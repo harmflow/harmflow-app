@@ -73,8 +73,29 @@ impl TrayState {
     }
 }
 
+/// The menu the tray holds, as Tauri built it, kept for the debug build's test control channel: it names each item
+/// macOS shows by the id Tauri gave it, as it names the app menu's (src/test_control.rs). Nothing else reads it.
+#[cfg(all(debug_assertions, target_os = "macos"))]
+pub(crate) struct HeldMenu<R: Runtime>(pub std::sync::Mutex<Option<Menu<R>>>);
+
+#[cfg(all(debug_assertions, target_os = "macos"))]
+fn hold<R: Runtime>(app: &AppHandle<R>, menu: &Menu<R>) {
+    match app.try_state::<HeldMenu<R>>() {
+        Some(held) => {
+            if let Ok(mut current) = held.0.lock() {
+                *current = Some(menu.clone());
+            }
+        }
+        None => {
+            app.manage(HeldMenu(std::sync::Mutex::new(Some(menu.clone()))));
+        }
+    }
+}
+
 pub fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let menu = build_menu(app, &[])?;
+    #[cfg(all(debug_assertions, target_os = "macos"))]
+    hold(app, &menu);
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(Image::from_bytes(Icon::Idle.bytes())?)
         .icon_as_template(true)
@@ -164,6 +185,8 @@ pub fn render<R: Runtime>(app: &AppHandle<R>) {
     let shown = TrayState::of_running(state.tray_running.lock().map(|r| r.clone()).unwrap_or_default());
     let Some(tray) = app.tray_by_id(TRAY_ID) else { return };
     if let Ok(menu) = build_menu(app, &shown.running) {
+        #[cfg(all(debug_assertions, target_os = "macos"))]
+        hold(app, &menu);
         let _ = tray.set_menu(Some(menu));
     }
     if let Ok(image) = Image::from_bytes(shown.icon.bytes()) {
