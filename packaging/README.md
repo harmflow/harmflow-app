@@ -110,3 +110,26 @@ A failed release is fixed with a new patch version, never by moving a tag. A tag
 ## Linux and Windows
 
 Not started; the MVP's first target is macOS.
+
+## EGM Blueprint
+
+### Overview
+
+This directory holds packaging-specific operational behavior that is outside Tauri's bundle configuration.
+
+### Subdirectories & Boundaries
+
+- [macos](./macos/README.md) — local app update and installation flow.
+
+### Invariants
+
+- The update command uses the production update script declared by the repository target. `[../Makefile:update-app]`
+- The update script owns the decision to stop and restore the daemon around installation. `[macos/update-app.sh:main]`
+
+### Side Effects
+
+- Packaging flows build, stage, install, register, and open local application bundles. `[macos/update-app.sh:build_app]` `[macos/update-app.sh:install_app]` `[macos/update-app.sh:register_app]` `[macos/update-app.sh:open_window]`
+
+### Verification
+
+- Run: `make test-packaging`

@@ -12,3 +12,26 @@ Written by hand; the single source of truth for every key, enum, event, and rout
 | `schemas/context.schema.json` | `context.json`, the parameters and history the daemon gives a harness session in its execution directory |
 
 Each part keeps a generated copy: `make generate` refreshes them and `make check-generated` fails when a copy is stale.
+
+## EGM Blueprint
+
+### Overview
+
+This directory is the authored contract boundary. Generated consumers live outside this directory.
+
+### Subdirectories & Boundaries
+
+- [api](./api/README.md) — local HTTP and SSE API description.
+- [schemas](./schemas/README.md) — versioned task, event, report, template, and session-context schemas.
+
+### Invariants
+
+- The generation target copies these schema files into the daemon and regenerates the UI API types; do not hand-edit those outputs. `[../Makefile:generate]`
+
+### Side Effects
+
+- `make generate` overwrites generated contract copies and TypeScript API types. `[../Makefile:generate]`
+
+### Verification
+
+- Run: `make check-generated`
