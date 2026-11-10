@@ -70,9 +70,11 @@ impl SseParser {
     }
 }
 
+/// A change of the connection also refreshes the tray, whose daemon item follows a stop or a start from anywhere.
 fn set_connection(app: &AppHandle, state: &AppState, value: &str) {
     if state.set_connection(value) {
         let _ = app.emit(CONNECTION, serde_json::json!({ "state": value }));
+        crate::tray::schedule_refresh(app.clone());
     }
 }
 

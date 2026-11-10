@@ -134,7 +134,8 @@ export function App() {
 
   // The tray, the app menu's Settings…, and the Help menu's Keyboard Shortcuts speak the interface's language too. A count given as a string reads the key
   // as written, so both forms of the stop's question go with their `{{count}}` left in, for the tray to choose; so do
-  // both forms of its buttons, which hold none.
+  // both forms of its buttons, which hold none. The daemon item's start, its not-answering state, and a failed start's
+  // message reuse the dashboard's texts, the message with its `{{message}}` left for the tray to fill.
   useEffect(() => {
     void native.setTrayLabels({
       idle: t("tray.idle"),
@@ -142,6 +143,10 @@ export function App() {
       open: t("tray.open"),
       quit: t("tray.quit"),
       stop: t("tray.stop"),
+      start: t("daemonDown.start"),
+      notAnswering: t("connection.not_answering"),
+      startFailedTitle: t("daemonDown.title"),
+      startFailed: t("daemonDown.failed", { message: "{{message}}" }),
       stopTitle: t("settings.stopConfirmTitle"),
       stopConfirm: t("settings.stopConfirm"),
       stopChoiceRunning_one: t("settings.stopChoiceRunning_one", { count: "{{count}}" as unknown as number }),

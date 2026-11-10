@@ -1,5 +1,6 @@
 //! The menu-bar tray. Its icon changes only while an execution actually runs — queued work and idleness never change
-//! it — and it lists the running executions and a protected daemon stop.
+//! it — and it lists the running executions and a daemon item that follows the daemon's state: a protected stop while
+//! it runs, a start while it is stopped, and a disabled item while it is alive but not answering.
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -12,13 +13,16 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind, MessageDialogResult};
 
-use crate::daemon::ApiResponse;
-use crate::state::{ActiveExecution, AppState};
+use crate::daemon::{ApiResponse, DaemonStatus};
+use crate::state::{ActiveExecution, AppState, DaemonState};
 
 pub(crate) const TRAY_ID: &str = "main";
 /// The ids of the tray's items, which `menu::on_event` handles with the app menu's.
 pub const OPEN: &str = "open";
 pub const STOP: &str = "stop";
+pub const START: &str = "start";
+/// The disabled daemon item while the daemon is not answering, which no action takes.
+pub const NOT_ANSWERING: &str = "not-answering";
 pub const QUIT: &str = "quit";
 pub const EXECUTION_PREFIX: &str = "exec:";
 const ACTIVE_STATUSES: [&str; 5] = ["preparing", "running", "switching_harness", "testing", "publishing"];
@@ -89,9 +93,11 @@ enum Entry {
 }
 
 /// The tray's menu for the running executions, in order: a disabled header with their count, the first `MAX_LISTED`
-/// of them, "Open dashboard", then "Stop daemon…" and "Quit interface". `label` gives a text by its key, or the
-/// fallback when the interface has sent none, as `AppState::label` does.
-fn menu_entries(running: &[ActiveExecution], label: impl Fn(&str, &str) -> String) -> Vec<Entry> {
+/// of them, "Open dashboard", then the daemon item and "Quit interface". The daemon item follows `daemon`: "Stop
+/// daemon…" while it runs, "Start daemon" while it is stopped, and a disabled "Not answering" while it is alive but not
+/// answering. `label` gives a text by its key, or the fallback when the interface has sent none, as `AppState::label`
+/// does.
+fn menu_entries(running: &[ActiveExecution], daemon: DaemonState, label: impl Fn(&str, &str) -> String) -> Vec<Entry> {
     let item = |id: &str, text: String, enabled: bool| Entry::Item { id: id.to_string(), text, enabled };
     let header = if running.is_empty() {
         label("idle", "Nothing running")
@@ -102,20 +108,46 @@ fn menu_entries(running: &[ActiveExecution], label: impl Fn(&str, &str) -> Strin
     for exec in running.iter().take(MAX_LISTED) {
         entries.push(item(&format!("{EXECUTION_PREFIX}{}", exec.id), format!("  {}", exec.label), true));
     }
+    let daemon_item = match daemon {
+        DaemonState::Running => item(STOP, label("stop", "Stop daemon…"), true),
+        DaemonState::Stopped => item(START, label("start", "Start daemon"), true),
+        DaemonState::NotAnswering => item(NOT_ANSWERING, label("notAnswering", "Not answering"), false),
+    };
     entries.extend([
         Entry::Separator,
         item(OPEN, label("open", "Open dashboard"), true),
         Entry::Separator,
-        item(STOP, label("stop", "Stop daemon…"), true),
+        daemon_item,
         item(QUIT, label("quit", "Quit interface"), true),
     ]);
     entries
 }
 
+/// The state the tray's daemon item shows for the desktop's daemon status, the one the dashboard's banner reads.
+fn daemon_state(status: &DaemonStatus) -> DaemonState {
+    if status.running {
+        DaemonState::Running
+    } else if status.not_answering {
+        DaemonState::NotAnswering
+    } else {
+        DaemonState::Stopped
+    }
+}
+
+fn tray_daemon(state: &AppState) -> DaemonState {
+    state.tray_daemon.lock().map(|d| *d).unwrap_or(DaemonState::Running)
+}
+
+fn set_tray_daemon(state: &AppState, daemon: DaemonState) {
+    if let Ok(mut current) = state.tray_daemon.lock() {
+        *current = daemon;
+    }
+}
+
 fn build_menu<R: Runtime>(app: &AppHandle<R>, running: &[ActiveExecution]) -> tauri::Result<Menu<R>> {
     let state = app.state::<Arc<AppState>>();
     let menu = Menu::new(app)?;
-    for entry in menu_entries(running, |key, fallback| state.label(key, fallback)) {
+    for entry in menu_entries(running, tray_daemon(&state), |key, fallback| state.label(key, fallback)) {
         match entry {
             Entry::Item { id, text, enabled } => {
                 menu.append(&MenuItem::with_id(app, id, text, enabled, None::<&str>)?)?
@@ -170,6 +202,32 @@ pub fn schedule_refresh(app: AppHandle) {
     });
 }
 
+/// How often the shell reads the daemon's status on its own, as the dashboard's health poll does.
+const STATUS_POLL: Duration = Duration::from_secs(10);
+
+/// Reads the daemon's status every `STATUS_POLL`, for the life of the app, and refreshes the tray when it reads a
+/// state the daemon item does not show. A daemon kept busy stops answering its health check while its event stream,
+/// whose heartbeat takes no lock, stays connected: no change of the connection and no event follow, so only this read
+/// sees it, and sees it answer again. It runs with no window open, as the tray does.
+pub fn follow_status(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<Arc<AppState>>().inner().clone();
+        loop {
+            tokio::time::sleep(STATUS_POLL).await;
+            let status = state.daemon.status().await;
+            if polled(tray_daemon(&state), &status).is_some() {
+                schedule_refresh(app.clone());
+            }
+        }
+    });
+}
+
+/// The state a status read moves the daemon item to, from the one it shows; `None` when the read shows no change.
+fn polled(shown: DaemonState, status: &DaemonStatus) -> Option<DaemonState> {
+    let read = daemon_state(status);
+    (read != shown).then_some(read)
+}
+
 /// The running executions in the daemon's answer to `GET /executions?active=true`, each labeled "task — work item",
 /// or the task alone without a work item; `None` when the answer holds no list.
 fn running_of(answer: &Value) -> Option<Vec<ActiveExecution>> {
@@ -189,11 +247,29 @@ fn running_of(answer: &Value) -> Option<Vec<ActiveExecution>> {
     Some(running)
 }
 
+/// The executions the tray keeps for `daemon`, from the daemon's answer to `GET /executions?active=true`, which only a
+/// running daemon is asked for: none while it is stopped, since nothing runs then, and `None`, the list kept as it
+/// was, while it is not answering or when the answer holds no list.
+fn kept_running(daemon: DaemonState, answer: Option<&Value>) -> Option<Vec<ActiveExecution>> {
+    match daemon {
+        DaemonState::Running => answer.and_then(TrayState::from_answer).map(|shown| shown.running),
+        DaemonState::Stopped => Some(Vec::new()),
+        DaemonState::NotAnswering => None,
+    }
+}
+
+/// Reads the daemon's status, the one the dashboard reads, then, from a running daemon, its running executions.
 async fn refresh(app: &AppHandle, state: &AppState) {
-    let res = state.daemon.request("GET", "/executions?active=true&limit=50", None).await;
-    let Some(shown) = TrayState::from_answer(&res.body) else { return };
-    if let Ok(mut current) = state.tray_running.lock() {
-        *current = shown.running;
+    let daemon = daemon_state(&state.daemon.status().await);
+    let answer = match daemon {
+        DaemonState::Running => Some(state.daemon.request("GET", "/executions?active=true&limit=50", None).await.body),
+        _ => None,
+    };
+    set_tray_daemon(state, daemon);
+    if let Some(running) = kept_running(daemon, answer.as_ref()) {
+        if let Ok(mut current) = state.tray_running.lock() {
+            *current = running;
+        }
     }
     render(app);
 }
@@ -381,6 +457,47 @@ fn after_stop(res: &ApiResponse, chosen: bool) -> AfterStop {
     AfterStop::Failed(message)
 }
 
+/// Starting the daemon asks nothing, since it interrupts nothing: it takes the path of the dashboard's Start daemon.
+pub fn start<R: Runtime>(app: &AppHandle<R>) {
+    let state = app.state::<Arc<AppState>>().inner().clone();
+    if state.tray_starting.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let result = crate::start_daemon(&state, None).await;
+        state.tray_starting.store(false, Ordering::SeqCst);
+        let (daemon, failure) = after_start(&result, |key, fallback| state.label(key, fallback));
+        set_tray_daemon(&state, daemon);
+        render(&handle);
+        if let Some(message) = failure {
+            let ok = state.label("stopFailedOk", "OK");
+            handle
+                .dialog()
+                .message(message)
+                .title(state.label("startFailedTitle", "The HarmFlow daemon is not running"))
+                .kind(MessageDialogKind::Warning)
+                .buttons(MessageDialogButtons::OkCustom(ok))
+                .show(|_| {});
+        }
+    });
+}
+
+/// The daemon item's state after a start, and the message that says why it failed, as the dashboard words it: a start
+/// that failed leaves the daemon stopped. `label` is as for `menu_entries`.
+fn after_start(
+    result: &Result<DaemonStatus, String>,
+    label: impl Fn(&str, &str) -> String,
+) -> (DaemonState, Option<String>) {
+    match result {
+        Ok(status) => (daemon_state(status), None),
+        Err(error) => {
+            let message = label("startFailed", "The daemon did not start: {{message}}").replace("{{message}}", error);
+            (DaemonState::Stopped, Some(message))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -433,7 +550,7 @@ mod tests {
 
     /// The ids of the executions the menu lists by name for `running`.
     fn listed_ids(running: &[ActiveExecution]) -> Vec<String> {
-        items(&menu_entries(running, defaults))
+        items(&menu_entries(running, DaemonState::Running, defaults))
             .iter()
             .filter_map(|(id, _, _)| id.strip_prefix(EXECUTION_PREFIX))
             .map(str::to_string)
@@ -449,7 +566,7 @@ mod tests {
     #[test]
     fn with_nothing_running_the_menu_holds_its_fixed_items() {
         assert_eq!(
-            items(&menu_entries(&[], defaults)),
+            items(&menu_entries(&[], DaemonState::Running, defaults)),
             [
                 ("header", "Nothing running", false),
                 (OPEN, "Open dashboard", true),
@@ -467,7 +584,7 @@ mod tests {
         ]);
         let running = running_of(&answer).expect("a list is an answer");
         assert_eq!(
-            items(&menu_entries(&running, defaults)),
+            items(&menu_entries(&running, DaemonState::Running, defaults)),
             [
                 ("header", "2 running", false),
                 ("exec:exec-1", "  Queue — owner/repo#12", true),
@@ -481,7 +598,7 @@ mod tests {
 
     #[test]
     fn stop_daemon_and_quit_interface_are_two_items() {
-        let entries = menu_entries(&[], defaults);
+        let entries = menu_entries(&[], DaemonState::Running, defaults);
         let ids: Vec<&str> = items(&entries).iter().map(|(id, _, _)| *id).collect();
         assert_ne!(STOP, QUIT);
         assert_eq!(ids.iter().filter(|id| **id == STOP).count(), 1);
@@ -490,12 +607,141 @@ mod tests {
 
     #[test]
     fn the_menu_lists_the_first_five_of_seven() {
-        let entries = menu_entries(&running(7), defaults);
+        let entries = menu_entries(&running(7), DaemonState::Running, defaults);
         let items = items(&entries);
         assert_eq!(items[0], ("header", "7 running", false));
         let listed: Vec<&str> =
             items.iter().filter_map(|(id, _, _)| id.strip_prefix(EXECUTION_PREFIX)).collect();
         assert_eq!(listed, ["exec-1", "exec-2", "exec-3", "exec-4", "exec-5"]);
+    }
+
+    /// The daemon item: the one item between "Open dashboard" and "Quit interface".
+    fn daemon_item(daemon: DaemonState) -> (String, String, bool) {
+        let entries = menu_entries(&running(1), daemon, defaults);
+        let items = items(&entries);
+        let at = items.iter().position(|(id, _, _)| *id == OPEN).expect("the menu opens the dashboard") + 1;
+        assert_eq!(items[at + 1].0, QUIT, "{daemon:?}");
+        assert_eq!(items.len(), at + 2, "{daemon:?}");
+        let (id, text, enabled) = items[at];
+        (id.to_string(), text.to_string(), enabled)
+    }
+
+    #[test]
+    fn the_daemon_item_follows_the_daemons_state() {
+        assert_eq!(daemon_item(DaemonState::Running), (STOP.into(), "Stop daemon…".into(), true));
+        assert_eq!(daemon_item(DaemonState::Stopped), (START.into(), "Start daemon".into(), true));
+        assert_eq!(daemon_item(DaemonState::NotAnswering), (NOT_ANSWERING.into(), "Not answering".into(), false));
+    }
+
+    #[test]
+    fn each_state_shows_one_daemon_item_and_keeps_the_rest_of_the_menu() {
+        for daemon in [DaemonState::Running, DaemonState::Stopped, DaemonState::NotAnswering] {
+            let entries = menu_entries(&running(2), daemon, defaults);
+            let ids: Vec<&str> = items(&entries).iter().map(|(id, _, _)| *id).collect();
+            let daemon_items = ids.iter().filter(|id| [STOP, START, NOT_ANSWERING].contains(*id)).count();
+            assert_eq!(daemon_items, 1, "{daemon:?}");
+            assert_eq!(ids[..3], ["header", "exec:exec-1", "exec:exec-2"], "{daemon:?}");
+            assert!(ids.contains(&OPEN) && ids.contains(&QUIT), "{daemon:?}");
+        }
+    }
+
+    #[test]
+    fn each_daemon_item_has_its_action() {
+        use crate::menu::{action, Action};
+        // Stop daemon… keeps its confirmation, Start daemon asks nothing, and the not-answering item does nothing.
+        assert_eq!(action(STOP), Some(Action::StopDaemon));
+        assert_eq!(action(START), Some(Action::StartDaemon));
+        assert_eq!(action(NOT_ANSWERING), None);
+    }
+
+    #[test]
+    fn the_daemon_status_gives_the_items_state() {
+        let running = DaemonStatus { running: true, pid: Some(4242), ..Default::default() };
+        let not_answering = DaemonStatus {
+            not_answering: true,
+            pid: Some(4242),
+            error: Some("operation timed out".into()),
+            ..Default::default()
+        };
+        let stopped = DaemonStatus { error: Some("connection refused".into()), ..Default::default() };
+        assert_eq!(daemon_state(&running), DaemonState::Running);
+        assert_eq!(daemon_state(&not_answering), DaemonState::NotAnswering);
+        assert_eq!(daemon_state(&stopped), DaemonState::Stopped);
+        assert_eq!(daemon_state(&DaemonStatus::default()), DaemonState::Stopped);
+    }
+
+    #[test]
+    fn a_status_read_moves_the_item_while_the_connection_stays() {
+        // The stream stays connected and sends no event, so only the status read sees the daemon stop answering, and
+        // answer again.
+        let running = DaemonStatus { running: true, pid: Some(4242), ..Default::default() };
+        let not_answering = DaemonStatus {
+            not_answering: true,
+            pid: Some(4242),
+            error: Some("operation timed out".into()),
+            ..Default::default()
+        };
+        let stopped = DaemonStatus { error: Some("connection refused".into()), ..Default::default() };
+        assert_eq!(polled(DaemonState::Running, &not_answering), Some(DaemonState::NotAnswering));
+        assert_eq!(polled(DaemonState::NotAnswering, &running), Some(DaemonState::Running));
+        assert_eq!(polled(DaemonState::Running, &stopped), Some(DaemonState::Stopped));
+        assert_eq!(polled(DaemonState::Stopped, &running), Some(DaemonState::Running));
+        // A read that shows the state the item shows refreshes nothing.
+        assert_eq!(polled(DaemonState::Running, &running), None);
+        assert_eq!(polled(DaemonState::NotAnswering, &not_answering), None);
+        assert_eq!(polled(DaemonState::Stopped, &stopped), None);
+    }
+
+    #[test]
+    fn a_start_that_succeeds_shows_stop_daemon_again() {
+        let started = Ok(DaemonStatus { running: true, ..Default::default() });
+        assert_eq!(after_start(&started, defaults), (DaemonState::Running, None));
+        assert_eq!(daemon_item(after_start(&started, defaults).0).0, STOP);
+        // A daemon that runs but does not answer yet is not started again: the item says so.
+        let busy = Ok(DaemonStatus { not_answering: true, ..Default::default() });
+        assert_eq!(after_start(&busy, defaults), (DaemonState::NotAnswering, None));
+    }
+
+    #[test]
+    fn a_start_that_fails_says_why_and_keeps_start_daemon() {
+        let failed = Err("the daemon did not answer within 10 seconds".to_string());
+        let (daemon, message) = after_start(&failed, defaults);
+        assert_eq!(daemon, DaemonState::Stopped);
+        assert_eq!(daemon_item(daemon).0, START);
+        assert_eq!(message.as_deref(), Some("The daemon did not start: the daemon did not answer within 10 seconds"));
+        let label = |key: &str, fallback: &str| match key {
+            "startFailed" => "O daemon não iniciou: {{message}}".to_string(),
+            _ => fallback.to_string(),
+        };
+        assert_eq!(
+            after_start(&failed, label).1.as_deref(),
+            Some("O daemon não iniciou: the daemon did not answer within 10 seconds")
+        );
+    }
+
+    #[test]
+    fn the_interfaces_texts_name_the_daemon_item() {
+        let label = |key: &str, fallback: &str| match key {
+            "start" => "Iniciar o daemon".to_string(),
+            "notAnswering" => "Sem resposta".to_string(),
+            _ => fallback.to_string(),
+        };
+        let texts = |daemon| {
+            items(&menu_entries(&[], daemon, label)).iter().map(|(_, text, _)| text.to_string()).collect::<Vec<_>>()
+        };
+        assert!(texts(DaemonState::Stopped).contains(&"Iniciar o daemon".to_string()));
+        assert!(texts(DaemonState::NotAnswering).contains(&"Sem resposta".to_string()));
+    }
+
+    #[test]
+    fn a_stopped_daemon_clears_the_executions_and_one_not_answering_keeps_them() {
+        let answer = json!([{ "id": "exec-1", "status": "running", "taskName": "Nightly" }]);
+        let ids = |kept: Option<Vec<ActiveExecution>>| kept.map(|r| r.into_iter().map(|e| e.id).collect::<Vec<_>>());
+        assert_eq!(ids(kept_running(DaemonState::Running, Some(&answer))), Some(vec!["exec-1".to_string()]));
+        assert_eq!(ids(kept_running(DaemonState::Running, Some(&json!({ "error": "unavailable" })))), None);
+        assert_eq!(ids(kept_running(DaemonState::Running, None)), None);
+        assert_eq!(ids(kept_running(DaemonState::Stopped, None)), Some(vec![]));
+        assert_eq!(ids(kept_running(DaemonState::NotAnswering, None)), None);
     }
 
     fn stop_with(body: Value) -> Option<Request> {
@@ -597,7 +843,7 @@ mod tests {
             "stopCancelRunning_other" => "Cancelar todas".to_string(),
             _ => fallback.to_string(),
         };
-        assert_eq!(items(&menu_entries(&running(3), label))[0].1, "3 em execução");
+        assert_eq!(items(&menu_entries(&running(3), DaemonState::Running, label))[0].1, "3 em execução");
         assert_eq!(stop_dialog(1, label).message, "1 execução em andamento.");
         assert_eq!(stop_dialog(1, label).wait.as_deref(), Some("Aguardar"));
         assert_eq!(stop_dialog(2, label).message, "2 execuções em andamento.");

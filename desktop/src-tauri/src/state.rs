@@ -15,6 +15,15 @@ pub struct ActiveExecution {
     pub label: String,
 }
 
+/// The daemon's state as the tray's daemon item follows it, read from the desktop's daemon status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DaemonState {
+    Running,
+    Stopped,
+    /// Alive but not answering: the state the dashboard shows as *Not answering*.
+    NotAnswering,
+}
+
 pub struct AppState {
     pub daemon: DaemonClient,
     connection: Mutex<String>,
@@ -23,6 +32,10 @@ pub struct AppState {
     /// ⌘Q only hides the window while the tray is shown; off until the stored choice arrives.
     keep_tray_on_quit: AtomicBool,
     pub tray_running: Mutex<Vec<ActiveExecution>>,
+    /// The daemon's state the tray's daemon item shows; running until the first refresh reads it.
+    pub tray_daemon: Mutex<DaemonState>,
+    /// A start from the tray is under way: a second choice of Start daemon does nothing until it ends.
+    pub tray_starting: AtomicBool,
     /// The tray's and the app menu's texts in the interface's language, sent by the webview; English until it does.
     pub tray_labels: Mutex<HashMap<String, String>>,
     pub tray_refresh_pending: AtomicBool,
@@ -41,6 +54,8 @@ impl AppState {
             tray_enabled: AtomicBool::new(true),
             keep_tray_on_quit: AtomicBool::new(false),
             tray_running: Mutex::new(Vec::new()),
+            tray_daemon: Mutex::new(DaemonState::Running),
+            tray_starting: AtomicBool::new(false),
             tray_labels: Mutex::new(HashMap::new()),
             tray_refresh_pending: AtomicBool::new(false),
             start_hidden,
