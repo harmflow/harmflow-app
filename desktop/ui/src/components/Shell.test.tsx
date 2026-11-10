@@ -393,6 +393,17 @@ describe("the sidebar's gauges", () => {
     expect(reads()).toBe(3);
   });
 
+  it("titles the gauges System while expanded, and hides the title collapsed", async () => {
+    daemon.answers.set("GET /system", { status: 200, body: gauges });
+    await showSidebar(false);
+    const panel = host!.querySelector("section.gauges-panel");
+    expect(panel?.getAttribute("aria-labelledby")).toBe("gauges-title");
+    expect(host!.querySelector("#gauges-title")?.textContent).toBe("System");
+
+    await showSidebar(true);
+    expect(host!.querySelector("#gauges-title")).toBeNull();
+  });
+
   it("reads nothing while collapsed, and stops reading on collapsing", async () => {
     daemon.answers.set("GET /system", { status: 200, body: gauges });
     await showSidebar(true);

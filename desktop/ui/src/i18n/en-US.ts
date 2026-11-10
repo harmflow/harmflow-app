@@ -1458,6 +1458,7 @@ export const enUS = {
     shortcuts: "Keyboard Shortcuts",
   },
   gauges: {
+    title: "System",
     cpu: "CPU",
     ram: "RAM",
     disk: "Disk",

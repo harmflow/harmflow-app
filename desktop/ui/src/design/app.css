@@ -389,6 +389,22 @@ body:has([aria-modal="true"]) .tooltip {
   box-shadow: 0 0 8px currentColor;
 }
 
+.gauges-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--hf-space-1-5);
+}
+
+.gauges-panel__title {
+  padding-inline: var(--hf-space-1);
+  color: var(--hf-color-text-muted);
+  font-family: var(--hf-font-mono);
+  font-size: var(--hf-font-size-2xs);
+  font-weight: var(--hf-font-weight-semibold);
+  letter-spacing: var(--hf-letter-spacing-label);
+  text-transform: uppercase;
+}
+
 .gauges {
   display: flex;
   flex-direction: column;

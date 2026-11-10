@@ -158,34 +158,39 @@ export function Sidebar({
 
       <div className="sidebar__foot">
         {collapsed ? null : (
-          <div className="gauges">
-            <Gauge
-              label={t("gauges.cpu")}
-              value={system?.cpuPercent}
-              max={100}
-              text={system?.cpuPercent !== undefined ? `${formatNumber(system.cpuPercent, locale)}%` : "—"}
-            />
-            <Gauge
-              label={t("gauges.ram")}
-              value={system?.memoryUsedBytes}
-              max={system?.memoryTotalBytes}
-              text={
-                system?.memoryTotalBytes
-                  ? `${formatBytes(system.memoryUsedBytes, locale)} / ${formatBytes(system.memoryTotalBytes, locale)}`
-                  : "—"
-              }
-            />
-            <Gauge
-              label={t("gauges.disk")}
-              value={system?.diskUsedBytes}
-              max={system?.diskTotalBytes}
-              text={
-                system?.diskTotalBytes
-                  ? `${formatBytes(system.diskUsedBytes, locale)} / ${formatBytes(system.diskTotalBytes, locale)}`
-                  : "—"
-              }
-            />
-          </div>
+          <section className="gauges-panel" aria-labelledby="gauges-title">
+            <h2 id="gauges-title" className="gauges-panel__title">
+              {t("gauges.title")}
+            </h2>
+            <div className="gauges">
+              <Gauge
+                label={t("gauges.cpu")}
+                value={system?.cpuPercent}
+                max={100}
+                text={system?.cpuPercent !== undefined ? `${formatNumber(system.cpuPercent, locale)}%` : "—"}
+              />
+              <Gauge
+                label={t("gauges.ram")}
+                value={system?.memoryUsedBytes}
+                max={system?.memoryTotalBytes}
+                text={
+                  system?.memoryTotalBytes
+                    ? `${formatBytes(system.memoryUsedBytes, locale)} / ${formatBytes(system.memoryTotalBytes, locale)}`
+                    : "—"
+                }
+              />
+              <Gauge
+                label={t("gauges.disk")}
+                value={system?.diskUsedBytes}
+                max={system?.diskTotalBytes}
+                text={
+                  system?.diskTotalBytes
+                    ? `${formatBytes(system.diskUsedBytes, locale)} / ${formatBytes(system.diskTotalBytes, locale)}`
+                    : "—"
+                }
+              />
+            </div>
+          </section>
         )}
         <div className="sidebar__bar">
           {collapsed ? null : <span className="sidebar__version">{t("common.version", { version })}</span>}
