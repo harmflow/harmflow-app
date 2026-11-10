@@ -299,8 +299,8 @@ describe("the task's history, after an execution's log expired", () => {
     await tab("Results");
     const items = [...drawer()!.querySelectorAll(".results__item")];
     expect(items.map((i) => i.querySelector("h4")!.textContent)).toEqual(["org/core-banking#123 — Session tokens expire too early"]);
-    const pr = items[0].querySelector<HTMLButtonElement>("button.link")!;
-    expect(pr.textContent!.trim()).toBe("#9");
+    const pr = [...items[0].querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent!.trim() === "#9")!;
+    expect(pr).toBeDefined();
     await act(async () => pr.click());
     expect(openUrl.mock.calls).toEqual([[pullRequestUrl]]);
     expect(banners()).toEqual([expired]);

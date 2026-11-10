@@ -405,9 +405,9 @@ function NotificationBell({ onOpenExecution }: { onOpenExecution: (id: string) =
           <div className="popover__header">
             <strong>{t("header.notifications")}</strong>
             {unread.length ? (
-              <button type="button" className="link" onClick={() => void actions.markRead()}>
+              <Button variant="link" onClick={() => void actions.markRead()}>
                 {t("header.markAllRead")}
-              </button>
+              </Button>
             ) : null}
           </div>
           {unread.length === 0 ? <p className="popover__empty">{t("header.noNotifications")}</p> : null}

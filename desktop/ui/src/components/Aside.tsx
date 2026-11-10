@@ -6,7 +6,7 @@ import { formatRelative } from "../lib/format";
 import { useNow } from "../lib/hooks";
 import { useStore } from "../state/store";
 import { Icon, type IconName } from "./Icon";
-import { Chip, EmptyState, Panel, Sparkline, StatusMark, cx } from "./ui";
+import { Button, Chip, EmptyState, Panel, Sparkline, StatusMark, cx } from "./ui";
 
 export function QueuePanel({ onOpenExecution }: { onOpenExecution: (id: string) => void }) {
   const { t, i18n } = useTranslation();
@@ -112,9 +112,9 @@ export function RecentHistory({ onOpenExecution, onSeeAll }: { onOpenExecution: 
       icon="history"
       className="aside-panel"
       actions={
-        <button type="button" className="link" onClick={onSeeAll}>
+        <Button variant="link" onClick={onSeeAll}>
           {t("common.seeAll")} <Icon name="arrowRight" size={13} />
-        </button>
+        </Button>
       }
     >
       {recent.length === 0 ? <EmptyState icon="history" title={t("history.empty")} /> : null}
