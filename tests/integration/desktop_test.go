@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"syscall"
 	"testing"
@@ -253,4 +254,89 @@ func TestTheTrayShowsOnlyTheRunningExecutions(t *testing.T) {
 		}
 	}
 	s.waitTray(nil, "idle")
+}
+
+// systemAlerts reads, through the shell's test control channel, how many windows macOS shows on screen for the
+// system's alert process, which draws an alert that has no parent window, from the window list macOS gives any
+// process.
+func (s *shell) systemAlerts() int {
+	s.t.Helper()
+	alerts, ok := s.send("system-alerts")["alerts"].([]any)
+	if !ok {
+		s.t.Fatal("system-alerts answered no list of alerts")
+	}
+	return len(alerts)
+}
+
+// harmflow-app#903: stopping the daemon from the tray's menu asks first. With one execution running, the tray's menu,
+// opened as a click opens it and read from the status item's NSMenu macOS shows, holds in order a disabled header
+// counting that execution, its item, Open dashboard, Stop daemon…, and Quit interface, Stop daemon… and Quit interface
+// being two items. Choosing Stop daemon… puts the system's alert on screen, seen in the window list as a window of the
+// system's alert process, and while it is there the daemon still answers and the execution still runs: no stop
+// reaches the daemon before the alert is answered. The test answers no alert, which only Accessibility could, so the
+// alert's text, Cancel, and confirming stay with the unit tests of tray.rs. The run spends no usage: the stand-in
+// fake-claude is the harness, and it holds the session at a gate until the test opens it.
+func TestStoppingTheDaemonFromTheTrayAsksFirst(t *testing.T) {
+	bin := realDesktop(t)
+	d := startDaemon(t, t.TempDir())
+	gate := filepath.Join(t.TempDir(), "gate")
+	stand := standIn(t, "fake-claude", "claude",
+		"case \"$SCENARIO\" in\n", fmt.Sprintf("until [ -e '%s' ]; do sleep 0.05; done\ncase \"$SCENARIO\" in\n", gate))
+	d.call("PUT", "/harnesses/claude-code", map[string]any{"path": stand.path}, 200)
+	// The texts the test expects are the shell's in en-US, whatever the system's language.
+	d.call("PATCH", "/settings", map[string]any{"language": "en-US"}, 200)
+	d.call("POST", "/tasks", map[string]any{"yaml": task("gated", "SCENARIO=ok", "")}, 201)
+
+	s := startShell(t, bin, d)
+	s.waitState(true, true)
+	run := d.call("POST", "/tasks/gated/run", nil, 202)["executionId"].(string)
+	d.waitStatus(run, "running")
+	// The tray rebuilds its menu with its icon and count, once the execution's event reaches the shell.
+	s.waitTray("1", "executing")
+
+	want := []any{
+		map[string]any{"id": "header", "text": "1 running", "enabled": false},
+		map[string]any{"id": "exec:" + run, "text": "  Task gated", "enabled": true},
+		map[string]any{"separator": true},
+		map[string]any{"id": "open", "text": "Open dashboard", "enabled": true},
+		map[string]any{"separator": true},
+		map[string]any{"id": "stop", "text": "Stop daemon…", "enabled": true},
+		map[string]any{"id": "quit", "text": "Quit interface", "enabled": true},
+	}
+	if got := s.send("tray-menu")["items"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("the tray's menu macOS shows = %v, want %v", got, want)
+	}
+
+	health := d.call("GET", "/health", nil, 200)
+	before := s.systemAlerts()
+	s.send("choose-tray stop")
+	for deadline := time.Now().Add(10 * time.Second); s.systemAlerts() <= before; time.Sleep(200 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("no window of the system's alert process came on screen within 10s of Stop daemon…; %d before it",
+				before)
+		}
+	}
+	// Nothing answers the alert, so for as long as it is on screen no stop may reach the daemon: the same daemon
+	// answers, draining nothing.
+	for end := time.Now().Add(3 * time.Second); time.Now().Before(end); time.Sleep(200 * time.Millisecond) {
+		now := d.call("GET", "/health", nil, 200)
+		if now["pid"] != health["pid"] || now["startedAt"] != health["startedAt"] || now["draining"] != nil {
+			t.Fatalf("GET /health while the stop's alert is on screen = %v, want the daemon of %v, draining nothing", now,
+				health)
+		}
+		if x := d.call("GET", "/executions/"+run, nil, 200); x["status"] != "running" {
+			t.Fatalf("the execution %s is %v while the stop's alert is on screen, want running", run, x["status"])
+		}
+		if n := s.systemAlerts(); n <= before {
+			t.Fatalf("the system's alert left the screen with no answer: %d of its windows, %d before Stop daemon…", n,
+				before)
+		}
+	}
+
+	if err := os.WriteFile(gate, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if x := d.waitStatus(run, "completed", "failed", "cancelled", "interrupted"); x["status"] != "completed" {
+		t.Fatalf("the execution %s ended %v (%v), want completed", run, x["status"], x["errorMessage"])
+	}
 }
