@@ -417,12 +417,11 @@ pub fn start_daemon() -> Result<(), String> {
 
 /// Starts `bin` on the data directory `home` through `agent` when it serves both, and directly otherwise, with
 /// `--home home_arg` when one is given: the process started directly, or `None` when launchd started the agent's job.
-/// A kickstart that fails starts the binary directly, as before the agent existed.
+/// A kickstart that fails is the error, and starts no binary: a daemon of the app's own beside the loaded agent is the
+/// competition for the directory this avoids.
 fn start(agent: Option<&LaunchAgent>, bin: &Path, home: &Path, home_arg: Option<&OsStr>) -> Result<Option<Child>, String> {
     if let Some(agent) = agent.filter(|agent| agent.serves(bin, home)) {
-        if agent.kickstart().is_ok() {
-            return Ok(None);
-        }
+        return agent.kickstart().map(|()| None);
     }
     spawn_detached(bin, home_arg).map(Some)
 }
@@ -923,15 +922,15 @@ mod tests {
         }
     }
 
-    /// harmflow-app#978: when the login agent would not start this harmflowd on this data directory, or launchd will not
-    /// start it, the app starts the binary itself, as before.
+    /// harmflow-app#978: when the login agent would not start this harmflowd on this data directory, the app starts the
+    /// binary itself, as before, and asks launchd for nothing.
     #[cfg(unix)]
     #[test]
     fn the_daemon_starts_directly_unless_the_login_agent_serves_it() {
         let serving = || Some(vec!["{bin}", "--home", "{home}"]);
         let cases = [
-            ("not-loaded", Agent { loaded: false, loaded_program: "", program_arguments: serving(), kickstart_ok: true }, false),
-            ("no-plist", Agent { loaded: true, loaded_program: "{bin}", program_arguments: None, kickstart_ok: true }, false),
+            ("not-loaded", Agent { loaded: false, loaded_program: "", program_arguments: serving(), kickstart_ok: true }),
+            ("no-plist", Agent { loaded: true, loaded_program: "{bin}", program_arguments: None, kickstart_ok: true }),
             (
                 "other-program",
                 Agent {
@@ -940,7 +939,6 @@ mod tests {
                     program_arguments: Some(vec!["/elsewhere/harmflowd", "--home", "{home}"]),
                     kickstart_ok: true,
                 },
-                false,
             ),
             (
                 "other-home",
@@ -950,7 +948,6 @@ mod tests {
                     program_arguments: Some(vec!["{bin}", "--home", "/elsewhere/HarmFlow"]),
                     kickstart_ok: true,
                 },
-                false,
             ),
             (
                 "loaded-before-it-changed",
@@ -960,11 +957,9 @@ mod tests {
                     program_arguments: serving(),
                     kickstart_ok: true,
                 },
-                false,
             ),
-            ("kickstart-fails", Agent { loaded: true, loaded_program: "{bin}", program_arguments: serving(), kickstart_ok: false }, true),
         ];
-        for (name, agent, kickstarted) in cases {
+        for (name, agent) in cases {
             let (dir, agent) = stand_in_agent(name, &agent);
             let started = start(Some(&agent), &dir.join("harmflowd"), &dir.join("home"), None);
             let calls = launchctl_calls(&dir);
@@ -978,12 +973,42 @@ mod tests {
             };
             std::fs::remove_dir_all(&dir).ok();
             assert!(direct, "{name}: the binary was not started directly");
-            assert_eq!(
-                calls.iter().any(|c| c.starts_with("kickstart")),
-                kickstarted,
-                "{name}: launchctl calls {calls:?}"
-            );
+            assert!(!calls.iter().any(|c| c.starts_with("kickstart")), "{name}: launchctl calls {calls:?}");
         }
+    }
+
+    /// harmflow-app#978: while the login agent serves this data directory, a kickstart launchd refuses is the start's
+    /// error, and no harmflowd of the app's own starts beside the loaded agent.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_kickstart_starts_no_daemon_of_the_apps_own() {
+        let (dir, agent) = stand_in_agent(
+            "kickstart-fails",
+            &Agent {
+                loaded: true,
+                loaded_program: "{bin}",
+                program_arguments: Some(vec!["{bin}", "--home", "{home}"]),
+                kickstart_ok: false,
+            },
+        );
+        let started = start(Some(&agent), &dir.join("harmflowd"), &dir.join("home"), None);
+        let calls = launchctl_calls(&dir);
+        std::fs::remove_dir_all(&dir).ok();
+        let error = match started {
+            Err(error) => error,
+            Ok(Some(mut child)) => {
+                child.kill().ok();
+                child.wait().ok();
+                panic!("the binary was started directly beside the loaded agent");
+            }
+            Ok(None) => panic!("the start reported success though launchd refused the kickstart"),
+        };
+        assert!(error.contains("kickstart"), "error {error:?}, want the failed kickstart");
+        assert_eq!(
+            calls,
+            ["print gui/501/com.harmflow.daemon", "kickstart gui/501/com.harmflow.daemon"],
+            "launchctl calls"
+        );
     }
 
     /// With no login agent at all, the binary starts directly.
