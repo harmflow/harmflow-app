@@ -1486,6 +1486,7 @@ export const esES: Resources = {
     shortcuts: "Atajos de teclado",
   },
   gauges: {
+    title: "Sistema",
     cpu: "CPU",
     ram: "RAM",
     disk: "Disco",

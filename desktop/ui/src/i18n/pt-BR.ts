@@ -1484,6 +1484,7 @@ export const ptBR: Resources = {
     shortcuts: "Atalhos de teclado",
   },
   gauges: {
+    title: "Sistema",
     cpu: "CPU",
     ram: "RAM",
     disk: "Disco",
