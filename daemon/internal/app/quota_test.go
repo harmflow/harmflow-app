@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -128,6 +130,162 @@ func TestTimedOutQuotaReadLetsTheAttemptStart(t *testing.T) {
 			if len(unread) != 1 || unread[0].Subject != c.harness || unread[0].Params["harness"] != h.Name() ||
 				!strings.Contains(unread[0].Message, c.detail) {
 				t.Errorf("warnings %+v, want one quota_unread naming %s and %q", x.Warnings, c.harness, c.detail)
+			}
+		})
+	}
+}
+
+// unreadable is a Claude Code usage report with no plan window HarmFlow can read, as the CLI prints it while the usage
+// endpoint is throttled.
+func unreadable() (domain.Quota, error) {
+	return domain.Quota{}, domain.TextErr("quota_report_unrecognized",
+		"{{harness}}'s usage report names no plan window HarmFlow can read", "harness", "Claude Code")
+}
+
+// runQuotaChecked runs the task to its end, in one attempt, and says how many quota reads Claude Code has made in all
+// and whether the execution was warned that the quota could not be read, for the report unreadable gives.
+func (e *env) runQuotaChecked(t *testing.T, id string) (reads int, unread bool) {
+	t.Helper()
+	r, err := e.app.RunTask(id)
+	if err != nil {
+		t.Fatalf("RunTask(%s) = %v, want no error", id, err)
+	}
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	if len(x.Attempts) != 1 {
+		t.Fatalf("attempts %+v, want one", x.Attempts)
+	}
+	for _, w := range x.Warnings {
+		if w.Key == "quota_unread" && strings.Contains(w.Message, "no plan window") {
+			unread = true
+		}
+	}
+	return e.claude.reads(), unread
+}
+
+// A quota read that fails is kept for its backoff: an attempt inside it starts with the same warning and reads nothing,
+// and the first attempt after it reads again. The backoff is five minutes after the first failure and ten after the
+// second.
+func TestFailedQuotaReadBacksOff(t *testing.T) {
+	e := newEnv(t)
+	e.create("unread", "")
+	e.claude.setQuota(unreadable)
+	steps := []struct {
+		name    string
+		advance time.Duration
+		reads   int
+	}{
+		{"the first attempt", 0, 1},
+		{"four minutes after the first failure", 4 * time.Minute, 1},
+		{"five minutes after it", time.Minute, 2},
+		{"nine minutes after the second failure", 9 * time.Minute, 2},
+		{"ten minutes after it", time.Minute, 3},
+	}
+	for _, s := range steps {
+		e.clock.Advance(s.advance)
+		if reads, unread := e.runQuotaChecked(t, "unread"); reads != s.reads || !unread {
+			t.Errorf("%s: %d quota reads in all, warned %v; want %d and the quota_unread warning", s.name, reads, unread,
+				s.reads)
+		}
+	}
+}
+
+// A good read ends the backoff: once reads fail again, the first failure backs off five minutes, not the twenty a third
+// failure in a row would.
+func TestGoodQuotaReadEndsTheBackoff(t *testing.T) {
+	e := newEnv(t)
+	e.create("unread", "")
+	e.claude.setQuota(unreadable)
+	e.runQuotaChecked(t, "unread")
+	e.clock.Advance(5 * time.Minute)
+	e.runQuotaChecked(t, "unread")
+	e.clock.Advance(10 * time.Minute)
+	e.claude.setQuota(nil)
+	if reads, unread := e.runQuotaChecked(t, "unread"); reads != 3 || unread {
+		t.Fatalf("a good read after two failures: %d quota reads in all, warned %v; want 3 and no warning", reads, unread)
+	}
+	e.claude.setQuota(unreadable)
+	e.clock.Advance(quotaTTL)
+	if reads, unread := e.runQuotaChecked(t, "unread"); reads != 4 || !unread {
+		t.Errorf("once the good reading is five minutes old: %d quota reads in all, warned %v; want 4 and the warning",
+			reads, unread)
+	}
+	e.clock.Advance(5 * time.Minute)
+	if reads, unread := e.runQuotaChecked(t, "unread"); reads != 5 || !unread {
+		t.Errorf("five minutes after that failure: %d quota reads in all, warned %v; want 5 and the warning", reads, unread)
+	}
+}
+
+// A running attempt's report is a reading but not a read: while it is five minutes old or less the next attempt uses
+// it, with no warning, and once it is older the backoff of the failed reads still runs, so the next attempt neither
+// reads nor uses it.
+func TestReportedQuotaLeavesTheBackoffRunning(t *testing.T) {
+	e := newEnv(t)
+	e.create("unread", "")
+	e.claude.setQuota(unreadable)
+	e.runQuotaChecked(t, "unread")
+	e.clock.Advance(5 * time.Minute)
+	e.runQuotaChecked(t, "unread")
+	// The second failure backs off ten minutes; the attempt a minute into them reads nothing and reports a reading.
+	e.clock.Advance(time.Minute)
+	e.claude.setScript(func(ports.RunRequest) string { return "echo 'WINDOW 10'; echo 'END ok'" })
+	if reads, unread := e.runQuotaChecked(t, "unread"); reads != 2 || !unread {
+		t.Fatalf("a minute into the backoff: %d quota reads in all, warned %v; want 2 and the warning", reads, unread)
+	}
+	e.claude.setScript(nil)
+	e.clock.Advance(4 * time.Minute)
+	if reads, unread := e.runQuotaChecked(t, "unread"); reads != 2 || unread {
+		t.Errorf("four minutes after the report: %d quota reads in all, warned %v; want 2 and no warning", reads, unread)
+	}
+	e.clock.Advance(2 * time.Minute)
+	if reads, unread := e.runQuotaChecked(t, "unread"); reads != 2 || !unread {
+		t.Errorf("six minutes after the report, inside the backoff: %d quota reads in all, warned %v; want 2 and the warning",
+			reads, unread)
+	}
+	e.clock.Advance(3 * time.Minute)
+	if reads, _ := e.runQuotaChecked(t, "unread"); reads != 3 {
+		t.Errorf("ten minutes after the second failure: %d quota reads in all, want 3", reads)
+	}
+}
+
+// A read cut short by the attempt's own context, as its execution's timeout or cancel ends it, is not kept: it says
+// nothing of the harness, so the next attempt reads again, and that read's failure is kept.
+func TestQuotaReadCutByItsContextIsNotKept(t *testing.T) {
+	e := newEnv(t)
+	e.claude.setQuota(func() (domain.Quota, error) { return domain.Quota{}, errors.New("signal: killed") })
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, read, err := e.app.quota(ctx, e.claude, ports.HarnessInfo{}); !read || err == nil {
+		t.Fatalf("quota(cancelled context) = read %v, error %v; want a read that failed", read, err)
+	}
+	for range 2 {
+		if _, read, err := e.app.quota(t.Context(), e.claude, ports.HarnessInfo{}); !read || err == nil {
+			t.Fatalf("quota() = read %v, error %v; want a read that failed", read, err)
+		}
+	}
+	if n := e.claude.reads(); n != 2 {
+		t.Errorf("%d quota reads, want 2: one cut short and not kept, then one that failed and was kept", n)
+	}
+}
+
+// The backoff doubles from five minutes with each failure in a row, and stops at an hour however long reads fail.
+func TestQuotaBackoff(t *testing.T) {
+	cases := []struct {
+		name  string
+		count int
+		want  time.Duration
+	}{
+		{"the first failure", 1, 5 * time.Minute},
+		{"the second", 2, 10 * time.Minute},
+		{"the third", 3, 20 * time.Minute},
+		{"the fourth", 4, 40 * time.Minute},
+		{"the fifth", 5, time.Hour},
+		{"the sixth", 6, time.Hour},
+		{"a thousand", 1000, time.Hour},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := (quotaFailure{count: c.count}).backoff(); got != c.want {
+				t.Errorf("quotaFailure{count: %d}.backoff() = %v, want %v", c.count, got, c.want)
 			}
 		})
 	}

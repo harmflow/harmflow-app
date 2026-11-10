@@ -14,16 +14,45 @@ import (
 // quotaTTL is how long a harness's quota reading stands before an attempt reads it again.
 const quotaTTL = 5 * time.Minute
 
+// quotaBackoffMax is the longest a harness's failed quota reads keep the next attempt from reading again.
+const quotaBackoffMax = time.Hour
+
 // quotaReading is a harness's last quota reading and when it was taken.
 type quotaReading struct {
 	quota domain.Quota
 	at    time.Time
 }
 
+// quotaFailure is the quota reads of a harness's installation that failed in a row since its last good one: how many,
+// the error of the last, and when it failed.
+type quotaFailure struct {
+	count int
+	err   error
+	at    time.Time
+}
+
+// backoff is how long the failed reads keep the next attempt from reading again: quotaTTL after the first, as long as
+// a good reading stands, doubled with each failure after it, up to quotaBackoffMax. Claude Code's usage endpoint
+// throttles with a Retry-After of 30 to 50 minutes, which the CLI does not pass on. The wait reaches 40 minutes at the
+// fourth failure in a row and an hour at the fifth, so a throttled endpoint gets a few reads, not one per attempt, and
+// once it answers again the hour bounds how long the check stays off.
+func (f quotaFailure) backoff() time.Duration {
+	d := quotaTTL
+	for i := 1; i < f.count && d < quotaBackoffMax; i++ {
+		d *= 2
+	}
+	return min(d, quotaBackoffMax)
+}
+
 // quota is the quota of the installation of a harness that info describes, as an attempt checks it before it starts:
 // the reading of the last five minutes, or a new one, read with no model call. Attempts that start together share one
-// read. read is false when the adapter reads no quota; a read that fails is not kept, so the next attempt reads again.
-// Each installation runs under its own account, so each keeps a reading of its own.
+// read. read is false when the adapter reads no quota. Each installation runs under its own account, so each keeps a
+// reading, and a backoff, of its own.
+//
+// A read that fails is kept for its backoff: the attempts in it get its error without reading again, and the first
+// after it reads again. Only a good read ends the backoff. A running attempt's report is a reading, which stands for
+// five minutes, but it is not a read of the harness's usage and leaves the backoff running. A read cut short by the
+// attempt's own context, its execution's timeout or cancel, says nothing of the harness and is not kept.
 func (a *App) quota(ctx context.Context, ad ports.HarnessAdapter, info ports.HarnessInfo) (q domain.Quota, read bool, err error) {
 	reader, ok := ad.(ports.QuotaReader)
 	if !ok {
@@ -41,14 +70,27 @@ func (a *App) quota(ctx context.Context, ad ports.HarnessAdapter, info ports.Har
 	defer lock.Unlock()
 	a.mu.Lock()
 	last, kept := a.quotas[key]
+	failed, failing := a.quotaFailures[key]
 	a.mu.Unlock()
-	if kept && a.now().Sub(last.at) < quotaTTL {
+	now := a.now()
+	if kept && now.Sub(last.at) < quotaTTL {
 		return last.quota, true, nil
+	}
+	if failing && now.Sub(failed.at) < failed.backoff() {
+		return domain.Quota{}, true, failed.err
 	}
 	q, err = reader.ReadQuota(ctx, info)
 	if err != nil {
+		if ctx.Err() == nil {
+			a.mu.Lock()
+			a.quotaFailures[key] = quotaFailure{count: failed.count + 1, err: err, at: a.now()}
+			a.mu.Unlock()
+		}
 		return domain.Quota{}, true, err
 	}
+	a.mu.Lock()
+	delete(a.quotaFailures, key)
+	a.mu.Unlock()
 	a.storeQuota(key, q)
 	return q, true, nil
 }
