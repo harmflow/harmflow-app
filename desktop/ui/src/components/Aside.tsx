@@ -6,7 +6,7 @@ import { formatRelative } from "../lib/format";
 import { useNow } from "../lib/hooks";
 import { useStore } from "../state/store";
 import { Icon, type IconName } from "./Icon";
-import { Button, Chip, EmptyState, Panel, Sparkline, StatusMark, cx } from "./ui";
+import { Button, Chip, EmptyState, ListRow, ListRows, Panel, Sparkline, StatusMark, cx } from "./ui";
 
 export function QueuePanel({ onOpenExecution }: { onOpenExecution: (id: string) => void }) {
   const { t, i18n } = useTranslation();
@@ -21,22 +21,23 @@ export function QueuePanel({ onOpenExecution }: { onOpenExecution: (id: string) 
   return (
     <Panel title={t("queue.title", { count })} icon="layers" className="aside-panel">
       {count === 0 ? <EmptyState icon="clock" title={t("queue.empty")} /> : null}
-      <ul className="queue-list">
+      <ListRows loose>
         {waiting.map((e) => (
           <li key={e.id}>
-            <button type="button" className="queue-item" onClick={() => onOpenExecution(e.id)}>
-              <span className="queue-item__icon">
-                <Icon name="file" size={18} />
-              </span>
-              <span className="queue-item__text">
-                <span className="queue-item__title">{e.taskName}</span>
-                <span className="queue-item__sub mono">{t("queue.taskLabel", { task: e.taskId })}</span>
-                <span className="queue-item__when">
+            <ListRow
+              card
+              alignTop
+              icon="file"
+              title={e.taskName}
+              secondary={<span className="mono">{t("queue.taskLabel", { task: e.taskId })}</span>}
+              meta={
+                <>
                   <Icon name="clock" size={13} /> {t(`trigger.${e.trigger}`)} · {formatRelative(e.createdAt, i18n.language, now)}
-                </span>
-              </span>
-              <Chip tone="violet">{t("queue.waiting")}</Chip>
-            </button>
+                </>
+              }
+              aside={<Chip tone="violet">{t("queue.waiting")}</Chip>}
+              onClick={() => onOpenExecution(e.id)}
+            />
           </li>
         ))}
         {workItems.map((w) => (
@@ -48,24 +49,24 @@ export function QueuePanel({ onOpenExecution }: { onOpenExecution: (id: string) 
           const due = Date.parse(u.nextFireAt) <= now;
           return (
             <li key={u.taskId}>
-              <div className="queue-item">
-                <span className="queue-item__icon">
-                  <Icon name="clock" size={18} />
-                </span>
-                <span className="queue-item__text">
-                  <span className="queue-item__title">{u.taskName}</span>
-                  <span className="queue-item__sub mono">{t("queue.taskLabel", { task: u.taskId })}</span>
-                  <span className="queue-item__when">
+              <ListRow
+                card
+                alignTop
+                icon="clock"
+                title={u.taskName}
+                secondary={<span className="mono">{t("queue.taskLabel", { task: u.taskId })}</span>}
+                meta={
+                  <>
                     <Icon name="clock" size={13} /> {t("queue.nextRun")}{" "}
                     <strong>{due ? t("queue.overdue") : formatRelative(u.nextFireAt, i18n.language, now)}</strong>
-                  </span>
-                </span>
-                <Chip tone="blue">{t("queue.upcoming")}</Chip>
-              </div>
+                  </>
+                }
+                aside={<Chip tone="blue">{t("queue.upcoming")}</Chip>}
+              />
             </li>
           );
         })}
-      </ul>
+      </ListRows>
     </Panel>
   );
 }
@@ -73,31 +74,27 @@ export function QueuePanel({ onOpenExecution }: { onOpenExecution: (id: string) 
 function WorkItemRow({ item, onOpenExecution, now }: { item: WorkItem; onOpenExecution: (id: string) => void; now: number }) {
   const { t, i18n } = useTranslation();
   const lastExecution = item.lastExecutionId;
-  const content = (
-    <>
-      <span className="queue-item__icon">
-        <Icon name={item.pullRequestUrl ? "pr" : "issue"} size={18} />
-      </span>
-      <span className="queue-item__text">
-        <span className="queue-item__title">{item.title || item.key}</span>
-        <span className="queue-item__sub mono">{item.repository || t("queue.taskLabel", { task: item.taskId })}</span>
-        <span className="queue-item__when">
+  return (
+    <ListRow
+      card
+      alignTop
+      icon={item.pullRequestUrl ? "pr" : "issue"}
+      title={item.title || item.key}
+      secondary={<span className="mono">{item.repository || t("queue.taskLabel", { task: item.taskId })}</span>}
+      meta={
+        <>
           <Icon name="clock" size={13} /> {formatRelative(item.updatedAt, i18n.language, now)}
-        </span>
-      </span>
-      {item.status === "in_progress" ? (
-        <Chip tone="cyan">{t("queue.toResume")}</Chip>
-      ) : (
-        <Chip tone="warning">{t("queue.toRetry")}</Chip>
-      )}
-    </>
-  );
-  return lastExecution ? (
-    <button type="button" className="queue-item" onClick={() => onOpenExecution(lastExecution)}>
-      {content}
-    </button>
-  ) : (
-    <div className="queue-item">{content}</div>
+        </>
+      }
+      aside={
+        item.status === "in_progress" ? (
+          <Chip tone="cyan">{t("queue.toResume")}</Chip>
+        ) : (
+          <Chip tone="warning">{t("queue.toRetry")}</Chip>
+        )
+      }
+      onClick={lastExecution ? () => onOpenExecution(lastExecution) : undefined}
+    />
   );
 }
 
@@ -118,22 +115,20 @@ export function RecentHistory({ onOpenExecution, onSeeAll }: { onOpenExecution: 
       }
     >
       {recent.length === 0 ? <EmptyState icon="history" title={t("history.empty")} /> : null}
-      <ul className="history-list">
+      <ListRows loose>
         {recent.slice(0, 7).map((e) => (
           <li key={e.id}>
-            <button type="button" className="history-item" onClick={() => onOpenExecution(e.id)}>
-              <StatusMark status={e.status} />
-              <span className="history-item__text">
-                <span className="history-item__title">
-                  {e.workItem ? `${e.taskName} · ${e.workItem.split("/").pop()}` : e.taskName}
-                </span>
-                <span className="history-item__sub mono">{t("queue.taskLabel", { task: e.taskId })}</span>
-              </span>
-              <span className="history-item__time">{formatRelative(e.endedAt ?? e.createdAt, i18n.language, now)}</span>
-            </button>
+            <ListRow
+              card
+              leading={<StatusMark status={e.status} />}
+              title={e.workItem ? `${e.taskName} · ${e.workItem.split("/").pop()}` : e.taskName}
+              secondary={<span className="mono">{t("queue.taskLabel", { task: e.taskId })}</span>}
+              trailing={formatRelative(e.endedAt ?? e.createdAt, i18n.language, now)}
+              onClick={() => onOpenExecution(e.id)}
+            />
           </li>
         ))}
-      </ul>
+      </ListRows>
     </Panel>
   );
 }

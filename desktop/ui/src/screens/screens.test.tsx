@@ -136,6 +136,10 @@ const item = (key: string, status: WorkItem["status"], title: string): WorkItem 
   updatedAt: "2026-10-20T19:40:00-03:00",
 });
 
+/** The rows of the Executions screen's recent history: the aside's buttons that lead with a status mark. */
+const historyRows = (host: Element) => [...host.querySelectorAll(".aside-panel button")].filter((b) => b.querySelector(".status-mark"));
+const rowTitle = (row: Element) => row.querySelector(".list-row__title")!.textContent;
+
 const workItems: WorkItem[] = [
   { ...item("124", "in_progress", "Draft PR with failing tests"), testsStatus: "failed", pullRequestUrl: "https://github.com/org/core-banking/pull/9" },
   { ...item("125", "failed", "Issue to retry"), failures: 1 },
@@ -478,9 +482,9 @@ describe("an execution that found no work", () => {
     expect(text).toContain("Issue to retry");
     expect(text).not.toContain("Completed issue");
 
-    const rows = [...host.querySelectorAll(".history-item")];
-    const row = (name: string) => rows.find((r) => r.querySelector(".history-item__title")!.textContent === name)!;
-    expect(rows.map((r) => r.querySelector(".history-item__title")!.textContent)).toEqual([noWork.taskName, failed.taskName]);
+    const rows = historyRows(host);
+    const row = (name: string) => rows.find((r) => rowTitle(r) === name)!;
+    expect(rows.map(rowTitle)).toEqual([noWork.taskName, failed.taskName]);
 
     expect(mark(row(noWork.taskName))).toEqual({ tones: ["status-mark--neutral"], title: "No work", label: "No work", icon: icon("circle") });
     expect(row(noWork.taskName).textContent).not.toContain("Failed");
@@ -492,7 +496,7 @@ describe("an execution that found no work", () => {
     const panel = [...host.querySelectorAll("section.panel")].find((p) => p.querySelector(".panel__title")?.textContent === "Needs your attention")!;
     expect(panel).toBeDefined();
     const rows = [...panel.querySelectorAll("li")];
-    expect(rows.map((r) => r.querySelector("strong")!.textContent)).toEqual([failed.taskName]);
+    expect(rows.map(rowTitle)).toEqual([failed.taskName]);
     expect(mark(rows[0])).toEqual({ tones: ["status-mark--danger"], title: "Failed", label: "Failed", icon: icon("x") });
     expect(panel.textContent).not.toContain(noWork.taskName);
     expect(panel.textContent).not.toContain("No work");
@@ -633,10 +637,10 @@ describe("an execution that was interrupted", () => {
 
   /** Each row of the recent history by its task's name, with its status mark's tone, label, and icon. */
   const marks = (host: HTMLElement) =>
-    [...host.querySelectorAll(".history-item")].map((row) => {
+    historyRows(host).map((row) => {
       const m = row.querySelector(".status-mark")!;
       return {
-        name: row.querySelector(".history-item__title")!.textContent,
+        name: rowTitle(row),
         tones: [...m.classList].filter((c) => c.startsWith("status-mark--")),
         title: m.getAttribute("title"),
         label: m.querySelector(".sr-only")!.textContent,
@@ -650,7 +654,7 @@ describe("an execution that was interrupted", () => {
       { name: interrupted.taskName, tones: ["status-mark--warning"], title: "Interrupted", label: "Interrupted", icon: icon("alert") },
       { name: failed.taskName, tones: ["status-mark--danger"], title: "Failed", label: "Failed", icon: icon("x") },
     ]);
-    const row = [...host.querySelectorAll(".history-item")][0];
+    const row = historyRows(host)[0];
     expect(row.textContent).not.toContain("Failed");
     expect(row.querySelector(".status-mark--danger")).toBeNull();
   });
