@@ -866,6 +866,7 @@ type parser struct {
 	rateStatus string
 	rateType   string
 	overage    bool // the last rate-limit report said the session is using extra usage
+	disabled   bool // the last rate-limit report rejected the call because the usage allocation is disabled
 	resetsAt   int64
 	lastText   string
 	messages   map[string]messageUsage // the latest usage of each assistant message, by message id
@@ -1037,6 +1038,7 @@ func (p *parser) Line(line []byte) []ports.HarnessEvent {
 			p.rateStatus = sl.RateLimit.Status
 			p.rateType = sl.RateLimit.RateLimitType
 			p.overage = sl.RateLimit.IsUsingOverage
+			p.disabled = sl.RateLimit.allocationDisabled()
 			p.resetsAt = sl.RateLimit.ResetsAt
 			out := []ports.HarnessEvent{{Kind: ports.HarnessQuota, Quota: sl.RateLimit.quota()}}
 			if sl.RateLimit.Status != "allowed" && sl.RateLimit.Status != "allowed_warning" {
@@ -1194,7 +1196,7 @@ var signedOut = regexp.MustCompile(`(?i)(` + signedOutTexts + `)`)
 // patterns match the CLI's own texts, not words a task's error can hold too: a bare quota or "limit reached", or the
 // "not logged into" of another tool, ends the attempt as a task error (harmflow-app#213).
 var patterns = classify.Patterns{
-	Quota:       regexp.MustCompile(`(?i)(usage limit|you(’|')ve hit your ([\w’']+ ){0,3}limit|out of (extra )?usage|credit balance (is )?too low|(weekly|session|5-hour|opus|sonnet)( weekly)? limit (has been )?reached)`),
+	Quota:       regexp.MustCompile(`(?i)(usage limit|you(’|')ve hit your ([\w’']+ ){0,3}limit|out of (extra )?usage|credit balance (is )?too low|usage allocation (has been )?disabled by your admin|(weekly|session|5-hour|opus|sonnet)( weekly)? limit (has been )?reached)`),
 	RateLimit:   regexp.MustCompile(`(?i)(rate[ _-]?limit|too many requests|overloaded_error|api error:? (429|529))`),
 	Unavailable: regexp.MustCompile(`(?i)(invalid api key|` + signedOutTexts + `|managed settings .*could not be loaded)`),
 	Network:     regexp.MustCompile(`(?i)(ECONNREFUSED|ENOTFOUND|ETIMEDOUT|ECONNRESET|network error|getaddrinfo|fetch failed|connection error)`),
@@ -1234,7 +1236,13 @@ func (p *parser) Finish(exitCode int, stderrTail string, timedOut, cancelled boo
 		// The stream itself said the limit rejected the session: a plan window is a quota, anything else a rate limit. A
 		// plan window rejected while the session goes on with extra usage is no quota exhausted, so the session's error
 		// keeps the class its text gives; the runner ends the attempt of a task that allows no extra usage as a quota.
+		// A member whose usage an admin disabled is rejected with no window at all, and no retry on this harness mends
+		// that: the report's reason, or the CLI's own quota text, outranks a rejection that names no plan window.
 		switch {
+		case p.disabled:
+			end.Class = domain.ClassQuotaExhausted
+		case end.Class == domain.ClassQuotaExhausted:
+			// The CLI's own quota text: the class it gave stands.
 		case !planWindow(p.rateType):
 			end.Class = domain.ClassRateLimited
 		case !p.overage:
