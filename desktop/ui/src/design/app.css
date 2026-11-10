@@ -718,7 +718,7 @@ body:has([aria-modal="true"]) .tooltip {
   line-height: 18px;
 }
 
-.link,
+.btn--link,
 .link-like {
   display: inline-flex;
   align-items: center;
@@ -730,7 +730,22 @@ body:has([aria-modal="true"]) .tooltip {
   font-size: var(--hf-font-size-sm);
 }
 
-.link:hover {
+/* The link variant undoes the rest of .btn, so a text-styled action keeps a bare button's weight, radius, and wrap. */
+.btn--link {
+  border-radius: 0;
+  font-weight: inherit;
+  white-space: inherit;
+}
+
+/* Button wraps its children in a span: the span lays out the text and a trailing icon as the button did. */
+.btn--link > span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--hf-space-1);
+}
+
+.btn--link:hover:not(:disabled) {
+  background: none;
   color: var(--hf-color-cyan);
   text-decoration: underline;
 }

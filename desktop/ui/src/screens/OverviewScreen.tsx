@@ -143,9 +143,9 @@ export function OverviewScreen({
           className="overview-grid__wide"
           actions={
             unread.length ? (
-              <button type="button" className="link" onClick={() => void actions.markRead()}>
+              <Button variant="link" onClick={() => void actions.markRead()}>
                 {t("header.markAllRead")}
-              </button>
+              </Button>
             ) : null
           }
         >

@@ -27,7 +27,8 @@ export function Elapsed({ start, end, locale }: { start?: string | null; end?: s
   return <>{formatElapsed(start, end, locale, now)}</>;
 }
 
-type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "danger-outline";
+/** `link` draws a text-styled action: no padding, border, or background, the link color, and an underline on hover. */
+type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "danger-outline" | "link";
 
 export function Button({
   variant = "secondary",

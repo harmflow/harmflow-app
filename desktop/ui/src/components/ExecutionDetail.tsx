@@ -758,9 +758,9 @@ function Results({ detail, summary }: { detail?: Execution; summary: ExecutionSu
               [
                 t("executions.detail.pullRequest"),
                 w.pullRequest?.url ? (
-                  <button type="button" className="link mono" onClick={() => void native.openUrl(w.pullRequest!.url!)}>
+                  <Button variant="link" className="mono" onClick={() => void native.openUrl(w.pullRequest!.url!)}>
                     #{w.pullRequest.number} <Icon name="external" size={12} />
-                  </button>
+                  </Button>
                 ) : null,
               ],
               [t("executions.detail.commits"), w.commits?.length ? <span className="mono">{w.commits.map((c) => c.slice(0, 7)).join(", ")}</span> : null],
