@@ -166,7 +166,9 @@ const boxes = (fieldLabel: string) => [...field(fieldLabel)!.querySelectorAll("l
 const button = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === label)!;
 const radio = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((b) => b.textContent === label)!;
 const chips = (label: string) => [...field(label)!.querySelectorAll(".name-chip > .mono")].map((c) => c.textContent);
-const repository = () => [...host!.querySelector(".grid-repo:not(.row-list__head)")!.querySelectorAll("input")];
+/** The first repository row's fields, each by its column's name. */
+const repository = () =>
+  ["Repository (owner/repo)", "Local path", "Base branch"].map((name) => host!.querySelector<HTMLInputElement>(`input[aria-label="${name}"]`)!);
 /**
  * The preferred harness, then each fallback: its harness, model, and effort controls, each by its label within the
  * profile's row, since a harness with homes adds an Installation select to the row.

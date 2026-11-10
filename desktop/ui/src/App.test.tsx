@@ -1487,18 +1487,18 @@ describe("unsaved changes", () => {
       section: "Paths",
       hold: async () => {
         await click(button(host!, "Add variable"));
-        await type(host!.querySelector<HTMLInputElement>(".grid-var input")!, "REPOS");
+        await type(host!.querySelector<HTMLInputElement>('input[aria-label="Name"]')!, "REPOS");
       },
-      held: () => host!.querySelector<HTMLInputElement>(".grid-var input")?.value ?? null,
+      held: () => host!.querySelector<HTMLInputElement>('input[aria-label="Name"]')?.value ?? null,
     },
     {
       draft: "the allowed folders (Save)",
       section: "Paths",
       hold: async () => {
         await click(button(host!, "Add folder"));
-        await type(host!.querySelector<HTMLInputElement>(".grid-folder input")!, "/srv/repos");
+        await type(host!.querySelector<HTMLInputElement>('input[aria-label="Allowed folder"]')!, "/srv/repos");
       },
-      held: () => host!.querySelector<HTMLInputElement>(".grid-folder input")?.value ?? null,
+      held: () => host!.querySelector<HTMLInputElement>('input[aria-label="Allowed folder"]')?.value ?? null,
     },
     {
       draft: "a harness's path set by hand (its Save)",

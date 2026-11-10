@@ -7,6 +7,7 @@ This package contains reusable presentation, editing, shell, timeline, and feedb
 ## Interface
 
 - Shared primitive controls and status presentation are exported from `ui.tsx`. `[ui.tsx:Button]` `[ui.tsx:StatusChip]` `[ui.tsx:Tabs]` `[ui.tsx:SegmentedControl]` `[ui.tsx:SegmentedMultiSelect]` `[ui.tsx:Modal]`
+- `RowListEditor` draws every editable list of rows of text fields, with a remove button on each row and an add button below: Settings' path variables and allowed folders, and the task form's repositories. `[RowListEditor.tsx:RowListEditor]`
 - Screen-shell, error-boundary, task-editor, execution-detail, harness, and template components are exported by their named modules. `[Shell.tsx:Sidebar]` `[ErrorBoundary.tsx:RootBoundary]` `[TaskEditor.tsx:TaskEditor]` `[ExecutionDetail.tsx:ExecutionDetail]` `[Harnesses.tsx:HarnessInventory]` `[Templates.tsx:TemplatePicker]`
 
 ## Invariants

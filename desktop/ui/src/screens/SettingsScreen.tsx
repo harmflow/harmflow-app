@@ -9,9 +9,10 @@ import type { CleanResult, Settings, SettingsPatch } from "../api/types";
 import { HarnessInventory, ToolRow } from "../components/Harnesses";
 import { Icon, type IconName } from "../components/Icon";
 import { tipBeside, useTooltip } from "../components/Shell";
+import { RowListEditor } from "../components/RowListEditor";
 import type { LeaveCheck } from "../components/TaskEditor";
 import { toast } from "../components/toast";
-import { Banner, Button, Chip, Field, IconButton, KeyValue, NumberInput, Panel, Select, TextArea, TextInput, Toggle, cx } from "../components/ui";
+import { Banner, Button, Chip, Field, IconButton, KeyValue, NumberInput, Panel, Select, TextArea, Toggle, cx } from "../components/ui";
 import { applyLanguage } from "../i18n";
 import { askAndStopDaemon } from "../lib/daemonStop";
 import { errorMessage } from "../lib/errorMessage";
@@ -744,29 +745,37 @@ function PathVariables({ value, onSave, onDraft }: { value: Record<string, strin
   const changed = JSON.stringify(Object.fromEntries(rows.filter(([k]) => k.trim()))) !== JSON.stringify(value);
   useDraft(onDraft, "pathVariables", changed);
   return (
-    <div className="row-list">
-      <p className="field__hint">{t("settings.variablesHint")}</p>
-      {rows.map(([k, v], i) => (
-        <div className="grid-var" key={i}>
-          <TextInput
-            className="mono"
-            placeholder={t("settings.variableName")}
-            value={k}
-            onChange={(e) => setRows(rows.map((r, j) => (j === i ? [e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "_"), r[1]] : r)))}
-          />
-          <TextInput className="mono" placeholder={t("settings.variableValue")} value={v} onChange={(e) => setRows(rows.map((r, j) => (j === i ? [r[0], e.target.value] : r)))} />
-          <IconButton icon="trash" label={t("common.remove")} onClick={() => setRows(rows.filter((_, j) => j !== i))} />
-        </div>
-      ))}
-      <div className="inline-actions">
-        <Button size="sm" icon="plus" onClick={() => setRows([...rows, ["", ""]])}>
-          {t("settings.addVariable")}
-        </Button>
+    <RowListEditor<[string, string]>
+      rows={rows}
+      onChange={setRows}
+      empty={() => ["", ""]}
+      hint={t("settings.variablesHint")}
+      columns={[
+        {
+          label: t("settings.variableName"),
+          placeholder: t("settings.variableName"),
+          width: "minmax(0, 0.8fr)",
+          mono: true,
+          value: ([k]) => k,
+          set: ([, v], k) => [k.toUpperCase().replace(/[^A-Z0-9_]/g, "_"), v],
+        },
+        {
+          label: t("settings.variableValue"),
+          placeholder: t("settings.variableValue"),
+          width: "minmax(0, 1.4fr)",
+          mono: true,
+          value: ([, v]) => v,
+          set: ([k], v) => [k, v],
+        },
+      ]}
+      addLabel={t("settings.addVariable")}
+      removeLabel={t("common.remove")}
+      actions={
         <Button size="sm" variant="primary" disabled={!changed} onClick={() => onSave(Object.fromEntries(rows.filter(([k]) => k.trim())))}>
           {t("common.save")}
         </Button>
-      </div>
-    </div>
+      }
+    />
   );
 }
 
@@ -780,28 +789,28 @@ function AllowedFolders({ value, onSave, onDraft }: { value: string[]; onSave: (
   const changed = JSON.stringify(kept) !== JSON.stringify(value);
   useDraft(onDraft, "allowedFolders", changed);
   return (
-    <div className="row-list">
-      <p className="field__hint">{t("settings.allowedFoldersHint")}</p>
-      {rows.map((f, i) => (
-        <div className="grid-folder" key={i}>
-          <TextInput
-            className="mono"
-            aria-label={t("settings.allowedFolder")}
-            placeholder={t("settings.allowedFolderPlaceholder")}
-            value={f}
-            onChange={(e) => setRows(rows.map((r, j) => (j === i ? e.target.value : r)))}
-          />
-          <IconButton icon="trash" label={t("common.remove")} onClick={() => setRows(rows.filter((_, j) => j !== i))} />
-        </div>
-      ))}
-      <div className="inline-actions">
-        <Button size="sm" icon="plus" onClick={() => setRows([...rows, ""])}>
-          {t("settings.addAllowedFolder")}
-        </Button>
+    <RowListEditor<string>
+      rows={rows}
+      onChange={setRows}
+      empty={() => ""}
+      hint={t("settings.allowedFoldersHint")}
+      columns={[
+        {
+          label: t("settings.allowedFolder"),
+          placeholder: t("settings.allowedFolderPlaceholder"),
+          width: "minmax(0, 1fr)",
+          mono: true,
+          value: (f) => f,
+          set: (_, f) => f,
+        },
+      ]}
+      addLabel={t("settings.addAllowedFolder")}
+      removeLabel={t("common.remove")}
+      actions={
         <Button size="sm" variant="primary" disabled={!changed} onClick={() => onSave(kept)}>
           {t("common.save")}
         </Button>
-      </div>
-    </div>
+      }
+    />
   );
 }

@@ -42,6 +42,7 @@ import {
   type Path,
 } from "../lib/taskForm";
 import { Icon, type IconName } from "./Icon";
+import { RowListEditor } from "./RowListEditor";
 import {
   Banner,
   Button,
@@ -742,42 +743,44 @@ function NamePicker({
 function RepositoryList({ rows, onChange, errorPaths }: { rows: Item[]; onChange: (rows: Item[] | undefined) => void; errorPaths: Set<string> }) {
   const { t } = useTranslation();
   const base = "/spec/github/repositories";
-  const update = (i: number, key: string, v: string) => onChange(rows.map((r, j) => (j === i ? cleanRow({ ...r, [key]: v }) : r)));
+  const cell = (key: string) => ({
+    value: (row: Item) => (row[key] as string) ?? "",
+    set: (row: Item, v: string) => cleanRow({ ...row, [key]: v }),
+  });
   return (
-    <div className="row-list">
-      <div className="row-list__head grid-repo">
-        <span>{t("tasks.fields.repository")}</span>
-        <span>{t("tasks.fields.localPath")}</span>
-        <span>{t("tasks.fields.baseBranch")}</span>
-        <span />
-      </div>
-      {rows.map((row, i) => (
-        <div className="grid-repo" key={i}>
-          <TextInput
-            className={cx("mono", errorPaths.has(`${base}/${i}/name`) && "input--error")}
-            placeholder="owner/repo"
-            value={(row.name as string) ?? ""}
-            onChange={(e) => update(i, "name", e.target.value)}
-          />
-          <TextInput
-            className={cx("mono", errorPaths.has(`${base}/${i}/localPath`) && "input--error")}
-            placeholder="${PROJECTS_ROOT}/repo"
-            value={(row.localPath as string) ?? ""}
-            onChange={(e) => update(i, "localPath", e.target.value)}
-          />
-          <TextInput
-            className="mono"
-            placeholder={String(schemaDefault(["spec", "github", "repositories", 0, "baseBranch"]) ?? "main")}
-            value={(row.baseBranch as string) ?? ""}
-            onChange={(e) => update(i, "baseBranch", e.target.value)}
-          />
-          <IconButton icon="trash" label={t("common.remove")} onClick={() => onChange(rows.filter((_, j) => j !== i))} />
-        </div>
-      ))}
-      <Button size="sm" icon="plus" onClick={() => onChange([...rows, { name: "", localPath: "", baseBranch: "main" }])}>
-        {t("tasks.fields.addRepository")}
-      </Button>
-    </div>
+    <RowListEditor<Item>
+      rows={rows}
+      onChange={onChange}
+      empty={() => ({ name: "", localPath: "", baseBranch: "main" })}
+      header
+      columns={[
+        {
+          label: t("tasks.fields.repository"),
+          placeholder: "owner/repo",
+          width: "minmax(0, 1fr)",
+          mono: true,
+          error: (_, i) => errorPaths.has(`${base}/${i}/name`),
+          ...cell("name"),
+        },
+        {
+          label: t("tasks.fields.localPath"),
+          placeholder: "${PROJECTS_ROOT}/repo",
+          width: "minmax(0, 1.3fr)",
+          mono: true,
+          error: (_, i) => errorPaths.has(`${base}/${i}/localPath`),
+          ...cell("localPath"),
+        },
+        {
+          label: t("tasks.fields.baseBranch"),
+          placeholder: String(schemaDefault(["spec", "github", "repositories", 0, "baseBranch"]) ?? "main"),
+          width: "130px",
+          mono: true,
+          ...cell("baseBranch"),
+        },
+      ]}
+      addLabel={t("tasks.fields.addRepository")}
+      removeLabel={t("common.remove")}
+    />
   );
 }
 

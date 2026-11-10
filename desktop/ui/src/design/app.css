@@ -2907,13 +2907,6 @@ button.queue-item:hover,
   }
 }
 
-.grid-repo {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) 130px 32px;
-  gap: var(--hf-space-2);
-  align-items: center;
-}
-
 .grid-profile {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 32px;
@@ -2939,18 +2932,6 @@ button.queue-item:hover,
   grid-column: 1 / -1;
 }
 
-.grid-var {
-  display: grid;
-  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr) 32px;
-  gap: var(--hf-space-2);
-}
-
-.grid-folder {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 32px;
-  gap: var(--hf-space-2);
-}
-
 .row-list {
   display: flex;
   flex-direction: column;
@@ -2964,6 +2945,13 @@ button.queue-item:hover,
 
 .row-list > .btn {
   width: auto;
+}
+
+/* A RowListEditor's row: its columns' tracks, then the remove button's, set on the element. */
+.row-list__row {
+  display: grid;
+  gap: var(--hf-space-2);
+  align-items: center;
 }
 
 .row-list__head {
