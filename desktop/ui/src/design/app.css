@@ -1136,6 +1136,35 @@ body:has([aria-modal="true"]) .tooltip {
   border-color: rgba(var(--hf-rgb-neutral), 0.35);
 }
 
+/* A chip the user removes, such as a name picked in a list: text in the page's color, on the tone's background and
+   border, with a remove button at its end. */
+.chip--removable {
+  gap: var(--hf-space-1-5);
+  padding: var(--hf-space-0-5) var(--hf-space-1) var(--hf-space-0-5) var(--hf-space-2);
+  color: inherit;
+  font-weight: inherit;
+  white-space: normal;
+  line-height: inherit;
+}
+
+.chip--removable.chip--warning {
+  border-color: rgba(var(--hf-rgb-warning), 0.5);
+}
+
+.chip__remove {
+  display: inline-flex;
+  padding: var(--hf-space-0-5);
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: var(--hf-color-text-muted);
+}
+
+.chip__remove:hover {
+  color: var(--hf-color-text);
+  background: rgba(var(--hf-rgb-white), 0.06);
+}
+
 /* The glow is a fixed shadow on a layer of its own that fades in and out, so the pulse repaints nothing. */
 .chip__pulse {
   position: relative;
@@ -3141,39 +3170,9 @@ button.list-row--error:hover {
   gap: var(--hf-space-1-5);
 }
 
-.name-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--hf-space-1-5);
-  padding: var(--hf-space-0-5) var(--hf-space-1) var(--hf-space-0-5) var(--hf-space-2);
-  border: 1px solid rgba(var(--hf-rgb-violet), 0.45);
-  border-radius: var(--hf-radius-sm);
-  background: var(--hf-color-violet-soft);
-  font-size: var(--hf-font-size-xs);
-}
-
-.name-chip--missing {
-  border-color: rgba(var(--hf-rgb-warning), 0.5);
-  background: var(--hf-color-warning-soft);
-}
-
-.name-chip__source {
+.name-picker__source {
   color: var(--hf-color-text-muted);
   font-size: var(--hf-font-size-2xs);
-}
-
-.name-chip button {
-  display: inline-flex;
-  padding: var(--hf-space-0-5);
-  border: none;
-  border-radius: 3px;
-  background: none;
-  color: var(--hf-color-text-muted);
-}
-
-.name-chip button:hover {
-  color: var(--hf-color-text);
-  background: rgba(var(--hf-rgb-white), 0.06);
 }
 
 /* ---------- Task editor ---------- */

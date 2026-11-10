@@ -579,7 +579,9 @@ const toggle = (label: string) =>
 const boxes = (fieldLabel: string) => [...field(fieldLabel).querySelectorAll("label.checkbox")];
 const checked = (fieldLabel: string) => boxes(fieldLabel).filter((c) => c.querySelector("input")!.checked).map((c) => c.textContent);
 const button = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === label)!;
-const radio = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((b) => b.textContent === label)!;
+/** A name picker's remove buttons, one per chip, each the last child of its chip. */
+const removeButtons = (within: HTMLElement) => [...within.querySelectorAll<HTMLButtonElement>('button[aria-label="Remove"]')];
+const radio =(label: string) => [...host!.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((b) => b.textContent === label)!;
 const sent = (method: string, path: string) => daemon.requests.filter((r) => r.method === method && r.path === path).map((r) => r.body);
 
 /** Types into a field or chooses an option, as React sees it. */
@@ -597,6 +599,53 @@ async function click(el: HTMLElement) {
 async function tick(fieldLabel: string, label: string) {
   await click(boxes(fieldLabel).find((c) => c.textContent === label)!.querySelector("input")!);
 }
+
+// A name picker shows each picked name as a removable chip: its source, a name the catalog lacks in the warning tone,
+// and the catalog's description as its title. Its remove button takes the name out of the document.
+describe("task form name picker", () => {
+  const catalog: Catalog = {
+    agents: [],
+    skills: [{ name: "review-notes", kind: "skill", source: "user", harnesses: ["claude-code"], description: "Writes the review's notes" }],
+    problems: [],
+    taskTypes: [],
+  };
+  let current: Doc = {};
+
+  function Form({ doc }: { doc: Doc }) {
+    const [value, setValue] = useState(doc);
+    current = value;
+    return <TaskForm doc={value} onChange={(d) => setValue((current = d))} mode="edit" catalog={catalog} harnesses={[]} errorPaths={new Set()} />;
+  }
+
+  const picked = () =>
+    removeButtons(field("Skills")).map((remove) => {
+      const chip = remove.parentElement!;
+      return {
+        name: chip.querySelector(".mono")!.textContent,
+        source: chip.querySelector(".name-picker__source")!.textContent,
+        title: chip.getAttribute("title"),
+        missing: chip.classList.contains("chip--warning"),
+      };
+    });
+
+  it("removes a name from the task when its chip's remove button is clicked", async () => {
+    const doc = task({});
+    (doc.spec as Doc).skills = ["review-notes", "gone"];
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(<Form doc={doc} />));
+    await settle();
+
+    expect(picked()).toEqual([
+      { name: "review-notes", source: "Yours", title: "Writes the review's notes", missing: false },
+      { name: "gone", source: "Not found", title: null, missing: true },
+    ]);
+
+    await click(removeButtons(field("Skills"))[0]!);
+    expect(current.spec).toMatchObject({ skills: ["gone"] });
+    expect(picked().map((p) => p.name)).toEqual(["gone"]);
+  });
+});
 
 // A new GitHub task, every section filled through its controls, saves the document task-form-document.json holds, which
 // itest › TestFormDocumentIsTheFile writes as an equal file: the two tests cover the way from the form to the file. That
@@ -650,7 +699,7 @@ describe("task form document", () => {
     await openScreen(view);
   }
 
-  const chips = (label: string) => [...field(label).querySelectorAll(".name-chip > .mono")].map((c) => c.textContent);
+  const chips = (label: string) => removeButtons(field(label)).map((b) => b.parentElement!.querySelector(".mono")!.textContent);
   /** The first repository row's fields, each by its column's name. */
   const repository = () =>
     ["Repository (owner/repo)", "Local path", "Base branch"].map((name) => host!.querySelector<HTMLInputElement>(`input[aria-label="${name}"]`)!);

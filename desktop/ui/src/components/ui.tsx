@@ -133,11 +133,31 @@ export function StatusMark({ status }: { status: ExecutionStatus }) {
   );
 }
 
-export function Chip({ tone = "neutral", icon, children, title }: { tone?: Tone; icon?: IconName; children: ReactNode; title?: string }) {
+/** A short label in a tone. Given `onRemove`, it ends in a remove button named `removeLabel`. */
+export function Chip({
+  tone = "neutral",
+  icon,
+  children,
+  title,
+  onRemove,
+  removeLabel,
+}: {
+  tone?: Tone;
+  icon?: IconName;
+  children: ReactNode;
+  title?: string;
+  onRemove?: () => void;
+  removeLabel?: string;
+}) {
   return (
-    <span className={cx("chip", `chip--${tone}`)} title={title}>
+    <span className={cx("chip", `chip--${tone}`, onRemove && "chip--removable")} title={title}>
       {icon ? <Icon name={icon} size={12} /> : null}
       {children}
+      {onRemove ? (
+        <button type="button" className="chip__remove" aria-label={removeLabel} onClick={onRemove}>
+          <Icon name="x" size={12} />
+        </button>
+      ) : null}
     </span>
   );
 }

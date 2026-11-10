@@ -3,8 +3,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { CatalogEntry } from "../../api/types";
 import { controlKey } from "../../lib/shortcuts";
-import { Icon } from "../Icon";
-import { Field, cx } from "../ui";
+import { Chip, Field } from "../ui";
 
 export function NamePicker({
   label,
@@ -33,15 +32,18 @@ export function NamePicker({
           {value.map((name) => {
             const entry = entries.find((e) => e.name === name);
             return (
-              <span key={name} className={cx("name-chip", !entry && "name-chip--missing")} title={entry?.description}>
+              <Chip
+                key={name}
+                tone={entry ? "violet" : "warning"}
+                title={entry?.description}
+                onRemove={() => onChange(value.filter((v) => v !== name))}
+                removeLabel={t("common.remove")}
+              >
                 <span className="mono">{name}</span>
-                <span className="name-chip__source">
+                <span className="name-picker__source">
                   {entry ? (entry.source === "builtin" ? t("tasks.fields.builtin") : t("tasks.fields.user")) : t("tasks.fields.notFound")}
                 </span>
-                <button type="button" aria-label={t("common.remove")} onClick={() => onChange(value.filter((v) => v !== name))}>
-                  <Icon name="x" size={12} />
-                </button>
-              </span>
+              </Chip>
             );
           })}
         </div>

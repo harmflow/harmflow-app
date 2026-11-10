@@ -745,11 +745,14 @@ describe("task editor catalog", () => {
     const suggestions = () => [...skills().querySelectorAll("datalist option")].map((o) => (o as HTMLOptionElement).value);
     /** The Skills field's chips: each name, the source it shows, and whether it is marked not found. */
     const chips = () =>
-      [...skills().querySelectorAll(".name-chip")].map((chip) => ({
-        name: chip.querySelector(".mono")!.textContent,
-        source: chip.querySelector(".name-chip__source")!.textContent,
-        missing: chip.classList.contains("name-chip--missing"),
-      }));
+      [...skills().querySelectorAll('button[aria-label="Remove"]')].map((remove) => {
+        const chip = remove.parentElement!;
+        return {
+          name: chip.querySelector(".mono")!.textContent,
+          source: chip.querySelector(".name-picker__source")!.textContent,
+          missing: chip.classList.contains("chip--warning"),
+        };
+      });
 
     it("offers a plugin's skill and not one only the workspace holds, and marks a cited workspace skill not found", async () => {
       await openTask(workspaceTask(NOTES), installation, installation);
