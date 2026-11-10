@@ -907,6 +907,7 @@ export const esES: Resources = {
     createFirst: "Crea tu primera tarea",
     spend: {
       title: "Gasto de este mes",
+      titleMonth: "Gasto de este mes - {{month}}, {{year}}",
       view: "Mostrar el gasto en",
       cost: "Coste",
       tokens: "Tokens",

@@ -882,6 +882,7 @@ export const enUS = {
     createFirst: "Create your first task",
     spend: {
       title: "Spend this month",
+      titleMonth: "Spend this month - {{month}}, {{year}}",
       view: "Show the spend in",
       cost: "Cost",
       tokens: "Tokens",
