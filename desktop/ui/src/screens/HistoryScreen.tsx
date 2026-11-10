@@ -7,7 +7,7 @@ import { api, type ExecutionQuery } from "../api/client";
 import type { ExecutionStatus, ExecutionSummary, Trigger } from "../api/types";
 import { ExecutionDetail } from "../components/ExecutionDetail";
 import { HarnessLabel } from "../components/Shell";
-import { Banner, Button, Chip, EmptyState, IconButton, Select, StatusChip, TextInput } from "../components/ui";
+import { Banner, Button, Chip, Drawer, EmptyState, IconButton, Select, StatusChip, TextInput } from "../components/ui";
 import { formatDateTime, formatElapsed, formatNumber } from "../lib/format";
 import { useDebounced } from "../lib/hooks";
 import { actions, getState, useStore } from "../state/store";
@@ -304,14 +304,9 @@ export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpe
       </div>
 
       {openId ? (
-        <div className="drawer" role="dialog" aria-modal="true" onMouseDown={(e) => e.target === e.currentTarget && onOpen(null)}>
-          <div className="drawer__card">
-            <div className="drawer__close">
-              <IconButton icon="x" label={t("common.close")} onClick={() => onOpen(null)} />
-            </div>
-            <ExecutionDetail executionId={openId} summary={opened} />
-          </div>
-        </div>
+        <Drawer label={t("executions.detail.execId")} onClose={() => onOpen(null)}>
+          <ExecutionDetail executionId={openId} summary={opened} />
+        </Drawer>
       ) : null}
     </div>
   );

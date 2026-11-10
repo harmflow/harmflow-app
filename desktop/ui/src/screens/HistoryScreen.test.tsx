@@ -368,6 +368,26 @@ describe("an execution that was interrupted", () => {
   });
 });
 
+describe("the drawer an execution opens in", () => {
+  it("is a modal dialog named for the execution, and the close key closes it", async () => {
+    daemon.executions = [aged];
+    daemon.answers.set(`/executions/${aged.id}`, record);
+    daemon.answers.set(`/executions/${aged.id}/events`, expiredEvents);
+    await open();
+    await act(async () => rowOf(aged.id)!.click());
+    await settle();
+    expect(drawer()).not.toBeNull();
+    expect(drawer()!.getAttribute("aria-modal")).toBe("true");
+    expect(drawer()!.getAttribute("aria-label")).toBe("Execution");
+    expect(drawer()!.querySelector(".detail__title")!.textContent).toBe(issues.name);
+
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(drawer()).toBeNull();
+    expect(host!.querySelector('[aria-modal="true"]')).toBeNull();
+    expect(rows()).toHaveLength(1);
+  });
+});
+
 describe("the automatic refresh, after Load more", () => {
   /** The instant `minutes` after 09:00, as the daemon writes it. */
   const at = (minutes: number) => new Date(Date.UTC(2026, 6, 1, 9, minutes)).toISOString();
