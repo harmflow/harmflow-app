@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/schema"
@@ -122,6 +123,11 @@ type Deps struct {
 	// SignInTimeout is how long a harness's sign-in waits for the user to approve it in the browser; ten minutes when
 	// zero.
 	SignInTimeout time.Duration
+	// StopDetectionWait is how long Stop waits for the harness detection to end before it goes on without it, and
+	// StopExecutionsWait how long it waits for the cancelled executions to end, all of them under the one deadline;
+	// DefaultStopDetectionWait and DefaultStopExecutionsWait when zero.
+	StopDetectionWait  time.Duration
+	StopExecutionsWait time.Duration
 	// DaemonExecutable and DaemonArgs are what autostart launches.
 	DaemonExecutable string
 	DaemonArgs       []string
@@ -216,13 +222,19 @@ type App struct {
 	// noticeSaves counts the saves of the notices keepNotice started, which run off the caller's path; Stop waits for
 	// them.
 	noticeSaves sync.WaitGroup
+	// noticesInPlace is set, under mu, once Stop waits for noticeSaves: an execution that outlived the stop's wait then
+	// saves its notices on its own path, never adding to noticeSaves while Stop waits for it.
+	noticesInPlace bool
 
 	stopOnce sync.Once
 	// stopLoops cancels the context Start runs the loops under, and stopDetection the one of the harness detection it
 	// launches; both are nil until Start.
 	stopLoops     context.CancelFunc
 	stopDetection context.CancelFunc
-	wg            sync.WaitGroup
+	// wg counts the loops, the drain's watcher, and the sign-ins; runs counts the executions, which Stop waits for only
+	// up to Deps.StopExecutionsWait.
+	wg   sync.WaitGroup
+	runs sync.WaitGroup
 	// detection counts the harness detections Start launched, and the loop that runs Detect again's, which Stop waits
 	// for.
 	detection sync.WaitGroup
@@ -233,13 +245,17 @@ type App struct {
 	// announce and announces, and Stop holds it for writing to announce the stop, so a detection an API request or an
 	// execution started either announces first or sees the daemon stopping and announces nothing.
 	announceMu sync.RWMutex
-	// ShutdownRequested is closed when the API asks the daemon to stop, or a drain has ended; shutdownReason, guarded by
-	// mu, says which.
+	// ShutdownRequested is closed when the API asks the daemon to stop, or a drain has ended; shutdownReason says which.
+	// Neither takes mu, so a stop is asked for at once however long another holder keeps it.
 	ShutdownRequested chan struct{}
 	shutdownOnce      sync.Once
-	shutdownReason    domain.Text
-	// drainStop is closed when Stop begins, so the drain's watcher returns.
-	drainStop chan struct{}
+	shutdownReason    atomic.Pointer[domain.Text]
+	// stopForced is set by a forced stop, which RequestShutdown records without mu: from then on the daemon accepts no
+	// work, and every execution it runs counts as cancelled by the user (acceptingLocked, cancelRequestedLocked).
+	stopForced atomic.Bool
+	// stopBegun is closed when Stop begins, before it takes mu: every running execution cancels itself on it, and the
+	// drain's watcher returns.
+	stopBegun chan struct{}
 }
 
 // New builds the use cases over d, with its defaults filled in, and creates the directories they write to; it loads
@@ -262,6 +278,12 @@ func New(d Deps) (*App, error) {
 	}
 	if d.MisfireAfter == 0 {
 		d.MisfireAfter = 2 * time.Minute
+	}
+	if d.StopDetectionWait == 0 {
+		d.StopDetectionWait = DefaultStopDetectionWait
+	}
+	if d.StopExecutionsWait == 0 {
+		d.StopExecutionsWait = DefaultStopExecutionsWait
 	}
 	if d.OS == "" {
 		d.OS = currentOS()
@@ -286,7 +308,7 @@ func New(d Deps) (*App, error) {
 		applied: map[string][]string{}, accepting: true,
 		adapters: map[string]ports.HarnessAdapter{}, quotas: map[string]quotaReading{}, quotaReads: map[string]*sync.Mutex{},
 		signIns: map[string]*signInState{}, tokens: map[string]*tokenRecord{}, records: map[string]*recordLock{},
-		redetect: make(chan struct{}, 1), ShutdownRequested: make(chan struct{}), drainStop: make(chan struct{}),
+		redetect: make(chan struct{}, 1), ShutdownRequested: make(chan struct{}), stopBegun: make(chan struct{}),
 	}
 	for _, h := range d.Harnesses {
 		a.adapters[h.ID()] = h
@@ -349,47 +371,50 @@ func (a *App) Start(ctx context.Context) error {
 	return nil
 }
 
+// DefaultStopDetectionWait is how long Stop waits for the harness detection to end, and DefaultStopExecutionsWait how
+// long for the cancelled executions to end, when Deps sets neither.
+const (
+	DefaultStopDetectionWait  = 5 * time.Second
+	DefaultStopExecutionsWait = 45 * time.Second
+)
+
 // Stop ends the loops, the harness detection Start launched, and the sign-ins that run, and interrupts running
-// executions: a stopped daemon never continues them. The detection ends before the daemon announces that it stops, so
-// no harness check is recorded after that.
+// executions: a stopped daemon never continues them. Its first step, before it takes any lock, closes stopBegun, which
+// cancels every running execution (see execute), so nothing the stop waits on holds their cancels up. It then waits for
+// the detection, at most Deps.StopDetectionWait, before it announces that the daemon stops: a detection that ends in
+// time records no harness check after that, and one still running when the wait ends records none either, since the
+// daemon is stopping (see announceMu). The executions are awaited together, all of them within
+// Deps.StopExecutionsWait; one still running then is left to the recovery of the next start, which ends it interrupted.
 func (a *App) Stop(reason domain.Text) {
 	a.stopOnce.Do(func() {
+		close(a.stopBegun)
 		a.mu.Lock()
 		a.accepting = false
 		a.stopping = true
 		a.stopSignInsLocked()
 		stopLoops, stopDetection := a.stopLoops, a.stopDetection
-		var cancels []context.CancelFunc
-		var dones []chan struct{}
-		for _, h := range a.running {
-			if h.cancel != nil {
-				cancels = append(cancels, h.cancel)
-			}
-			dones = append(dones, h.done)
-		}
 		a.mu.Unlock()
-		close(a.drainStop)
 		if stopDetection != nil {
 			stopDetection()
 		}
-		a.detection.Wait()
+		if !waitAtMost(&a.detection, a.d.StopDetectionWait) {
+			a.log.Printf("stopping: harness detection still running after %s; stopping without it", a.d.StopDetectionWait)
+		}
 		a.announceMu.Lock()
 		a.emit(domain.Event{Type: domain.EventDaemonStopping}.Says(reason))
 		a.announceMu.Unlock()
 		if stopLoops != nil {
 			stopLoops()
 		}
-		for _, cancel := range cancels {
-			cancel()
-		}
-		for _, done := range dones {
-			select {
-			case <-done:
-			case <-time.After(45 * time.Second):
-			}
+		if !waitAtMost(&a.runs, a.d.StopExecutionsWait) {
+			a.log.Printf("stopping: executions still running after %s; stopping without them", a.d.StopExecutionsWait)
 		}
 		a.wg.Wait()
-		// The executions and loops that ended kept their last notices; those saves end before the daemon does.
+		// The executions and loops that ended kept their last notices; those saves end before the daemon does. An
+		// execution still running saves its own in place from now on (see keepNotice).
+		a.mu.Lock()
+		a.noticesInPlace = true
+		a.mu.Unlock()
 		a.noticeSaves.Wait()
 		// No execution or loop asks a harness anything more: the processes harnesses keep between calls end.
 		for _, id := range sortedKeys(a.adapters) {
@@ -400,9 +425,33 @@ func (a *App) Stop(reason domain.Text) {
 	})
 }
 
+// waitAtMost waits for wg, at most d, and reports whether wg ended in time. The goroutine that waits for wg ends when
+// wg does, which Stop has asked for by then: it cancelled what wg counts.
+func waitAtMost(wg *sync.WaitGroup, d time.Duration) bool {
+	ended := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(ended)
+	}()
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ended:
+		return true
+	case <-timer.C:
+		return false
+	}
+}
+
 // RequestShutdown asks main to stop the daemon; with running executions it needs force. A forced stop also ends a
-// drain under way at once.
+// drain under way at once. A forced stop takes no lock, so it returns at once however long another holder keeps mu: it
+// needs no count of the executions, and stopForced marks them cancelled. A stop without force counts them under mu.
 func (a *App) RequestShutdown(force bool) error {
+	if force {
+		a.stopForced.Store(true)
+		a.requestStop(stopRequested())
+		return nil
+	}
 	a.mu.Lock()
 	n := 0
 	for _, x := range a.executions {
@@ -410,7 +459,7 @@ func (a *App) RequestShutdown(force bool) error {
 			n++
 		}
 	}
-	if n > 0 && !force {
+	if n > 0 {
 		a.mu.Unlock()
 		return newError(CodeExecutionsRunning, domain.T("executions_running",
 			"{{count}} executions are running; confirm to stop the daemon and cancel them", "count", strconv.Itoa(n)))
@@ -458,7 +507,19 @@ func (a *App) Paths() Paths { return a.d.Paths }
 func (a *App) AcceptingFirings() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.accepting
+	return a.acceptingLocked()
+}
+
+// acceptingLocked reports whether the daemon still starts work: accepting, unless a forced stop was asked for, which
+// RequestShutdown records without mu. The caller holds mu.
+func (a *App) acceptingLocked() bool {
+	return a.accepting && !a.stopForced.Load()
+}
+
+// cancelRequestedLocked reports whether h's execution was asked to cancel: by the user, or by a forced stop of the
+// daemon. The caller holds mu.
+func (a *App) cancelRequestedLocked(h *runHandle) bool {
+	return h.cancelRequested || a.stopForced.Load()
 }
 
 // Subscribe streams the events after the id after, the buffered ones then the live ones, and reports whether the buffer

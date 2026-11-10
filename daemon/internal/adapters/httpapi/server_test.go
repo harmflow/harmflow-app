@@ -143,6 +143,30 @@ func TestUnforcedStopRequestIsRefusedWhileAnExecutionIsActive(t *testing.T) {
 	}
 }
 
+// harmflow-app#995: with an execution running, POST /api/v1/daemon/stop with force answers 202 at once: the handler
+// asks for the stop and waits for neither the stop nor the execution, which main stops once ShutdownRequested closes.
+func TestForcedStopRequestIsAnsweredAtOnce(t *testing.T) {
+	a := startedApp(t)
+	id := runningBusy(t, a)
+	s := &Server{App: a}
+	s.SetToken(validToken)
+
+	asked := time.Now()
+	if status, key := postStop(t, s, `{"force":true}`); status != 202 {
+		t.Fatalf("POST /api/v1/daemon/stop with force: status %d (%s), want 202", status, key)
+	}
+	if took := time.Since(asked); took > 2*time.Second {
+		t.Errorf("POST /api/v1/daemon/stop with force took %s, want it answered at once", took)
+	}
+	if !closedWithin(a.ShutdownRequested, 100*time.Millisecond) {
+		t.Error("ShutdownRequested is open once the forced stop was answered, want it closed")
+	}
+	if x, _ := a.GetExecution(id); x.Status != domain.StatusRunning {
+		t.Errorf("execution %s is %s once the forced stop was answered, want %s until main stops the daemon", id, x.Status,
+			domain.StatusRunning)
+	}
+}
+
 // GET /api/v1/executions reads the period from createdFrom, inclusive, and createdUntil, exclusive, RFC 3339 instants
 // apart from the before cursor; a malformed one bounds nothing.
 func TestListExecutionsReadsThePeriod(t *testing.T) {

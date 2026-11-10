@@ -168,12 +168,19 @@ func (a *App) notifySignIn(e domain.Event) {
 
 // keepNotice records a notice, newest first, and announces it. The notices are saved off the caller's path, so an
 // execution that ended leaves the running set without waiting for that save; what the API lists and publishes is the
-// notices in memory, at once.
+// notices in memory, at once. Once Stop waits for those saves, an execution that outlived its wait saves in place: the
+// save is counted under mu, so it is counted before Stop's wait or not at all.
 func (a *App) keepNotice(n Notification) {
 	a.mu.Lock()
 	a.notifications = trimNotifications(append([]Notification{n}, a.notifications...))
+	inPlace := a.noticesInPlace
+	if !inPlace {
+		a.noticeSaves.Go(a.saveNotifications)
+	}
 	a.mu.Unlock()
-	a.noticeSaves.Go(a.saveNotifications)
+	if inPlace {
+		a.saveNotifications()
+	}
 	payload, _ := toMap(n).(map[string]any)
 	a.d.Events.Append(domain.Event{Type: domain.EventNotificationCreated, TaskID: n.TaskID, ExecutionID: n.ExecutionID,
 		Timestamp: n.CreatedAt, Message: n.Title, Payload: payload})

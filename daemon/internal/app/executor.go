@@ -89,11 +89,7 @@ func (r *run) selectionOf(key string) *selection {
 }
 
 func (a *App) launch(x *domain.Execution, h *runHandle) {
-	a.wg.Add(1)
-	go func() {
-		defer a.wg.Done()
-		a.execute(x, h)
-	}()
+	a.runs.Go(func() { a.execute(x, h) })
 }
 
 // execute carries one execution to its terminal state, then starts the task's waiting firing, if any.
@@ -136,15 +132,26 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 	deadline := now.Add(timeout)
 	// The timeout runs on real time; the record shows it on the daemon's clock. An execution outlives whatever fired it
 	// (an API request, a tick of the scheduler), so its context starts from none of theirs: it ends by its timeout, or by
-	// its handle's cancel, which cancellation and Stop call.
+	// its handle's cancel, which cancellation calls, or by the start of Stop, which closes stopBegun before it takes mu,
+	// so no holder of mu holds a stop's cancel up. The goroutine that watches stopBegun ends with ctx, which execute
+	// cancels before it returns, and execute waits for it then, so the executions' wait group counts it too.
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
+	watched := make(chan struct{})
+	go func() {
+		defer close(watched)
+		select {
+		case <-a.stopBegun:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	defer func() {
+		cancel()
+		<-watched
+	}()
 	a.mu.Lock()
 	h.cancel = cancel
-	cancelled := h.cancelRequested
-	if a.stopping {
-		cancel() // the daemon began stopping before this execution could be cancelled with the others
-	}
+	cancelled := a.cancelRequestedLocked(h)
 	a.mu.Unlock()
 
 	r := &run{a: a, x: x, h: h, def: def, eff: eff, commandIndex: map[string]int{}}
@@ -195,10 +202,15 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 	r.finish(status, reason)
 }
 
+// daemonStopping reports whether Stop has begun. It reads stopBegun, not stopping, which Stop sets only once it holds
+// mu: an execution its cancel ended first still reads the daemon stopping.
 func (r *run) daemonStopping() bool {
-	r.a.mu.Lock()
-	defer r.a.mu.Unlock()
-	return r.a.stopping
+	select {
+	case <-r.a.stopBegun:
+		return true
+	default:
+		return false
+	}
 }
 
 // event emits an event of the execution; one that names no work item takes the execution's current one.
@@ -676,7 +688,7 @@ func (r *run) chain(ctx context.Context) ([]domain.HarnessProfile, []domain.Text
 func (r *run) cancelRequested() bool {
 	r.a.mu.Lock()
 	defer r.a.mu.Unlock()
-	return r.h.cancelRequested
+	return r.a.cancelRequestedLocked(r.h)
 }
 
 // warn records a warning on the execution and emits it once, under the work item it names or, when it names none, the
@@ -1562,7 +1574,7 @@ func (r *run) finish(status domain.ExecutionStatus, reason domain.Text) {
 		reason.Message = trimTo(reason.Message, 2000)
 		r.x.SetError(reason)
 	}
-	if status == domain.StatusCancelled && r.x.CancelRequestedAt == nil && r.h != nil && r.h.cancelRequested {
+	if status == domain.StatusCancelled && r.x.CancelRequestedAt == nil && r.h != nil && a.cancelRequestedLocked(r.h) {
 		r.x.CancelRequestedAt = &now
 	}
 	r.x.SetStep(domain.Text{})

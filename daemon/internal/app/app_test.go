@@ -97,6 +97,8 @@ type fakeHarness struct {
 	held    int           // Detect calls waiting for the gate
 	// cutLag is how long a held Detect takes to return once its context ends, as a CLI takes time to exit.
 	cutLag time.Duration
+	// ignoresCancel makes a held Detect wait for the gate alone, as a check whose process outlives its context does.
+	ignoresCancel bool
 	// quota answers ReadQuota when set; otherwise every read finds a quota with nothing used. quotaReads counts them.
 	quota      func() (domain.Quota, error)
 	quotaReads int
@@ -125,10 +127,14 @@ func (f *fakeHarness) Detect(ctx context.Context, _ string) ports.HarnessInfo {
 	f.mu.Lock()
 	if gate := f.gate; gate != nil {
 		f.held++
+		cut := ctx.Done()
+		if f.ignoresCancel {
+			cut = nil
+		}
 		f.mu.Unlock()
 		select {
 		case <-gate:
-		case <-ctx.Done():
+		case <-cut:
 			f.mu.Lock()
 			lag := f.cutLag
 			f.mu.Unlock()
@@ -547,6 +553,10 @@ type env struct {
 	logger *log.Logger
 	// location is the machine's time zone, when a test sets one; UTC otherwise.
 	location *time.Location
+	// stopDetectionWait and stopExecutionsWait are how long Stop waits for the detection and the executions, when a test
+	// sets them; the defaults otherwise.
+	stopDetectionWait  time.Duration
+	stopExecutionsWait time.Duration
 }
 
 // newEnv starts an App on fake harnesses; configure sets up the env, its fakes included, before the App starts.
@@ -605,7 +615,7 @@ func (e *env) start(t *testing.T, configure ...func(*env)) {
 		State: e.state, Executions: e.records, Events: e.events, Validator: v, Harnesses: harnesses,
 		Service: e.service, Workspace: &workspace.Reader{}, TickInterval: time.Hour, TimeoutUnit: e.timeoutUnit,
 		SignInTimeout: e.signInTimeout, HarnessTokens: e.harnessTokens, Identify: e.identify,
-		Logger: logger})
+		StopDetectionWait: e.stopDetectionWait, StopExecutionsWait: e.stopExecutionsWait, Logger: logger})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -8397,7 +8407,7 @@ func (e *env) cancelMarked(task string) bool {
 	e.t.Helper()
 	e.app.mu.Lock()
 	h := e.app.running[task]
-	marked := h != nil && h.cancelRequested
+	marked := h != nil && e.app.cancelRequestedLocked(h)
 	e.app.mu.Unlock()
 	if h == nil {
 		e.t.Fatalf("task %s has no running execution", task)
@@ -8472,5 +8482,195 @@ func TestUnforcedStopIsAcceptedWithNothingActive(t *testing.T) {
 	}
 	if err := e.app.RequestShutdown(false); err != nil {
 		t.Errorf("a second RequestShutdown(false) = %v, want nil", err)
+	}
+}
+
+// harmflow-app#995: a forced stop is asked for at once while another holder keeps the App's lock, and once the lock is
+// free the daemon accepts no work and counts the running execution as cancelled.
+func TestForcedStopIsAskedWhileTheLockIsHeld(t *testing.T) {
+	e := newEnv(t)
+	e.runSlow("busy")
+
+	e.app.mu.Lock()
+	returned := make(chan error, 1)
+	go func() { returned <- e.app.RequestShutdown(true) }()
+	select {
+	case err := <-returned:
+		if err != nil {
+			t.Errorf("RequestShutdown(true) = %v, want nil", err)
+		}
+	case <-time.After(5 * time.Second):
+		e.app.mu.Unlock()
+		t.Fatal("RequestShutdown(true) still waits 5 s after another holder took the App's lock, want it returned")
+	}
+	asked := e.shutdownRequested()
+	e.app.mu.Unlock()
+	if !asked {
+		t.Error("ShutdownRequested is open after a forced stop made while the lock was held, want it closed")
+	}
+	if e.app.AcceptingFirings() {
+		t.Error("AcceptingFirings() = true after a forced stop, want false")
+	}
+	if !e.cancelMarked("busy") {
+		t.Error(`cancelMarked("busy") = false after RequestShutdown(true), want true`)
+	}
+}
+
+// harmflow-app#995: a forced stop cancels the running execution before it waits for the harness detection, so a
+// detection that ignores its context holds up neither the cancel nor the execution's end.
+func TestStopCancelsExecutionsBeforeWaitingForADetection(t *testing.T) {
+	var release func()
+	e := newEnv(t, func(e *env) {
+		release = e.codex.hold(t)
+		e.codex.ignoresCancel = true
+		e.stopDetectionWait = 20 * time.Second // longer than the execution takes to end once cancelled
+	})
+	if !e.poll(5*time.Second, e.codex.holding) {
+		t.Fatal("the detection Start launched never reached Detect")
+	}
+	id := e.runSlow("busy")
+
+	if err := e.app.RequestShutdown(true); err != nil {
+		t.Fatalf("RequestShutdown(true) = %v, want nil", err)
+	}
+	stopped := make(chan struct{})
+	go func() {
+		e.app.Stop(stopRequested())
+		close(stopped)
+	}()
+	e.wait(id, domain.StatusCancelled)
+	if !e.codex.holding() {
+		t.Fatal("the detection ended before the execution did, so the test proves nothing")
+	}
+	select {
+	case <-stopped:
+		t.Error("Stop returned while the detection still runs within its wait, want it waiting")
+	default:
+	}
+	release()
+	select {
+	case <-stopped:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Stop still runs 10 s after the detection ended")
+	}
+}
+
+// harmflow-app#995: Stop waits for the harness detection only up to its wait, then announces the stop and goes on,
+// while a detection that ignores its context still runs; that detection records no harness check once it ends.
+func TestStopGoesOnWithoutADetectionThatOutlivesItsWait(t *testing.T) {
+	var release func()
+	e := newEnv(t, func(e *env) {
+		release = e.codex.hold(t)
+		e.codex.ignoresCancel = true
+		e.stopDetectionWait = 200 * time.Millisecond
+	})
+	if !e.poll(5*time.Second, e.codex.holding) {
+		t.Fatal("the detection Start launched never reached Detect")
+	}
+
+	began := time.Now()
+	e.app.Stop(domain.Text{Message: "test stop"})
+	if took := time.Since(began); took > 5*time.Second {
+		t.Errorf("Stop took %s while a detection ignored its context, want about its 200 ms wait", took)
+	}
+	if !e.codex.holding() {
+		t.Fatal("the detection ended before Stop returned, so the test proves nothing")
+	}
+	if got := e.published(domain.EventDaemonStopping); len(got) != 1 {
+		t.Errorf("daemon.stopping events: %d, want 1", len(got))
+	}
+	release()
+	if !waitAtMost(&e.app.detection, 10*time.Second) {
+		t.Fatal("the detection still runs 10 s after its gate opened")
+	}
+	if got := e.published(domain.EventHarnessChecked); slices.ContainsFunc(got, func(ev domain.Event) bool {
+		return ev.Harness == domain.HarnessCodex
+	}) {
+		t.Errorf("harness.checked events for codex: %+v, want none from a detection that ended after the stop", got)
+	}
+}
+
+// harmflow-app#995: Stop waits for the cancelled executions together, under one deadline: with several executions
+// whose harness ignores SIGTERM for its whole grace period, it returns once that deadline passes, not once each one's
+// wait has, and the executions still end over their grace period afterwards.
+func TestStopWaitsForExecutionsUnderOneDeadline(t *testing.T) {
+	e := newEnv(t, func(e *env) { e.stopExecutionsWait = 500 * time.Millisecond })
+	e.claude.setScript(func(ports.RunRequest) string { return "trap '' TERM; echo working; exec sleep 600" })
+	tasks := []string{"first", "second", "third"}
+	var ids []string
+	for _, task := range tasks {
+		e.create(task, "  execution:\n    cancelGraceSeconds: 5\n")
+		r, err := e.app.RunTask(task)
+		if err != nil {
+			t.Fatalf("RunTask(%q): %v", task, err)
+		}
+		ids = append(ids, r.ExecutionID)
+	}
+	for _, id := range ids {
+		if !e.poll(10*time.Second, func() bool {
+			events, _, _ := e.app.ExecutionEvents(id, 0, 0)
+			return slices.ContainsFunc(events, func(ev domain.Event) bool {
+				return ev.Type == domain.EventHarnessMessage && ev.Message == "working"
+			})
+		}) {
+			t.Fatalf("the harness of execution %s printed nothing", id)
+		}
+	}
+
+	began := time.Now()
+	e.app.Stop(domain.Text{Message: "test stop"})
+	if took := time.Since(began); took >= 4*time.Second {
+		t.Errorf("Stop took %s with %d executions ignoring SIGTERM for 5 s, want about its 500 ms deadline", took, len(ids))
+	}
+	if !waitAtMost(&e.app.runs, 30*time.Second) {
+		t.Fatal("the executions still run 30 s after the stop, want them ended over their 5 s grace period")
+	}
+	for _, id := range ids {
+		if x, _ := e.app.GetExecution(id); x.Status != domain.StatusInterrupted {
+			t.Errorf("execution %s is %s after the stop, want %s", id, x.Status, domain.StatusInterrupted)
+		}
+	}
+}
+
+// harmflow-app#995: an execution that outlives Stop's wait for the executions keeps its notice once it ends, and saves
+// it in place: Stop has already waited for the notices' saves, so none is started that it would no longer wait for.
+func TestAnExecutionThatOutlivesTheStopSavesItsNoticeInPlace(t *testing.T) {
+	e := newEnv(t, func(e *env) { e.stopExecutionsWait = 200 * time.Millisecond })
+	e.claude.setScript(func(ports.RunRequest) string { return "trap '' TERM; echo working; exec sleep 600" })
+	e.create("late", "  execution:\n    cancelGraceSeconds: 2\n")
+	r, err := e.app.RunTask("late")
+	if err != nil {
+		t.Fatalf("RunTask(%q): %v", "late", err)
+	}
+	id := r.ExecutionID
+	if !e.poll(10*time.Second, func() bool {
+		events, _, _ := e.app.ExecutionEvents(id, 0, 0)
+		return slices.ContainsFunc(events, func(ev domain.Event) bool {
+			return ev.Type == domain.EventHarnessMessage && ev.Message == "working"
+		})
+	}) {
+		t.Fatalf("the harness of execution %s printed nothing", id)
+	}
+
+	e.app.Stop(domain.Text{Message: "test stop"})
+	if x, _ := e.app.GetExecution(id); x.Status.IsTerminal() {
+		t.Fatalf("execution %s is %s once Stop returned, so the test proves nothing", id, x.Status)
+	}
+	if !waitAtMost(&e.app.runs, 30*time.Second) {
+		t.Fatal("the execution still runs 30 s after the stop, want it ended over its 2 s grace period")
+	}
+	if x, _ := e.app.GetExecution(id); x.Status != domain.StatusInterrupted {
+		t.Errorf("execution %s is %s after the stop, want %s", id, x.Status, domain.StatusInterrupted)
+	}
+	// Saved in place, the notice is in the store by the time the execution has left the executions' wait group.
+	var list []Notification
+	if _, err := e.app.d.State.Load("notifications", &list); err != nil {
+		t.Fatalf(`State.Load("notifications") = %v, want nil`, err)
+	}
+	if !slices.ContainsFunc(list, func(n Notification) bool {
+		return n.ExecutionID == id && n.EventType == domain.EventExecutionFailed
+	}) {
+		t.Errorf(`State.Load("notifications") = %+v once execution %s ended, want its %s notice`, list, id,
+			domain.EventExecutionFailed)
 	}
 }
