@@ -87,10 +87,13 @@ test-desktop: sidecar ## Type check and unit tests of the desktop
 	pnpm -C desktop test
 	cd desktop/src-tauri && cargo test
 
-# Apart from test-desktop and coverage-desktop, whose unit run and floors must not need a daemon.
+# Apart from test-desktop and coverage-desktop, whose unit run and floors must not need a daemon. The shell's test
+# against a real daemon is marked #[ignore], so `cargo test` and `cargo llvm-cov` never start it: it runs here by name.
 .PHONY: test-desktop-daemon
-test-desktop-daemon: daemon ## The dashboard's store and timeline against a real daemon, with fake harnesses
+test-desktop-daemon: sidecar ## The dashboard's store and timeline, and the shell's event stream, against a real daemon, with fake harnesses
 	HARMFLOW_TEST_DAEMON="$(CURDIR)/build/harmflowd" pnpm -C desktop test:daemon
+	cd desktop/src-tauri && HARMFLOW_TEST_DAEMON="$(CURDIR)/build/harmflowd" cargo test --lib \
+		sse::tests::the_stream_survives_a_dropped_connection_to_the_real_daemon -- --ignored --exact
 
 .PHONY: check-imports
 check-imports: ## Fail on Go imports outside the Go guide's three groups, as CI does

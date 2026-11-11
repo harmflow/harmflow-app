@@ -47,8 +47,13 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(start_hidden: bool) -> Self {
+        Self::with_daemon(DaemonClient::new(), start_hidden)
+    }
+
+    /// The state of an app that reaches the daemon through `daemon`: the tests give it a HarmFlow folder of their own.
+    pub(crate) fn with_daemon(daemon: DaemonClient, start_hidden: bool) -> Self {
         Self {
-            daemon: DaemonClient::new(),
+            daemon,
             connection: Mutex::new("connecting".into()),
             last_event_id: AtomicU64::new(0),
             tray_enabled: AtomicBool::new(true),
