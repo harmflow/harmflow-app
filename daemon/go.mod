@@ -2,7 +2,7 @@ module github.com/harmflow/harmflow-app/daemon
 
 go 1.26.0
 
-toolchain go1.26.10
+toolchain go1.26.11
 
 require (
 	github.com/creack/pty v1.1.24
