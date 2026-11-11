@@ -954,6 +954,7 @@ components:
         - settings_change_breaks_task
         - settings_quota_harness_unknown
         - settings_quota_share_invalid
+        - settings_quota_interval_invalid
         - settings_system_prompt_too_long
         - harness_not_identified
         - template_not_found
@@ -2142,6 +2143,14 @@ components:
           exclusiveMinimum: 0
           maximum: 100
           default: 100
+        checkIntervalMinutes:
+          description: >-
+            How long a reading of the tool's quota stands before an attempt reads it again, in minutes. A read that
+            fails stands for this interval too, doubled on each failed read in a row, up to an hour or the interval
+            when it is longer. Left out, five minutes.
+          type: integer
+          minimum: 1
+          maximum: 60
 
     SettingsPatch:
       type: object
@@ -2162,7 +2171,9 @@ components:
           items: { type: string }
         onboardingCompleted: { type: boolean }
         quota:
-          description: Replaces the whole map of shares. A share outside the bounds is refused, naming its tool.
+          description: >-
+            Replaces the whole map of shares. A share or a check interval outside the bounds is refused, naming its
+            tool.
           type: object
           propertyNames: { enum: [claude-code, codex] }
           additionalProperties: { $ref: "#/components/schemas/QuotaShare" }

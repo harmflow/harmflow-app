@@ -87,6 +87,122 @@ func TestQuotaReadAtMostOnceInFiveMinutes(t *testing.T) {
 	}
 }
 
+// A quota read that fails is kept like a good one: the attempts while it stands start with its warning and read
+// nothing. It stands for the check interval, doubled on each failed read in a row, up to an hour; a good read ends the
+// wait, and the next reading stands for the interval again.
+func TestFailedQuotaReadIsKept(t *testing.T) {
+	e := newEnv(t)
+	e.create("t", "")
+	failing := func() (domain.Quota, error) {
+		return domain.Quota{}, domain.TextErr("quota_report_unrecognized", "Claude Code's usage report names no plan window")
+	}
+	e.claude.setQuota(failing)
+	run := func(advance time.Duration, wantReads int, wantWarned bool) {
+		t.Helper()
+		e.clock.Advance(advance)
+		r, _ := e.app.RunTask("t")
+		x := e.wait(r.ExecutionID, domain.StatusCompleted)
+		if n := e.claude.reads(); n != wantReads {
+			t.Errorf("after %v, %d quota reads, want %d", advance, n, wantReads)
+		}
+		warned := len(x.Warnings) == 1 && x.Warnings[0].Key == "quota_unread"
+		if warned != wantWarned || (!wantWarned && len(x.Warnings) != 0) {
+			t.Errorf("after %v, warnings %+v; want the quota_unread warning: %v", advance, x.Warnings, wantWarned)
+		}
+	}
+	run(0, 1, true)              // the first read fails and stands for 5 minutes
+	run(4*time.Minute, 1, true)  // still standing: no read, the same warning
+	run(time.Minute, 2, true)    // 5 minutes: read again, fails, stands for 10
+	run(9*time.Minute, 2, true)  // still standing
+	run(time.Minute, 3, true)    // 10 minutes: fails, stands for 20
+	run(20*time.Minute, 4, true) // fails, stands for 40
+	run(40*time.Minute, 5, true) // fails, stands for 60, the cap
+	run(60*time.Minute, 6, true) // fails, still 60
+	run(59*time.Minute, 6, true) // still standing at the cap
+	e.claude.setQuota(func() (domain.Quota, error) { return domain.Quota{}, nil })
+	run(time.Minute, 7, false)   // a good read ends the wait
+	run(4*time.Minute, 7, false) // and stands for the interval
+	e.claude.setQuota(failing)
+	run(time.Minute, 8, true) // a failure after a good read stands for the interval again
+	run(5*time.Minute, 9, true)
+}
+
+// The check interval the settings give a harness is how long its readings stand, a good one or a failed one.
+func TestQuotaIntervalFromTheSettings(t *testing.T) {
+	e := newEnv(t)
+	if _, err := e.app.UpdateSettings(SettingsPatch{Quota: map[string]QuotaShare{
+		domain.HarnessClaudeCode: {MaxPercent: 100, CheckIntervalMinutes: new(30.0)}}}); err != nil {
+		t.Fatalf("UpdateSettings(claude-code every 30 minutes) = %v, want no error", err)
+	}
+	e.create("t", "")
+	for i, c := range []struct {
+		advance time.Duration
+		reads   int
+	}{{0, 1}, {29 * time.Minute, 1}, {time.Minute, 2}} {
+		e.clock.Advance(c.advance)
+		r, _ := e.app.RunTask("t")
+		e.wait(r.ExecutionID, domain.StatusCompleted)
+		if n := e.claude.reads(); n != c.reads {
+			t.Errorf("run %d, %d quota reads, want %d", i, n, c.reads)
+		}
+	}
+}
+
+// The time a failed read stands is the interval after the first, doubled on each failed read in a row after it, up to
+// an hour, or the interval when it is longer.
+func TestFailedQuotaReadStands(t *testing.T) {
+	cases := []struct {
+		name     string
+		interval time.Duration
+		failures int
+		want     time.Duration
+	}{
+		{"5m after 1 failure", 5 * time.Minute, 1, 5 * time.Minute},
+		{"5m after 2 failures", 5 * time.Minute, 2, 10 * time.Minute},
+		{"5m after 4 failures", 5 * time.Minute, 4, 40 * time.Minute},
+		{"5m after 5 failures, capped at an hour", 5 * time.Minute, 5, time.Hour},
+		{"5m after 50 failures, capped at an hour", 5 * time.Minute, 50, time.Hour},
+		{"7m after 5 failures, capped at an hour", 7 * time.Minute, 5, time.Hour},
+		{"60m after 3 failures, the interval itself", 60 * time.Minute, 3, time.Hour},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := (quotaFailure{failures: c.failures}).stands(c.interval); got != c.want {
+				t.Errorf("stands(%v) after %d failures = %v, want %v", c.interval, c.failures, got, c.want)
+			}
+		})
+	}
+}
+
+// harmflow-app#975: a running attempt's report is no read of the quota endpoint, so it neither ends a failed read's
+// wait nor resets its doubling. Between two failed reads, an attempt that reports a reading leaves the next attempts
+// inside the window with the quota_unread warning and no read, and the next failed read stands twice as long.
+func TestReportedQuotaLeavesAFailedReadStanding(t *testing.T) {
+	e := newEnv(t)
+	e.create("t", "")
+	e.claude.setQuota(func() (domain.Quota, error) {
+		return domain.Quota{}, domain.TextErr("quota_report_unrecognized", "Claude Code's usage report names no plan window")
+	})
+	e.claude.setScript(func(ports.RunRequest) string { return "echo 'WINDOW 10'; echo 'END ok'" })
+	run := func(advance time.Duration, wantReads int) {
+		t.Helper()
+		e.clock.Advance(advance)
+		r, _ := e.app.RunTask("t")
+		x := e.wait(r.ExecutionID, domain.StatusCompleted)
+		if n := e.claude.reads(); n != wantReads {
+			t.Errorf("after %v, %d quota reads, want %d", advance, n, wantReads)
+		}
+		if len(x.Warnings) != 1 || x.Warnings[0].Key != "quota_unread" {
+			t.Errorf("after %v, warnings %+v; want the quota_unread warning", advance, x.Warnings)
+		}
+	}
+	run(0, 1)             // the first read fails and stands for 5 minutes; the attempt reports a reading
+	run(time.Minute, 1)   // inside the window, beside that fresh report: no read, the same warning
+	run(4*time.Minute, 2) // 5 minutes: read again, fails, stands for 10, not 5
+	run(9*time.Minute, 2) // still standing, beside the report of the last attempt
+	run(time.Minute, 3)   // 10 minutes: read again
+}
+
 // A quota read that timed out, with the error each adapter returns at its bound, is a quota that cannot be read: the
 // attempt starts, and the execution carries one warning that names the harness and why.
 func TestTimedOutQuotaReadLetsTheAttemptStart(t *testing.T) {

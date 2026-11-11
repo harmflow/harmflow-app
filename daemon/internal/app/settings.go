@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"regexp"
+	"time"
 	"unicode/utf8"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
@@ -43,8 +44,13 @@ const maxSystemPromptLength = 20000
 
 // QuotaShare is the share of each of a harness's quota windows HarmFlow may spend, in percent: above 0 and at most
 // 100. An attempt does not start while a window is used at or above it; a running attempt is never ended by it.
+// CheckIntervalMinutes is how long a reading of the harness's quota stands before an attempt reads it again, a whole
+// number from 1 to 60 minutes; nil leaves the default of five. It is a pointer, so that a 0 sent is refused and not
+// read as left out, and a number, so that a fraction decodes and is refused with its own message, not as a body that
+// is no JSON.
 type QuotaShare struct {
-	MaxPercent float64 `json:"maxPercent"`
+	MaxPercent           float64  `json:"maxPercent"`
+	CheckIntervalMinutes *float64 `json:"checkIntervalMinutes,omitempty"`
 }
 
 // AutostartView is whether the daemon starts with the user's session, by which mechanism, none when the daemon has no
@@ -103,12 +109,19 @@ func (a *App) loadSettings() error {
 	}
 	quota := map[string]QuotaShare{}
 	for _, h := range sortedKeys(s.Quota) {
-		if err := checkQuotaShare(h, s.Quota[h]); err != nil {
+		q := s.Quota[h]
+		if err := checkQuotaInterval(h, q); err != nil {
+			// An interval edited by hand outside the bounds is refused alone: the harness keeps its share and the
+			// default interval.
+			a.log.Printf("loading the settings, the interval is refused: %s", err.Text.Message)
+			q.CheckIntervalMinutes = nil
+		}
+		if err := checkQuotaShare(h, q); err != nil {
 			// A share edited by hand outside the bounds is refused, and its harness may spend the whole of each window.
 			a.log.Printf("loading the settings, the share is refused: %s", err.Text.Message)
 			continue
 		}
-		quota[h] = s.Quota[h]
+		quota[h] = q
 	}
 	s.Quota = quota
 	a.mu.Lock()
@@ -161,6 +174,9 @@ func (a *App) UpdateSettings(p SettingsPatch) (SettingsView, error) {
 	}
 	for _, h := range sortedKeys(p.Quota) {
 		if err := checkQuotaShare(h, p.Quota[h]); err != nil {
+			return SettingsView{}, err
+		}
+		if err := checkQuotaInterval(h, p.Quota[h]); err != nil {
 			return SettingsView{}, err
 		}
 	}
@@ -241,6 +257,29 @@ func (a *App) quotaShare(harness string) float64 {
 		return q.MaxPercent
 	}
 	return domain.FullShare
+}
+
+// quotaInterval is how long a reading of the harness's quota stands: the interval the settings give it, or five
+// minutes.
+func (a *App) quotaInterval(harness string) time.Duration {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if q, ok := a.settings.Quota[harness]; ok && q.CheckIntervalMinutes != nil {
+		return time.Duration(*q.CheckIntervalMinutes) * time.Minute
+	}
+	return domain.DefaultQuotaCheckMinutes * time.Minute
+}
+
+// checkQuotaInterval refuses a quota check interval that is set and not a whole number from 1 to 60 minutes, 0
+// included, naming it by its harness.
+func checkQuotaInterval(harness string, q QuotaShare) *Error {
+	if q.CheckIntervalMinutes == nil || domain.ValidQuotaCheckMinutes(*q.CheckIntervalMinutes) {
+		return nil
+	}
+	text := domain.T("settings_quota_interval_invalid",
+		"quota.{{harness}}.checkIntervalMinutes must be a whole number from 1 to 60", "harness", harness)
+	return &Error{Code: CodeValidationFailed, Text: text,
+		Validation: fieldIssue(fmt.Sprintf("/quota/%s/checkIntervalMinutes", harness), text)}
 }
 
 // checkQuotaShare refuses a share of a harness HarmFlow does not run, and one that is not above 0 and at most 100,

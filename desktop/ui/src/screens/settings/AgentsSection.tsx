@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api/client";
 import { HarnessInventory, ToolRow } from "../../components/Harnesses";
 import { toast } from "../../components/toast";
-import { Button, Field, Panel, TextArea } from "../../components/ui";
+import { Button, Field, NumberInput, Panel, TextArea } from "../../components/ui";
 import { errorMessage } from "../../lib/errorMessage";
 import { useDraft, type DraftReport } from "../../lib/hooks";
 import { actions, useStore } from "../../state/store";
@@ -41,20 +41,32 @@ export function AgentsSection({ report }: { report: DraftReport }) {
         </div>
       </Panel>
       <Panel title={t("settings.subheads.quota")}>
-        {harnesses.map((h) => (
-          <SettingRow
-            key={h.id}
-            id={`settings-quota-${h.id}`}
-            label={t("settings.quotaShare", { harness: h.name })}
-            hint={t("settings.quotaShareHint")}
-          >
-            <QuotaShareSlider
-              id={`settings-quota-${h.id}`}
-              value={settings?.quota?.[h.id]?.maxPercent ?? FULL_SHARE}
-              onSave={(share) => void patch({ quota: { ...(settings?.quota ?? {}), [h.id]: { maxPercent: share } } })}
-            />
-          </SettingRow>
-        ))}
+        {harnesses.map((h) => {
+          const entry = settings?.quota?.[h.id];
+          // A change to one of a tool's two settings keeps the other, and the other tools' entries.
+          const save = (change: { maxPercent?: number; checkIntervalMinutes?: number }) =>
+            void patch({ quota: { ...(settings?.quota ?? {}), [h.id]: { ...entry, maxPercent: entry?.maxPercent ?? FULL_SHARE, ...change } } });
+          return (
+            <Fragment key={h.id}>
+              <SettingRow id={`settings-quota-${h.id}`} label={t("settings.quotaShare", { harness: h.name })} hint={t("settings.quotaShareHint")}>
+                <QuotaShareSlider id={`settings-quota-${h.id}`} value={entry?.maxPercent ?? FULL_SHARE} onSave={(share) => save({ maxPercent: share })} />
+              </SettingRow>
+              <SettingRow
+                id={`settings-quota-interval-${h.id}`}
+                label={t("settings.quotaInterval", { harness: h.name })}
+                hint={t("settings.quotaIntervalHint")}
+              >
+                <QuotaIntervalField
+                  id={`settings-quota-interval-${h.id}`}
+                  draft={`quotaInterval-${h.id}`}
+                  value={entry?.checkIntervalMinutes ?? DEFAULT_QUOTA_CHECK_MINUTES}
+                  onSave={(minutes) => save({ checkIntervalMinutes: minutes })}
+                  onDraft={report}
+                />
+              </SettingRow>
+            </Fragment>
+          );
+        })}
       </Panel>
       <Panel title={t("settings.subheads.systemPrompt")}>
         <SystemPromptField value={settings?.systemPrompt ?? ""} onDraft={report} />
@@ -119,6 +131,9 @@ function SystemPromptField({ value, onDraft }: { value: string; onDraft: DraftRe
 
 /** The share of a quota window HarmFlow may spend when the user sets none: the whole of it. */
 const FULL_SHARE = 100;
+// How long a reading of an AI tool's quota stands when no interval is set, and the longest interval, in minutes.
+const DEFAULT_QUOTA_CHECK_MINUTES = 5;
+const MAX_QUOTA_CHECK_MINUTES = 60;
 
 /**
  * A slider of the share of an AI tool's quota HarmFlow may spend, from 1% to 100%. It shows the share while it is
@@ -157,5 +172,34 @@ function QuotaShareSlider({ id, value, onSave }: { id: string; value: number; on
         {share}%
       </output>
     </span>
+  );
+}
+
+/** How long a reading of an AI tool's quota stands before an attempt reads it again, from 1 to 60 minutes. */
+function QuotaIntervalField({
+  id,
+  draft,
+  value,
+  onSave,
+  onDraft,
+}: {
+  id: string;
+  draft: string;
+  value: number;
+  onSave: (minutes: number) => void;
+  onDraft: DraftReport;
+}) {
+  const { t } = useTranslation();
+  const [minutes, setMinutes] = useState<number | undefined>(value);
+  useEffect(() => setMinutes(value), [value]);
+  useDraft(onDraft, draft, minutes !== value);
+  const valid = minutes !== undefined && Number.isInteger(minutes) && minutes >= 1 && minutes <= MAX_QUOTA_CHECK_MINUTES;
+  return (
+    <div className="inline-form">
+      <NumberInput id={id} value={minutes} onValue={setMinutes} min={1} max={MAX_QUOTA_CHECK_MINUTES} />
+      <Button size="sm" disabled={!valid || minutes === value} onClick={() => valid && onSave(minutes)}>
+        {t("common.apply")}
+      </Button>
+    </div>
   );
 }

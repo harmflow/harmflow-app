@@ -492,6 +492,41 @@ describe("the AI tools section's quota shares", () => {
     expect(shown("codex")).toBe("80%");
   });
 
+  it("shows each AI tool's quota check interval, five minutes when none is set, and saves it beside the share", async () => {
+    daemon.settings = { ...daemon.settings, quota: { codex: { maxPercent: 80, checkIntervalMinutes: 15 } } };
+    patchStateForTests({ harnesses: [claudeCode, codex], tools });
+    await open("agents");
+    const interval = (id: string) => host!.querySelector<HTMLInputElement>(`#settings-quota-interval-${id}`)!;
+    const applyInterval = (id: string) => interval(id).closest(".inline-form")!.querySelector<HTMLButtonElement>("button")!;
+    expect([interval("claude-code").value, interval("claude-code").min, interval("claude-code").max]).toEqual(["5", "1", "60"]);
+    expect(interval("codex").value).toBe("15");
+    expect(applyInterval("claude-code").disabled).toBe(true);
+    daemon.requests.length = 0;
+
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    const typeInterval = async (value: string) =>
+      act(async () => {
+        setValue.call(interval("claude-code"), value);
+        interval("claude-code").dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    await typeInterval("61");
+    expect(applyInterval("claude-code").disabled).toBe(true);
+    await typeInterval("30");
+    await click(applyInterval("claude-code"));
+
+    expect(updates().map((r) => r.body)).toStrictEqual([
+      { quota: { codex: { maxPercent: 80, checkIntervalMinutes: 15 }, "claude-code": { maxPercent: 100, checkIntervalMinutes: 30 } } },
+    ]);
+    expect(interval("claude-code").value).toBe("30");
+
+    // Moving the share afterwards keeps the interval.
+    daemon.requests.length = 0;
+    await drag("claude-code", 90);
+    expect(updates().map((r) => r.body)).toStrictEqual([
+      { quota: { codex: { maxPercent: 80, checkIntervalMinutes: 15 }, "claude-code": { maxPercent: 90, checkIntervalMinutes: 30 } } },
+    ]);
+  });
+
   it("saves the share once it is let go, keeping the other tools' shares", async () => {
     daemon.settings = { ...daemon.settings, quota: { codex: { maxPercent: 80 } } };
     patchStateForTests({ harnesses: [claudeCode, codex], tools });

@@ -280,6 +280,7 @@ export const esES: Resources = {
     settings_change_breaks_task: "este cambio dejaría {{field}} de la tarea {{task}} fuera de las rutas permitidas: {{detail}}",
     settings_quota_harness_unknown: "quota.{{harness}} no es una herramienta de IA que HarmFlow ejecute",
     settings_quota_share_invalid: "quota.{{harness}}.maxPercent debe ser mayor que 0 y como máximo 100",
+    settings_quota_interval_invalid: "quota.{{harness}}.checkIntervalMinutes debe ser un número entero de 1 a 60",
     settings_system_prompt_too_long: "systemPrompt debe tener como máximo 20000 caracteres",
     harness_not_identified: "{{path}} no es {{harness}}: la salida de --version no lo nombra",
     template_not_found: "no hay ninguna plantilla {{template}}",
@@ -1393,6 +1394,8 @@ export const esES: Resources = {
     logRetentionHint: "Los registros de ejecución se conservan sin límite; solo caducan sus logs.",
     quotaShare: "{{harness}}: parte de cada ventana de la cuota que HarmFlow puede gastar",
     quotaShareHint: "Un intento no empieza mientras una ventana esté en esta parte o por encima; un intento en curso nunca se detiene por ella. Las tareas que permiten uso extra no se retienen.",
+    quotaInterval: "{{harness}}: minutos entre comprobaciones de la cuota",
+    quotaIntervalHint: "Cuánto vale una lectura de la cuota antes de que un intento la lea de nuevo; una lectura fallida espera más cada vez, hasta una hora. Un intervalo más largo consulta menos el endpoint de uso, y un intento puede comprobar una cuota de hasta esa antigüedad.",
     cleanWorkspaces: "Limpiar espacios de trabajo",
     cleanWorkspacesHint:
       "Elimina los worktrees cuyo elemento de trabajo terminó. Se conservan los PR en borrador aún en curso.",

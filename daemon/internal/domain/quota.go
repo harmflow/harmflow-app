@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 // QuotaWindow is one limit of a harness's quota, named as the harness names it: how much of it is used, and when it
 // resets, as a time when the harness gives one, or in the harness's own words when it gives only those.
@@ -30,6 +33,19 @@ const FullShare = 100.0
 // ValidShare reports whether maxPercent is a share of a quota window HarmFlow may spend: above 0 and at most 100.
 func ValidShare(maxPercent float64) bool {
 	return maxPercent > 0 && maxPercent <= FullShare
+}
+
+// DefaultQuotaCheckMinutes is how long, in minutes, a harness's quota reading stands when the user sets no interval.
+const DefaultQuotaCheckMinutes = 5
+
+// MaxQuotaCheckMinutes is the longest quota check interval the user may set, and the longest a failed read is kept
+// when the interval is shorter.
+const MaxQuotaCheckMinutes = 60
+
+// ValidQuotaCheckMinutes reports whether minutes is a quota check interval the user may set: a whole number from 1 to
+// 60.
+func ValidQuotaCheckMinutes(minutes float64) bool {
+	return minutes >= 1 && minutes <= MaxQuotaCheckMinutes && minutes == math.Trunc(minutes)
 }
 
 // Exhausted reports the first limit that leaves the quota exhausted: a plan window at the whole of it, a rate limit

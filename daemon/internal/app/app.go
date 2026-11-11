@@ -189,8 +189,10 @@ type App struct {
 	drain    *drainState
 	adapters map[string]ports.HarnessAdapter
 	// quotas holds each harness's last quota reading, by harness id, and quotaReads runs one read of a harness at a time.
-	quotas     map[string]quotaReading
-	quotaReads map[string]*sync.Mutex
+	// quotaFailures holds the failed reads in a row of each harness that has them, under the same key.
+	quotas        map[string]quotaReading
+	quotaFailures map[string]quotaFailure
+	quotaReads    map[string]*sync.Mutex
 	// signIns holds each harness's sign-in, by harness id; a.wg counts the ones that run.
 	signIns map[string]*signInState
 	// tokens holds the record of each harness's long-lived token, by harness id; the token is in the credential store.
@@ -306,7 +308,8 @@ func New(d Deps) (*App, error) {
 		inventory: map[string]ports.HarnessInfo{}, manualPaths: map[string]string{}, sched: map[string]*scheduleState{},
 		firings: map[string][]firingRecord{}, ledger: map[string]map[string]*domain.WorkItem{},
 		applied: map[string][]string{}, accepting: true,
-		adapters: map[string]ports.HarnessAdapter{}, quotas: map[string]quotaReading{}, quotaReads: map[string]*sync.Mutex{},
+		adapters: map[string]ports.HarnessAdapter{}, quotas: map[string]quotaReading{},
+		quotaFailures: map[string]quotaFailure{}, quotaReads: map[string]*sync.Mutex{},
 		signIns: map[string]*signInState{}, tokens: map[string]*tokenRecord{}, records: map[string]*recordLock{},
 		redetect: make(chan struct{}, 1), ShutdownRequested: make(chan struct{}), stopBegun: make(chan struct{}),
 	}

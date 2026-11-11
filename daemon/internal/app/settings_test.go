@@ -1,12 +1,14 @@
 package app
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
@@ -249,6 +251,73 @@ func TestQuotaShareRefusedOnLoad(t *testing.T) {
 	}
 	if got := e.app.quotaShare(domain.HarnessCodex); got != 80 {
 		t.Errorf("quotaShare(codex) = %v, want 80", got)
+	}
+}
+
+// A harness's quota check interval is kept with its share and returned with the settings, and a harness that sets none
+// reads its quota every five minutes. An interval that is not a whole number from 1 to 60 minutes, 0 included, is
+// refused with its own message, naming it by its harness, and a refused change keeps the intervals as they were. The
+// patch is decoded as the local API decodes it, so a fraction is refused as an interval, not as a body that is no JSON.
+func TestQuotaIntervalSettings(t *testing.T) {
+	e := newEnv(t)
+	v, err := e.app.UpdateSettings(SettingsPatch{Quota: map[string]QuotaShare{
+		domain.HarnessClaudeCode: {MaxPercent: 100, CheckIntervalMinutes: new(20.0)}}})
+	if err != nil {
+		t.Fatalf("UpdateSettings(claude-code every 20 minutes) = %v, want no error", err)
+	}
+	if got := v.Quota[domain.HarnessClaudeCode]; got.CheckIntervalMinutes == nil || *got.CheckIntervalMinutes != 20 ||
+		got.MaxPercent != 100 {
+		t.Errorf("UpdateSettings(claude-code every 20 minutes).Quota = %v, want 20 minutes at 100%%", v.Quota)
+	}
+	if got := e.app.quotaInterval(domain.HarnessClaudeCode); got != 20*time.Minute {
+		t.Errorf("quotaInterval(claude-code) = %v, want 20m", got)
+	}
+	if got := e.app.quotaInterval(domain.HarnessCodex); got != 5*time.Minute {
+		t.Errorf("quotaInterval(codex) = %v, want 5m for a harness left out", got)
+	}
+	for _, minutes := range []string{"-1", "0", "2.5", "61"} {
+		t.Run(minutes, func(t *testing.T) {
+			var p SettingsPatch
+			body := `{"quota":{"codex":{"maxPercent":100,"checkIntervalMinutes":` + minutes + `}}}`
+			if err := json.Unmarshal([]byte(body), &p); err != nil {
+				t.Fatalf("json.Unmarshal(%s) = %v, want no error", body, err)
+			}
+			_, err := e.app.UpdateSettings(p)
+			var ae *Error
+			if !errors.As(err, &ae) || ae.Code != CodeValidationFailed || ae.Key != "settings_quota_interval_invalid" ||
+				ae.Validation == nil || len(ae.Validation.Errors) != 1 ||
+				ae.Validation.Errors[0].Path != "/quota/codex/checkIntervalMinutes" {
+				t.Fatalf("UpdateSettings(codex every %s minutes) = %v, want settings_quota_interval_invalid at "+
+					"/quota/codex/checkIntervalMinutes", minutes, err)
+			}
+			if got := e.app.quotaInterval(domain.HarnessClaudeCode); got != 20*time.Minute {
+				t.Errorf("after a refused change, quotaInterval(claude-code) = %v, want 20m", got)
+			}
+		})
+	}
+}
+
+// An interval outside the bounds in the settings file, edited by hand, a fraction included, is refused alone when the
+// settings load: its harness keeps its share and reads its quota every five minutes.
+func TestQuotaIntervalRefusedOnLoad(t *testing.T) {
+	for _, minutes := range []float64{600, 2.5} {
+		t.Run(fmt.Sprint(minutes), func(t *testing.T) {
+			e := newEnv(t)
+			s := defaultSettings()
+			s.Quota = map[string]QuotaShare{domain.HarnessClaudeCode: {MaxPercent: 90, CheckIntervalMinutes: &minutes}}
+			if err := e.app.d.State.Save("settings", s); err != nil {
+				t.Fatalf("Save(settings) = %v", err)
+			}
+			if err := e.app.loadSettings(); err != nil {
+				t.Fatalf("loadSettings() = %v, want no error", err)
+			}
+			if got := e.app.quotaInterval(domain.HarnessClaudeCode); got != 5*time.Minute {
+				t.Errorf("quotaInterval(claude-code) = %v, want 5m for an interval refused on load", got)
+			}
+			if got := e.app.quotaShare(domain.HarnessClaudeCode); got != 90 {
+				t.Errorf("quotaShare(claude-code) = %v, want 90 kept beside a refused interval", got)
+			}
+		})
 	}
 }
 
