@@ -294,32 +294,3 @@ The code is licensed under the PolyForm Noncommercial License 1.0.0: see [`LICEN
 code, not the HarmFlow name, logo, or app icon: see [`TRADEMARKS.md`](TRADEMARKS.md).
 
 <p align="center"><sub>Automate the repetitive. Amplify what matters.</sub></p>
-
-## EGM Blueprint
-
-### System Overview
-
-The repository integrates authored contracts, the scheduler daemon, the native desktop client, and release packaging.
-
-### Subdirectories & System Boundaries
-
-- [contracts](./contracts/README.md) — authored local API and schema contracts.
-- [daemon](./daemon/README.md) — Go scheduler, local API, persistence, and harness orchestration.
-- [desktop](./desktop/README.md) — Tauri shell and React dashboard.
-- [packaging](./packaging/README.md) — local macOS update and installation behavior.
-
-### Global Invariants
-
-- Generated daemon schemas and UI API types are derived from authored contract inputs. `[Makefile:generate]`
-- The daemon serves its API through a loopback listener and applies token, Host, and Origin checks to requests. `[daemon/internal/adapters/httpapi/server.go:Listen]` `[daemon/internal/adapters/httpapi/server.go:Handler]`
-- The native desktop forwards daemon access through Rust so the daemon token does not reach the webview. `[desktop/src-tauri/src/daemon.rs:connection]` `[desktop/ui/src/api/transport.ts:TauriTransport]`
-
-### Global Side Effects
-
-- The daemon writes runtime state and starts its local API, event log, system sampler, and harness integrations. `[daemon/harmflowd/harmflowd.go:Run]`
-- The desktop shell reads local daemon credentials, performs local API/SSE communication, and controls native window, tray, and notification resources. `[desktop/src-tauri/src/daemon.rs:connection]` `[desktop/src-tauri/src/sse.rs:spawn]` `[desktop/src-tauri/src/lib.rs:run]`
-- Packaging can build and replace a local application bundle. `[packaging/macos/update-app.sh:main]`
-
-### System Verification
-
-- Run: `make test`
