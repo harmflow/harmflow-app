@@ -210,7 +210,7 @@ impl DaemonClient {
         Self::with(None, REQUEST_TIMEOUT)
     }
 
-    fn with(home: Option<PathBuf>, timeout: Duration) -> Self {
+    pub(crate) fn with(home: Option<PathBuf>, timeout: Duration) -> Self {
         let http = reqwest::Client::builder()
             .no_proxy()
             .connect_timeout(Duration::from_secs(3))

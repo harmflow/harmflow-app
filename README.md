@@ -131,7 +131,7 @@ run, and the Dependabot groups are described in [`docs/ci.md`](docs/ci.md).
 | `make help` | List every target |
 | `make deps` | Install the desktop's JavaScript dependencies |
 | `make test` | Run the daemon, desktop, and integration tests |
-| `make test-desktop-daemon` | Run the dashboard's store and timeline against a real daemon built from this tree, with the stand-in harnesses |
+| `make test-desktop-daemon` | Run the dashboard's store and timeline, and the shell's event stream, against a real daemon built from this tree, with the stand-in harnesses |
 | `make coverage` | Read the tests' coverage of the daemon, the interface, and the shell, and fail below a floor; the floors and their reading are in [`docs/coverage.md`](docs/coverage.md) |
 | `make dev-daemon` | Run the daemon on `.harmflow-dev/home` |
 | `make dev-ui` | Serve the interface in a browser, proxied to that daemon (`http://localhost:1420`) |
