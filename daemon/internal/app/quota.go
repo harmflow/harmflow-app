@@ -11,19 +11,38 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
-// quotaTTL is how long a harness's quota reading stands before an attempt reads it again.
-const quotaTTL = 5 * time.Minute
-
 // quotaReading is a harness's last quota reading and when it was taken.
 type quotaReading struct {
 	quota domain.Quota
 	at    time.Time
 }
 
+// quotaFailure is a run of failed reads of an installation's quota: the last one's error, how many failed in a row, and
+// when the last one was taken. It is kept apart from the reading, so a running attempt's report, which comes from the
+// API stream and not from the quota endpoint, neither ends it nor resets its count; only a good read does.
+type quotaFailure struct {
+	err      error
+	failures int
+	at       time.Time
+}
+
+// stands is how long the last failed read stands from when it was taken: the harness's check interval, doubled on each
+// failed read in a row after the first, up to an hour, or the interval when it is longer. A harness whose quota
+// endpoint is throttled is read a few times an hour.
+func (f quotaFailure) stands(interval time.Duration) time.Duration {
+	limit := max(interval, domain.MaxQuotaCheckMinutes*time.Minute)
+	d := interval
+	for i := 1; i < f.failures && d < limit; i++ {
+		d *= 2
+	}
+	return min(d, limit)
+}
+
 // quota is the quota of the installation of a harness that info describes, as an attempt checks it before it starts:
-// the reading of the last five minutes, or a new one, read with no model call. Attempts that start together share one
-// read. read is false when the adapter reads no quota; a read that fails is not kept, so the next attempt reads again.
-// Each installation runs under its own account, so each keeps a reading of its own.
+// the reading that still stands, or a new one, read with no model call. Attempts that start together share one read.
+// read is false when the adapter reads no quota. A read that fails is kept too: while it stands, every attempt starts
+// with its error and reads nothing, even beside a reading a running attempt reported since. Each installation runs
+// under its own account, so each keeps a reading of its own.
 func (a *App) quota(ctx context.Context, ad ports.HarnessAdapter, info ports.HarnessInfo) (q domain.Quota, read bool, err error) {
 	reader, ok := ad.(ports.QuotaReader)
 	if !ok {
@@ -41,14 +60,29 @@ func (a *App) quota(ctx context.Context, ad ports.HarnessAdapter, info ports.Har
 	defer lock.Unlock()
 	a.mu.Lock()
 	last, kept := a.quotas[key]
+	failed, failing := a.quotaFailures[key]
 	a.mu.Unlock()
-	if kept && a.now().Sub(last.at) < quotaTTL {
+	interval := a.quotaInterval(ad.ID())
+	switch {
+	case failing && a.now().Sub(failed.at) < failed.stands(interval):
+		return domain.Quota{}, true, failed.err
+	case !failing && kept && a.now().Sub(last.at) < interval:
 		return last.quota, true, nil
 	}
 	q, err = reader.ReadQuota(ctx, info)
 	if err != nil {
+		f := quotaFailure{err: err, failures: 1, at: a.now()}
+		if failing {
+			f.failures = failed.failures + 1
+		}
+		a.mu.Lock()
+		a.quotaFailures[key] = f
+		a.mu.Unlock()
 		return domain.Quota{}, true, err
 	}
+	a.mu.Lock()
+	delete(a.quotaFailures, key)
+	a.mu.Unlock()
 	a.storeQuota(key, q)
 	return q, true, nil
 }
