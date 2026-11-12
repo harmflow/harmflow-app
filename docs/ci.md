@@ -11,7 +11,7 @@ Dependabot's configuration, and the images the root README shows.
 
 | Workflow | When it runs | What it does |
 |---|---|---|
-| [`ci.yml`](/.github/workflows/ci.yml) | Every pull request, every push to `main`, and by hand | Runs the jobs of the parts a pull request touches — daemon, integration, desktop, and the generated code — and every one of them on `main` or when `contracts/`, the `Makefile`, or `.github/` changes. The file-name check and the secret scan run on every change |
+| [`ci.yml`](/.github/workflows/ci.yml) | Every pull request, every push to `main`, and by hand | Runs the jobs of the parts a change touches — daemon, integration, desktop, and the generated code: on a pull request, the parts its diff against its base touches, and on a push to `main`, the parts that push changed, so a merge runs again only what its pull request ran. Every part runs when `contracts/`, the `Makefile`, or `ci.yml` changes, and when it is run by hand. The file-name check and the secret scan run on every change. The daemon's unit tests run once, under the race detector, in the integration job, which reads their coverage too |
 | [`coverage.yml`](/.github/workflows/coverage.yml) | Every night at 03:17 UTC, by hand, and on a pull request that changes it | Reads the coverage of the daemon, the interface, and the shell on `main`, and shows each reading beside its floor in the run's summary. It never fails on a figure: the floors are held by CI |
 | [`dead-code.yml`](/.github/workflows/dead-code.yml) | Every night at 05:47 UTC, by hand, and on a pull request that changes it | Reports the daemon's dead code on `main` in the run's summary, as macOS and Linux build it: the functions that nothing reaches from `main` or from a test, the unexported names that nothing uses, and the functions that only a test reaches. It is no check: it never fails on a finding, only when a tool cannot read the code |
 | [`security.yml`](/.github/workflows/security.yml) | Mondays at 00:17 UTC, by hand, and on a pull request that changes the scan | Scans the whole history for secrets, every branch and tag included, audits every part's dependencies, and checks that the Go toolchain is the newest patch of its minor |
@@ -53,5 +53,7 @@ merged together: Tauri's build checks that the two share a major and minor, so a
   `install-gitleaks.sh`.
 - **Every workflow reads only:** `permissions: contents: read`. The one job that writes, `release.yml`'s GitHub
   Release, asks for `contents: write` on itself and nowhere else.
-- **A change here runs every CI job**, since `ci.yml` treats `.github/` as touching every part.
+- **A change to `ci.yml` runs every CI job**, since it can change what each job runs. A change to anything else here
+  runs CI's file-name check and secret scan, and the workflow it changes when that workflow runs on its own pull
+  request.
 - **A new or changed workflow or script updates its row here.**

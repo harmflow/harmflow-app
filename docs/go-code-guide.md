@@ -29,12 +29,13 @@ CI runs these checks on the Go code; run them before you finish.
 | Formatting | `gofmt -l daemon tests` prints nothing |
 | Import groups | `make check-imports` |
 | File and folder names, as `CLAUDE.md` sets them | `make check-file-names` |
-| Vet and unit tests, under the race detector | `GOFLAGS=-race make test-daemon` |
-| Integration tests and coverage floors | `make coverage-daemon` |
+| Vet | `make vet-daemon` |
+| Unit tests under the race detector, integration tests, and coverage floors | `make coverage-daemon COVERAGE_UNIT_FLAGS=-race` |
 
-`make test-daemon` includes the tests of `daemon/internal/archtest`, which fail on an import that breaks the layers, on
-an exported name of the daemon without a doc comment, and on a comment line of any Go module wider than the 120 columns
-of "Line length" below. No linter checks the other rules, so review holds them. A change is done when every rule in
+The unit tests include the tests of `daemon/internal/archtest`, which fail on an import that breaks the layers, on an
+exported name of the daemon without a doc comment, and on a comment line of any Go module wider than the 120 columns of
+"Line length" below. While you work, `GOFLAGS=-race make test-daemon` runs vet and the unit tests alone, without the
+integration tests. No linter checks the other rules, so review holds them. A change is done when every rule in
 this file holds in the code it adds or changes.
 
 ## Set by this repository
