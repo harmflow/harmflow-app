@@ -41,6 +41,10 @@ VITEST_FLOOR_FLAGS := $(if $(HOLD_FLOORS),,--coverage.thresholds.statements=0 --
 # More go test flags for test-daemon and test-integration, passed after their own so that a repeated flag wins: the
 # nightly Stress workflow sets its -count and -timeout here. Empty, the two targets run as they always did.
 TEST_FLAGS ?=
+# More go test flags for coverage-daemon's run of the daemon's unit tests, passed after its own. CI sets -race here, so
+# its one run of the unit tests both looks for data races and reads their coverage. Empty, the target runs as it always
+# did.
+COVERAGE_UNIT_FLAGS ?=
 
 .PHONY: help
 help: ## List the targets
@@ -76,9 +80,12 @@ deps: ## Install the desktop's JavaScript dependencies
 .PHONY: test
 test: test-daemon test-desktop test-desktop-daemon test-integration test-packaging ## Run every test
 
-.PHONY: test-daemon
-test-daemon: ## Unit tests of the daemon
+.PHONY: vet-daemon
+vet-daemon: ## go vet over the daemon, as CI runs it
 	go -C daemon vet ./...
+
+.PHONY: test-daemon
+test-daemon: vet-daemon ## Unit tests of the daemon
 	go -C daemon test $(TEST_FLAGS) ./...
 
 .PHONY: test-desktop
@@ -124,7 +131,8 @@ coverage: coverage-daemon coverage-desktop ## Read the tests' coverage of the da
 coverage-daemon: ## Statements per package of the daemon, unit and integration data merged, held at their floors
 	rm -rf "$(COVERAGE)/daemon" "$(COVERAGE)/daemon.out"
 	mkdir -p "$(COVERAGE)/daemon/unit" "$(COVERAGE)/daemon/integration"
-	go -C daemon test -count=1 -covermode=atomic -coverpkg=./... ./... -args -test.gocoverdir="$(COVERAGE)/daemon/unit" \
+	go -C daemon test -count=1 -covermode=atomic -coverpkg=./... $(COVERAGE_UNIT_FLAGS) ./... \
+		-args -test.gocoverdir="$(COVERAGE)/daemon/unit" \
 		> "$(COVERAGE)/daemon/unit.log" 2>&1 & unit=$$!; \
 	GOCOVERDIR="$(COVERAGE)/daemon/integration" go -C tests test -count=1 -timeout $(INTEGRATION_TIMEOUT) ./...; \
 	integration=$$?; wait $$unit; unit=$$?; cat "$(COVERAGE)/daemon/unit.log"; \
