@@ -6,7 +6,16 @@ This package contains reusable presentation, editing, shell, timeline, and feedb
 
 ## Interface
 
-- Shared primitive controls and status presentation are exported from `ui.tsx`, the list row every clickable row of a list is drawn with and its list included. `[ui.tsx:Button]` `[ui.tsx:StatusChip]` `[ui.tsx:Tabs]` `[ui.tsx:SegmentedControl]` `[ui.tsx:SegmentedMultiSelect]` `[ui.tsx:Modal]` `[ui.tsx:Drawer]` `[ui.tsx:ListRow]` `[ui.tsx:ListRows]`
+- Shared primitive controls and status presentation live one per module in `ui/`, the list row every clickable row of a list is drawn with and its list included; `ui/index.ts` re-exports them all, and `ui/README.md` names each one.
+  - `[ui/Button.tsx:Button]`
+  - `[ui/StatusChip.tsx:StatusChip]`
+  - `[ui/Tabs.tsx:Tabs]`
+  - `[ui/SegmentedControl.tsx:SegmentedControl]`
+  - `[ui/SegmentedMultiSelect.tsx:SegmentedMultiSelect]`
+  - `[ui/Modal.tsx:Modal]`
+  - `[ui/Drawer.tsx:Drawer]`
+  - `[ui/ListRow.tsx:ListRow]`
+  - `[ui/ListRows.tsx:ListRows]`
 - `RowListEditor` draws every editable list of rows of text fields, with a remove button on each row and an add button below: Settings' path variables and allowed folders, and the task form's repositories. `[RowListEditor.tsx:RowListEditor]`
 - Screen-shell, error-boundary, task-editor, execution-detail, harness, template, and notification-list components are exported by their named modules. `[Shell.tsx:Sidebar]` `[ErrorBoundary.tsx:RootBoundary]` `[TaskEditor.tsx:TaskEditor]` `[ExecutionDetail.tsx:ExecutionDetail]` `[Harnesses.tsx:HarnessInventory]` `[Templates.tsx:TemplatePicker]` `[NotificationList.tsx:NotificationList]`
 - The task form's parts live one per module in `taskform/`, with the row type, setter type, closed sets, and row cleaner they share in `formModel.ts`; `TaskForm.tsx` re-exports `OPTION_FIELDS`. `[taskform/ScheduleFields.tsx:ScheduleFields]` `[taskform/HarnessProfile.tsx:HarnessProfile]` `[taskform/AgentOrigin.tsx:AgentOrigin]` `[taskform/formModel.ts:OPTION_FIELDS]`
@@ -14,13 +23,13 @@ This package contains reusable presentation, editing, shell, timeline, and feedb
 
 ## Invariants
 
-- The shared `Tabs` component receives the selected value and reports changes via its callback. `[ui.tsx:Tabs]`
-- `Modal` and `Drawer` share one overlay, which closes on the close shortcut and on a click outside its card. `[ui.tsx:Modal]` `[ui.tsx:Drawer]`
+- The shared `Tabs` component receives the selected value and reports changes via its callback. `[ui/Tabs.tsx:Tabs]`
+- `Modal` and `Drawer` share one overlay, which closes on the close shortcut and on a click outside its card. `[ui/Modal.tsx:Modal]` `[ui/Drawer.tsx:Drawer]` `[ui/Overlay.tsx:Overlay]`
 - `RootBoundary` and `ScreenBoundary` establish the root and screen error boundaries used by the application. `[ErrorBoundary.tsx:RootBoundary]` `[ErrorBoundary.tsx:ScreenBoundary]`
 
 ## Side Effects
 
-- `CopyButton` writes text to the browser clipboard and the toast module schedules expiration of in-memory notices. `[ui.tsx:CopyButton]` `[toast.tsx:toast]`
+- `CopyButton` writes text to the browser clipboard and the toast module schedules expiration of in-memory notices. `[ui/CopyButton.tsx:CopyButton]` `[toast.tsx:toast]`
 - `RawOutput` schedules refresh polling while an execution remains active. `[execution/RawOutput.tsx:RawOutput]`
 
 ## Verification
