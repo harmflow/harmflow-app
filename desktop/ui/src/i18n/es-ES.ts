@@ -395,6 +395,12 @@ export const esES: Resources = {
       "Claude Code no limita los comandos de shell al espacio de trabajo; solo limita sus herramientas de edición de archivos",
     restriction_claude_shell_network:
       "Claude Code no bloquea el acceso a la red desde los comandos de shell; solo quita sus herramientas web",
+    restriction_claude_sandbox_write_rules:
+      "Claude Code suma las rutas de escritura, las reglas de edición, los directorios adicionales, los comandos fuera del sandbox y los hooks del workspace de su $t(claudeSettings.{{sources}}) a su sandbox, y permiten que los comandos de shell escriban fuera del workspace y de los directorios añadidos o no se pudieron leer; la configuración administrada no se comprueba",
+    restriction_claude_sandbox_network_rules:
+      "Claude Code suma los dominios web que permite su $t(claudeSettings.{{sources}}) a la red de su sandbox, y permiten que los comandos de shell lleguen a esos hosts o no se pudieron leer; la configuración administrada no se comprueba",
+    restriction_claude_sandbox_network:
+      "El sandbox de Claude Code está configurado para que los comandos de shell no lleguen a ningún host, lo que ninguna prueba ha mostrado aún; sus herramientas web se quitan",
     restriction_claude_allow_rules:
       "Claude Code suma las reglas de permiso de su $t(claudeSettings.{{sources}}) a la lista de herramientas de la tarea, y permiten más que la lista o no se pudieron leer; la configuración administrada no se comprueba",
     restriction_claude_edit_rules:

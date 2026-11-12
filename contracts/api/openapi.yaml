@@ -1047,6 +1047,9 @@ components:
         # Execution warnings
         - restriction_claude_shell_workspace
         - restriction_claude_shell_network
+        - restriction_claude_sandbox_write_rules
+        - restriction_claude_sandbox_network_rules
+        - restriction_claude_sandbox_network
         - restriction_claude_allow_rules
         - restriction_claude_edit_rules
         - restriction_claude_shell_reads

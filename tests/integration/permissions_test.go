@@ -8,7 +8,10 @@ import (
 	"io/fs"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -126,9 +129,11 @@ func TestReadOnlyNetworkDeniedRealClaudeCodeFetchesNothing(t *testing.T) {
 
 // A workspace_write task on the real Claude Code asks the session to write, with the Write tool, one file inside its
 // workspace and one outside it. The file inside is written, and no editing tool's call to the file outside succeeds.
-// Claude Code does not confine its shell to the workspace, which the execution's warning for restrictToWorkspace says:
-// a Bash call that wrote the file outside is logged as that shell, and only when no Bash call touched it must the file
-// outside be absent.
+// Below Claude Code 2.1.309, the adapter leaves the sandbox off, so Claude Code does not confine its shell to the
+// workspace, which the execution's warning for restrictToWorkspace says: a Bash call that wrote the file outside is
+// logged as that shell, and only when no Bash call touched it must the file outside be absent. From 2.1.309 the shell
+// is confined, which TestWorkspaceWriteRealClaudeCodeSandboxRefusesAShellWriteOutside proves, and the warning is not
+// expected.
 func TestWorkspaceWriteRealClaudeCodeEditsOnlyItsWorkspace(t *testing.T) {
 	h := claudeForPermissions(t)
 	w := newWriteTargets(t)
@@ -154,11 +159,132 @@ func TestWorkspaceWriteRealClaudeCodeEditsOnlyItsWorkspace(t *testing.T) {
 			"for restrictToWorkspace says", w.outside)
 	}
 	r.wantEnforced(t, "read_only")
+	if version, _ := r.harness["version"].(string); sandboxedClaude(version) {
+		t.Logf("Claude Code %s runs with its sandbox on: the shell's warning is not expected", version)
+		return
+	}
 	if !slices.ContainsFunc(r.unenforced, func(u unenforced) bool {
 		return u.subject == "restrictToWorkspace" && u.key == "restriction_claude_shell_workspace"
 	}) {
 		t.Errorf("the execution's unenforced restrictions are %v, want the one for restrictToWorkspace, about the shell",
 			r.unenforced)
+	}
+}
+
+// claudeSandboxMinimum is the oldest Claude Code on which the daemon turns its sandbox on.
+const claudeSandboxMinimum = "2.1.309"
+
+// sandboxedClaude reports whether a Claude Code version, dotted numbers, is at least claudeSandboxMinimum.
+func sandboxedClaude(version string) bool {
+	got, want := strings.Split(version, "."), strings.Split(claudeSandboxMinimum, ".")
+	for i := range want {
+		var g, w int
+		if i < len(got) {
+			_, _ = fmt.Sscanf(got[i], "%d", &g)
+		}
+		_, _ = fmt.Sscanf(want[i], "%d", &w)
+		if g != w {
+			return g > w
+		}
+	}
+	return version != ""
+}
+
+// claudeForTheSandbox is claudeForPermissions on a Mac, where Claude Code's sandbox was checked, with a Claude Code of
+// at least claudeSandboxMinimum; an older one fails the test, naming what it needs.
+func claudeForTheSandbox(t *testing.T) realHarness {
+	t.Helper()
+	h := claudeForPermissions(t)
+	if runtime.GOOS != "darwin" {
+		t.Skipf("Claude Code's sandbox was checked on macOS only, not on %s", runtime.GOOS)
+	}
+	out, err := exec.Command(h.path, "--version").Output()
+	if err != nil {
+		t.Fatalf("%s --version: %v", h.path, err)
+	}
+	version := strings.Fields(string(out))
+	if len(version) == 0 || !sandboxedClaude(version[0]) {
+		t.Fatalf("Claude Code %q is older than %s, the sandbox's minimum: the test needs %s or later",
+			strings.TrimSpace(string(out)), claudeSandboxMinimum, claudeSandboxMinimum)
+	}
+	return h
+}
+
+// A workspace_write task on the real Claude Code, at 2.1.309 or later, asks the session to write, with a shell command,
+// one file inside its workspace and one outside it. Claude Code's sandbox, which the adapter turns on, lets the first
+// through and refuses the second: the file inside is written, the file outside is absent, and the execution carries no
+// warning that the restriction to the workspace is not enforced. The log gives Claude Code's version.
+func TestWorkspaceWriteRealClaudeCodeSandboxRefusesAShellWriteOutside(t *testing.T) {
+	h := claudeForTheSandbox(t)
+	w := newWriteTargets(t)
+	r := runWithPermissions(t, h, map[string]any{"profile": "workspace_write", "restrictToWorkspace": true}, w,
+		w.prompt("a shell command run with the Bash tool, such as printf"))
+
+	t.Logf("Claude Code %v", r.harness["version"])
+	r.wantAttemptAtOutside(t, w)
+	w.wantWritten(t)
+	wantAbsent(t, w.outside)
+	r.wantEnforced(t, "restrictToWorkspace")
+}
+
+// privateRepoEnv names the private repository, <owner>/<name>, that TestRealClaudeCodeSandboxReadsAPrivateRepository
+// reads.
+const privateRepoEnv = "HARMFLOW_TEST_PRIVATE_REPO"
+
+// A workspace_write task on the real Claude Code, at 2.1.309 or later, with the sandbox on, asks the session to read a
+// private repository with gh and with git over HTTPS. The daemon passes the signed-in gh's token, masked, and the
+// sandbox's proxy puts it in place on GitHub's hosts: both commands succeed, gh naming the repository and git listing
+// its HEAD. The token is in no output of the execution, no event, and no file of the daemon's home; the test counts
+// it there and never prints it. It needs the variables of the real Claude Code and the real gh, and privateRepoEnv.
+func TestRealClaudeCodeSandboxReadsAPrivateRepository(t *testing.T) {
+	h := claudeForTheSandbox(t)
+	gh := realGh(t)
+	repo := os.Getenv(privateRepoEnv)
+	if !regexp.MustCompile(`^[\w.-]+/[\w.-]+$`).MatchString(repo) {
+		t.Skipf("reads a private repository: set %s=<owner>/<name> to one the signed-in gh can read", privateRepoEnv)
+	}
+	out, err := exec.Command(gh, "auth", "token").Output()
+	token := strings.TrimSpace(string(out))
+	if err != nil || token == "" {
+		t.Fatalf("gh auth token failed (%v): the test needs a signed-in gh", err)
+	}
+	w := newWriteTargets(t)
+	prompt := "Run these two shell commands with the Bash tool, one at a time, and nothing else:\n\n" +
+		"1. gh api repos/" + repo + " --jq .full_name\n" +
+		"2. git ls-remote https://github.com/" + repo + ".git HEAD\n\n" +
+		"Then report, for each, its exit status and its output."
+	r := runWithPermissions(t, h, map[string]any{"profile": "workspace_write", "restrictToWorkspace": true}, w, prompt)
+
+	t.Logf("Claude Code %v", r.harness["version"])
+	var api, remote bool
+	for _, c := range r.calls {
+		switch {
+		case c.tool != "Bash" || c.status != "succeeded":
+		case strings.Contains(c.command, "gh api") && strings.Contains(strings.ToLower(c.output), strings.ToLower(repo)):
+			api = true
+		case strings.Contains(c.command, "ls-remote") && regexp.MustCompile(`\b[0-9a-f]{40}\s+HEAD\b`).MatchString(c.output):
+			remote = true
+		}
+	}
+	if !api {
+		t.Errorf("no gh api call read %s inside the sandbox", repo)
+	}
+	if !remote {
+		t.Errorf("no git ls-remote call listed the HEAD of %s inside the sandbox", repo)
+	}
+	found := strings.Count(r.output, token) + strings.Count(r.events, token)
+	if err := filepath.WalkDir(r.home, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		found += strings.Count(string(data), token)
+		return err
+	}); err != nil {
+		t.Errorf("reading the daemon's home folder: %v", err)
+	}
+	if found > 0 {
+		t.Errorf("the GitHub token appears %d times in the execution's output, events, or files; want none", found)
 	}
 }
 
@@ -417,13 +543,16 @@ func wantAbsent(t *testing.T, path string) {
 }
 
 // permissionRun is what an execution of a task asking for the two writes left: its tool calls, the restrictions its
-// warnings say are not enforced, the harness's notices, its raw output, and the harness as the daemon checked it.
+// warnings say are not enforced, the harness's notices, its raw output, its events as JSON, the harness as the daemon
+// checked it, and the daemon's home folder, where it keeps its records and logs.
 type permissionRun struct {
 	calls      []toolCall
 	unenforced []unenforced
 	notices    []string
 	output     string
+	events     string
 	harness    map[string]any
+	home       string
 }
 
 // runWithProfile runs a task with the profile on the real harness h, its workspace w's, and waits for its end.
@@ -436,7 +565,8 @@ func runWithProfile(t *testing.T, h realHarness, profile string, w writeTargets,
 // The daemon's allowed folders are the workspace alone, so the outside folder is no directory the session is given.
 func runWithPermissions(t *testing.T, h realHarness, permissions map[string]any, w writeTargets, prompt string) permissionRun {
 	t.Helper()
-	d := startDaemon(t, t.TempDir(), h.env...)
+	home := t.TempDir()
+	d := startDaemon(t, home, h.env...)
 	harness := d.call("PUT", "/harnesses/"+h.id, map[string]any{"path": h.path}, 200)
 	d.call("PATCH", "/settings", map[string]any{"allowedFolders": []any{w.work}}, 200)
 	profile, _ := permissions["profile"].(string)
@@ -460,7 +590,10 @@ func runWithPermissions(t *testing.T, h realHarness, permissions map[string]any,
 	}
 
 	events := d.events(run)
-	r := permissionRun{calls: toolCalls(events), harness: harness}
+	r := permissionRun{calls: toolCalls(events), harness: harness, home: home}
+	if raw, err := json.Marshal(events); err == nil {
+		r.events = string(raw)
+	}
 	// A file change Codex made is no tool call: the daemon records it as a change to the workspace alone.
 	for _, e := range events {
 		switch e["type"] {

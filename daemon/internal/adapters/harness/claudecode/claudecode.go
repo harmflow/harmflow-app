@@ -5,6 +5,7 @@ package claudecode
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,6 +38,9 @@ const (
 	// TestedMinor is the newest release line HarmFlow was tested with: every patch in it runs as supported, and a newer
 	// line runs with a warning.
 	TestedMinor = "2.1"
+	// SandboxMinVersion is the oldest release on which the adapter turns on Claude Code's sandbox: before it, a
+	// repository's settings and a shell's startup files could still reach outside the sandbox.
+	SandboxMinVersion = "2.1.309"
 )
 
 // Features the adapter needs from the CLI; a version without them is not ready.
@@ -56,6 +60,9 @@ type Adapter struct {
 	// SkillListTimeout bounds the session started to read the skill list, up to its init line; zero is
 	// defaultSkillListTimeout.
 	SkillListTimeout time.Duration
+	// GitHubToken gives the user's GitHub token, read outside the sandbox when a sandboxed session is prepared, empty
+	// for none; nil gives none. The daemon sets GHAuthToken.
+	GitHubToken func() string
 
 	mu           sync.Mutex
 	skills       map[string][]ports.ResolvedItem // the installed skills by CLI path, kept until ReloadUserItems
@@ -412,6 +419,7 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 	}
 
 	perm := req.Permissions
+	env := req.Env
 	restrictions := []ports.Restriction{}
 	network := perm.Network != domain.NetworkDeny
 	dirs := append([]string{}, req.AdditionalDirs...)
@@ -484,7 +492,20 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 		}
 		args = append(args, "--permission-mode", "acceptEdits", "--allowedTools", strings.Join(tools, ","))
 		restrictions = append(restrictions, a.editRestriction(req))
-		restrictions = append(restrictions, shellRestrictions(true, network, *perm.RestrictToWorkspace)...)
+		if !*perm.RestrictToWorkspace || !sandboxed(info) {
+			restrictions = append(restrictions, shellRestrictions(true, network, *perm.RestrictToWorkspace)...)
+			break
+		}
+		// Claude Code's sandbox confines the shell. The user's settings sources stay loaded, so the session keeps the
+		// agents, skills, and MCP servers a task cites; what they add to the sandbox is reported. A validation reads no
+		// token, since no session starts.
+		token := ""
+		if !req.PolicyCheck && a.GitHubToken != nil {
+			token = a.GitHubToken()
+		}
+		args = append(args, "--settings", sandboxSettings(network, token != ""))
+		env = withGitHubToken(env, token)
+		restrictions = append(restrictions, a.sandboxRestrictions(req, network)...)
 	}
 	if req.ExecutionDir != "" {
 		dirs = append(dirs, req.ExecutionDir)
@@ -494,7 +515,7 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 			args = append(args, "--add-dir", d)
 		}
 	}
-	inv := ports.Invocation{Path: info.Path, Args: args, Env: a.withToken(req.Env), Dir: req.WorkDir, Stdin: req.Prompt,
+	inv := ports.Invocation{Path: info.Path, Args: args, Env: a.withToken(env), Dir: req.WorkDir, Stdin: req.Prompt,
 		Restrictions: restrictions}
 	return inv, &parser{tools: map[string]toolUse{}}, nil
 }
@@ -556,13 +577,32 @@ func (a *Adapter) allowlistRestriction(req ports.RunRequest, covered []string) p
 // directories are not read: Claude Code refuses edits in the folders they name, as a real run showed. The user's and
 // the local settings' ones still count until a real run shows the same of them.
 func (a *Adapter) editRestriction(req ports.RunRequest) ports.Restriction {
+	widening := a.wideningSources(req, a.editsOutside(workspaceRoots(req)))
+	if len(widening) == 0 {
+		return ports.Restriction{Name: "edit_directories", Enforced: true,
+			Text: domain.Text{Message: "file edits are limited to the workspace and the added directories"}}
+	}
+	return ports.Restriction{Name: "edit_directories", Enforced: false,
+		Text: domain.T("restriction_claude_edit_rules",
+			"Claude Code adds the allow rules and additional directories of its {{where}} to the task's permissions, and they allow file edits outside the workspace and the added directories or could not be read; managed settings are not checked",
+			"where", settingsPhrase(widening), "sources", strings.Join(widening, "_"))}
+}
+
+// workspaceRoots are the execution's folder, the working directory, and the added directories that resolve, resolved.
+func workspaceRoots(req ports.RunRequest) []string {
 	var roots []string
 	for _, d := range append([]string{req.ExecutionDir, req.WorkDir}, req.AdditionalDirs...) {
 		if real, err := domain.ResolvePath(d); err == nil {
 			roots = append(roots, real)
 		}
 	}
-	widening := a.wideningSources(req, func(source string, s claudeSettings) bool {
+	return roots
+}
+
+// editsOutside reports whether a settings source lets file edits reach outside roots: an additional directory outside
+// them, outside the project settings, or an editing allow rule that may reach outside them.
+func (a *Adapter) editsOutside(roots []string) func(source string, s claudeSettings) bool {
+	return func(source string, s claudeSettings) bool {
 		if source != "project" {
 			dirs, ok := s.additionalDirs()
 			if !ok || slices.ContainsFunc(dirs, func(d string) bool { return !dirInside(d, roots) }) {
@@ -572,15 +612,140 @@ func (a *Adapter) editRestriction(req ports.RunRequest) ports.Restriction {
 		return slices.ContainsFunc(s.Permissions.Allow, func(r string) bool {
 			return containsStr(editTools, toolName(r)) && !a.editRuleInside(r, source != "user", roots)
 		})
-	})
-	if len(widening) == 0 {
-		return ports.Restriction{Name: "edit_directories", Enforced: true,
-			Text: domain.Text{Message: "file edits are limited to the workspace and the added directories"}}
 	}
-	return ports.Restriction{Name: "edit_directories", Enforced: false,
-		Text: domain.T("restriction_claude_edit_rules",
-			"Claude Code adds the allow rules and additional directories of its {{where}} to the task's permissions, and they allow file edits outside the workspace and the added directories or could not be read; managed settings are not checked",
-			"where", settingsPhrase(widening), "sources", strings.Join(widening, "_"))}
+}
+
+// sandboxed reports whether the adapter turns on Claude Code's sandbox for the CLI info describes: one whose version
+// is known and at least SandboxMinVersion.
+func sandboxed(info ports.HarnessInfo) bool {
+	return info.Version != "" && compareVersions(info.Version, SandboxMinVersion) >= 0
+}
+
+// Hosts of GitHub where the sandbox's proxy puts the real token in place of its placeholder.
+const (
+	githubAPIHost = "api.github.com"
+	githubGitHost = "github.com"
+)
+
+// sandboxSettings are the --settings of a sandboxed session: the sandbox on, with no way for the model to run a
+// command outside it and no start without it, and its network open to every host, or to none when the task denies the
+// network. With a GitHub token, the variables withGitHubToken sets are masked: shell commands see only a placeholder,
+// which the sandbox's proxy replaces with the token on GitHub's hosts alone, and a pattern that finds nothing to mask
+// denies the variable rather than passing it through. GITHUB_TOKEN, which the daemon does not set, is hidden from
+// shell commands. The settings hold no token.
+func sandboxSettings(network, token bool) string {
+	net := map[string]any{"allowedDomains": []string{"*"}}
+	if !network {
+		net = map[string]any{"allowedDomains": []string{}, "strictAllowlist": true}
+	}
+	envVars := []map[string]any{{"name": "GITHUB_TOKEN", "action": "deny"}}
+	if token {
+		net["tlsTerminate"] = map[string]any{}
+		envVars = append(envVars,
+			map[string]any{"name": "GH_TOKEN", "action": "mask", "injectHosts": []string{githubAPIHost}},
+			map[string]any{"name": "GIT_CONFIG_VALUE_0", "action": "mask", "extract": `Basic (\S+)`,
+				"injectHosts": []string{githubGitHost}, "onExtractNoMatch": "deny"})
+	}
+	settings := map[string]any{"sandbox": map[string]any{
+		"enabled": true, "autoAllowBashIfSandboxed": true, "allowUnsandboxedCommands": false, "failIfUnavailable": true,
+		"network": net, "credentials": map[string]any{"envVars": envVars},
+	}}
+	js, _ := json.Marshal(settings) // maps of strings, booleans, and string slices always marshal
+	return string(js)
+}
+
+// withGitHubToken is env with the GitHub token for gh, in GH_TOKEN, and for git over HTTPS, as a Basic authorization
+// header on github.com that replaces the user's credential helper and git configuration, in a copy; env itself when
+// token is empty. The header is the first GIT_CONFIG entry, the one sandboxSettings masks. A nil env is the daemon's
+// own, which the token is added to.
+func withGitHubToken(env []string, token string) []string {
+	if token == "" {
+		return env
+	}
+	if env == nil {
+		env = os.Environ()
+	}
+	basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
+	return append(slices.Clone(env),
+		"GH_TOKEN="+token,
+		"GIT_CONFIG_COUNT=2",
+		"GIT_CONFIG_KEY_0=http.https://"+githubGitHost+"/.extraHeader",
+		"GIT_CONFIG_VALUE_0=Authorization: Basic "+basic,
+		"GIT_CONFIG_KEY_1=credential.helper",
+		"GIT_CONFIG_VALUE_1=",
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_TERMINAL_PROMPT=0")
+}
+
+// ghTokenTimeout bounds `gh auth token`.
+const ghTokenTimeout = 10 * time.Second
+
+// GHAuthToken is a GitHubToken source: the token of the user's signed-in gh, as `gh auth token` prints it, with gh
+// found on pathEnv and run with env. It is empty when gh is not there, is signed out, or does not answer in time.
+func GHAuthToken(pathEnv string, env []string) func() string {
+	return func() string {
+		paths := procutil.LookPath("gh", pathEnv, nil)
+		if len(paths) == 0 {
+			return ""
+		}
+		out, _, err := procutil.Output(context.Background(), ghTokenTimeout, env, paths[0], "auth", "token")
+		if fields := strings.Fields(out); err == nil && len(fields) == 1 {
+			return fields[0]
+		}
+		return ""
+	}
+}
+
+// sandboxRestrictions say what Claude Code's sandbox confines of a workspace_write session restricted to its
+// workspace. The shell writes where the sandbox lets it: the working directory, the added directories, and what every
+// settings source it loads adds — the editing allow rules and additional directories it adds for file edits, and its
+// own write paths — while a source's unsandboxed commands, and the hooks of the workspace's own settings, run outside
+// it. So the shell's writes are confined when no source adds any of those outside the workspace. The sandbox's network
+// allowlist takes the domains of every source's WebFetch rules and its own; no test shows yet that it holds, so a
+// denied network is reported as not enforced, naming the sources that widen it.
+func (a *Adapter) sandboxRestrictions(req ports.RunRequest, network bool) []ports.Restriction {
+	roots := workspaceRoots(req)
+	edits := a.editsOutside(roots)
+	widening := a.wideningSources(req, func(source string, s claudeSettings) bool {
+		return edits(source, s) || len(s.Sandbox.ExcludedCommands) > 0 ||
+			slices.ContainsFunc(s.Sandbox.Filesystem.AllowWrite, func(p string) bool { return !a.sandboxPathInside(p, roots) }) ||
+			(source != "user" && s.hasHooks())
+	})
+	out := []ports.Restriction{{Name: "restrictToWorkspace", Enforced: true,
+		Text: domain.Text{Message: "Claude Code's sandbox confines shell commands' writes to the workspace and the added directories"}}}
+	if len(widening) > 0 {
+		out[0] = ports.Restriction{Name: "restrictToWorkspace", Enforced: false,
+			Text: domain.T("restriction_claude_sandbox_write_rules",
+				"Claude Code adds the write paths, edit rules, additional directories, unsandboxed commands, and workspace hooks of its {{where}} to its sandbox, and they let shell commands write outside the workspace and the added directories or could not be read; managed settings are not checked",
+				"where", settingsPhrase(widening), "sources", strings.Join(widening, "_"))}
+	}
+	if network {
+		return out
+	}
+	widening = a.wideningSources(req, func(_ string, s claudeSettings) bool {
+		return len(s.Sandbox.Network.AllowedDomains) > 0 || slices.ContainsFunc(s.Permissions.Allow, func(r string) bool {
+			return strings.HasPrefix(r, "WebFetch(domain:")
+		})
+	})
+	if len(widening) > 0 {
+		return append(out, ports.Restriction{Name: "network", Enforced: false,
+			Text: domain.T("restriction_claude_sandbox_network_rules",
+				"Claude Code adds the web domains its {{where}} allow to its sandbox's network, and they let shell commands reach those hosts or could not be read; managed settings are not checked",
+				"where", settingsPhrase(widening), "sources", strings.Join(widening, "_"))})
+	}
+	return append(out, ports.Restriction{Name: "network", Enforced: false,
+		Text: domain.T("restriction_claude_sandbox_network",
+			"Claude Code's sandbox is set to let shell commands reach no host, which no test has shown yet; its web tools are removed")})
+}
+
+// sandboxPathInside reports whether a write path of a sandbox's settings lies within one of roots: an absolute or ~/
+// path that resolves inside them. Any other path is in doubt, so it reaches outside.
+func (a *Adapter) sandboxPathInside(path string, roots []string) bool {
+	if rest, ok := strings.CutPrefix(path, "~/"); ok {
+		path = filepath.Join(a.Home, rest)
+	}
+	return filepath.IsAbs(path) && dirInside(path, roots)
 }
 
 // readingTools are the built-in tools that read files, which Claude Code's Read rules govern.
@@ -733,13 +898,33 @@ func within(path string, dirs []string) bool {
 }
 
 // claudeSettings are what HarmFlow checks in a Claude Code settings file: its permissions.allow rules, and its
-// permissions.additionalDirectories, which Claude Code counts as working directories. The directories are decoded
-// apart, by additionalDirs, so that a value that is not a list leaves the allow rules readable.
+// permissions.additionalDirectories, which Claude Code counts as working directories; what it adds to the sandbox; and
+// its hooks. The directories and the hooks are decoded apart, by additionalDirs and hasHooks, so that a value of
+// another shape leaves the allow rules readable.
 type claudeSettings struct {
 	Permissions struct {
 		Allow                 []string        `json:"allow"`
 		AdditionalDirectories json.RawMessage `json:"additionalDirectories"`
 	} `json:"permissions"`
+	Sandbox struct {
+		ExcludedCommands []string `json:"excludedCommands"`
+		Filesystem       struct {
+			AllowWrite []string `json:"allowWrite"`
+		} `json:"filesystem"`
+		Network struct {
+			AllowedDomains []string `json:"allowedDomains"`
+		} `json:"network"`
+	} `json:"sandbox"`
+	Hooks json.RawMessage `json:"hooks"`
+}
+
+// hasHooks reports whether the settings may define a hook: a hooks value other than an empty object or null.
+func (s claudeSettings) hasHooks() bool {
+	var hooks map[string]json.RawMessage
+	if s.Hooks == nil {
+		return false
+	}
+	return json.Unmarshal(s.Hooks, &hooks) != nil || len(hooks) > 0
 }
 
 // additionalDirs are the settings' additional directories, none when the key is absent. ok is false when the value is

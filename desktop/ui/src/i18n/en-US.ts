@@ -387,6 +387,12 @@ export const enUS = {
       "Claude Code does not confine shell commands to the workspace; only its file-edit tools are confined",
     restriction_claude_shell_network:
       "Claude Code does not block network access from shell commands; only its web tools are removed",
+    restriction_claude_sandbox_write_rules:
+      "Claude Code adds the write paths, edit rules, additional directories, unsandboxed commands, and workspace hooks of its $t(claudeSettings.{{sources}}) to its sandbox, and they let shell commands write outside the workspace and the added directories or could not be read; managed settings are not checked",
+    restriction_claude_sandbox_network_rules:
+      "Claude Code adds the web domains its $t(claudeSettings.{{sources}}) allow to its sandbox's network, and they let shell commands reach those hosts or could not be read; managed settings are not checked",
+    restriction_claude_sandbox_network:
+      "Claude Code's sandbox is set to let shell commands reach no host, which no test has shown yet; its web tools are removed",
     restriction_claude_allow_rules:
       "Claude Code adds the allow rules of its $t(claudeSettings.{{sources}}) to the task's tool list, and they allow more than the list or could not be read; managed settings are not checked",
     restriction_claude_edit_rules:

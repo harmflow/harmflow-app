@@ -29,6 +29,7 @@ import (
 
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/eventlog"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/fsstore"
+	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/claudecode"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/codex"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/schema"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/workspace"
@@ -2537,6 +2538,87 @@ func TestFailoverKeepsThePermissions(t *testing.T) {
 		if !strings.Contains(args, want) {
 			t.Errorf("codex Prepare(second attempt) args %q, want %q", inv.Args, want)
 		}
+	}
+}
+
+// harmflow-app#1025: after a quota failover from Codex, Claude Code runs with the permissions, work directory, and
+// additional directories of the first attempt, and its adapter prepares it with its sandbox on, over the same
+// directories, with restrictToWorkspace enforced: the shell stays confined as Codex confined it.
+func TestFailoverToClaudeCodeKeepsTheRestriction(t *testing.T) {
+	e := newEnv(t)
+	work := filepath.Join(e.app.Paths().UserHome, "worktree")
+	repo := mkdir(t, filepath.Join(e.app.Paths().UserHome, "repo"))
+	doc := strings.Replace(strings.Replace(taskYAML("confined", "    fallback:\n      candidates:\n"+
+		"        - provider: claude-code\n  workspace:\n    path: "+work+"\n"+
+		"  permissions:\n    profile: workspace_write\n    restrictToWorkspace: true\n"+
+		fmt.Sprintf("  github:\n    repositories:\n      - name: o/r\n        localPath: %q\n", repo)),
+		"type: general", "type: github", 1), "provider: claude-code", "provider: codex", 1)
+	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: doc}); err != nil {
+		t.Fatalf("CreateTask(confined): %v", err)
+	}
+	var q requests
+	e.codex.setScript(func(req ports.RunRequest) string { q.add(req); return "echo 'END quota'" })
+	e.claude.setScript(func(req ports.RunRequest) string { q.add(req); return "echo 'END ok'" })
+	r, _ := e.app.RunTask("confined")
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	sent := q.all()
+	if len(sent) != 2 || len(x.Attempts) != 2 || x.Attempts[0].Harness != domain.HarnessCodex ||
+		x.Attempts[1].Harness != domain.HarnessClaudeCode {
+		t.Fatalf("%d requests, attempts %+v; want 2, the first on Codex and the second on Claude Code", len(sent), x.Attempts)
+	}
+	first, second := sent[0], sent[1]
+	if p := first.Permissions; p.Profile != domain.ProfileWorkspaceWrite || p.RestrictToWorkspace == nil ||
+		!*p.RestrictToWorkspace {
+		t.Errorf("the first attempt's permissions %+v, want workspace_write restricted to the workspace", p)
+	}
+	if !reflect.DeepEqual(second.Permissions, first.Permissions) {
+		t.Errorf("the second attempt's permissions %+v, want the first's %+v", second.Permissions, first.Permissions)
+	}
+	resolved, _ := domain.ResolvePath(work)
+	if first.WorkDir != resolved || second.WorkDir != first.WorkDir {
+		t.Errorf("work directories %q and %q, want %q for both", first.WorkDir, second.WorkDir, resolved)
+	}
+	resolvedRepo, _ := domain.ResolvePath(repo)
+	if want := []string{resolvedRepo}; !slices.Equal(first.AdditionalDirs, want) ||
+		!slices.Equal(second.AdditionalDirs, first.AdditionalDirs) {
+		t.Errorf("additional directories %q and %q, want %q for both", first.AdditionalDirs, second.AdditionalDirs, want)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir()) // no settings of the user's own widen the sandbox
+	info := ports.HarnessInfo{Path: "claude", Version: claudecode.SandboxMinVersion, Features: map[string]bool{}}
+	second.Env = []string{"PATH=/bin"}
+	inv, _, err := (&claudecode.Adapter{Home: t.TempDir()}).Prepare(info, second)
+	if err != nil {
+		t.Fatalf("claudecode Prepare(second attempt): %v", err)
+	}
+	settings, ok := "", false
+	for i, arg := range inv.Args {
+		if arg == "--settings" && i+1 < len(inv.Args) {
+			settings, ok = inv.Args[i+1], true
+		}
+	}
+	var parsed struct {
+		Sandbox struct {
+			Enabled bool `json:"enabled"`
+		} `json:"sandbox"`
+	}
+	if !ok || json.Unmarshal([]byte(settings), &parsed) != nil || !parsed.Sandbox.Enabled {
+		t.Errorf("claudecode Prepare(second attempt) args %q, want --settings with the sandbox enabled", inv.Args)
+	}
+	if inv.Dir != second.WorkDir || !strings.Contains(strings.Join(inv.Args, " "), "--add-dir "+resolvedRepo) {
+		t.Errorf("claudecode Prepare(second attempt) runs in %q with args %q, want %q and --add-dir %s", inv.Dir,
+			inv.Args, second.WorkDir, resolvedRepo)
+	}
+	found := false
+	for _, r := range inv.Restrictions {
+		if r.Name == "restrictToWorkspace" {
+			found = true
+			if !r.Enforced {
+				t.Errorf("claudecode Prepare(second attempt) restrictToWorkspace = %+v, want enforced", r)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("claudecode Prepare(second attempt) restrictions %+v, want restrictToWorkspace", inv.Restrictions)
 	}
 }
 

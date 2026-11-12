@@ -225,7 +225,8 @@ func Run(cfg Config, registrations ...Registration) error {
 		Paths: paths, Version: cfg.Version, Commit: cfg.Commit, BuiltAt: cfg.BuiltAt, Wake: wake.NewMonitor(),
 		Tasks: tasks, State: state, Executions: execs, Events: events, Validator: validator,
 		Harnesses: []ports.HarnessAdapter{
-			&claudecode.Adapter{Home: userHome, PathEnv: pathEnv, Env: harnessEnv},
+			&claudecode.Adapter{Home: userHome, PathEnv: pathEnv, Env: harnessEnv,
+				GitHubToken: claudecode.GHAuthToken(pathEnv, harnessEnv)},
 			&codex.Adapter{Home: userHome, PathEnv: pathEnv, Env: harnessEnv, ClientVersion: cfg.Version},
 		},
 		Service:    service,

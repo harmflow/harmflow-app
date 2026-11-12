@@ -3,9 +3,13 @@ package claudecode
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -382,6 +386,330 @@ func TestPrepareTranslatesPermissions(t *testing.T) {
 	}
 	if !unenforced["restrictToWorkspace"] || !unenforced["network"] {
 		t.Errorf("the shell's freedom must be warned: %v", inv.Restrictions)
+	}
+}
+
+// sandboxOf decodes the sandbox settings Prepare passes in --settings; ok is false when it passes none.
+func sandboxOf(t *testing.T, args []string) (sandbox map[string]any, ok bool) {
+	t.Helper()
+	raw, ok := flagValue(args, "--settings")
+	if !ok {
+		return nil, false
+	}
+	var settings struct {
+		Sandbox map[string]any `json:"sandbox"`
+	}
+	if err := json.Unmarshal([]byte(raw), &settings); err != nil {
+		t.Fatalf("--settings %q: %v", raw, err)
+	}
+	return settings.Sandbox, true
+}
+
+// sandboxedInfo is a Claude Code at the sandbox's minimum version.
+var sandboxedInfo = ports.HarnessInfo{Path: "/bin/claude", Version: SandboxMinVersion, Features: map[string]bool{}}
+
+// harmflow-app#1025: from Claude Code 2.1.309, a workspace_write session restricted to its workspace runs with Claude
+// Code's sandbox on, through --settings, so the shell writes only in the working directory, the added directories, and
+// the execution's folder, and restrictToWorkspace is reported as enforced. The model cannot ask to leave the sandbox,
+// and Claude Code does not start without it. The user's settings sources stay loaded: no --setting-sources. A denied
+// network leaves the sandbox's network open to no host, still reported as not enforced, which no test shows yet.
+func TestPrepareTurnsOnTheSandboxUnderWorkspaceWrite(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, c := range []struct {
+		name          string
+		networkDenied bool
+	}{{"network allowed", false}, {"network denied", true}} {
+		t.Run(c.name, func(t *testing.T) {
+			a := &Adapter{Home: t.TempDir()}
+			perm := *domain.TaskDocument{}.Effective().Spec.Permissions
+			restrict := true
+			perm.RestrictToWorkspace = &restrict
+			if c.networkDenied {
+				perm.Network = domain.NetworkDeny
+			}
+			work, repo, exec := t.TempDir(), t.TempDir(), t.TempDir()
+			inv, _, err := a.Prepare(sandboxedInfo, ports.RunRequest{WorkDir: work, AdditionalDirs: []string{repo},
+				Permissions: perm, ExecutionDir: exec, Env: []string{"PATH=/bin"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := strings.Join(inv.Args, " ")
+			for _, want := range []string{"--permission-mode acceptEdits", "--add-dir " + repo, "--add-dir " + exec} {
+				if !strings.Contains(args, want) {
+					t.Errorf("Prepare args = %s, want %q", args, want)
+				}
+			}
+			if slices.Contains(inv.Args, "--setting-sources") {
+				t.Errorf("Prepare args = %s, want the user's settings sources kept", args)
+			}
+			sandbox, ok := sandboxOf(t, inv.Args)
+			if !ok {
+				t.Fatalf("Prepare args = %s, want --settings with the sandbox", args)
+			}
+			for key, want := range map[string]any{"enabled": true, "autoAllowBashIfSandboxed": true,
+				"allowUnsandboxedCommands": false, "failIfUnavailable": true} {
+				if sandbox[key] != want {
+					t.Errorf("sandbox.%s = %v, want %v", key, sandbox[key], want)
+				}
+			}
+			if _, ok := sandbox["filesystem"]; ok {
+				t.Errorf("sandbox.filesystem = %v, want no write path beyond the working and added directories",
+					sandbox["filesystem"])
+			}
+			network, _ := sandbox["network"].(map[string]any)
+			domains, _ := network["allowedDomains"].([]any)
+			if c.networkDenied {
+				if network["strictAllowlist"] != true || len(domains) != 0 {
+					t.Errorf("sandbox.network = %v, want a strict allowlist of no host", network)
+				}
+			} else if network["strictAllowlist"] != nil || !reflect.DeepEqual(domains, []any{"*"}) {
+				t.Errorf("sandbox.network = %v, want every host allowed", network)
+			}
+			if r, ok := restriction(inv.Restrictions, "restrictToWorkspace"); !ok || !r.Enforced {
+				t.Errorf("restrictToWorkspace = %+v (found %v), want enforced", r, ok)
+			}
+			if r, _ := restriction(inv.Restrictions, "edit_directories"); !r.Enforced {
+				t.Errorf("edit_directories = %+v, want enforced", r)
+			}
+			r, ok := restriction(inv.Restrictions, "network")
+			switch {
+			case !c.networkDenied && ok:
+				t.Errorf("network = %+v, want no restriction with the network allowed", r)
+			case c.networkDenied && (!ok || r.Enforced || r.Text.Key != "restriction_claude_sandbox_network"):
+				t.Errorf("network = %+v (found %v), want not enforced, restriction_claude_sandbox_network", r, ok)
+			}
+		})
+	}
+}
+
+// harmflow-app#1025: a settings source Claude Code loads can widen its sandbox, and the widened restriction is reported
+// as not enforced, naming the source, as for the tool list and the edit directories. The shell's writes widen with an
+// editing allow rule or an additional directory that reaches outside the workspace, a sandbox write path outside it, an
+// unsandboxed command, or a hook of the workspace's own settings, which runs outside the sandbox; the network, with a
+// WebFetch domain rule or a sandbox domain. A source that cannot be read widens both. Anything else leaves them as they
+// are.
+func TestPrepareReportsSettingsThatWidenTheSandbox(t *testing.T) {
+	const hook = `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"true"}]}]}}`
+	cases := []struct {
+		name                 string
+		user, project, local string // a settings file's content; "" for no file
+		writes, network      string // the sources param of a restriction not enforced; "" for none
+	}{
+		{name: "no settings files"},
+		{name: "a WebFetch domain rule", user: `{"permissions":{"allow":["WebFetch(domain:example.com)"]}}`,
+			network: "user"},
+		{name: "a sandbox domain", local: `{"sandbox":{"network":{"allowedDomains":["example.com"]}}}`,
+			network: "local"},
+		{name: "an edit rule outside", user: `{"permissions":{"allow":["Edit(//etc/**)"]}}`, writes: "user"},
+		{name: "an additional directory outside", local: `{"permissions":{"additionalDirectories":["/etc"]}}`,
+			writes: "local"},
+		{name: "a sandbox write path outside", user: `{"sandbox":{"filesystem":{"allowWrite":["/etc"]}}}`,
+			writes: "user"},
+		{name: "a sandbox write path relative", user: `{"sandbox":{"filesystem":{"allowWrite":["out"]}}}`,
+			writes: "user"},
+		{name: "an unsandboxed command", project: `{"sandbox":{"excludedCommands":["gh *"]}}`, writes: "project"},
+		{name: "a hook of the workspace", project: hook, writes: "project"},
+		{name: "a hook of the user", user: hook},
+		{name: "no hooks", local: `{"hooks":{}}`},
+		{name: "settings that are not JSON", user: `{"sandbox":`, writes: "user", network: "user"},
+		{name: "a sandbox of another shape", local: `{"sandbox":{"excludedCommands":"gh *"}}`, writes: "local",
+			network: "local"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			config, work := t.TempDir(), t.TempDir()
+			t.Setenv("CLAUDE_CONFIG_DIR", config)
+			writeSettings(t, filepath.Join(config, "settings.json"), c.user)
+			writeSettings(t, filepath.Join(work, ".claude", "settings.json"), c.project)
+			writeSettings(t, filepath.Join(work, ".claude", "settings.local.json"), c.local)
+			perm := *domain.TaskDocument{}.Effective().Spec.Permissions
+			restrict := true
+			perm.RestrictToWorkspace, perm.Network = &restrict, domain.NetworkDeny
+			a := &Adapter{Home: t.TempDir()}
+			inv, _, err := a.Prepare(sandboxedInfo, ports.RunRequest{WorkDir: work, Permissions: perm,
+				ExecutionDir: t.TempDir(), Env: []string{"PATH=/bin"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, w := range []struct{ name, key, want string }{
+				{"restrictToWorkspace", "restriction_claude_sandbox_write_rules", c.writes},
+				{"network", "restriction_claude_sandbox_network_rules", c.network},
+			} {
+				r, ok := restriction(inv.Restrictions, w.name)
+				switch {
+				case !ok:
+					t.Errorf("Prepare restrictions = %+v, want one named %s", inv.Restrictions, w.name)
+				case w.want == "" && r.Text.Key == w.key:
+					t.Errorf("%s = %+v, want no source named", w.name, r)
+				case w.want != "" && (r.Enforced || r.Text.Key != w.key || r.Text.Params["sources"] != w.want):
+					t.Errorf("%s = %+v, want not enforced, %s naming %s", w.name, r, w.key, w.want)
+				}
+			}
+			if r, _ := restriction(inv.Restrictions, "restrictToWorkspace"); c.writes == "" && !r.Enforced {
+				t.Errorf("restrictToWorkspace = %+v, want enforced", r)
+			}
+		})
+	}
+}
+
+// harmflow-app#1025: below Claude Code 2.1.309, or with a version the probes did not read, the adapter does not turn
+// the sandbox on, and the shell's restrictions are reported as not enforced, as before. Neither does it for a task not
+// restricted to its workspace, whose shell may write outside it.
+func TestPrepareLeavesTheSandboxOffBelowItsMinimum(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, c := range []struct {
+		name, version string
+		restrict      bool
+	}{
+		{"an older patch", "2.1.308", true},
+		{"an older line", "2.0.99", true},
+		{"an unknown version", "", true},
+		{"not restricted to the workspace", SandboxMinVersion, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			called := false
+			a := &Adapter{Home: t.TempDir(), GitHubToken: func() string { called = true; return "ghs_unused" }}
+			perm := *domain.TaskDocument{}.Effective().Spec.Permissions
+			perm.RestrictToWorkspace, perm.Network = &c.restrict, domain.NetworkDeny
+			info := ports.HarnessInfo{Path: "/bin/claude", Version: c.version, Features: map[string]bool{}}
+			inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: t.TempDir(), Permissions: perm,
+				ExecutionDir: t.TempDir(), Env: []string{"PATH=/bin"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := sandboxOf(t, inv.Args); ok {
+				t.Errorf("Prepare args = %q, want no sandbox", inv.Args)
+			}
+			if called || slices.ContainsFunc(inv.Env, func(v string) bool { return strings.HasPrefix(v, "GH_TOKEN=") }) {
+				t.Errorf("Prepare read the GitHub token (%v) or passed it (%q), want neither", called, inv.Env)
+			}
+			r, ok := restriction(inv.Restrictions, "restrictToWorkspace")
+			if c.restrict && (!ok || r.Enforced || r.Text.Key != "restriction_claude_shell_workspace") {
+				t.Errorf("restrictToWorkspace = %+v (found %v), want not enforced, restriction_claude_shell_workspace", r, ok)
+			}
+			if r, ok := restriction(inv.Restrictions, "network"); !ok || r.Text.Key != "restriction_claude_shell_network" {
+				t.Errorf("network = %+v (found %v), want restriction_claude_shell_network", r, ok)
+			}
+		})
+	}
+}
+
+// harmflow-app#1025: a sandboxed session gets the user's GitHub token, read outside the sandbox, in the environment
+// alone: in GH_TOKEN for gh, and in a Basic authorization header on github.com for git over HTTPS, which replaces the
+// user's credential helper and git configuration. --settings masks both, each on its own host, the header's through a
+// pattern that denies the variable when it finds nothing, and holds no token; no argument does, and no file Prepare
+// writes in the execution's folder. Without a token, the sandbox stays on with no masked variable and no new warning;
+// a validation, which starts no session, reads none.
+func TestPreparePassesTheGitHubTokenMasked(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	const token = "ghs_FakeTokenForTheTest0123456789"
+	basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
+	perm := *domain.TaskDocument{}.Effective().Spec.Permissions
+	restrict := true
+	perm.RestrictToWorkspace = &restrict
+	builtin := filepath.Join(t.TempDir(), "hf-skill")
+	if err := os.MkdirAll(builtin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(builtin, "SKILL.md"), []byte("---\nname: hf-skill\n---\nDo it.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	reads := 0
+	a := &Adapter{Home: t.TempDir(), GitHubToken: func() string { reads++; return token }}
+	exec := t.TempDir()
+	inv, _, err := a.Prepare(sandboxedInfo, ports.RunRequest{WorkDir: t.TempDir(), Permissions: perm, ExecutionDir: exec,
+		Env: []string{"PATH=/bin"}, Prompt: "hi",
+		Skills: []ports.ResolvedItem{{Name: "hf-skill", Path: builtin, Builtin: true}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reads != 1 {
+		t.Errorf("Prepare read the token %d times, want once", reads)
+	}
+	for _, want := range []string{"GH_TOKEN=" + token, "GIT_CONFIG_COUNT=2",
+		"GIT_CONFIG_KEY_0=http.https://github.com/.extraHeader", "GIT_CONFIG_VALUE_0=Authorization: Basic " + basic,
+		"GIT_CONFIG_KEY_1=credential.helper", "GIT_CONFIG_VALUE_1=", "GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0"} {
+		if !slices.Contains(inv.Env, want) {
+			t.Errorf("Prepare env lacks %q", strings.SplitN(want, "=", 2)[0])
+		}
+	}
+	for _, arg := range inv.Args {
+		if strings.Contains(arg, token) || strings.Contains(arg, basic) {
+			t.Error("Prepare args hold the GitHub token")
+		}
+	}
+	if err := filepath.WalkDir(exec, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err == nil && (strings.Contains(string(data), token) || strings.Contains(string(data), basic)) {
+			t.Errorf("%s holds the GitHub token", path)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sandbox, _ := sandboxOf(t, inv.Args)
+	network, _ := sandbox["network"].(map[string]any)
+	if _, ok := network["tlsTerminate"]; !ok {
+		t.Errorf("sandbox.network = %v, want tlsTerminate, which masking needs", network)
+	}
+	masks := map[string]map[string]any{}
+	credentials, _ := sandbox["credentials"].(map[string]any)
+	entries, _ := credentials["envVars"].([]any)
+	for _, e := range entries {
+		entry, _ := e.(map[string]any)
+		name, _ := entry["name"].(string)
+		masks[name] = entry
+	}
+	for name, want := range map[string]map[string]any{
+		"GH_TOKEN":     {"name": "GH_TOKEN", "action": "mask", "injectHosts": []any{"api.github.com"}},
+		"GITHUB_TOKEN": {"name": "GITHUB_TOKEN", "action": "deny"},
+		"GIT_CONFIG_VALUE_0": {"name": "GIT_CONFIG_VALUE_0", "action": "mask", "extract": `Basic (\S+)`,
+			"injectHosts": []any{"github.com"}, "onExtractNoMatch": "deny"},
+	} {
+		if !reflect.DeepEqual(masks[name], want) {
+			t.Errorf("sandbox.credentials entry %s = %v, want %v", name, masks[name], want)
+		}
+	}
+	if r, _ := restriction(inv.Restrictions, "restrictToWorkspace"); !r.Enforced {
+		t.Errorf("restrictToWorkspace = %+v, want enforced", r)
+	}
+
+	// Without a token: the sandbox stays on, with nothing masked and the same restrictions.
+	signedOut := &Adapter{Home: a.Home, GitHubToken: func() string { return "" }}
+	without, _, err := signedOut.Prepare(sandboxedInfo, ports.RunRequest{WorkDir: t.TempDir(), Permissions: perm,
+		ExecutionDir: t.TempDir(), Env: []string{"PATH=/bin"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sandbox, ok := sandboxOf(t, without.Args)
+	if !ok || sandbox["enabled"] != true {
+		t.Fatalf("Prepare without a token args = %q, want the sandbox on", without.Args)
+	}
+	network, _ = sandbox["network"].(map[string]any)
+	credentials, _ = sandbox["credentials"].(map[string]any)
+	if entries, _ := credentials["envVars"].([]any); len(entries) != 1 || network["tlsTerminate"] != nil {
+		t.Errorf("sandbox without a token = %v, want only GITHUB_TOKEN denied and no tlsTerminate", sandbox)
+	}
+	if !slices.Equal(without.Env, []string{"PATH=/bin"}) {
+		t.Errorf("Prepare without a token env = %q, want the request's", without.Env)
+	}
+	if !reflect.DeepEqual(without.Restrictions, inv.Restrictions) {
+		t.Errorf("restrictions without a token %+v, want those with one %+v", without.Restrictions, inv.Restrictions)
+	}
+
+	// A validation reads no token.
+	reads = 0
+	if _, _, err := a.Prepare(sandboxedInfo, ports.RunRequest{WorkDir: t.TempDir(), Permissions: perm,
+		PolicyCheck: true}); err != nil {
+		t.Fatal(err)
+	}
+	if reads != 0 {
+		t.Errorf("a validation read the token %d times, want none", reads)
 	}
 }
 
