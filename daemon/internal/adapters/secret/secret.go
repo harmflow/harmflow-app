@@ -56,11 +56,19 @@ func (k Keychain) Get() (string, error) {
 		}
 		args = append(args, k.Path)
 	}
-	out, err := exec.Command("/usr/bin/security", args...).Output()
+	out, err := security(args...).Output()
 	if err != nil {
 		return "", keychainError(err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// security is a run of /usr/bin/security with the daemon's environment but CODEX_HOME, which only Codex's own
+// processes get.
+func security(args ...string) *exec.Cmd {
+	cmd := exec.Command("/usr/bin/security", args...)
+	cmd.Env = ports.WithoutCodexHome(nil)
+	return cmd
 }
 
 // keychainError maps a failed security command. Only exit 44, errSecItemNotFound, means no token is stored: a locked
@@ -107,7 +115,7 @@ func (k Keychain) Set(token string) error {
 		}
 		keychain = ` "` + k.Path + `"`
 	}
-	cmd := exec.Command("/usr/bin/security", "-i")
+	cmd := security("-i")
 	cmd.Stdin = strings.NewReader(fmt.Sprintf("add-generic-password -U -s %s -a %s -l HarmFlow -w %s%s\n",
 		k.Service, k.Account, token, keychain))
 	var stderr bytes.Buffer
@@ -135,7 +143,7 @@ func (k Keychain) Delete() error {
 		args = append(args, k.Path)
 	}
 	// Output, not Run, so a failure carries security's stderr.
-	if _, err := exec.Command("/usr/bin/security", args...).Output(); err != nil {
+	if _, err := security(args...).Output(); err != nil {
 		if err := keychainError(err); !errors.Is(err, ErrNoToken) {
 			return err
 		}

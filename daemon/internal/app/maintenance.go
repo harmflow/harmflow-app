@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
+	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
 func (a *App) maintenanceLoop(ctx context.Context) {
@@ -314,6 +315,14 @@ func removeWorktree(p string) {
 	// <repo>/.git/worktrees/<name> → <repo>
 	repo := filepath.Dir(filepath.Dir(filepath.Dir(gitdir)))
 	// git's answer changes nothing: the caller removes the directory itself, and prune drops a record left stale.
-	_ = exec.Command("git", "-C", repo, "worktree", "remove", "--force", p).Run()
-	_ = exec.Command("git", "-C", repo, "worktree", "prune").Run()
+	_ = gitCommand("-C", repo, "worktree", "remove", "--force", p).Run()
+	_ = gitCommand("-C", repo, "worktree", "prune").Run()
+}
+
+// gitCommand is git with args, started without the CODEX_HOME that names a Codex installation
+// (ports.WithoutCodexHome).
+func gitCommand(args ...string) *exec.Cmd {
+	cmd := exec.Command("git", args...)
+	cmd.Env = ports.WithoutCodexHome(nil)
+	return cmd
 }

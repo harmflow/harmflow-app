@@ -439,3 +439,37 @@ func TestCleanSkipsAScriptsWorkingDirectory(t *testing.T) {
 		t.Errorf("CleanWorkspaces() read the script's working directory: %+v", res)
 	}
 }
+
+// harmflow-app#1028: the daemon's CODEX_HOME names a Codex installation, whose environment reaches no other process, so
+// the git that removes a worktree starts without it.
+func TestRemoveWorktreeRunsGitWithoutCodexHome(t *testing.T) {
+	bin, envLog := t.TempDir(), filepath.Join(t.TempDir(), "env.log")
+	// A stand-in git, first on the PATH, that appends its arguments and its CODEX_HOME, "unset" when none, to $ENVLOG.
+	script := "#!/bin/sh\nprintf '%s|%s\\n' \"$*\" \"${CODEX_HOME-unset}\" >> \"$ENVLOG\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("ENVLOG", envLog)
+	t.Setenv("CODEX_HOME", t.TempDir())
+	repo, wt := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: "+filepath.Join(repo, ".git", "worktrees", "w")+"\n"),
+		0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	removeWorktree(wt)
+	data, err := os.ReadFile(envLog)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%s) = %v, want the runs of git", envLog, err)
+	}
+	lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+	for _, l := range lines {
+		if args, home, _ := strings.Cut(l, "|"); home != "unset" {
+			t.Errorf("git %q ran with CODEX_HOME %q, want none", args, home)
+		}
+	}
+	if len(lines) != 2 {
+		t.Errorf("git ran %q, want worktree remove and worktree prune", lines)
+	}
+}
