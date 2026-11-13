@@ -114,6 +114,14 @@ type fakeHarness struct {
 	// are the homes ReadQuota read with, one per read.
 	homeSkills map[string][]string
 	quotaHomes []string
+	// runs are the installation and the request each attempt was prepared with, in order.
+	runs []preparedRun
+}
+
+// preparedRun is what an attempt was prepared with: the installation detection gave it and the request.
+type preparedRun struct {
+	info ports.HarnessInfo
+	req  ports.RunRequest
 }
 
 var _ ports.HarnessAdapter = (*fakeHarness)(nil)
@@ -240,6 +248,7 @@ func (f *fakeHarness) Prepare(info ports.HarnessInfo, req ports.RunRequest) (por
 	if req.Prompt != "" { // validation's policy check prepares with no prompt
 		f.prompts = append(f.prompts, req.Prompt)
 		f.preparedOn = append(f.preparedOn, info.Home)
+		f.runs = append(f.runs, preparedRun{info: info, req: req})
 	}
 	// An attempt whose program cannot start never reaches its parser's Finish, so it never counts as live.
 	if req.Prompt != "" && path == "/bin/sh" {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -35,13 +36,27 @@ esac
 // are signed in. It returns the App and the two homes. The App is not started, as newCodexApp's.
 func newCodexHomesApp(t *testing.T) (a *App, first, second string) {
 	t.Helper()
+	return newCodexHomesAppWith(t, modelsCache("model-a", "low"), modelsCache("model-b", "low"))
+}
+
+// modelsCache is a Codex models cache that lists one model, which accepts the efforts.
+func modelsCache(model string, efforts ...string) string {
+	levels := make([]string, len(efforts))
+	for i, effort := range efforts {
+		levels[i] = `{"effort":"` + effort + `"}`
+	}
+	return `{"models":[{"slug":"` + model + `","supported_reasoning_levels":[` + strings.Join(levels, ",") + `]}]}`
+}
+
+// newCodexHomesAppWith is newCodexHomesApp with the models cache of ~/.codex and of the home in use given.
+func newCodexHomesAppWith(t *testing.T, firstCache, secondCache string) (a *App, first, second string) {
+	t.Helper()
 	user := t.TempDir()
 	first, second = filepath.Join(user, ".codex"), filepath.Join(user, ".codex-b")
-	for home, model := range map[string]string{first: "model-a", second: "model-b"} {
+	for home, cache := range map[string]string{first: firstCache, second: secondCache} {
 		if err := os.MkdirAll(home, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		cache := `{"models":[{"slug":"` + model + `","supported_reasoning_levels":[{"effort":"low"}]}]}`
 		for name, content := range map[string]string{"models_cache.json": cache, "signed-in": ""} {
 			if err := os.WriteFile(filepath.Join(home, name), []byte(content), 0o600); err != nil {
 				t.Fatal(err)
@@ -334,4 +349,247 @@ func TestSignedOutAttemptOnAnotherInstallationStartsNoSignIn(t *testing.T) {
 	e.waitSignIns(signer, 1)
 	signer.end <- ports.SignInResult{Outcome: ports.SignInSucceeded}
 	e.waitPublished(domain.EventHarnessSignInCompleted)
+}
+
+// newHomesEnv starts an App on fake harnesses whose Codex lists two installations, ~/.codex, in use, and ~/.codex-b,
+// with Claude Code exhausting its quota on every attempt, so a task whose preferred harness is Claude Code fails over.
+func newHomesEnv(t *testing.T) *env {
+	t.Helper()
+	e := newEnv(t, func(e *env) { e.codex.homes = []string{"~/.codex", "~/.codex-b"} })
+	e.app.RefreshHarnesses(t.Context())
+	e.claude.setScript(func(ports.RunRequest) string { return "echo 'END quota'" })
+	return e
+}
+
+// codexHomes are the homes the fake Codex prepared its attempts with, in order.
+func (e *env) codexHomes() []string {
+	e.codex.mu.Lock()
+	defer e.codex.mu.Unlock()
+	return slices.Clone(e.codex.preparedOn)
+}
+
+// harmflow-app#1029: a fallback candidate runs on the installation it names. Claude Code exhausts its quota, and the
+// second attempt, on the Codex candidate, is prepared with the home of the installation the candidate names, which is
+// not the one in use, and records that installation and its home; a candidate that names none runs on the installation
+// in use.
+func TestFallbackRunsOnTheInstallationItNames(t *testing.T) {
+	for _, c := range []struct{ name, extra, want string }{
+		{"named", "          installation: \"~/.codex-b\"\n", "~/.codex-b"},
+		{"unnamed", "", "~/.codex"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			// An App of its own: the quota one case exhausts does not hold the other's first attempt.
+			e := newHomesEnv(t)
+			if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: taskYAML("fallback", codexFallback+c.extra)}); err != nil {
+				t.Fatalf("CreateTask(fallback) error = %v, want none", err)
+			}
+			r, err := e.app.RunTask("fallback")
+			if err != nil {
+				t.Fatal(err)
+			}
+			x := e.wait(r.ExecutionID, domain.StatusCompleted)
+			home := filepath.Join("/homes", c.want)
+			if len(x.Attempts) != 2 || x.Attempts[1].Harness != domain.HarnessCodex || x.Attempts[1].Installation != c.want ||
+				x.Attempts[1].InstallationHome != home {
+				t.Errorf("attempts %+v, want two, the second on Codex's %s at %s", x.Attempts, c.want, home)
+			}
+			if got := e.codexHomes(); !slices.Equal(got, []string{home}) {
+				t.Errorf("Codex prepared attempts with the homes %q, want only %q", got, home)
+			}
+		})
+	}
+}
+
+// goneCandidate is a fallback candidate on Codex's ~/.codex-b, the installation runRemoved removes once the task is
+// saved, and missingInstallation is what the execution says of it.
+const (
+	goneCandidate       = "        - provider: codex\n          installation: \"~/.codex-b\"\n"
+	missingInstallation = `no installation "~/.codex-b"`
+)
+
+// runRemoved saves a task whose preferred Claude Code exhausts its quota and whose fallback candidates are candidates,
+// removes the installation ~/.codex-b, runs the task, and returns its execution once it has ended with want. It fails
+// the test unless a harness.unavailable event of the execution, from Codex, names the missing installation.
+func runRemoved(t *testing.T, candidates string, want domain.ExecutionStatus) (*env, ExecutionView) {
+	t.Helper()
+	e := newHomesEnv(t)
+	// Two switches: to the candidate whose installation is gone, and on to the next.
+	fallback := "    fallback:\n      maxSwitches: 2\n      candidates:\n" + candidates
+	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: taskYAML("removed", fallback)}); err != nil {
+		t.Fatalf("CreateTask(removed) error = %v, want none", err)
+	}
+	e.codex.mu.Lock()
+	e.codex.homes = []string{"~/.codex"}
+	e.codex.mu.Unlock()
+	r, err := e.app.RunTask("removed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := e.wait(r.ExecutionID, want)
+	var got []string // each harness.unavailable event of the execution, as its harness and its message
+	named := false
+	for _, ev := range e.published(domain.EventHarnessUnavailable) {
+		if ev.ExecutionID != r.ExecutionID {
+			continue
+		}
+		got = append(got, ev.Harness+": "+ev.Message)
+		named = named || ev.Harness == domain.HarnessCodex && strings.Contains(ev.Message, missingInstallation)
+	}
+	if !named {
+		t.Errorf("the execution's %s events = %q, want one from %s naming %s", domain.EventHarnessUnavailable, got,
+			domain.HarnessCodex, missingInstallation)
+	}
+	return e, x
+}
+
+// harmflow-app#1029: a fallback candidate whose installation was removed after the task was saved is skipped: no
+// attempt is prepared on it, the execution names the missing installation, and the chain goes on to the next candidate.
+func TestFallbackOnARemovedInstallationIsSkipped(t *testing.T) {
+	e, x := runRemoved(t, goneCandidate+"        - provider: codex\n", domain.StatusCompleted)
+	if len(x.Attempts) != 2 || x.Attempts[1].Installation != "~/.codex" {
+		t.Errorf("attempts %+v, want two, the second on Codex's ~/.codex", x.Attempts)
+	}
+	if got := e.codexHomes(); !slices.Equal(got, []string{"/homes/~/.codex"}) {
+		t.Errorf("Codex prepared attempts with the homes %q, want only /homes/~/.codex", got)
+	}
+}
+
+// harmflow-app#1029: when the candidate whose installation was removed is the last one, the execution fails with an
+// error that names the missing installation, and no attempt is prepared on Codex.
+func TestFallbackOnARemovedInstallationWithNoneLeftFails(t *testing.T) {
+	e, x := runRemoved(t, goneCandidate, domain.StatusFailed)
+	if len(x.Attempts) != 1 || !strings.Contains(x.ErrorMessage, missingInstallation) {
+		t.Errorf("attempts %+v, error %q; want Claude Code's alone, and the error naming %s", x.Attempts, x.ErrorMessage,
+			missingInstallation)
+	}
+	if got := e.codexHomes(); len(got) != 0 {
+		t.Errorf("Codex prepared attempts with the homes %q, want none", got)
+	}
+}
+
+// harmflow-app#1029: an effort is checked against the installation the profile names, as a model is. Both homes list
+// model-c; ~/.codex accepts the effort xhigh for it, and the home in use does not. A profile that names ~/.codex saves
+// with xhigh; one that names no installation is refused at its path, naming the effort, and nothing is saved in its
+// place; the same holds for a fallback candidate.
+func TestEffortIsCheckedAgainstTheNamedInstallation(t *testing.T) {
+	a, _, _ := newCodexHomesAppWith(t, modelsCache("model-c", "low", "xhigh"), modelsCache("model-c", "low"))
+	// profile is a profile's keys at indent: model-c at xhigh, on ~/.codex when named is set.
+	profile := func(indent string, named bool) string {
+		keys := indent + "model: model-c\n" + indent + "effort: xhigh\n"
+		if named {
+			keys = indent + "installation: \"~/.codex\"\n" + keys
+		}
+		return keys
+	}
+	const preferred, candidate = "      ", "          "
+	for _, c := range []struct {
+		name, yaml, path string
+	}{
+		{"preferred", codexTaskYAML("preferred-unnamed", profile(preferred, false)), "/spec/harness/preferred"},
+		{"fallback", taskYAML("fallback-unnamed", codexFallback+profile(candidate, false)),
+			"/spec/harness/fallback/candidates/0"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := a.CreateTask(t.Context(), TaskInput{YAML: c.yaml})
+			if !refusedAt(err, c.path, "codex_effort_invalid") {
+				t.Errorf("CreateTask(xhigh with no installation) error = %v, want codex_effort_invalid at %s", err, c.path)
+			}
+			if err == nil || !strings.Contains(err.Error(), `"xhigh"`) {
+				t.Errorf("CreateTask(xhigh with no installation) error = %v, want it to name the effort", err)
+			}
+			for _, task := range a.ListTasks() {
+				if strings.HasSuffix(task.ID, "-unnamed") {
+					t.Errorf("ListTasks() holds %s, want no task saved in place of the refused one", task.ID)
+				}
+			}
+		})
+	}
+	for id, yaml := range map[string]string{
+		"preferred-named": codexTaskYAML("preferred-named", profile(preferred, true)),
+		"fallback-named":  taskYAML("fallback-named", codexFallback+profile(candidate, true)),
+	} {
+		if _, err := a.CreateTask(t.Context(), TaskInput{YAML: yaml}); err != nil {
+			t.Errorf("CreateTask(%s, xhigh on ~/.codex) error = %v, want none", id, err)
+		}
+	}
+}
+
+// harmflow-app#1029: two tasks, one naming each installation, run at the same time. While both attempts run, each was
+// prepared with its own installation's home and records its own installation, and the environment Codex's adapter
+// gives its process sets CODEX_HOME to that home alone, though the daemon's own CODEX_HOME names ~/.codex's.
+func TestTwoInstallationsRunAtOnce(t *testing.T) {
+	// An attempt on ~/.codex-b whose environment kept the daemon's own CODEX_HOME would carry ~/.codex's home.
+	t.Setenv("CODEX_HOME", "/homes/~/.codex")
+	release := filepath.Join(t.TempDir(), "release")
+	e := newEnv(t, func(e *env) { e.codex.homes = []string{"~/.codex", "~/.codex-b"} })
+	e.app.RefreshHarnesses(t.Context())
+	e.codex.setScript(func(ports.RunRequest) string {
+		return "until [ -f '" + release + "' ]; do sleep 0.05; done; echo 'END ok'"
+	})
+	installations := map[string]string{} // by execution
+	for task, installation := range map[string]string{"on-default": "~/.codex", "on-other": "~/.codex-b"} {
+		if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: codexTaskYAML(task,
+			"      installation: \""+installation+"\"\n")}); err != nil {
+			t.Fatalf("CreateTask(%s) error = %v, want none", task, err)
+		}
+		r, err := e.app.RunTask(task)
+		if err != nil {
+			t.Fatal(err)
+		}
+		installations[r.ExecutionID] = installation
+	}
+	if !e.poll(10*time.Second, func() bool {
+		e.codex.mu.Lock()
+		defer e.codex.mu.Unlock()
+		return e.codex.live == 2
+	}) {
+		t.Fatal("the two attempts never ran at the same time")
+	}
+	e.codex.mu.Lock()
+	runs := slices.Clone(e.codex.runs)
+	e.codex.mu.Unlock()
+	if len(runs) != 2 {
+		t.Fatalf("Codex prepared %d attempts, want 2", len(runs))
+	}
+	homes := map[string]string{"~/.codex": "/homes/~/.codex", "~/.codex-b": "/homes/~/.codex-b"}
+	cx := &codex.Adapter{Home: t.TempDir()}
+	for _, run := range runs {
+		want := installations[run.req.ExecutionID]
+		home := homes[want]
+		if run.info.InstallationID != want || run.info.Home != home {
+			t.Errorf("execution %s's attempt was prepared on %q at %q, want %s at %s", run.req.ExecutionID,
+				run.info.InstallationID, run.info.Home, want, home)
+		}
+		x, err := e.app.GetExecution(run.req.ExecutionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(x.Attempts) != 1 || x.Attempts[0].Outcome != domain.AttemptRunning || x.Attempts[0].Installation != want ||
+			x.Attempts[0].InstallationHome != home {
+			t.Errorf("execution %s's attempts %+v, want one running on %s at %s", run.req.ExecutionID, x.Attempts, want, home)
+		}
+		inv, _, err := cx.Prepare(run.info, run.req)
+		if err != nil {
+			t.Fatalf("codex Prepare(execution %s's attempt) error = %v, want none", run.req.ExecutionID, err)
+		}
+		var set []string
+		for _, kv := range inv.Env {
+			name, value, _ := strings.Cut(kv, "=")
+			if name == "CODEX_HOME" {
+				set = append(set, value)
+			} else if slices.Contains(slices.Collect(maps.Values(homes)), value) {
+				t.Errorf("execution %s's environment sets %s to an installation's home, want only CODEX_HOME to name one",
+					run.req.ExecutionID, kv)
+			}
+		}
+		if !slices.Equal(set, []string{home}) {
+			t.Errorf("execution %s's environment sets CODEX_HOME to %q, want %s alone", run.req.ExecutionID, set, home)
+		}
+	}
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for id := range installations {
+		e.wait(id, domain.StatusCompleted)
+	}
 }
