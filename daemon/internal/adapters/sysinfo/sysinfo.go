@@ -135,12 +135,17 @@ func (r *Reader) Snapshot(dir string) ports.SystemGauges {
 	return out
 }
 
-// systemOutput is what the system command name prints, run without the CODEX_HOME that names a Codex installation
-// (ports.WithoutCodexHome).
+// systemOutput is what the system command name prints, run as systemCommand builds it.
 func systemOutput(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return systemCommand(ctx, name, args...).Output()
+}
+
+// systemCommand is the system command name with its arguments, without the CODEX_HOME that names a Codex installation
+// (ports.WithoutCodexHome).
+func systemCommand(ctx context.Context, name string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Env = ports.WithoutCodexHome(nil)
-	return cmd.Output()
+	return cmd
 }
 
 func cpuPercent(ctx context.Context) (float64, bool) {

@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -112,6 +113,39 @@ func TestSignInTimeout(t *testing.T) {
 				t.Errorf("signInTimeout() with %s=%q = %v, want %v", signInTimeoutVariable, c.value, got, c.want)
 			}
 		})
+	}
+}
+
+// harmflow-app#1042: the daemon's CODEX_HOME names a Codex installation, whose environment reaches no other process, so
+// the login shell userPath starts to read the user's PATH runs without it and keeps the daemon's other variables. A
+// stand-in shell records the environment it started with and prints a PATH, which leads userPath's result.
+func TestLoginShellStartsWithoutCodexHome(t *testing.T) {
+	dir := t.TempDir()
+	shell, envFile := filepath.Join(dir, "shell"), filepath.Join(dir, "env")
+	script := "#!/bin/sh\n/usr/bin/env > '" + envFile + "'\nprintf %s /harmflow-test/login/bin:/harmflow-test/login/sbin\n"
+	if err := os.WriteFile(shell, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SHELL", shell)
+	t.Setenv("CODEX_HOME", t.TempDir())
+	t.Setenv("HARMFLOW_TEST_KEPT", "kept")
+
+	got := userPath(t.TempDir())
+	data, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%s) = %v, want the environment the login shell started with", envFile, err)
+	}
+	env := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "CODEX_HOME=") {
+			t.Errorf("the login shell started with %q, want no CODEX_HOME", kv)
+		}
+	}
+	if !slices.Contains(env, "HARMFLOW_TEST_KEPT=kept") {
+		t.Errorf("the login shell started with %q, want HARMFLOW_TEST_KEPT=kept kept", env)
+	}
+	if want := "/harmflow-test/login/bin:/harmflow-test/login/sbin:"; !strings.HasPrefix(got, want) {
+		t.Errorf("userPath() = %q, want it to start with the login shell's PATH %q", got, want)
 	}
 }
 
