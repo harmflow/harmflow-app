@@ -80,6 +80,25 @@ func TestDrainEndsOnItsOwn(t *testing.T) {
 	}
 }
 
+// FiringState pairs the drain with the firings it refuses: before a drain it shows firings accepted and no drain, and
+// during one it shows the drain, with the execution it waits for, and no firing accepted.
+func TestFiringStateReadsTheDrainAndTheFiringsTogether(t *testing.T) {
+	e := newEnv(t)
+	if got := e.app.FiringState(); !got.Accepting || got.Draining {
+		t.Errorf("FiringState() before a drain = %+v, want firings accepted and no drain", got)
+	}
+
+	e.runSlow("busy")
+	if err := e.app.RequestDrain(time.Hour); err != nil {
+		t.Fatalf("RequestDrain(1h) = %v, want nil", err)
+	}
+	want := DrainView{Executions: 1, DeadlineAt: e.clock.Now().Add(time.Hour)}
+	got := e.app.FiringState()
+	if got.Accepting || !got.Draining || got.Drain.Executions != want.Executions || !got.Drain.DeadlineAt.Equal(want.DeadlineAt) {
+		t.Errorf("FiringState() during a drain = %+v, want no firing accepted and the drain %+v", got, want)
+	}
+}
+
 // A drain whose deadline passes with an execution still running asks main to stop the daemon; the stop cancels the
 // execution, which ends interrupted, saying that the drain's deadline passed.
 func TestDrainReachesItsDeadline(t *testing.T) {

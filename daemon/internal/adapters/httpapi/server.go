@@ -333,16 +333,18 @@ func decode(r *http.Request, v any) error {
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
+	// One read gives both fields, so that no response pairs a drain with firings still accepted.
+	state := s.App.FiringState()
 	body := map[string]any{"status": "ok", "version": s.App.Version(), "apiVersion": "v1",
-		"pid": pid(), "startedAt": s.App.StartedAt(), "acceptingFirings": s.App.AcceptingFirings()}
+		"pid": pid(), "startedAt": s.App.StartedAt(), "acceptingFirings": state.Accepting}
 	if commit := s.App.Commit(); commit != "" {
 		body["commit"] = commit
 	}
 	if builtAt := s.App.BuiltAt(); !builtAt.IsZero() {
 		body["builtAt"] = builtAt
 	}
-	if drain, ok := s.App.Draining(); ok {
-		body["draining"] = drain
+	if state.Draining {
+		body["draining"] = state.Drain
 	}
 	writeJSON(w, 200, body)
 }
