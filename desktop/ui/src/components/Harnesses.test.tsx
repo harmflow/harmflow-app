@@ -611,4 +611,75 @@ describe("HarnessInventory of Codex homes", () => {
   it("shows no homes row for a harness that has none", () => {
     expect(rows(renderToString(<HarnessInventory harness={ready} locale="en-US" />))).not.toHaveProperty(i18n.t("harness.homes"));
   });
+
+  // harmflow-app#1030: Settings adds no Codex home by hand. The card's only text fields are the binary's path, shown
+  // after Set path, and the token's where Codex takes one; a folder saved in the path field is set as the binary, and
+  // the daemon receives no other write.
+  describe("in a DOM", () => {
+    let root: Root | undefined;
+    let host: HTMLElement | undefined;
+
+    beforeAll(() => {
+      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    });
+
+    afterEach(() => {
+      act(() => root?.unmount());
+      host?.remove();
+      root = host = undefined;
+      daemon.requests.length = 0;
+    });
+
+    const settle = () => act(() => new Promise<void>((resolve) => setImmediate(resolve)));
+
+    function Inventory() {
+      const codex = useStore((s) => s.harnesses.find((h) => h.id === "codex"));
+      return codex ? <HarnessInventory harness={codex} locale="en-US" /> : null;
+    }
+
+    async function open(over: Partial<Harness>) {
+      daemon.found = ["/opt/homebrew/bin/codex"];
+      daemon.codex = { ...signedOut, installations: daemon.found, installation: daemon.found[0], homes: [signedIn, signedOut], ...over };
+      patchStateForTests({ harnesses: [daemon.codex] });
+      host = document.body.appendChild(document.createElement("div"));
+      root = createRoot(host);
+      await act(async () => root!.render(<Inventory />));
+    }
+
+    // Each field the card offers to type in, by the label or the placeholder it shows.
+    const fields = () =>
+      [...host!.querySelectorAll<HTMLElement>("input, textarea, select, [contenteditable]")].map(
+        (f) => f.getAttribute("aria-label") ?? f.getAttribute("placeholder"),
+      );
+    const button = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === label)!;
+
+    it.each([
+      ["takes no token", false, []],
+      ["takes a token", true, [i18n.t("harness.token")]],
+    ])("offers no field that adds a home when Codex %s, and saves a folder as the binary's path", async (_, takesToken, before) => {
+      await open({ takesToken });
+      // The binary's installation, then the two homes.
+      expect([...host!.querySelectorAll(".installations__item > .mono")].map((e) => e.textContent)).toStrictEqual([
+        "/opt/homebrew/bin/codex",
+        "~/.codex",
+        "~/.codex-b",
+      ]);
+      expect(fields()).toStrictEqual(before);
+
+      await act(async () => button(i18n.t("harness.setPath")).click());
+      expect(fields()).toStrictEqual([...before, i18n.t("harness.pathPlaceholder")]);
+
+      const input = host!.querySelector<HTMLInputElement>(`input[placeholder="${i18n.t("harness.pathPlaceholder")}"]`)!;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "/Users/someone/.codex-c");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await act(async () => button(i18n.t("common.save")).click());
+      await settle();
+      expect(daemon.requests.filter((r) => r.method !== "GET")).toStrictEqual([
+        { method: "PUT", path: "/harnesses/codex", body: { path: "/Users/someone/.codex-c" } },
+      ]);
+      expect(fields()).toStrictEqual(before);
+    });
+  });
 });
