@@ -161,3 +161,51 @@ func TestHeadsOfTheWorkspaceRepositories(t *testing.T) {
 		t.Errorf("Heads gives r-5 the commit %s it started at, not its own", got[2].Commit)
 	}
 }
+
+// harmflow-app#1028: the daemon's CODEX_HOME names a Codex installation, whose environment reaches no other process, so
+// every git the reader runs starts without it, whether it comes in the reader's environment or, with none, in the
+// daemon's own.
+func TestGitRunsWithoutCodexHome(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		fromEnv bool
+	}{{"the reader's environment", false}, {"the daemon's own environment", true}} {
+		t.Run(c.name, func(t *testing.T) {
+			bin, envLog, codexHome := t.TempDir(), filepath.Join(t.TempDir(), "env.log"), t.TempDir()
+			// A stand-in git that appends its arguments and its CODEX_HOME, "unset" when none, to $ENVLOG and fails, so
+			// the reader goes on to each of its other commands.
+			write(t, filepath.Join(bin, "git"), "#!/bin/sh\nprintf '%s|%s\\n' \"$*\" \"${CODEX_HOME-unset}\" >> \"$ENVLOG\"\nexit 1\n")
+			if err := os.Chmod(filepath.Join(bin, "git"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("CODEX_HOME", codexHome)
+			r := &Reader{PathEnv: bin}
+			if c.fromEnv {
+				t.Setenv("ENVLOG", envLog)
+			} else {
+				r.Env = []string{"PATH=/usr/bin:/bin", "ENVLOG=" + envLog, "CODEX_HOME=" + codexHome}
+			}
+			ws := t.TempDir()
+			if err := os.Mkdir(filepath.Join(ws, ".git"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+
+			mark := r.Mark(t.Context(), ws)
+			r.Changes(t.Context(), ws, mark)
+			r.Heads(t.Context(), ws)
+			data, err := os.ReadFile(envLog)
+			if err != nil {
+				t.Fatalf("os.ReadFile(%s) = %v, want the runs of git", envLog, err)
+			}
+			lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+			for _, l := range lines {
+				if args, home, _ := strings.Cut(l, "|"); home != "unset" {
+					t.Errorf("git %q ran with CODEX_HOME %q, want none", args, home)
+				}
+			}
+			if len(lines) < 3 {
+				t.Errorf("git ran %d times, %q; want Mark, Changes, and Heads to run it", len(lines), lines)
+			}
+		})
+	}
+}

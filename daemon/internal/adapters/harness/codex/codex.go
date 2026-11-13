@@ -607,11 +607,16 @@ func sessionsDir(env []string, home string) string {
 // permission profile translated to a sandbox, with the restrictions it enforces and those it cannot. Its stdin is the
 // instructions, which name the built-ins as copied into the execution's directory. The session is ephemeral unless the
 // request keeps it; a Codex without --ephemeral keeps every session, which a restriction not enforced says. The
-// installation's home is the process's CODEX_HOME, in place of any the request's environment carries.
+// installation's home is the process's CODEX_HOME, in place of any the request's environment carries. An installation
+// detection did not give runs with the home in use when the request's environment has no CODEX_HOME, as one
+// ports.SessionEnv gives has none.
 func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.Invocation, ports.OutputParser, error) {
 	home := a.homeOf(info)
-	if info.Home != "" {
+	switch {
+	case info.Home != "":
 		req.Env = envWith(req.Env, info.Home)
+	case req.Env != nil && !slices.ContainsFunc(req.Env, func(kv string) bool { return strings.HasPrefix(kv, "CODEX_HOME=") }):
+		req.Env = envWith(req.Env, home)
 	}
 	args := []string{"exec", "--json", "--skip-git-repo-check", "--cd", req.WorkDir}
 	var restrictions []ports.Restriction

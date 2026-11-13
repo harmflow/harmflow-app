@@ -1038,3 +1038,27 @@ func TestPrepareRunsWithTheInstallationsHome(t *testing.T) {
 		t.Errorf("Prepare parser = %+v, want the model of the home's configuration", out)
 	}
 }
+
+// harmflow-app#1028: a session's environment carries no CODEX_HOME, so an attempt on an installation detection did not
+// give still runs with the home in use, the one the daemon's CODEX_HOME names, as its only CODEX_HOME.
+func TestPrepareWithoutAnInstallationRunsWithTheHomeInUse(t *testing.T) {
+	daemonHome := t.TempDir()
+	t.Setenv("CODEX_HOME", daemonHome)
+	a := &Adapter{Home: t.TempDir()}
+	info := ports.HarnessInfo{Path: "/bin/codex", Features: map[string]bool{"--ephemeral": true}}
+	perm := *domain.TaskDocument{}.Effective().Spec.Permissions
+	inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, Prompt: "do it",
+		Env: ports.SessionEnv([]string{"PATH=/bin", "CODEX_HOME=" + daemonHome})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var homes []string
+	for _, kv := range inv.Env {
+		if v, ok := strings.CutPrefix(kv, "CODEX_HOME="); ok {
+			homes = append(homes, v)
+		}
+	}
+	if !slices.Equal(homes, []string{daemonHome}) || !slices.Contains(inv.Env, "PATH=/bin") {
+		t.Errorf("Prepare env %q, want PATH kept and CODEX_HOME %q alone", inv.Env, daemonHome)
+	}
+}

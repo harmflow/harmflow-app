@@ -110,6 +110,10 @@ func (a *Adapter) withToken(env []string) []string {
 	return append(slices.Clone(env), tokenVariable+"="+token)
 }
 
+// env is the environment Claude Code's checks and sign-in start with: Env, or the daemon's own when Env is nil, without
+// the CODEX_HOME that names a Codex installation (ports.WithoutCodexHome). It is a copy, never nil.
+func (a *Adapter) env() []string { return ports.WithoutCodexHome(a.Env) }
+
 // ReportsExtraUsage implements ports.ExtraUsageReporter: every rate-limit report of the stream says whether the session
 // is using extra usage.
 func (a *Adapter) ReportsExtraUsage() bool { return true }
@@ -198,7 +202,7 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 	if helpTimeout == 0 {
 		helpTimeout = defaultHelpTimeout
 	}
-	help, read := procutil.Help(ctx, helpTimeout, a.withToken(a.Env), info.Path, "--help")
+	help, read := procutil.Help(ctx, helpTimeout, a.withToken(a.env()), info.Path, "--help")
 	for _, f := range append(requiredFlags, "--plugin-dir", "--effort", "--agents", "--add-dir", "--tools",
 		"--disallowedTools", "--no-session-persistence", "--model") {
 		info.Features[f] = strings.Contains(help, f)
@@ -245,7 +249,7 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 
 	// Signed out only when the CLI says so, which it does exiting 1; a probe killed at its timeout, or failing
 	// otherwise, leaves the sign-in unknown.
-	status, statusErr, err := procutil.Output(ctx, 20*time.Second, a.withToken(a.Env), info.Path, "auth", "status")
+	status, statusErr, err := procutil.Output(ctx, 20*time.Second, a.withToken(a.env()), info.Path, "auth", "status")
 	var st struct {
 		LoggedIn *bool `json:"loggedIn"`
 	}
@@ -1343,7 +1347,7 @@ func identifies(out string) bool { return strings.Contains(out, "Claude Code") }
 
 // Identify checks that path is an executable file whose --version output names Claude Code.
 func (a *Adapter) Identify(ctx context.Context, path string) error {
-	_, err := procutil.IdentifyHarness(ctx, procutil.VersionTimeout, a.Env, path, Name, "claude", identifies)
+	_, err := procutil.IdentifyHarness(ctx, procutil.VersionTimeout, a.env(), path, Name, "claude", identifies)
 	return err
 }
 
@@ -1352,7 +1356,7 @@ func (a *Adapter) Identify(ctx context.Context, path string) error {
 func (a *Adapter) firstIdentified(ctx context.Context, candidates []string) (string, string, error) {
 	var first error
 	for _, c := range candidates {
-		out, err := procutil.IdentifyHarness(ctx, procutil.VersionTimeout, a.Env, c, Name, "claude", identifies)
+		out, err := procutil.IdentifyHarness(ctx, procutil.VersionTimeout, a.env(), c, Name, "claude", identifies)
 		if err == nil {
 			return out, c, nil
 		}

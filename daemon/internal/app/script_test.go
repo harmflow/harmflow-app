@@ -314,6 +314,35 @@ func TestScriptVariableReplacesAnInheritedOne(t *testing.T) {
 	}
 }
 
+// harmflow-app#1028: the daemon's CODEX_HOME names a Codex installation, whose environment reaches no other process, so
+// a script's program starts without it; a task that sets CODEX_HOME itself gives its program the task's value, once.
+func TestScriptProgramStartsWithoutTheDaemonsCodexHome(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	e := newEnv(t)
+	for _, c := range []struct {
+		id, environment string
+		want            []string
+	}{
+		{"unset", "", nil},
+		{"its-own", "    environment:\n      CODEX_HOME: /the-task-home\n", []string{"/the-task-home"}},
+	} {
+		t.Run(c.id, func(t *testing.T) {
+			// env, by its absolute path, prints the whole environment, so no lookup depends on the variable.
+			e.createScript(c.id, "  script:\n    command: [/usr/bin/env]\n"+c.environment)
+			x := e.runScript(c.id, domain.StatusCompleted)
+			var got []string
+			for _, l := range e.output(x.ID) {
+				if v, ok := strings.CutPrefix(l, "stdout: CODEX_HOME="); ok {
+					got = append(got, v)
+				}
+			}
+			if !slices.Equal(got, c.want) {
+				t.Errorf("CODEX_HOME in the program's environment = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
 // Standard output and error reach the events, each line with its stream, and are kept redacted.
 func TestScriptOutputIsMarkedAndRedacted(t *testing.T) {
 	e := newEnv(t)
