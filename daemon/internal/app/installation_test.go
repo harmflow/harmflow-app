@@ -504,13 +504,15 @@ func TestEffortIsCheckedAgainstTheNamedInstallation(t *testing.T) {
 			}
 		})
 	}
-	for id, yaml := range map[string]string{
-		"preferred-named": codexTaskYAML("preferred-named", profile(preferred, true)),
-		"fallback-named":  taskYAML("fallback-named", codexFallback+profile(candidate, true)),
+	for _, c := range []struct{ name, yaml string }{
+		{"preferred-named", codexTaskYAML("preferred-named", profile(preferred, true))},
+		{"fallback-named", taskYAML("fallback-named", codexFallback+profile(candidate, true))},
 	} {
-		if _, err := a.CreateTask(t.Context(), TaskInput{YAML: yaml}); err != nil {
-			t.Errorf("CreateTask(%s, xhigh on ~/.codex) error = %v, want none", id, err)
-		}
+		t.Run(c.name, func(t *testing.T) {
+			if _, err := a.CreateTask(t.Context(), TaskInput{YAML: c.yaml}); err != nil {
+				t.Errorf("CreateTask(%s, xhigh on ~/.codex) error = %v, want none", c.name, err)
+			}
+		})
 	}
 }
 
@@ -526,6 +528,12 @@ func TestTwoInstallationsRunAtOnce(t *testing.T) {
 	e.codex.setScript(func(ports.RunRequest) string {
 		return "until [ -f '" + release + "' ]; do sleep 0.05; done; echo 'END ok'"
 	})
+	// Release the held scripts even when the test fails before it releases them, so none outlives it.
+	t.Cleanup(func() {
+		if err := os.WriteFile(release, nil, 0o600); err != nil {
+			t.Error(err)
+		}
+	})
 	installations := map[string]string{} // by execution
 	for task, installation := range map[string]string{"on-default": "~/.codex", "on-other": "~/.codex-b"} {
 		if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: codexTaskYAML(task,
@@ -538,12 +546,14 @@ func TestTwoInstallationsRunAtOnce(t *testing.T) {
 		}
 		installations[r.ExecutionID] = installation
 	}
+	live := 0 // the last count the poll read
 	if !e.poll(10*time.Second, func() bool {
 		e.codex.mu.Lock()
 		defer e.codex.mu.Unlock()
-		return e.codex.live == 2
+		live = e.codex.live
+		return live == 2
 	}) {
-		t.Fatal("the two attempts never ran at the same time")
+		t.Fatalf("%d attempts ran at once, want %d", live, 2)
 	}
 	e.codex.mu.Lock()
 	runs := slices.Clone(e.codex.runs)
