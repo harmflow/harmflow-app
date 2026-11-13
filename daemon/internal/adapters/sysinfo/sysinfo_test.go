@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -209,5 +211,36 @@ func TestUsedMemory(t *testing.T) {
 		"Pages occupied by compressor:             3.\n"
 	if got, want := usedMemory(vmStat), int64(15*16384); got != want {
 		t.Errorf("usedMemory(vm_stat output) = %d, want %d", got, want)
+	}
+}
+
+// harmflow-app#1042: the daemon's CODEX_HOME names a Codex installation, whose environment reaches no other process, so
+// the commands the CPU and memory gauges start run without it and keep the daemon's other variables. The test builds
+// each command and never runs it, so it needs no ps, sysctl, or vm_stat.
+func TestGaugeCommandsStartWithoutCodexHome(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	t.Setenv("HARMFLOW_TEST_KEPT", "kept")
+	for _, args := range [][]string{
+		{"/bin/ps", "-A", "-o", "%cpu="},
+		{"/usr/sbin/sysctl", "-n", "hw.memsize"},
+		{"/usr/bin/vm_stat"},
+	} {
+		t.Run(args[0], func(t *testing.T) {
+			cmd := systemCommand(t.Context(), args[0], args[1:]...)
+			if cmd.Path != args[0] || !slices.Equal(cmd.Args, args) {
+				t.Errorf("systemCommand(%q) = %s %q, want %s %q", args, cmd.Path, cmd.Args, args[0], args)
+			}
+			if cmd.Env == nil {
+				t.Fatalf("systemCommand(%q).Env = nil, want the daemon's environment without CODEX_HOME", args)
+			}
+			for _, kv := range cmd.Env {
+				if strings.HasPrefix(kv, "CODEX_HOME=") {
+					t.Errorf("systemCommand(%q).Env holds %q, want no CODEX_HOME", args, kv)
+				}
+			}
+			if !slices.Contains(cmd.Env, "HARMFLOW_TEST_KEPT=kept") {
+				t.Errorf("systemCommand(%q).Env = %q, want HARMFLOW_TEST_KEPT=kept kept", args, cmd.Env)
+			}
+		})
 	}
 }

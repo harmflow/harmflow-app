@@ -36,11 +36,17 @@ func NewAgent(home, logPath string) *Agent {
 		Launchctl: runLaunchctl}
 }
 
-// runLaunchctl runs launchctl without the CODEX_HOME that names a Codex installation (ports.WithoutCodexHome).
+// runLaunchctl runs launchctl as launchctlCommand builds it.
 func runLaunchctl(args ...string) error {
+	return launchctlCommand(args...).Run()
+}
+
+// launchctlCommand is launchctl with its arguments, without the CODEX_HOME that names a Codex installation
+// (ports.WithoutCodexHome).
+func launchctlCommand(args ...string) *exec.Cmd {
 	cmd := exec.Command("/bin/launchctl", args...)
 	cmd.Env = ports.WithoutCodexHome(nil)
-	return cmd.Run()
+	return cmd
 }
 
 // Mechanism implements ports.HostServiceManager: launchd.

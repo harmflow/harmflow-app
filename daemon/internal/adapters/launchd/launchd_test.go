@@ -140,6 +140,31 @@ func TestAutostartLeavesTheRunningDaemon(t *testing.T) {
 	}
 }
 
+// harmflow-app#1042: the daemon's CODEX_HOME names a Codex installation, whose environment reaches no other process, so
+// launchctl starts without it and keeps the daemon's other variables. The test builds the command and never runs it,
+// so nothing reaches the user's launchd session.
+func TestLaunchctlStartsWithoutCodexHome(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	t.Setenv("HARMFLOW_TEST_KEPT", "kept")
+	args := []string{"print", "gui/501/" + Label}
+
+	cmd := launchctlCommand(args...)
+	if want := append([]string{"/bin/launchctl"}, args...); cmd.Path != "/bin/launchctl" || !slices.Equal(cmd.Args, want) {
+		t.Errorf("launchctlCommand(%q) = %s %q, want /bin/launchctl %q", args, cmd.Path, cmd.Args, want)
+	}
+	if cmd.Env == nil {
+		t.Fatalf("launchctlCommand(%q).Env = nil, want the daemon's environment without CODEX_HOME", args)
+	}
+	for _, kv := range cmd.Env {
+		if strings.HasPrefix(kv, "CODEX_HOME=") {
+			t.Errorf("launchctlCommand(%q).Env holds %q, want no CODEX_HOME", args, kv)
+		}
+	}
+	if !slices.Contains(cmd.Env, "HARMFLOW_TEST_KEPT=kept") {
+		t.Errorf("launchctlCommand(%q).Env = %q, want HARMFLOW_TEST_KEPT=kept kept", args, cmd.Env)
+	}
+}
+
 // harmflow-app#907: the user agent gives the daemon the Standard process class, and at start the daemon brings an agent
 // an earlier version wrote up to date, so it takes that class at the next login. Refresh rewrites only an agent that
 // starts this daemon, with the same program, arguments, and variables, and leaves any other as it is: a test or
