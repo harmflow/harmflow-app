@@ -1,7 +1,13 @@
 #!/bin/bash
 # A stand-in for the Codex CLI that speaks the JSONL of `codex exec --json`. CODEX=quota in the prompt fails the turn;
 # CODEX=slow starts a command and waits until it is ended, with a child the test finds in child.pid; CODEX=record first
-# copies the execution's record, as it is on disk when the attempt starts, to record-at-start.json.
+# copies the execution's record, as it is on disk when the attempt starts, to record-at-start.json. CODEX=home records
+# the CODEX_HOME the attempt started with in codex-home; CODEX=together then waits, for up to a minute, until another
+# execution of the daemon has recorded its own, and fails the turn when none has. A copy whose HOMES_LOG names a file
+# records there, for each of its processes, probes and attempts alike, the CODEX_HOME it started with and its first two
+# arguments, one line each; this copy, with none, records nothing.
+HOMES_LOG=
+if [ -n "$HOMES_LOG" ]; then printf '%s\t%s %s\n' "$CODEX_HOME" "$1" "$2" >> "$HOMES_LOG"; fi
 case "$1" in
   --version) echo "codex-cli 0.163.0"; exit 0 ;;
   login) echo "Logged in using ChatGPT"; exit 0 ;;
@@ -19,8 +25,24 @@ if [[ "$PROMPT" == *"CODEX=record"* ]]; then
   IFS= read -r -d '' RECORD < "${RUNS%/*}/state/executions/$HARMFLOW_EXECUTION_ID.json"
   printf '%s' "$RECORD" > "$HARMFLOW_EXECUTION_DIR/record-at-start.json"
 fi
+if [[ "$PROMPT" == *"CODEX=home"* ]]; then
+  printf '%s' "$CODEX_HOME" > "$HARMFLOW_EXECUTION_DIR/codex-home"
+fi
 echo '{"type":"thread.started","thread_id":"fake-thread"}'
 echo '{"type":"turn.started"}'
+if [[ "$PROMPT" == *"CODEX=together"* ]]; then
+  together=
+  for _ in {1..600}; do
+    # The runs directory holds each execution's directory; a pattern that matches nothing stays one word.
+    homes=("${HARMFLOW_EXECUTION_DIR%/*}"/*/codex-home)
+    if [ "${#homes[@]}" -ge 2 ]; then together=1; break; fi
+    sleep 0.1
+  done
+  if [ -z "$together" ]; then
+    echo '{"type":"turn.failed","error":{"message":"no other execution recorded its CODEX_HOME within a minute"}}'
+    exit 1
+  fi
+fi
 if [[ "$PROMPT" == *"CODEX=quota"* ]]; then
   echo '{"type":"turn.failed","error":{"message":"You have hit your usage limit."}}'
   exit 1
