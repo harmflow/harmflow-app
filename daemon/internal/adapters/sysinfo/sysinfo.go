@@ -135,8 +135,16 @@ func (r *Reader) Snapshot(dir string) ports.SystemGauges {
 	return out
 }
 
+// systemOutput is what the system command name prints, run without the CODEX_HOME that names a Codex installation
+// (ports.WithoutCodexHome).
+func systemOutput(ctx context.Context, name string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = ports.WithoutCodexHome(nil)
+	return cmd.Output()
+}
+
 func cpuPercent(ctx context.Context) (float64, bool) {
-	out, err := exec.CommandContext(ctx, "/bin/ps", "-A", "-o", "%cpu=").Output()
+	out, err := systemOutput(ctx, "/bin/ps", "-A", "-o", "%cpu=")
 	if err != nil {
 		return 0, false
 	}
@@ -151,7 +159,7 @@ func cpuPercent(ctx context.Context) (float64, bool) {
 }
 
 func memory(ctx context.Context) (memSample, bool) {
-	out, err := exec.CommandContext(ctx, "/usr/sbin/sysctl", "-n", "hw.memsize").Output()
+	out, err := systemOutput(ctx, "/usr/sbin/sysctl", "-n", "hw.memsize")
 	if err != nil {
 		return memSample{}, false
 	}
@@ -159,7 +167,7 @@ func memory(ctx context.Context) (memSample, bool) {
 	if err != nil {
 		return memSample{}, false
 	}
-	vm, err := exec.CommandContext(ctx, "/usr/bin/vm_stat").Output()
+	vm, err := systemOutput(ctx, "/usr/bin/vm_stat")
 	if err != nil {
 		return memSample{total: total}, true
 	}

@@ -5,9 +5,33 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
+
+// harmflow-app#1028: security runs by its absolute path with the daemon's environment but CODEX_HOME, which only
+// Codex's own processes get. The command is built, never run, so no keychain is read.
+func TestSecurityStartsWithoutCodexHome(t *testing.T) {
+	t.Setenv("CODEX_HOME", "/codex-home")
+	t.Setenv("HARMFLOW_SECRET_TEST", "kept")
+	cmd := security("find-generic-password", "-s", KeychainService)
+	if cmd.Path != "/usr/bin/security" {
+		t.Errorf("security(...).Path = %q, want /usr/bin/security", cmd.Path)
+	}
+	if want := []string{"/usr/bin/security", "find-generic-password", "-s", KeychainService}; !slices.Equal(cmd.Args, want) {
+		t.Errorf("security(...).Args = %q, want %q", cmd.Args, want)
+	}
+	if cmd.Env == nil {
+		t.Fatal("security(...).Env is nil, so the command would inherit CODEX_HOME")
+	}
+	if slices.ContainsFunc(cmd.Env, func(e string) bool { return strings.HasPrefix(e, "CODEX_HOME=") }) {
+		t.Errorf("security(...).Env carries CODEX_HOME: %q", cmd.Env)
+	}
+	if !slices.Contains(cmd.Env, "HARMFLOW_SECRET_TEST=kept") {
+		t.Errorf("security(...).Env lost the daemon's other variables: %q", cmd.Env)
+	}
+}
 
 // Only security's "item not found" reads as no token stored; any other failure keeps its exit status and message, so
 // a locked keychain never makes a new token (#15).
