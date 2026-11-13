@@ -2,6 +2,7 @@ package integration
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -214,6 +215,12 @@ func claudeForTheSandbox(t *testing.T) realHarness {
 // one file inside its workspace and one outside it. Claude Code's sandbox, which the adapter turns on, lets the first
 // through and refuses the second: the file inside is written, the file outside is absent, and the execution carries no
 // warning that the restriction to the workspace is not enforced. The log gives Claude Code's version.
+//
+// A settings source of Claude Code's own that widens the sandbox's write paths outside the workspace — an editing allow
+// rule of the user's settings, say — makes the adapter warn, rightly, with restriction_claude_sandbox_write_rules,
+// which the test cannot lift without changing the user's settings. That warning, and only that one, is then logged
+// with the sources it names, and the shell's write outside must still be refused; any other warning for the
+// restriction, such as the one that says the sandbox is off, fails the test.
 func TestWorkspaceWriteRealClaudeCodeSandboxRefusesAShellWriteOutside(t *testing.T) {
 	h := claudeForTheSandbox(t)
 	w := newWriteTargets(t)
@@ -224,18 +231,37 @@ func TestWorkspaceWriteRealClaudeCodeSandboxRefusesAShellWriteOutside(t *testing
 	r.wantAttemptAtOutside(t, w)
 	w.wantWritten(t)
 	wantAbsent(t, w.outside)
-	r.wantEnforced(t, "restrictToWorkspace")
+	for _, u := range r.unenforced {
+		switch {
+		case u.subject != "restrictToWorkspace":
+		case u.key == "restriction_claude_sandbox_write_rules":
+			t.Logf("the execution warns that Claude Code's %s settings widen the sandbox's write paths, as they do on "+
+				"this machine; the shell's write outside was checked all the same", u.sources)
+		default:
+			t.Errorf("the execution warns that restrictToWorkspace is not enforced (%s), want it enforced", u.key)
+		}
+	}
 }
 
 // privateRepoEnv names the private repository, <owner>/<name>, that TestRealClaudeCodeSandboxReadsAPrivateRepository
 // reads.
 const privateRepoEnv = "HARMFLOW_TEST_PRIVATE_REPO"
 
+// gitConfigProbe is a shell command that prints the git configuration variables the shell sees, without their values:
+// the count and the keys as they are, and in place of each value or of GIT_CONFIG_PARAMETERS, "masked" when it holds
+// the sandbox's placeholder, "set" when it holds anything else, and nothing after its "=" when it is empty. It tells a
+// header variable the sandbox unset from one it masked, or one that moved to another index.
+const gitConfigProbe = `env | grep '^GIT_CONFIG_' | sort | ` +
+	`sed -E 's/^(GIT_CONFIG_(VALUE_[0-9]+|PARAMETERS))=.*fake_value_.*/\1 masked/; ` +
+	`s/^(GIT_CONFIG_(VALUE_[0-9]+|PARAMETERS))=.+/\1 set/'`
+
 // A workspace_write task on the real Claude Code, at 2.1.309 or later, with the sandbox on, asks the session to read a
 // private repository with gh and with git over HTTPS. The daemon passes the signed-in gh's token, masked, and the
 // sandbox's proxy puts it in place on GitHub's hosts: both commands succeed, gh naming the repository and git listing
 // its HEAD. The token is in no output of the execution, no event, and no file of the daemon's home; the test counts
-// it there and never prints it. It needs the variables of the real Claude Code and the real gh, and privateRepoEnv.
+// it there and never prints it. The session also runs gitConfigProbe, whose output the test logs, so that a failing
+// git call shows what the shell saw of its configuration. It needs the variables of the real Claude Code and the real
+// gh, and privateRepoEnv.
 func TestRealClaudeCodeSandboxReadsAPrivateRepository(t *testing.T) {
 	h := claudeForTheSandbox(t)
 	gh := realGh(t)
@@ -249,15 +275,24 @@ func TestRealClaudeCodeSandboxReadsAPrivateRepository(t *testing.T) {
 		t.Fatalf("gh auth token failed (%v): the test needs a signed-in gh", err)
 	}
 	w := newWriteTargets(t)
-	prompt := "Run these two shell commands with the Bash tool, one at a time, and nothing else:\n\n" +
+	prompt := "Run these three shell commands with the Bash tool, one at a time, exactly as written, and nothing else:\n\n" +
 		"1. gh api repos/" + repo + " --jq .full_name\n" +
-		"2. git ls-remote https://github.com/" + repo + ".git HEAD\n\n" +
+		"2. git ls-remote https://github.com/" + repo + ".git HEAD\n" +
+		"3. " + gitConfigProbe + "\n\n" +
 		"Then report, for each, its exit status and its output."
 	r := runWithPermissions(t, h, map[string]any{"profile": "workspace_write", "restrictToWorkspace": true}, w, prompt)
 
 	t.Logf("Claude Code %v", r.harness["version"])
+	basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
 	var api, remote bool
 	for _, c := range r.calls {
+		if c.tool == "Bash" && strings.Contains(c.command, "GIT_CONFIG_") {
+			if strings.Contains(c.output, token) || strings.Contains(c.output, basic) {
+				t.Error("the git configuration the shell sees holds the GitHub token unmasked; not logged")
+			} else {
+				t.Logf("the git configuration the shell sees, each value as masked, set, or empty:\n%s", c.output)
+			}
+		}
 		switch {
 		case c.tool != "Bash" || c.status != "succeeded":
 		case strings.Contains(c.command, "gh api") && strings.Contains(strings.ToLower(c.output), strings.ToLower(repo)):
