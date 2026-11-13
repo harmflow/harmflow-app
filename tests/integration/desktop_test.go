@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"syscall"
 	"testing"
 	"time"
@@ -338,5 +339,125 @@ func TestStoppingTheDaemonFromTheTrayAsksFirst(t *testing.T) {
 	}
 	if x := d.waitStatus(run, "completed", "failed", "cancelled", "interrupted"); x["status"] != "completed" {
 		t.Fatalf("the execution %s ended %v (%v), want completed", run, x["status"], x["errorMessage"])
+	}
+}
+
+// waitTrayMenu waits until the tray's menu macOS shows, read as tray-menu reads it, holds exactly the items want, for
+// at most the duration d.
+func (s *shell) waitTrayMenu(want []any, d time.Duration) {
+	s.t.Helper()
+	var got any
+	for deadline := time.Now().Add(d); time.Now().Before(deadline); time.Sleep(500 * time.Millisecond) {
+		if got = s.send("tray-menu")["items"]; reflect.DeepEqual(got, want) {
+			return
+		}
+	}
+	s.t.Fatalf("the tray's menu macOS shows = %v after %v, want %v", got, d, want)
+}
+
+// withDaemonItem is the menu items with the daemon item at index i replaced by item.
+func withDaemonItem(items []any, i int, item map[string]any) []any {
+	out := slices.Clone(items)
+	out[i] = item
+	return out
+}
+
+// harmflow-app#1024: the tray's daemon item follows the daemon's state, in the menu macOS shows, with the same shell
+// process throughout. While the daemon runs, the menu holds one daemon item, Stop daemon…, enabled. Once the daemon
+// stops, through its local API with nothing running, the item reads Start daemon, enabled, in the same place, the rest
+// of the menu as it was. Choosing Start daemon starts a daemon on the test's home with no alert on screen, and once it
+// answers GET /health the item reads Stop daemon… again. While that daemon is alive but stopped by SIGSTOP, so that the
+// shell's reads of its status time out with its pid alive, the item is disabled and reads Not answering, with neither
+// Stop daemon… nor Start daemon; once it is resumed by SIGCONT, Stop daemon… comes back. The test asks for no
+// Accessibility permission, and spends no usage: it runs no task.
+func TestTheTrayDaemonItemFollowsTheDaemonsState(t *testing.T) {
+	bin := realDesktop(t)
+	home := t.TempDir()
+	d := startDaemon(t, home)
+	// The texts the test expects are the shell's in en-US, whatever the system's language.
+	d.call("PATCH", "/settings", map[string]any{"language": "en-US"}, 200)
+
+	// The daemon the tray starts is no child of the test: the shell starts it in a process group of its own. This
+	// cleanup, registered before the shell's, runs once the shell has ended, and ends any daemon left on the home,
+	// resumed first, since a process stopped by SIGSTOP takes no SIGTERM.
+	t.Cleanup(func() {
+		left, _ := daemonsOn(home)
+		for _, pid := range left {
+			if pid == d.cmd.Process.Pid {
+				continue
+			}
+			_ = syscall.Kill(pid, syscall.SIGCONT)
+			stopDetachedDaemon(pid)
+		}
+	})
+	// The shell passes its environment to the daemon it starts, so it gets what startDaemon gives its own: the file
+	// token store and a Codex home of the test's, never the user's keychain or ~/.codex. The start runs the test's
+	// harmflowd on the test's home, which the user's login agent does not serve, so it never kickstarts that agent.
+	s := startShellWith(t, bin, d, []string{"HARMFLOW_TOKEN_STORE=file", "CODEX_HOME=" + filepath.Join(home, "codex")})
+	s.waitState(true, true)
+
+	stop := map[string]any{"id": "stop", "text": "Stop daemon…", "enabled": true}
+	start := map[string]any{"id": "start", "text": "Start daemon", "enabled": true}
+	notAnswering := map[string]any{"id": "not-answering", "text": "Not answering", "enabled": false}
+	// The shell reads the daemon's status as it starts, so the menu takes a moment to show the daemon running.
+	var running []any
+	at := -1
+	for deadline := time.Now().Add(30 * time.Second); at < 0 && time.Now().Before(deadline); time.Sleep(500 * time.Millisecond) {
+		running, _ = s.send("tray-menu")["items"].([]any)
+		at = slices.IndexFunc(running, func(item any) bool { return reflect.DeepEqual(item, stop) })
+	}
+	if at < 0 {
+		t.Fatalf("the tray's menu macOS shows = %v, want one item %v", running, stop)
+	}
+	for i, item := range running {
+		entry, _ := item.(map[string]any)
+		if id, _ := entry["id"].(string); i != at && (id == "stop" || id == "start" || id == "not-answering") {
+			t.Fatalf("the tray's menu macOS shows = %v, want one daemon item, %v at %d", running, stop, at)
+		}
+	}
+
+	// A stop with nothing running; the daemon removes its runtime file as it exits.
+	d.call("POST", "/daemon/stop", map[string]any{}, 202)
+	d.waitExit()
+	// The event stream's loss refreshes the tray at once; failing that, the status read every 10 seconds does.
+	s.waitTrayMenu(withDaemonItem(running, at, start), 30*time.Second)
+
+	before := s.systemAlerts()
+	s.send("choose-tray start")
+	started := &daemon{t: t, home: home}
+	if started.base, started.token = awaitRuntime(home, runtimeWait); started.base == "" {
+		t.Fatalf("no daemon wrote its runtime file on the test's home within %v of Start daemon; its log ends:\n%s",
+			runtimeWait, daemonLogTail(home))
+	}
+	health := started.call("GET", "/health", nil, 200)
+	pid := int(health["pid"].(float64))
+	watchDaemon(t, pid, true)
+	if pid == d.cmd.Process.Pid {
+		t.Fatalf("GET /health after Start daemon names pid %d, the daemon the test stopped", pid)
+	}
+	// The start waits for the daemon to answer before it rebuilds the menu, well within the 30 seconds.
+	s.waitTrayMenu(running, 30*time.Second)
+	if n := s.systemAlerts(); n > before {
+		t.Fatalf("%d windows of the system's alert process on screen after Start daemon, %d before it: the start asked", n,
+			before)
+	}
+	if !s.running() {
+		t.Fatal("the shell exited after Start daemon, want the process the test started")
+	}
+
+	if err := syscall.Kill(pid, syscall.SIGSTOP); err != nil {
+		t.Fatalf("SIGSTOP to the daemon %d: %v", pid, err)
+	}
+	// The status read every 10 seconds waits for its answer for the request's 30-second timeout, and the refresh it
+	// starts reads the status once more, as long: the item moves within about 70 seconds, and the margin covers a read
+	// already under way.
+	s.waitTrayMenu(withDaemonItem(running, at, notAnswering), 120*time.Second)
+	if err := syscall.Kill(pid, syscall.SIGCONT); err != nil {
+		t.Fatalf("SIGCONT to the daemon %d: %v", pid, err)
+	}
+	// The next status read answers, within 10 seconds and the one under way.
+	s.waitTrayMenu(running, 60*time.Second)
+	if !s.running() {
+		t.Fatal("the shell exited while the daemon did not answer, want the process the test started")
 	}
 }
