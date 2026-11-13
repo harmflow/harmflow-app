@@ -498,9 +498,9 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 		}
 		// Claude Code's sandbox confines the shell. The user's settings sources stay loaded, so the session keeps the
 		// agents, skills, and MCP servers a task cites; what they add to the sandbox is reported. A validation reads no
-		// token, since no session starts.
+		// token, since no session starts, and neither does a session denied the network, which reaches no GitHub host.
 		token := ""
-		if !req.PolicyCheck && a.GitHubToken != nil {
+		if !req.PolicyCheck && network && a.GitHubToken != nil {
 			token = a.GitHubToken()
 		}
 		args = append(args, "--settings", sandboxSettings(network, token != ""))
@@ -628,22 +628,26 @@ const (
 )
 
 // sandboxSettings are the --settings of a sandboxed session: the sandbox on, with no way for the model to run a
-// command outside it and no start without it, and its network open to every host, or to none when the task denies the
-// network. With a GitHub token, the variables withGitHubToken sets are masked: shell commands see only a placeholder,
-// which the sandbox's proxy replaces with the token on GitHub's hosts alone, and a pattern that finds nothing to mask
-// denies the variable rather than passing it through. GITHUB_TOKEN, which the daemon does not set, is hidden from
-// shell commands. The settings hold no token.
+// command outside it and no start without it, and a strict network allowlist: GitHub's hosts when the task allows the
+// network, no host when it denies it. The sandbox refuses a bare "*" in its allowlist, so no setting opens every host,
+// and a host outside the list is refused rather than asked for. With a GitHub token, the variables withGitHubToken sets
+// are masked: shell commands see only a placeholder, which the sandbox's proxy replaces with the token on GitHub's
+// hosts alone, and a pattern that finds nothing to mask denies the variable rather than passing it through. Each
+// injected host must be in the allowlist, so a token goes only with the network allowed. GITHUB_TOKEN, which the daemon
+// does not set, is hidden from shell commands. Each entry names its variable and its mode, the fields Claude Code's
+// settings schema requires: an entry it cannot read makes it skip the whole of --settings, the sandbox included. The
+// settings hold no token.
 func sandboxSettings(network, token bool) string {
-	net := map[string]any{"allowedDomains": []string{"*"}}
-	if !network {
-		net = map[string]any{"allowedDomains": []string{}, "strictAllowlist": true}
+	net := map[string]any{"allowedDomains": []string{}, "strictAllowlist": true}
+	if network {
+		net["allowedDomains"] = []string{githubGitHost, githubAPIHost}
 	}
-	envVars := []map[string]any{{"name": "GITHUB_TOKEN", "action": "deny"}}
-	if token {
+	envVars := []map[string]any{{"name": "GITHUB_TOKEN", "mode": "deny"}}
+	if token && network {
 		net["tlsTerminate"] = map[string]any{}
 		envVars = append(envVars,
-			map[string]any{"name": "GH_TOKEN", "action": "mask", "injectHosts": []string{githubAPIHost}},
-			map[string]any{"name": "GIT_CONFIG_VALUE_0", "action": "mask", "extract": `Basic (\S+)`,
+			map[string]any{"name": "GH_TOKEN", "mode": "mask", "injectHosts": []string{githubAPIHost}},
+			map[string]any{"name": "GIT_CONFIG_VALUE_0", "mode": "mask", "extract": `Basic (\S+)`,
 				"injectHosts": []string{githubGitHost}, "onExtractNoMatch": "deny"})
 	}
 	settings := map[string]any{"sandbox": map[string]any{

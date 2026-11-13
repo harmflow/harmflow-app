@@ -456,14 +456,16 @@ func TestPrepareTurnsOnTheSandboxUnderWorkspaceWrite(t *testing.T) {
 				t.Errorf("sandbox.filesystem = %v, want no write path beyond the working and added directories",
 					sandbox["filesystem"])
 			}
+			// The sandbox refuses a bare "*" in its allowlist: an allowed network is GitHub's hosts, a denied one none,
+			// and either list is strict, so a host outside it is refused rather than asked for.
 			network, _ := sandbox["network"].(map[string]any)
 			domains, _ := network["allowedDomains"].([]any)
+			want := []any{"github.com", "api.github.com"}
 			if c.networkDenied {
-				if network["strictAllowlist"] != true || len(domains) != 0 {
-					t.Errorf("sandbox.network = %v, want a strict allowlist of no host", network)
-				}
-			} else if network["strictAllowlist"] != nil || !reflect.DeepEqual(domains, []any{"*"}) {
-				t.Errorf("sandbox.network = %v, want every host allowed", network)
+				want = []any{}
+			}
+			if network["strictAllowlist"] != true || !reflect.DeepEqual(domains, want) {
+				t.Errorf("sandbox.network = %v, want a strict allowlist of %v", network, want)
 			}
 			if r, ok := restriction(inv.Restrictions, "restrictToWorkspace"); !ok || !r.Enforced {
 				t.Errorf("restrictToWorkspace = %+v (found %v), want enforced", r, ok)
@@ -599,7 +601,7 @@ func TestPrepareLeavesTheSandboxOffBelowItsMinimum(t *testing.T) {
 // user's credential helper and git configuration. --settings masks both, each on its own host, the header's through a
 // pattern that denies the variable when it finds nothing, and holds no token; no argument does, and no file Prepare
 // writes in the execution's folder. Without a token, the sandbox stays on with no masked variable and no new warning;
-// a validation, which starts no session, reads none.
+// a validation, which starts no session, reads none, and neither does a session denied the network.
 func TestPreparePassesTheGitHubTokenMasked(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 	const token = "ghs_FakeTokenForTheTest0123456789"
@@ -666,9 +668,9 @@ func TestPreparePassesTheGitHubTokenMasked(t *testing.T) {
 		masks[name] = entry
 	}
 	for name, want := range map[string]map[string]any{
-		"GH_TOKEN":     {"name": "GH_TOKEN", "action": "mask", "injectHosts": []any{"api.github.com"}},
-		"GITHUB_TOKEN": {"name": "GITHUB_TOKEN", "action": "deny"},
-		"GIT_CONFIG_VALUE_0": {"name": "GIT_CONFIG_VALUE_0", "action": "mask", "extract": `Basic (\S+)`,
+		"GH_TOKEN":     {"name": "GH_TOKEN", "mode": "mask", "injectHosts": []any{"api.github.com"}},
+		"GITHUB_TOKEN": {"name": "GITHUB_TOKEN", "mode": "deny"},
+		"GIT_CONFIG_VALUE_0": {"name": "GIT_CONFIG_VALUE_0", "mode": "mask", "extract": `Basic (\S+)`,
 			"injectHosts": []any{"github.com"}, "onExtractNoMatch": "deny"},
 	} {
 		if !reflect.DeepEqual(masks[name], want) {
@@ -710,6 +712,30 @@ func TestPreparePassesTheGitHubTokenMasked(t *testing.T) {
 	}
 	if reads != 0 {
 		t.Errorf("a validation read the token %d times, want none", reads)
+	}
+
+	// Nor does a session denied the network: its allowlist holds no GitHub host the token could be injected on, and a
+	// masked entry whose host the allowlist does not reach is a setting the sandbox refuses.
+	denied := perm
+	denied.Network = domain.NetworkDeny
+	offline, _, err := a.Prepare(sandboxedInfo, ports.RunRequest{WorkDir: t.TempDir(), Permissions: denied,
+		ExecutionDir: t.TempDir(), Env: []string{"PATH=/bin"}, Prompt: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reads != 0 {
+		t.Errorf("a session denied the network read the token %d times, want none", reads)
+	}
+	if !slices.Equal(offline.Env, []string{"PATH=/bin"}) {
+		t.Errorf("Prepare with the network denied env = %q, want the request's", offline.Env)
+	}
+	sandbox, _ = sandboxOf(t, offline.Args)
+	network, _ = sandbox["network"].(map[string]any)
+	credentials, _ = sandbox["credentials"].(map[string]any)
+	entries, _ = credentials["envVars"].([]any)
+	if want := []any{map[string]any{"name": "GITHUB_TOKEN", "mode": "deny"}}; !reflect.DeepEqual(entries, want) ||
+		network["tlsTerminate"] != nil {
+		t.Errorf("sandbox with the network denied = %v, want only GITHUB_TOKEN denied and no tlsTerminate", sandbox)
 	}
 }
 
