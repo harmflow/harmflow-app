@@ -124,14 +124,11 @@ func (r *Reader) git() string {
 	return found[0]
 }
 
-// env is Env with Git's optional locks off, so reading a repository never takes its index lock from a process the
-// attempt left running.
+// env is Env, or the daemon's own environment when Env is nil, without the CODEX_HOME that names a Codex installation
+// (ports.WithoutCodexHome), and with Git's optional locks off, so reading a repository never takes its index lock from
+// a process the attempt left running.
 func (r *Reader) env() []string {
-	base := r.Env
-	if base == nil {
-		base = os.Environ()
-	}
-	return append(append([]string{}, base...), "GIT_OPTIONAL_LOCKS=0")
+	return append(ports.WithoutCodexHome(r.Env), "GIT_OPTIONAL_LOCKS=0")
 }
 
 // createdFrom is the oldest commit dir's HEAD reflog holds, the commit a worktree or a clone started at; empty without

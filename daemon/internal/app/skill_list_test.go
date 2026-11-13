@@ -502,11 +502,13 @@ func TestClaudeCodeSkillsComeFromItsSkillList(t *testing.T) {
 	}
 }
 
-// An execution's session runs without the variables of a Claude Code session that started the daemon and without the
-// daemon's own HARMFLOW_* variables, as Claude Code's skill listing does, and with the execution's own identifiers.
+// An execution's session runs without the variables of a Claude Code session that started the daemon, without the
+// daemon's own HARMFLOW_* variables, as Claude Code's skill listing does, and without the daemon's CODEX_HOME, which
+// names a Codex installation (harmflow-app#1028), and with the execution's own identifiers.
 func TestExecutionRunsWithTheSessionEnvironment(t *testing.T) {
 	for _, kv := range [][2]string{{"CLAUDECODE", "1"}, {"CLAUDE_CODE_ENTRYPOINT", "cli"},
-		{"CLAUDE_CODE_SSE_PORT", "50123"}, {"HARMFLOW_EXECUTION_ID", "exec-of-the-daemon"}} {
+		{"CLAUDE_CODE_SSE_PORT", "50123"}, {"HARMFLOW_EXECUTION_ID", "exec-of-the-daemon"},
+		{"CODEX_HOME", t.TempDir()}} {
 		t.Setenv(kv[0], kv[1])
 	}
 	envLog := filepath.Join(t.TempDir(), "env.log")
@@ -519,7 +521,7 @@ func TestExecutionRunsWithTheSessionEnvironment(t *testing.T) {
 		t.Fatalf("os.ReadFile(%s) = %v, want the session's environment", envLog, err)
 	}
 	got := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
-	for _, k := range []string{"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SSE_PORT"} {
+	for _, k := range []string{"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SSE_PORT", "CODEX_HOME"} {
 		if slices.ContainsFunc(got, func(l string) bool { return strings.HasPrefix(l, k+"=") }) {
 			t.Errorf("the session ran with %s, want it left out", k)
 		}

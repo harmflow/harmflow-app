@@ -457,3 +457,29 @@ func TestRestartEndsWhatTheScriptLeft(t *testing.T) {
 		t.Errorf("warnings %v", x["warnings"])
 	}
 }
+
+// harmflow-app#1028: a daemon started with CODEX_HOME set lists that home as the Codex installation in use, whose
+// environment no other process receives, so a script task's program, which sets none of its own, starts without it.
+func TestScriptProgramStartsWithoutTheDaemonsCodexHome(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	codexHome := filepath.Join(home, "codex-b")
+	if err := os.MkdirAll(codexHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	d := startDaemon(t, home, "CODEX_HOME="+codexHome)
+	// env, by its absolute path, prints the whole environment it started with.
+	d.call("POST", "/tasks", map[string]any{"yaml": scriptTask("environment",
+		"  script:\n    command: [/usr/bin/env]\n")}, 201)
+	id := d.call("POST", "/tasks/environment/run", nil, 202)["executionId"].(string)
+	d.waitStatus(id, "completed")
+	lines := d.outputLines(id)
+	if len(lines) == 0 {
+		t.Fatalf("the program printed no environment")
+	}
+	for _, l := range lines {
+		if strings.HasPrefix(l, "stdout: CODEX_HOME=") {
+			t.Errorf("the program started with %q, want no CODEX_HOME", strings.TrimPrefix(l, "stdout: "))
+		}
+	}
+}

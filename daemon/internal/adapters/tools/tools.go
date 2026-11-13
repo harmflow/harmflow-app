@@ -13,7 +13,8 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
-// Prober is the ToolProber: it looks for git and gh on PathEnv, then in Dirs, and runs them with Env.
+// Prober is the ToolProber: it looks for git and gh on PathEnv, then in Dirs, and runs them with Env, or the daemon's
+// own environment when Env is nil, without the CODEX_HOME that names a Codex installation (ports.WithoutCodexHome).
 type Prober struct {
 	Home    string
 	PathEnv string
@@ -57,7 +58,7 @@ func (p *Prober) git(ctx context.Context) ports.ToolInfo {
 		t.SetDiagnostic(domain.T("git_not_found", "git was not found"))
 		return t
 	}
-	out, _, err := procutil.Output(ctx, 10*time.Second, p.Env, t.Path, "--version")
+	out, _, err := procutil.Output(ctx, 10*time.Second, ports.WithoutCodexHome(p.Env), t.Path, "--version")
 	if err != nil {
 		t.SetDiagnostic(commandFailed("git --version", err))
 		return t
@@ -76,7 +77,8 @@ func (p *Prober) gh(ctx context.Context) ports.ToolInfo {
 		t.SetDiagnostic(domain.T("gh_not_found", "the GitHub CLI (gh) was not found; the GitHub task type needs it"))
 		return t
 	}
-	out, _, err := procutil.Output(ctx, 10*time.Second, p.Env, t.Path, "--version")
+	env := ports.WithoutCodexHome(p.Env)
+	out, _, err := procutil.Output(ctx, 10*time.Second, env, t.Path, "--version")
 	if err != nil {
 		t.SetDiagnostic(commandFailed("gh --version", err))
 		return t
@@ -87,7 +89,7 @@ func (p *Prober) gh(ctx context.Context) ports.ToolInfo {
 	}
 	// Only a gh that says it is signed out reads invalid. Any other failure, a probe killed at its timeout included,
 	// leaves the sign-in unknown, as the harnesses' sign-in reads (harmflow-app#71).
-	stdout, stderr, err := procutil.Output(ctx, 15*time.Second, p.Env, t.Path, "auth", "status")
+	stdout, stderr, err := procutil.Output(ctx, 15*time.Second, env, t.Path, "auth", "status")
 	switch {
 	case err == nil:
 		t.Authentication = "valid"

@@ -1090,8 +1090,9 @@ Continue from the current state of the workspace. Reconcile before repeating any
 	return b.String()
 }
 
-// env is the environment of the harness process: the daemon's own, with a PATH that finds the user's tools, as
-// ports.SessionEnv gives it to every harness session, and HarmFlow's identifiers.
+// env is the environment of the harness process, and of a script task's program: the daemon's own, with a PATH that
+// finds the user's tools, as ports.SessionEnv gives it to every harness session — with no CODEX_HOME, which the Codex
+// adapter sets to its installation's home on its own attempts — and HarmFlow's identifiers.
 func (r *run) env() []string {
 	return append(ports.SessionEnv(r.a.d.HarnessEnv),
 		"HARMFLOW_EXECUTION_ID="+r.x.ID,

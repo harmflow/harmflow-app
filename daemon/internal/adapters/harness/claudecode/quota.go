@@ -28,7 +28,7 @@ func (a *Adapter) ReadQuota(ctx context.Context, info ports.HarnessInfo) (domain
 	if timeout == 0 {
 		timeout = defaultQuotaTimeout
 	}
-	out, _, err := procutil.Output(ctx, timeout, a.withToken(a.Env), info.Path, "-p", "/usage")
+	out, _, err := procutil.Output(ctx, timeout, a.withToken(a.env()), info.Path, "-p", "/usage")
 	if err != nil {
 		return domain.Quota{}, domain.TextErr("command_failed", "{{command}} failed: {{detail}}",
 			"command", `claude -p "/usage"`, "detail", err.Error())

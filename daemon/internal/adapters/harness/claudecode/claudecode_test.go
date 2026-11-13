@@ -1342,3 +1342,77 @@ func TestDetectSkipsAFileThatIsNotClaudeCode(t *testing.T) {
 		})
 	}
 }
+
+// codexHomeClaude is a stand-in Claude Code that appends each run's arguments and the CODEX_HOME it started with,
+// "unset" when none, to the file $ENVLOG, then answers its version, help, sign-in status, usage, and skill list as a
+// signed-in Claude Code does. Run with no arguments, as the sign-in runs it, it ends at once.
+const codexHomeClaude = `#!/bin/sh
+printf '%s|%s\n' "$*" "${CODEX_HOME-unset}" >> "$ENVLOG"
+case "$1" in
+  --version) echo "2.1.239 (Claude Code)" ;;
+  --help) echo "-p, --print  --output-format <format>  --permission-mode <mode>  --allowedTools <tools...>  --append-system-prompt <prompt>" ;;
+  auth) echo '{"loggedIn": true}' ;;
+  -p) if [ "$2" = /usage ]; then echo "Current session: 4% used"; else cat > /dev/null; echo '{"type":"system","subtype":"init","skills":[]}'; fi ;;
+esac
+`
+
+// harmflow-app#1028: the daemon's CODEX_HOME names a Codex installation, whose environment reaches no other process, so
+// each of Claude Code's checks — its version, help, sign-in status, usage, and skill list — and its sign-in start
+// without it, whether it comes in the adapter's environment or, with none, in the daemon's own.
+func TestChecksAndSignInStartWithoutCodexHome(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		fromEnv bool
+	}{{"the adapter's environment", false}, {"the daemon's own environment", true}} {
+		t.Run(c.name, func(t *testing.T) {
+			path := filepath.Join(tempDir(t), "claude")
+			if err := os.WriteFile(path, []byte(codexHomeClaude), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			envLog := filepath.Join(t.TempDir(), "env.log")
+			codexHome := t.TempDir()
+			t.Setenv("CODEX_HOME", codexHome)
+			a := &Adapter{Home: tempDir(t), signInStep: 5 * time.Second}
+			if c.fromEnv {
+				t.Setenv("ENVLOG", envLog)
+			} else {
+				a.Env = []string{"PATH=/usr/bin:/bin", "ENVLOG=" + envLog, "CODEX_HOME=" + codexHome}
+			}
+			ctx := t.Context()
+
+			if err := a.Identify(ctx, path); err != nil {
+				t.Fatalf("Identify(%s) error %v, want none", path, err)
+			}
+			info := a.Detect(ctx, path)
+			if info.Readiness != "ready" {
+				t.Fatalf("Detect(%s) readiness %s (%s), want ready", path, info.Readiness, info.Diagnostic)
+			}
+			if _, err := a.ReadQuota(ctx, info); err != nil {
+				t.Errorf("ReadQuota error %v, want none", err)
+			}
+			if _, _, err := a.UserItems(ctx, info, "skill", t.TempDir(), nil); err != nil {
+				t.Errorf("UserItems(skill) error %v, want none", err)
+			}
+			a.SignIn(ctx, info, filepath.Join(tempDir(t), "sign-in"))
+
+			data, err := os.ReadFile(envLog)
+			if err != nil {
+				t.Fatalf("os.ReadFile(%s) = %v, want the runs' environments", envLog, err)
+			}
+			ran := map[string]bool{}
+			for _, l := range strings.Split(strings.TrimSuffix(string(data), "\n"), "\n") {
+				args, home, _ := strings.Cut(l, "|")
+				ran[args] = true
+				if home != "unset" {
+					t.Errorf("claude %q ran with CODEX_HOME %q, want none", args, home)
+				}
+			}
+			for _, args := range []string{"--version", "--help", "auth status", "-p /usage",
+				"-p --output-format stream-json --verbose", ""} {
+				if !ran[args] {
+					t.Errorf("claude %q never ran, want it run once at least; runs %v", args, ran)
+				}
+			}
+		})
+	}
+}

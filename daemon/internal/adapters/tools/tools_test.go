@@ -5,6 +5,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
@@ -139,5 +140,47 @@ func TestProbeReportsAVersionThatFails(t *testing.T) {
 				"command_failed naming %q", c.tool.ID, c.tool.Detected, c.tool.Path, c.tool.Authentication,
 				c.tool.DiagnosticKey, c.tool.DiagnosticParams, c.path, c.command)
 		}
+	}
+}
+
+// harmflow-app#1028: the daemon's CODEX_HOME names a Codex installation, whose environment reaches no other process, so
+// git's and gh's probes start without it, whether it comes in the prober's environment or, with none, in the daemon's
+// own.
+func TestProbesRunWithoutCodexHome(t *testing.T) {
+	const record = `printf '%s|%s\n' "$0 $*" "${CODEX_HOME-unset}" >> "$ENVLOG"; `
+	for _, c := range []struct {
+		name    string
+		fromEnv bool
+	}{{"the prober's environment", false}, {"the daemon's own environment", true}} {
+		t.Run(c.name, func(t *testing.T) {
+			dir, envLog, codexHome := t.TempDir(), filepath.Join(t.TempDir(), "env.log"), t.TempDir()
+			standIn(t, dir, "git", record+gitVersion, "exit 1")
+			standIn(t, dir, "gh", record+ghVersion, record+ghSignedIn)
+			t.Setenv("CODEX_HOME", codexHome)
+			p := &Prober{PathEnv: dir, Dirs: []string{t.TempDir()}}
+			if c.fromEnv {
+				t.Setenv("ENVLOG", envLog)
+			} else {
+				p.Env = []string{"PATH=/usr/bin:/bin", "ENVLOG=" + envLog, "CODEX_HOME=" + codexHome}
+			}
+
+			tools := p.Probe(t.Context())
+			if len(tools) != 2 || !tools[0].Detected || !tools[1].Detected || tools[1].Authentication != "valid" {
+				t.Fatalf("Probe() = %+v, want git and gh detected, gh signed in", tools)
+			}
+			data, err := os.ReadFile(envLog)
+			if err != nil {
+				t.Fatalf("os.ReadFile(%s) = %v, want the probes' environments", envLog, err)
+			}
+			lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+			for _, l := range lines {
+				if probe, home, _ := strings.Cut(l, "|"); home != "unset" {
+					t.Errorf("%s ran with CODEX_HOME %q, want none", probe, home)
+				}
+			}
+			if len(lines) != 3 {
+				t.Errorf("the probes ran %q, want git --version, gh --version, and gh auth status", lines)
+			}
+		})
 	}
 }
