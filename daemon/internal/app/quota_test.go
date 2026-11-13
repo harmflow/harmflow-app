@@ -1,10 +1,12 @@
 package app
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/claudecode"
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
@@ -366,6 +368,56 @@ func TestQuotaShareNeverEndsARunningAttempt(t *testing.T) {
 	if len(x.Attempts) != 1 || x.Attempts[0].Harness != domain.HarnessCodex || e.claude.reads() != reads {
 		t.Errorf("attempts %+v, %d new reads; want Codex, held back on the reading the attempt reported", x.Attempts,
 			e.claude.reads()-reads)
+	}
+}
+
+// harmflow-app#977: a Claude Code session whose usage an admin disabled, replayed from the stream Claude Code 2.1.309
+// printed and read by the Claude Code adapter, is not retried and does not wait for its reset. With a fallback that
+// does not fail over on quota, the execution fails after that one attempt with the CLI's message; with no fallback, it
+// fails as having no alternative, the CLI's message as the detail. The rate limit's short wait and single retry make a
+// retry show as a second attempt and a harness.rate_limited event, not as a test waiting for the reset.
+func TestAdminDisabledUsageFailsAtOnce(t *testing.T) {
+	const message = "Your usage allocation has been disabled by your admin · run /usage-credits to ask your admin for a higher limit"
+	const rateLimit = "  execution:\n    rateLimit:\n      maxRetries: 1\n      initialWaitSeconds: 1\n      maxWaitSeconds: 1\n"
+	fixture, err := filepath.Abs(filepath.Join("..", "adapters", "harness", "claudecode", "testdata", "admin-disabled.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := "cat '" + strings.ReplaceAll(fixture, "'", `'\''`) + "'; exit 1"
+	cases := []struct {
+		name, extra string
+		key         string // the execution's error key; none for the CLI's own message
+	}{
+		{"failover off", "    fallback:\n      on: [harness_unavailable]\n      candidates:\n        - provider: codex\n" + rateLimit, ""},
+		{"no next harness", rateLimit, "no_alternative_harness_detail"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.claude.mu.Lock()
+			e.claude.parsedBy = &claudecode.Adapter{Home: t.TempDir(), PathEnv: t.TempDir(), KnownLocations: []string{}}
+			e.claude.mu.Unlock()
+			e.claude.setScript(func(ports.RunRequest) string { return script })
+			e.create("disabled", c.extra)
+			r, _ := e.app.RunTask("disabled")
+			x := e.wait(r.ExecutionID, domain.StatusFailed)
+			if len(x.Attempts) != 1 || x.Attempts[0].Harness != domain.HarnessClaudeCode ||
+				x.Attempts[0].Outcome != domain.AttemptQuotaExhausted || x.HarnessSwitches != 0 {
+				t.Fatalf("attempts %+v, %d switches; want one quota-exhausted Claude Code attempt and no switch", x.Attempts,
+					x.HarnessSwitches)
+			}
+			if x.ErrorKey != c.key || !strings.Contains(x.ErrorMessage, message) {
+				t.Errorf("the execution's error is %q (%q), want %q with the CLI's message", x.ErrorMessage, x.ErrorKey, c.key)
+			}
+			if n := e.codex.promptCount(); n != 0 {
+				t.Errorf("Codex got %d prompts, want 0", n)
+			}
+			counts, _ := e.eventCounts(r.ExecutionID)
+			if counts[domain.EventHarnessRateLimited] != 0 || counts[domain.EventHarnessSwitched] != 0 {
+				t.Errorf("%d %s and %d %s events, want none", counts[domain.EventHarnessRateLimited],
+					domain.EventHarnessRateLimited, counts[domain.EventHarnessSwitched], domain.EventHarnessSwitched)
+			}
+		})
 	}
 }
 

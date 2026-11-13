@@ -116,6 +116,21 @@ type fakeHarness struct {
 	quotaHomes []string
 	// runs are the installation and the request each attempt was prepared with, in order.
 	runs []preparedRun
+	// parsedBy, when set, is the adapter whose parser reads each attempt's output in place of the fake's own, so that a
+	// script replaying what a real CLI printed ends as that CLI's adapter classifies it.
+	parsedBy ports.HarnessAdapter
+}
+
+// replayed reads an attempt's output with another adapter's parser, and still tells the fake's parser when the attempt
+// finished, so the attempt stops counting as live.
+type replayed struct {
+	ports.OutputParser
+	fake *fakeParser
+}
+
+func (r replayed) Finish(exit int, stderrTail string, timedOut, cancelled bool) domain.AttemptEnd {
+	r.fake.Finish(exit, stderrTail, timedOut, cancelled)
+	return r.OutputParser.Finish(exit, stderrTail, timedOut, cancelled)
 }
 
 // preparedRun is what an attempt was prepared with: the installation detection gave it and the request.
@@ -240,6 +255,14 @@ func (f *fakeHarness) UserItems(_ context.Context, info ports.HarnessInfo, kind,
 }
 func (f *fakeHarness) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.Invocation, ports.OutputParser, error) {
 	f.mu.Lock()
+	var real ports.OutputParser
+	if f.parsedBy != nil {
+		var err error
+		if _, real, err = f.parsedBy.Prepare(info, req); err != nil {
+			f.mu.Unlock()
+			return ports.Invocation{}, nil, err
+		}
+	}
 	parser := &fakeParser{}
 	path := "/bin/sh"
 	if f.missing != "" {
@@ -265,8 +288,12 @@ func (f *fakeHarness) Prepare(info ports.HarnessInfo, req ports.RunRequest) (por
 	}
 	restrictions := slices.Clone(f.restrictions)
 	f.mu.Unlock()
+	var out ports.OutputParser = parser
+	if real != nil {
+		out = replayed{OutputParser: real, fake: parser}
+	}
 	return ports.Invocation{Path: path, Args: []string{"-c", script}, Env: req.Env, Dir: req.WorkDir,
-		Restrictions: restrictions}, parser, nil
+		Restrictions: restrictions}, out, nil
 }
 
 func (f *fakeHarness) setScript(s func(ports.RunRequest) string) {
