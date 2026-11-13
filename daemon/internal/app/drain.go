@@ -82,10 +82,32 @@ func (a *App) watchDrain(deadline time.Duration) {
 	}
 }
 
+// FiringState is whether the daemon still starts executions and the draining stop under way, read together, as the
+// local API's health shows them: a drain never comes with firings still accepted.
+type FiringState struct {
+	Accepting bool
+	Drain     DrainView
+	Draining  bool
+}
+
 // Draining reports the draining stop under way, and whether one is.
 func (a *App) Draining() (DrainView, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	return a.drainingLocked()
+}
+
+// FiringState reports whether the daemon still starts executions and the draining stop under way, from one hold of mu,
+// so that a drain that begins meanwhile shows in both or in neither.
+func (a *App) FiringState() FiringState {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	drain, draining := a.drainingLocked()
+	return FiringState{Accepting: a.acceptingLocked(), Drain: drain, Draining: draining}
+}
+
+// drainingLocked reports the draining stop under way, and whether one is. The caller holds mu.
+func (a *App) drainingLocked() (DrainView, bool) {
 	if a.drain == nil || a.stopping {
 		return DrainView{}, false
 	}
