@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -405,6 +406,17 @@ func sandboxOf(t *testing.T, args []string) (sandbox map[string]any, ok bool) {
 	return settings.Sandbox, true
 }
 
+// envValue is the value env gives name as a process started with it reads it: the last one; ok is false when it gives
+// none.
+func envValue(env []string, name string) (value string, ok bool) {
+	for _, kv := range env {
+		if v, found := strings.CutPrefix(kv, name+"="); found {
+			value, ok = v, true
+		}
+	}
+	return value, ok
+}
+
 // sandboxedInfo is a Claude Code at the sandbox's minimum version.
 var sandboxedInfo = ports.HarnessInfo{Path: "/bin/claude", Version: SandboxMinVersion, Features: map[string]bool{}}
 
@@ -600,7 +612,8 @@ func TestPrepareLeavesTheSandboxOffBelowItsMinimum(t *testing.T) {
 // alone: in GH_TOKEN for gh, and in a Basic authorization header on github.com for git over HTTPS, which replaces the
 // user's credential helper and git configuration. --settings masks both, each on its own host, the header's through a
 // pattern that denies the variable when it finds nothing, and holds no token; no argument does, and no file Prepare
-// writes in the execution's folder. Without a token, the sandbox stays on with no masked variable and no new warning;
+// writes in the execution's folder. The header follows the git configuration entries the environment already counts.
+// Without a token, the sandbox stays on with no masked variable and no new warning;
 // a validation, which starts no session, reads none, and neither does a session denied the network.
 func TestPreparePassesTheGitHubTokenMasked(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
@@ -679,6 +692,35 @@ func TestPreparePassesTheGitHubTokenMasked(t *testing.T) {
 	}
 	if r, _ := restriction(inv.Restrictions, "restrictToWorkspace"); !r.Enforced {
 		t.Errorf("restrictToWorkspace = %+v, want enforced", r)
+	}
+	if header, ok := envValue(inv.Env, "GIT_CONFIG_VALUE_0"); !ok || !regexp.MustCompile(`Basic (\S+)`).MatchString(header) {
+		t.Errorf("GIT_CONFIG_VALUE_0 (found %v) does not match the pattern its mask extracts with", ok)
+	}
+
+	// Git configuration entries the environment already counts stay as they are: the header and the credential helper
+	// follow them, and the mask names the header's variable at its index.
+	inherited, _, err := a.Prepare(sandboxedInfo, ports.RunRequest{WorkDir: t.TempDir(), Permissions: perm,
+		ExecutionDir: t.TempDir(), Env: []string{"PATH=/bin", "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=safe.directory",
+			"GIT_CONFIG_VALUE_0=/srv/repo"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"GIT_CONFIG_COUNT": "3", "GIT_CONFIG_KEY_0": "safe.directory",
+		"GIT_CONFIG_VALUE_0": "/srv/repo", "GIT_CONFIG_KEY_1": "http.https://github.com/.extraHeader",
+		"GIT_CONFIG_VALUE_1": "Authorization: Basic " + basic, "GIT_CONFIG_KEY_2": "credential.helper",
+		"GIT_CONFIG_VALUE_2": ""} {
+		if got, _ := envValue(inherited.Env, name); got != want {
+			t.Errorf("with an inherited entry, %s is not the one expected", name)
+		}
+	}
+	sandbox, _ = sandboxOf(t, inherited.Args)
+	credentials, _ = sandbox["credentials"].(map[string]any)
+	entries, _ = credentials["envVars"].([]any)
+	if !slices.ContainsFunc(entries, func(e any) bool {
+		entry, _ := e.(map[string]any)
+		return entry["name"] == "GIT_CONFIG_VALUE_1" && entry["extract"] == `Basic (\S+)`
+	}) {
+		t.Errorf("with an inherited entry, sandbox.credentials = %v, want GIT_CONFIG_VALUE_1 masked", credentials)
 	}
 
 	// Without a token: the sandbox stays on, with nothing masked and the same restrictions.
