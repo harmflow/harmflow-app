@@ -1464,6 +1464,29 @@ describe("task form installation", () => {
     expect(skills()).toStrictEqual(["hf-github-draft-pr", "review-notes", "triage"]);
   });
 
+  // harmflow-app#1030: a fallback candidate offers the installations of the harness it chose, as the preferred profile
+  // does, and its Model and Effort lists follow its own choice.
+  it("offers a Codex fallback candidate its installations, and its Model and Effort lists follow its choice", async () => {
+    const candidates = () => ((current.spec as Doc).harness as { fallback: { candidates: Doc[] } }).fallback.candidates;
+    await openForm(withProfiles({ provider: "claude-code" }, { provider: "codex" }));
+    expect(installation(0)).toBeUndefined();
+    expect(options(installation(1))).toStrictEqual(["", "~/.codex", "~/.codex-b"]);
+    expect(installation(1)!.options[0]!.textContent).toBe("In use (~/.codex-b)");
+    expect(models(1)).toStrictEqual(["default", "model-b"]);
+    expect(efforts(1)).toStrictEqual(["", "default", "high"]);
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(installation(1), "~/.codex");
+      installation(1)!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await settle();
+    expect(models(1)).toStrictEqual(["default", "model-a"]);
+    expect(efforts(1)).toStrictEqual(["", "default", "low"]);
+    expect(candidates()).toStrictEqual([{ provider: "codex", installation: "~/.codex" }]);
+    expect(preferred()).toStrictEqual({ provider: "claude-code" });
+    expect(installation(0)).toBeUndefined();
+  });
+
   it("keeps an installation this machine lacks, saying so, and drops it when the harness changes", async () => {
     await openForm(withProfiles({ provider: "codex", installation: "~/.gone" }));
     expect(options(installation(0))).toStrictEqual(["", "~/.codex", "~/.codex-b", "~/.gone"]);
