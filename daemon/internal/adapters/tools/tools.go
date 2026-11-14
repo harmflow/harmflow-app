@@ -4,6 +4,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"regexp"
 	"strings"
 	"time"
@@ -23,7 +24,10 @@ type Prober struct {
 	Dirs []string
 }
 
-var _ ports.ToolProber = (*Prober)(nil)
+var (
+	_ ports.ToolProber            = (*Prober)(nil)
+	_ ports.GitHubRateLimitReader = (*Prober)(nil)
+)
 
 // usualDirs are the folders searched after PathEnv when Prober.Dirs is nil.
 var usualDirs = []string{"/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"}
@@ -101,6 +105,46 @@ func (p *Prober) gh(ctx context.Context) ports.ToolInfo {
 		t.SetDiagnostic(domain.T("authentication_unverified", "authentication could not be verified"))
 	}
 	return t
+}
+
+// RateLimit implements ports.GitHubRateLimitReader: it runs `gh api rate_limit`, with the gh Probe finds and the same
+// environment, and reads REST from resources.core and GraphQL from resources.graphql, never the older rate field, which
+// GitHub keeps only for older clients. GitHub counts no request to that endpoint against the limit, and HarmFlow keeps
+// no count of its own. With gh missing, signed out, or failing, or an answer it cannot read, both buckets are left out.
+func (p *Prober) RateLimit(ctx context.Context) ports.GitHubRateLimit {
+	path := p.find("gh")
+	if path == "" {
+		return ports.GitHubRateLimit{}
+	}
+	out, _, err := procutil.Output(ctx, 10*time.Second, ports.WithoutCodexHome(p.Env), path, "api", "rate_limit")
+	if err != nil {
+		return ports.GitHubRateLimit{}
+	}
+	var answer struct {
+		Resources struct {
+			Core    *rateBucket `json:"core"`
+			GraphQL *rateBucket `json:"graphql"`
+		} `json:"resources"`
+	}
+	if err := json.Unmarshal([]byte(out), &answer); err != nil {
+		return ports.GitHubRateLimit{}
+	}
+	return ports.GitHubRateLimit{REST: answer.Resources.Core.bucket(), GraphQL: answer.Resources.GraphQL.bucket()}
+}
+
+// rateBucket is one bucket of the answer of `gh api rate_limit`, in GitHub's names; Reset is in Unix seconds.
+type rateBucket struct {
+	Limit int64 `json:"limit"`
+	Used  int64 `json:"used"`
+	Reset int64 `json:"reset"`
+}
+
+// bucket is b as the local API serves it; nil when the answer has no such bucket, or one with no limit.
+func (b *rateBucket) bucket() *ports.RateLimitBucket {
+	if b == nil || b.Limit <= 0 {
+		return nil
+	}
+	return &ports.RateLimitBucket{Limit: b.Limit, Used: b.Used, ResetAt: time.Unix(b.Reset, 0).UTC()}
 }
 
 // commandFailed says a check could not run; the command's own error is quoted as it is.
