@@ -709,6 +709,11 @@ func TestScriptStopEndsItsProcesses(t *testing.T) {
 // its own pid before it execs sleep: the test waits for both pids before it cancels or lets the timeout elapse, so a
 // SIGTERM that came before a trap was in place cannot end either process early and leave the grace unused.
 func TestScriptStopEndsAProgramIgnoringSIGTERM(t *testing.T) {
+	// The execution ends only once the grace is over, and the timed-out one once its timeout has elapsed too, so the
+	// wait is those and the margin TestScriptExitKeepsItsResultThroughACancel measured for the kill and the end under
+	// load.
+	const grace, timeout = time.Second, 3 * time.Second
+	const killAndEnd = 30 * time.Second
 	e := newEnv(t)
 	dir := t.TempDir()
 	body := fmt.Sprintf(`  script:
@@ -750,19 +755,19 @@ func TestScriptStopEndsAProgramIgnoringSIGTERM(t *testing.T) {
 	if err := e.app.CancelExecution(res.ExecutionID); err != nil {
 		t.Fatal(err)
 	}
-	x := e.wait(res.ExecutionID, domain.StatusCancelled)
+	x := e.waitWithin(grace+killAndEnd, res.ExecutionID, domain.StatusCancelled)
 	e.idle("cancel")
 	ended("cancelled", x, domain.AttemptCancelled, program, child)
 
 	// Set before the run starts, on this App alone: long enough on a loaded host for the program to set its trap and
 	// start its child first.
-	e.app.d.TimeoutUnit = 3 * time.Second
+	e.app.d.TimeoutUnit = timeout
 	_ = os.Remove(filepath.Join(dir, "program"))
 	_ = os.Remove(filepath.Join(dir, "child"))
 	e.createScript("slow", strings.Replace(body, "cancelGraceSeconds: 1", "cancelGraceSeconds: 1\n    timeoutMinutes: 1", 1))
 	res, _ = e.app.RunTask("slow")
 	program, child = pids()
-	x = e.wait(res.ExecutionID, domain.StatusFailed)
+	x = e.waitWithin(timeout+grace+killAndEnd, res.ExecutionID, domain.StatusFailed)
 	e.idle("slow")
 	if x.ErrorKey != "execution_timed_out" {
 		t.Errorf("timed out: error key = %q, want execution_timed_out", x.ErrorKey)
