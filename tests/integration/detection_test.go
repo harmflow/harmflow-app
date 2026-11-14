@@ -163,6 +163,44 @@ func TestDetectionOnlyProbes(t *testing.T) {
 	}
 }
 
+// harmflow-app#1050: the Codex half of TestDetectionOnlyProbes for a Codex that says it is signed out. The stand-in is
+// the signed-out Codex of the sign-in tests, behind a wrapper that records each invocation, and its --help names no app
+// server. Detecting it and running a task on it invokes only the probes and the sign-in the daemon starts,
+// `codex login` with no other argument, which nobody approves and which ends at the one-second timeout: no installer,
+// no updater, no device-code sign-in, and no sign-in with an API key. The execution fails without starting, and Codex
+// reads not ready.
+func TestDetectionOnlySignedOutCodexProbesAndSignIn(t *testing.T) {
+	t.Parallel()
+	codex, codexHome := newCodexSignInStandIn(t)
+	wrapper := wrap(t, codex.path)
+	d := startDaemon(t, t.TempDir(), append([]string{"CODEX_HOME=" + codexHome, "HARMFLOW_SIGN_IN_TIMEOUT=1s"},
+		noCredentialEnv()...)...)
+	d.setHarness("codex", wrapper.path)
+	// The sign-in starts in the background; once it has ended, none starts again by itself.
+	d.waitHarness("codex", 60*time.Second, func(h map[string]any) bool {
+		return h["diagnosticKey"] == "harness_sign_in_not_completed"
+	})
+
+	x := d.runOn("signedoutcodex", "codex")
+	neverStarted(t, x, "Codex")
+	for _, e := range d.call("GET", "/executions/"+x["id"].(string)+"/events", nil, 200)["events"].([]any) {
+		if e := e.(map[string]any); e["type"] == "execution.started" {
+			t.Errorf("the execution on the signed-out Codex logged %v, want it never started", e)
+		}
+	}
+	if h := d.harness("codex"); h["readiness"] != "not_ready" || h["authentication"] != "invalid" {
+		t.Errorf("GET /harnesses: codex is %v, authentication %v, diagnostic %v; want not_ready, invalid", h["readiness"],
+			h["authentication"], h["diagnosticKey"])
+	}
+	// A late invocation is in the log once the daemon has stopped.
+	d.stop()
+	allowed := append(slices.Clone(codexProbes), codexSignIn)
+	if counts := wrapper.only(t, allowed...); counts[codexSignIn] == 0 || counts["--version"] == 0 {
+		t.Errorf("%s invocations = %v, want the probes and the sign-in %q at least once", wrapper.path, counts,
+			codexSignIn)
+	}
+}
+
 // harmflow-app#68: with ready harnesses, the daemon invokes each one for its probes and its runs, and for nothing else.
 func TestReadyHarnessesOnlyProbeAndRun(t *testing.T) {
 	t.Parallel()
