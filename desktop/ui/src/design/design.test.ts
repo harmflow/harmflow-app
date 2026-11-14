@@ -531,3 +531,56 @@ describe("bundled fonts", () => {
     }
   });
 });
+
+const iconSources = join(ui, "..", "src-tauri", "icons", "source");
+
+/** The brand's images whose letters are outlines: no font, bundled or the system's, may set them. */
+const wordmarks = ["wordmark.svg", "wordmark-one-color.svg", "lockup.svg"];
+
+/**
+ * What in an SVG would set its letters in a font: a text or tspan element, a font-family, a font shorthand in a style
+ * attribute or a style block, or an @font-face rule. Each is found by its line.
+ */
+function fontReferences(file: string, svg: string): Literal[] {
+  return [...svg.matchAll(/<text|<tspan|font-family|(?<![\w-])font\s*:|@font-face/gi)].map((m) => ({
+    file,
+    line: lineAt(svg, m.index),
+    value: m[0],
+  }));
+}
+
+describe("the wordmark and the lockup", () => {
+  it("finds live text or a font in an SVG, and lets outlined paths through", () => {
+    const svg = [
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 32">',
+      '  <text x="0" y="24">HarmFlow</text>',
+      '  <g font-family="Inter"><TSPAN>Flow</TSPAN></g>',
+      '  <style>@font-face { font-family: "Inter"; } .name { font: 600 12px Inter; }</style>',
+      '  <path style="font:12px sans-serif" d="M0 0h4v4H0z" />',
+      "</svg>",
+    ].join("\n");
+    expect(fontReferences("sample.svg", svg).map(describeLiteral)).toEqual([
+      "sample.svg:2: <text",
+      "sample.svg:3: font-family",
+      "sample.svg:3: <TSPAN",
+      "sample.svg:4: @font-face",
+      "sample.svg:4: font-family",
+      "sample.svg:4: font:",
+      "sample.svg:5: font:",
+    ]);
+
+    const outlined = [
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 32">',
+      '  <path fill="#22d3ee" d="M4 4h6v24H4zM14 4h6v24h-6z" />',
+      '  <g id="letters"><path d="M24 4c6 0 10 4 10 12s-4 12-10 12z" /></g>',
+      "</svg>",
+    ].join("\n");
+    expect(fontReferences("outlined.svg", outlined)).toEqual([]);
+  });
+
+  it.each(wordmarks)("draws %s in outlines, which no typeface choice can change", (file) => {
+    const path = join(iconSources, file);
+    expect(existsSync(path), path).toBe(true);
+    expect(fontReferences(file, readFileSync(path, "utf8")).map(describeLiteral), file).toEqual([]);
+  });
+});
