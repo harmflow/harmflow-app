@@ -151,6 +151,7 @@ export const enUS = {
     manual: "Manual",
     schedule: "Scheduled",
     catch_up: "Catch-up",
+    run_again: "Run again",
   },
   attemptOutcome: {
     running: "Running",
@@ -202,6 +203,7 @@ export const enUS = {
       cancelled: "Execution cancelled",
       interrupted: "Execution interrupted",
       needs_attention: "Needs human attention",
+      run_again_limit_reached: "Run-again limit reached",
     },
     harness: {
       started: "AI tool started",
@@ -477,6 +479,10 @@ export const enUS = {
     firing_skipped: "the task was running; this firing was skipped, per its overlap policy",
     firings_missed_catch_up_one: "{{count}} firing was missed; a catch-up execution runs for it",
     firings_missed_catch_up_other: "{{count}} firings were missed; one catch-up execution runs for all of them",
+    run_again_limit_reached_one:
+      "the task ran again {{count}} time in a row, its run-again limit; it now waits for its schedule",
+    run_again_limit_reached_other:
+      "the task ran again {{count}} times in a row, its run-again limit; it now waits for its schedule",
     firings_missed_skipped_one: "{{count}} firing was missed and skipped, per the task's missed-run policy",
     firings_missed_skipped_other: "{{count}} firings were missed and skipped, per the task's missed-run policy",
     cancel_requested: "cancellation requested",

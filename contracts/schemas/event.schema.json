@@ -70,6 +70,7 @@
         "execution.cancelled",
         "execution.interrupted",
         "execution.needs_attention",
+        "execution.run_again_limit_reached",
         "harness.started",
         "harness.message",
         "harness.output",

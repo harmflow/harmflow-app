@@ -152,6 +152,7 @@ export const ptBR: Resources = {
     manual: "Manual",
     schedule: "Agendada",
     catch_up: "Recuperação",
+    run_again: "Execução seguida",
   },
   attemptOutcome: {
     running: "Executando",
@@ -203,6 +204,7 @@ export const ptBR: Resources = {
       cancelled: "Execução cancelada",
       interrupted: "Execução interrompida",
       needs_attention: "Requer atenção humana",
+      run_again_limit_reached: "Limite de execuções seguidas atingido",
     },
     harness: {
       started: "Ferramenta de IA iniciada",
@@ -486,6 +488,10 @@ export const ptBR: Resources = {
     firing_skipped: "a tarefa estava em execução; este disparo foi ignorado, conforme a política de sobreposição",
     firings_missed_catch_up_one: "{{count}} disparo foi perdido; uma execução de recuperação roda por ele",
     firings_missed_catch_up_other: "{{count}} disparos foram perdidos; uma execução de recuperação roda por todos eles",
+    run_again_limit_reached_one:
+      "a tarefa rodou de novo {{count}} vez seguida, seu limite de execuções seguidas; agora aguarda seu agendamento",
+    run_again_limit_reached_other:
+      "a tarefa rodou de novo {{count}} vezes seguidas, seu limite de execuções seguidas; agora aguarda seu agendamento",
     firings_missed_skipped_one:
       "{{count}} disparo foi perdido e ignorado, conforme a política de execuções perdidas da tarefa",
     firings_missed_skipped_other:

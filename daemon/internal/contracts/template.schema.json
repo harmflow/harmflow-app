@@ -64,6 +64,7 @@
         "workspace": { "$ref": "task.schema.json#/$defs/workspace" },
         "schedule": { "$ref": "task.schema.json#/$defs/schedule" },
         "concurrency": { "$ref": "task.schema.json#/$defs/concurrency" },
+        "completion": { "$ref": "task.schema.json#/$defs/completion" },
         "harness": { "$ref": "#/$defs/harness" },
         "permissions": { "$ref": "task.schema.json#/$defs/permissions" },
         "execution": { "$ref": "task.schema.json#/$defs/execution" },
@@ -84,6 +85,7 @@
               "parameters": false,
               "workspace": false,
               "harness": false,
+              "completion": false,
               "github": false,
               "execution": { "properties": { "allowExtraUsage": false } }
             }

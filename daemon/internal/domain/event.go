@@ -30,6 +30,7 @@ const (
 	EventExecutionCancelled      = "execution.cancelled"
 	EventExecutionInterrupted    = "execution.interrupted"
 	EventExecutionNeedsAttention = "execution.needs_attention"
+	EventRunAgainLimitReached    = "execution.run_again_limit_reached"
 	EventHarnessStarted          = "harness.started"
 	EventHarnessMessage          = "harness.message"
 	EventHarnessOutput           = "harness.output"

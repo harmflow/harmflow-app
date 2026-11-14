@@ -61,6 +61,10 @@ func (a *App) notifyFor(e domain.Event, started *domain.TaskDocument) {
 		a.notifySignIn(e)
 		return
 	}
+	if e.Type == domain.EventRunAgainLimitReached {
+		a.notifyRunAgainLimit(e)
+		return
+	}
 	kind := notifiable(e)
 	if kind == "" || e.TaskID == "" {
 		return
@@ -166,6 +170,33 @@ func (a *App) notifySignIn(e domain.Event) {
 	a.keepNotice(n)
 }
 
+// notifyRunAgainLimit creates the notice that a task reached its run-again limit, whatever events the task chose to
+// notify: the user learns that its runs again stopped. The global level still applies, and the notice passes "failures
+// and attention only", since it asks the user to look.
+func (a *App) notifyRunAgainLimit(e domain.Event) {
+	a.mu.Lock()
+	level := a.settings.NotificationLevel
+	t := a.tasks[e.TaskID]
+	var name string
+	if t != nil {
+		name = t.doc.Metadata.Name
+	}
+	a.mu.Unlock()
+	if level == "none" || t == nil {
+		return
+	}
+	n := Notification{ID: newNoticeID(), CreatedAt: a.now(), EventType: e.Type, TaskID: e.TaskID,
+		ExecutionID: e.ExecutionID, Severity: "warning", Params: map[string]string{"taskName": name}}
+	if e.ExecutionID != "" {
+		n.Params["executionId"] = e.ExecutionID
+	}
+	if count := e.Params["count"]; count != "" {
+		n.Params["count"] = count // the limit, as the event's text counts it
+	}
+	n.Title, n.Body = englishNotice(e.Type, name, n.Params)
+	a.keepNotice(n)
+}
+
 // keepNotice records a notice, newest first, and announces it. The notices are saved off the caller's path, so an
 // execution that ended leaves the running set without waiting for that save; what the API lists and publishes is the
 // notices in memory, at once. Once Stop waits for those saves, an execution that outlived its wait saves in place: the
@@ -238,6 +269,8 @@ func englishNotice(kind, task string, p map[string]string) (string, string) {
 		return "Harness unavailable", task + ": " + p["reason"]
 	case domain.EventHarnessNoAlternative:
 		return "No harness available", task + ": " + p["reason"]
+	case domain.EventRunAgainLimitReached:
+		return "Run-again limit reached", task + " ran again " + p["count"] + " times in a row and now waits for its schedule."
 	case domain.EventHarnessSignInStarted:
 		return "Sign in to " + p["harnessName"], p["harnessName"] + " is signed out. Approve the sign-in HarmFlow opened in your browser."
 	case domain.EventHarnessSignInCompleted:
