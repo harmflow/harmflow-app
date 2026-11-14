@@ -99,6 +99,9 @@ type Deps struct {
 	Service    ports.HostServiceManager
 	System     ports.SystemInfo
 	Tools      ports.ToolProber
+	// GitHub reads GitHub's count of the gh login's hourly limits, for the sidebar's GitHub gauges; without one, both are
+	// left out.
+	GitHub ports.GitHubRateLimitReader
 	// Workspace reads the files an attempt changed in its workspace, for the checkpoint before a switch; without one, the
 	// checkpoint is not taken.
 	Workspace ports.WorkspaceReader

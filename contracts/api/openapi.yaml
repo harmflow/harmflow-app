@@ -129,6 +129,23 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/SystemGauges" }
 
+  /github/rate-limit:
+    get:
+      tags: [daemon]
+      operationId: getGitHubRateLimit
+      summary: GitHub's count of the gh login's hourly limits
+      description: >-
+        Read from `gh api rate_limit`, which GitHub counts against no limit: REST from its resources.core and GraphQL
+        from its resources.graphql, never its older rate field. HarmFlow keeps no count of its own requests.
+      responses:
+        "200":
+          description: >-
+            Each bucket GitHub reported; one that cannot be read is left out, and both are when gh is missing, signed
+            out, or fails.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GitHubRateLimit" }
+
   /harnesses:
     get:
       tags: [harnesses]
@@ -1337,6 +1354,24 @@ components:
         diskUsedBytes: { type: integer }
         diskTotalBytes: { type: integer }
         harmflowDirBytes: { type: integer }
+
+    GitHubRateLimit:
+      description: >-
+        GitHub's own count of the signed-in gh login's hourly limits, for the sidebar's GitHub gauges: every request made
+        with that login spends them, in HarmFlow or outside it. A bucket that cannot be read is left out.
+      type: object
+      properties:
+        rest: { $ref: "#/components/schemas/RateLimitBucket" }
+        graphql: { $ref: "#/components/schemas/RateLimitBucket" }
+
+    RateLimitBucket:
+      description: One of GitHub's rate-limit buckets, as GitHub reports it.
+      type: object
+      required: [limit, used, resetAt]
+      properties:
+        limit: { type: integer, description: The limit GitHub reports for the bucket. }
+        used: { type: integer, description: What the current window used of it. }
+        resetAt: { type: string, format: date-time, description: When the window resets. }
 
     ReadinessState:
       description: checking while a harness's first check runs; a later check keeps the previous state.

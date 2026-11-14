@@ -244,6 +244,15 @@ func (a *App) Tools(ctx context.Context) []ports.ToolInfo {
 	return a.d.Tools.Probe(ctx)
 }
 
+// GitHubRateLimit is GitHub's own count of the gh login's hourly limits, REST and GraphQL; with no reader, both are
+// left out.
+func (a *App) GitHubRateLimit(ctx context.Context) ports.GitHubRateLimit {
+	if a.d.GitHub == nil {
+		return ports.GitHubRateLimit{}
+	}
+	return a.d.GitHub.RateLimit(ctx)
+}
+
 // CatalogEntry is an agent or skill a task can cite. An agent whose file reads carries what selecting it copies.
 type CatalogEntry struct {
 	Name        string     `json:"name"`

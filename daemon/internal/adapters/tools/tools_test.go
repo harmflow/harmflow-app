@@ -5,8 +5,10 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
@@ -140,6 +142,94 @@ func TestProbeReportsAVersionThatFails(t *testing.T) {
 				"command_failed naming %q", c.tool.ID, c.tool.Detected, c.tool.Path, c.tool.Authentication,
 				c.tool.DiagnosticKey, c.tool.DiagnosticParams, c.path, c.command)
 		}
+	}
+}
+
+// rateLimitAnswer is an answer of `gh api rate_limit` as GitHub gives it, but for its rate field, which differs here
+// from resources.core so that a read of the wrong one shows.
+const rateLimitAnswer = `{
+  "resources": {
+    "core":    { "limit": 2000, "used": 500,  "remaining": 1500, "reset": 1794324681 },
+    "graphql": { "limit": 5000, "used": 1000, "remaining": 4000, "reset": 1794326854 },
+    "search":  { "limit": 30,   "used": 0,    "remaining": 30,   "reset": 1794323644 }
+  },
+  "rate": { "limit": 5000, "used": 4321, "remaining": 679, "reset": 1794320000 }
+}`
+
+// ghAPI writes into dir a stand-in for gh that records its arguments in a file beside it and runs api for `api`, and
+// returns that file's path.
+func ghAPI(t *testing.T, dir, api string) string {
+	t.Helper()
+	args := filepath.Join(t.TempDir(), "args")
+	script := `#!/bin/bash
+echo "$*" >> '` + args + `'
+case "$1" in
+  api) ` + api + ` ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return args
+}
+
+// The GitHub gauges read GitHub's own count: REST from resources.core and GraphQL from resources.graphql, each with the
+// limit GitHub reports for it and its own reset, never the older rate field, through one `gh api rate_limit`.
+func TestRateLimitReadsCoreAndGraphQL(t *testing.T) {
+	dir, answer := t.TempDir(), filepath.Join(t.TempDir(), "rate_limit.json")
+	if err := os.WriteFile(answer, []byte(rateLimitAnswer), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := ghAPI(t, dir, `cat '`+answer+`'`)
+	got :=(&Prober{PathEnv: dir, Dirs: []string{t.TempDir()}}).RateLimit(t.Context())
+	want := ports.GitHubRateLimit{
+		REST:    &ports.RateLimitBucket{Limit: 2000, Used: 500, ResetAt: time.Unix(1794324681, 0).UTC()},
+		GraphQL: &ports.RateLimitBucket{Limit: 5000, Used: 1000, ResetAt: time.Unix(1794326854, 0).UTC()},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("RateLimit() = REST %+v, GraphQL %+v; want REST %+v, GraphQL %+v", got.REST, got.GraphQL, want.REST,
+			want.GraphQL)
+	}
+	data, err := os.ReadFile(args)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%s) = %v, want gh's arguments", args, err)
+	}
+	if string(data) != "api rate_limit\n" {
+		t.Errorf("RateLimit() ran gh %q, want once with api rate_limit", data)
+	}
+}
+
+// With gh missing, signed out, failing, or answering what cannot be read, both buckets are left out; a bucket the
+// answer lacks, or one with no limit, is left out alone.
+func TestRateLimitLeavesOutWhatItCannotRead(t *testing.T) {
+	rest := &ports.RateLimitBucket{Limit: 2000, Used: 500, ResetAt: time.Unix(1794324681, 0).UTC()}
+	cases := []struct {
+		name string
+		api  string // "" for no gh at all
+		want ports.GitHubRateLimit
+	}{
+		{"gh missing", "", ports.GitHubRateLimit{}},
+		// What gh prints when no host is signed in, exiting 4.
+		{"signed out", `echo "To get started with GitHub CLI, please run:  gh auth login" >&2; exit 4`, ports.GitHubRateLimit{}},
+		{"failing", `echo "error connecting to api.github.com" >&2; exit 1`, ports.GitHubRateLimit{}},
+		{"not JSON", `echo "rate limit: fine"`, ports.GitHubRateLimit{}},
+		{"no graphql bucket", `echo '{"resources": {"core": {"limit": 2000, "used": 500, "reset": 1794324681}}}'`,
+			ports.GitHubRateLimit{REST: rest}},
+		{"a bucket with no limit", `echo '{"resources": {"core": {"limit": 2000, "used": 500, "reset": 1794324681}, ` +
+			`"graphql": {"limit": 0, "used": 0, "reset": 0}}}'`, ports.GitHubRateLimit{REST: rest}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if c.api != "" {
+				ghAPI(t, dir, c.api)
+			}
+			got := (&Prober{PathEnv: dir, Dirs: []string{t.TempDir()}}).RateLimit(t.Context())
+			if !reflect.DeepEqual(got, c.want) {
+				t.Errorf("RateLimit() = REST %+v, GraphQL %+v; want REST %+v, GraphQL %+v", got.REST, got.GraphQL,
+					c.want.REST, c.want.GraphQL)
+			}
+		})
 	}
 }
 

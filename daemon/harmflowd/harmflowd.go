@@ -221,6 +221,7 @@ func Run(cfg Config, registrations ...Registration) error {
 		}
 	}
 	system := sysinfo.New(paths.Home)
+	prober := &tools.Prober{Home: userHome, PathEnv: pathEnv, Env: harnessEnv}
 	a, err := app.New(app.Deps{
 		Paths: paths, Version: cfg.Version, Commit: cfg.Commit, BuiltAt: cfg.BuiltAt, Wake: wake.NewMonitor(),
 		Tasks: tasks, State: state, Executions: execs, Events: events, Validator: validator,
@@ -230,7 +231,8 @@ func Run(cfg Config, registrations ...Registration) error {
 		},
 		Service:    service,
 		System:     system,
-		Tools:      &tools.Prober{Home: userHome, PathEnv: pathEnv, Env: harnessEnv},
+		Tools:      prober,
+		GitHub:     prober,
 		Workspace:  &workspace.Reader{PathEnv: pathEnv, Env: harnessEnv},
 		HarnessEnv: harnessEnv, DaemonExecutable: exe, DaemonArgs: daemonArgs, DaemonEnv: daemonEnv, Logger: logger,
 		SignInTimeout: signInTimeout(logger),

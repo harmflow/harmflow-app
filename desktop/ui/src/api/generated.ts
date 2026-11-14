@@ -109,6 +109,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/github/rate-limit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * GitHub's count of the gh login's hourly limits
+         * @description Read from `gh api rate_limit`, which GitHub counts against no limit: REST from its resources.core and GraphQL from its resources.graphql, never its older rate field. HarmFlow keeps no count of its own requests.
+         */
+        get: operations["getGitHubRateLimit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/harnesses": {
         parameters: {
             query?: never;
@@ -853,6 +873,23 @@ export interface components {
             diskUsedBytes?: number;
             diskTotalBytes?: number;
             harmflowDirBytes?: number;
+        };
+        /** @description GitHub's own count of the signed-in gh login's hourly limits, for the sidebar's GitHub gauges: every request made with that login spends them, in HarmFlow or outside it. A bucket that cannot be read is left out. */
+        GitHubRateLimit: {
+            rest?: components["schemas"]["RateLimitBucket"];
+            graphql?: components["schemas"]["RateLimitBucket"];
+        };
+        /** @description One of GitHub's rate-limit buckets, as GitHub reports it. */
+        RateLimitBucket: {
+            /** @description The limit GitHub reports for the bucket. */
+            limit: number;
+            /** @description What the current window used of it. */
+            used: number;
+            /**
+             * Format: date-time
+             * @description When the window resets.
+             */
+            resetAt: string;
         };
         /**
          * @description checking while a harness's first check runs; a later check keeps the previous state.
@@ -1767,6 +1804,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SystemGauges"];
+                };
+            };
+        };
+    };
+    getGitHubRateLimit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Each bucket GitHub reported; one that cannot be read is left out, and both are when gh is missing, signed out, or fails. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubRateLimit"];
                 };
             };
         };

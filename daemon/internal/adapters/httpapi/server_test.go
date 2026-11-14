@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -41,11 +42,12 @@ spec:
 // startedApp starts the daemon's use cases over a new installation, with no harness, and stops them when the test ends.
 func startedApp(t *testing.T) *app.App {
 	t.Helper()
-	return startedAppWith(t, nil)
+	return startedAppWith(t, nil, nil)
 }
 
-// startedAppWith is startedApp with system as the reader of the machine's gauges; nil reads none.
-func startedAppWith(t *testing.T, system ports.SystemInfo) *app.App {
+// startedAppWith is startedApp with system as the reader of the machine's gauges and github as the reader of GitHub's
+// rate limits; nil reads none.
+func startedAppWith(t *testing.T, system ports.SystemInfo, github ports.GitHubRateLimitReader) *app.App {
 	t.Helper()
 	paths := app.NewPaths(t.TempDir(), t.TempDir(), t.TempDir())
 	tasks, err := fsstore.NewTasks(paths.Tasks)
@@ -70,7 +72,7 @@ func startedAppWith(t *testing.T, system ports.SystemInfo) *app.App {
 	}
 	a, err := app.New(app.Deps{Paths: paths, Version: "test", Location: time.UTC, Tasks: tasks, State: state,
 		Executions: execs, Events: events, Validator: v, TickInterval: time.Hour, Logger: log.New(io.Discard, "", 0),
-		System: system})
+		System: system, GitHub: github})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +323,7 @@ func TestSystemGaugesHaveTheirOwnRoute(t *testing.T) {
 			DiskUsedBytes: new(int64(48e9)), DiskTotalBytes: new(int64(500e9))},
 		dirs: make(chan string, 1),
 	}
-	a := startedAppWith(t, system)
+	a := startedAppWith(t, system, nil)
 	s := &Server{App: a}
 	s.SetToken(validToken)
 
@@ -388,6 +390,67 @@ func TestSystemRouteWithoutAReaderLeavesOutEveryGauge(t *testing.T) {
 	s.SetToken(validToken)
 	if got := get(t, s, "/api/v1/system"); len(got) != 0 {
 		t.Errorf("GET /api/v1/system with no SystemInfo = %v, want {}", got)
+	}
+}
+
+// fakeGitHub is a GitHubRateLimitReader that answers limits, and counts its reads.
+type fakeGitHub struct {
+	limits ports.GitHubRateLimit
+	reads  atomic.Int64
+}
+
+func (f *fakeGitHub) RateLimit(context.Context) ports.GitHubRateLimit {
+	f.reads.Add(1)
+	return f.limits
+}
+
+// GET /api/v1/github/rate-limit answers GitHub's count of the gh login's hourly limits, REST and GraphQL, each with its
+// limit, its use, and its reset, from a route of its own: GET /api/v1/system neither reads nor carries it.
+func TestGitHubRateLimitHasItsOwnRoute(t *testing.T) {
+	github := &fakeGitHub{limits: ports.GitHubRateLimit{
+		REST:    &ports.RateLimitBucket{Limit: 2000, Used: 500, ResetAt: time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC)},
+		GraphQL: &ports.RateLimitBucket{Limit: 5000, Used: 1000, ResetAt: time.Date(2026, 11, 14, 10, 30, 0, 0, time.UTC)},
+	}}
+	s := &Server{App: startedAppWith(t, &fakeSystem{dirs: make(chan string, 1)}, github)}
+	s.SetToken(validToken)
+
+	got := get(t, s, "/api/v1/github/rate-limit")
+	want := map[string]any{
+		"rest":    map[string]any{"limit": 2000.0, "used": 500.0, "resetAt": "2026-11-14T10:00:00Z"},
+		"graphql": map[string]any{"limit": 5000.0, "used": 1000.0, "resetAt": "2026-11-14T10:30:00Z"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("GET /api/v1/github/rate-limit = %v, want %v", got, want)
+	}
+	if n := github.reads.Load(); n != 1 {
+		t.Errorf("GET /api/v1/github/rate-limit read the limits %d times, want once", n)
+	}
+
+	system := get(t, s, "/api/v1/system")
+	for _, k := range []string{"rest", "graphql", "github"} {
+		if _, ok := system[k]; ok {
+			t.Errorf("GET /api/v1/system = %v, want no %s field", system, k)
+		}
+	}
+	if n := github.reads.Load(); n != 1 {
+		t.Errorf("GET /api/v1/system read GitHub's limits, %d reads in all; want only the rate-limit route's", n)
+	}
+}
+
+// With no reader, or one that could read neither bucket, GET /api/v1/github/rate-limit answers an empty object: both
+// buckets left out, which the interface shows as —.
+func TestGitHubRateLimitRouteLeavesOutWhatItCannotRead(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		github ports.GitHubRateLimitReader
+	}{{"no reader", nil}, {"nothing read", &fakeGitHub{}}} {
+		t.Run(c.name, func(t *testing.T) {
+			s := &Server{App: startedAppWith(t, nil, c.github)}
+			s.SetToken(validToken)
+			if got := get(t, s, "/api/v1/github/rate-limit"); len(got) != 0 {
+				t.Errorf("GET /api/v1/github/rate-limit = %v, want {}", got)
+			}
+		})
 	}
 }
 

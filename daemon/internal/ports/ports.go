@@ -508,6 +508,27 @@ type ToolProber interface {
 	Probe(ctx context.Context) []ToolInfo
 }
 
+// GitHubRateLimitReader reads how much of the signed-in GitHub login's hourly limits is used, as GitHub counts it.
+type GitHubRateLimitReader interface {
+	RateLimit(ctx context.Context) GitHubRateLimit
+}
+
+// GitHubRateLimit is GitHub's own count of the signed-in login's hourly limits, the REST API's and GraphQL's, which
+// every request made with that login spends, in HarmFlow or outside it. A bucket that cannot be read is nil and left
+// out: both are when gh is missing, signed out, or fails.
+type GitHubRateLimit struct {
+	REST    *RateLimitBucket `json:"rest,omitempty"`
+	GraphQL *RateLimitBucket `json:"graphql,omitempty"`
+}
+
+// RateLimitBucket is one of GitHub's rate-limit buckets: the limit GitHub reports for it, how much of it the current
+// window used, and when the window resets.
+type RateLimitBucket struct {
+	Limit   int64     `json:"limit"`
+	Used    int64     `json:"used"`
+	ResetAt time.Time `json:"resetAt"`
+}
+
 // WorkspaceReader reads, from an execution's workspace itself, which files an attempt changed there, whatever wrote
 // them: the checkpoint taken before a switch.
 type WorkspaceReader interface {

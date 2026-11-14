@@ -186,6 +186,9 @@ func (s *Server) Handler() http.Handler {
 	h("PUT /api/v1/harnesses/{harnessId}/token", s.setHarnessToken)
 	h("DELETE /api/v1/harnesses/{harnessId}/token", s.deleteHarnessToken)
 	h("GET /api/v1/tools", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.App.Tools(r.Context())) })
+	h("GET /api/v1/github/rate-limit", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, s.App.GitHubRateLimit(r.Context()))
+	})
 	h("GET /api/v1/catalog", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		writeJSON(w, 200, s.App.Catalog(r.Context(), q.Get("workspace"), q.Get("task"), q["addDir"]...))
