@@ -1102,6 +1102,15 @@ export const ptBR: Resources = {
     templates: {
       title: "Nova tarefa",
       none: "O HarmFlow não encontrou modelos para iniciar uma tarefa.",
+      yours: "Seu",
+      saveAs: "Salvar como modelo",
+      saveTitle: "Salvar {{name}} como modelo",
+      saveHint: "O modelo guarda o tipo e as configurações desta tarefa, o prompt incluído, e aparece no catálogo depois dos modelos do HarmFlow. A tarefa fica como está.",
+      name: "Nome do modelo",
+      id: "ID do modelo",
+      idHint: "Letras minúsculas, dígitos e hifens; não pode começar com hf-.",
+      description: "Para que serve",
+      saved: "Modelo {{name}} salvo",
     },
     types: {
       github: "GitHub",

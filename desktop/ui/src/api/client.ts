@@ -19,6 +19,7 @@ import type {
   NewTask,
   Notification,
   Queue,
+  SaveAsTemplateRequest,
   ScheduleInput,
   SchedulePreview,
   Settings,
@@ -129,6 +130,8 @@ export const api = {
   importTask: (yaml: string, overwrite = false) => call<Task>("POST", "/tasks/import", { yaml, overwrite }),
   runTask: (id: string) => call<FiringResult>("POST", `/tasks/${enc(id)}/run`),
   duplicateTask: (id: string) => call<Task>("POST", `/tasks/${enc(id)}/duplicate`),
+  /** Saves the task as a new template of the user's, named and described as the user writes it. */
+  saveAsTemplate: (id: string, template: SaveAsTemplateRequest) => call<Template>("POST", `/tasks/${enc(id)}/template`, template),
   enableTask: (id: string) => call<Task>("POST", `/tasks/${enc(id)}/enable`),
   disableTask: (id: string) => call<Task>("POST", `/tasks/${enc(id)}/disable`),
   exportTask: async (id: string): Promise<string> => {

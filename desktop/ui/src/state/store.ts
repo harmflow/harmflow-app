@@ -483,6 +483,10 @@ function handleEvent(e: HarmflowEvent) {
   if (family === "task" || (family === "execution" && e.type !== "execution.status_changed")) {
     debounce("tasks", () => void actions.refreshTasks(), 400);
   }
+  // A template of the user's was saved, changed or removed outside HarmFlow, or found invalid: the catalog changed.
+  if (family === "template") {
+    debounce("templates", () => void actions.refreshTemplates(), 400);
+  }
   // A check ended, a sign-in started or ended, or a token was rejected or expires soon: read the inventory again,
   // without detecting again, which would announce another check.
   if (e.type === "harness.checked" || e.type.startsWith("harness.sign_in_") || e.type.startsWith("harness.token_")) {

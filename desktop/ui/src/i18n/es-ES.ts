@@ -1100,6 +1100,15 @@ export const esES: Resources = {
     templates: {
       title: "Nueva tarea",
       none: "HarmFlow no encontró plantillas para empezar una tarea.",
+      yours: "Tuya",
+      saveAs: "Guardar como plantilla",
+      saveTitle: "Guardar {{name}} como plantilla",
+      saveHint: "La plantilla conserva el tipo y la configuración de esta tarea, su prompt incluido, y aparece en el catálogo después de las plantillas de HarmFlow. La tarea queda como está.",
+      name: "Nombre de la plantilla",
+      id: "ID de la plantilla",
+      idHint: "Letras minúsculas, dígitos y guiones; no puede empezar por hf-.",
+      description: "Para qué sirve",
+      saved: "Plantilla {{name}} guardada",
     },
     types: {
       github: "GitHub",

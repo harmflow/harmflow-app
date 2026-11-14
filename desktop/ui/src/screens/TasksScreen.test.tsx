@@ -9,6 +9,8 @@
 // declares only other systems shows the daemon's warning on its row, in the interface's language, and Run now shows
 // the daemon's refusal (harmflow-app#559): that the daemon warns and refuses is app › TestScriptDoesNotRunOnAnUndeclaredSystem's.
 // The user's groups and order (harmflow-app#346) are the desktop's own, kept in localStorage: no request carries them.
+// Save as template sends the name, description, and identifier the dialog asks for, and the New task dialog lists the
+// user's templates after HarmFlow's (harmflow-app#179): what the daemon writes is app › TestSaveTaskAsTemplate's.
 import { EditorView } from "@codemirror/view";
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -260,6 +262,94 @@ describe("the Tasks screen's Duplicate", () => {
     await click(button("standup", "Duplicate"));
     expect(daemon.requests).toEqual([req("POST", "/tasks/standup/duplicate"), req("GET", "/tasks")]);
     expect(onView.mock.calls).toEqual([[{ kind: "edit", id: "standup-copy" }]]);
+  });
+});
+
+describe("the Tasks screen's Save as template", () => {
+  /** Types into a text field or area as React sees it. */
+  async function type(field: HTMLInputElement | HTMLTextAreaElement, value: string) {
+    const proto = field instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(field, value);
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+  const dialog = () => host!.querySelector<HTMLElement>(".modal")!;
+  const fields = () => [...dialog().querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea")];
+  const save = () => [...dialog().querySelectorAll<HTMLButtonElement>(".modal__footer button")].find((b) => b.textContent === "Save as template")!;
+
+  it("asks for a name and a description, proposes an identifier from the name, and sends the three", async () => {
+    answer("POST", "/tasks/standup/template", { id: "weekly-standup", source: "user", path: "/t/weekly-standup.yaml", validation: { valid: true, errors: [], warnings: [] } }, 201);
+    answer("GET", "/templates", []);
+    await open([standup]);
+
+    await click(button("standup", "Save as template"));
+    const [name, id, description] = fields();
+    expect([name.value, id.value, description.value]).toEqual(["Standup notes", "standup-notes", ""]);
+    await type(name, "Weekly standup");
+    expect(id.value).toBe("weekly-standup");
+    expect(save().disabled).toBe(true);
+    await type(description, "Sums up the week's standups.");
+    expect(save().disabled).toBe(false);
+
+    await click(save());
+    expect(daemon.requests).toEqual([
+      req("POST", "/tasks/standup/template", { id: "weekly-standup", name: "Weekly standup", description: "Sums up the week's standups." }),
+      req("GET", "/templates"),
+    ]);
+    expect(host!.querySelector(".modal")).toBeNull();
+    expect(toasts()).toEqual([{ tone: "success", text: "Template Weekly standup saved" }]);
+  });
+
+  it("keeps an identifier the user wrote, and shows the daemon's refusal in the dialog, which stays open", async () => {
+    answer(
+      "POST",
+      "/tasks/standup/template",
+      { error: { code: "conflict", message: "a template with the identifier mine already exists", messageKey: "template_exists", params: { template: "mine" } } },
+      409,
+    );
+    await open([standup]);
+
+    await click(button("standup", "Save as template"));
+    const [name, id, description] = fields();
+    await type(id, "mine");
+    await type(name, "Another name");
+    await type(description, "Notes.");
+    expect(id.value).toBe("mine");
+    await click(save());
+    expect(daemon.requests).toEqual([req("POST", "/tasks/standup/template", { id: "mine", name: "Another name", description: "Notes." })]);
+    expect(dialog().querySelector(".banner")?.textContent).toContain("a template with the identifier mine already exists");
+  });
+
+  it("is offered on no task whose file fails validation", async () => {
+    await open([{ ...standup, invalid: true }]);
+    expect(button("standup", "Save as template").disabled).toBe(true);
+  });
+});
+
+describe("the New task dialog's templates", () => {
+  const valid = { valid: true, errors: [], warnings: [] };
+  const named = (text: string) => ({ "pt-BR": text, "en-US": text, "es-ES": text });
+
+  afterEach(() => patchStateForTests({ templates: undefined }));
+
+  it("lists the user's templates after HarmFlow's, marked as the user's, named as the user wrote them", async () => {
+    patchStateForTests({
+      templates: [
+        { id: "hf-general", source: "builtin", path: "/b/hf-general.yaml", type: "general", name: { "pt-BR": "Tarefa geral", "en-US": "General task", "es-ES": "Tarea general" }, description: named("Runs a prompt."), validation: valid },
+        { id: "notas", source: "user", path: "/t/notas.yaml", type: "general", name: named("Notas semanais"), description: named("Resume a semana."), validation: valid },
+      ],
+    });
+    await open([standup]);
+    await click([...host!.querySelectorAll<HTMLButtonElement>(".filters button")].find((b) => b.textContent === "New task")!);
+    const offered = [...host!.querySelectorAll<HTMLElement>(".modal .template")].map((b) => ({
+      name: b.querySelector("strong")?.textContent,
+      yours: b.querySelector(".chip")?.textContent ?? null,
+    }));
+    expect(offered).toEqual([
+      { name: "General task", yours: null },
+      { name: "Notas semanais", yours: "Yours" },
+    ]);
   });
 });
 

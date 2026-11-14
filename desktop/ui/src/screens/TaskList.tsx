@@ -1,6 +1,6 @@
 // The task list: its search and filter, its groups in the user's arrangement (lib/taskLayout), the handles that move a
 // task or a group by dragging or through their menu, and each task's row with its commands — run, enable, disable,
-// edit, duplicate, export, and delete, every one carried out by the daemon.
+// edit, duplicate, save as a template, export, and delete, every one carried out by the daemon.
 import { Fragment, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
@@ -8,7 +8,7 @@ import { native } from "../api/native";
 import type { TaskSummary } from "../api/types";
 import { HarnessLabel } from "../components/Shell";
 import { Icon } from "../components/Icon";
-import { TemplatePicker } from "../components/Templates";
+import { SaveAsTemplateDialog, TemplatePicker } from "../components/Templates";
 import { toast } from "../components/toast";
 import { Button, Chip, EmptyState, IconButton, Select, StatusChip, TextInput, Toggle, cx } from "../components/ui";
 import { daemonText } from "../lib/daemonText";
@@ -56,6 +56,7 @@ export function TaskList({ onView, onOpenExecution }: { onView: (v: TaskView) =>
   const [filter, setFilter] = useState<Filter>("all");
   const [picker, setPicker] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [saving, setSaving] = useState<TaskSummary | null>(null);
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -517,6 +518,7 @@ export function TaskList({ onView, onOpenExecution }: { onView: (v: TaskView) =>
                 </Button>
                 <IconButton icon="pencil" label={t("common.edit")} onClick={() => onView({ kind: "edit", id: task.id })} />
                 <IconButton icon="copy" label={t("common.duplicate")} onClick={() => void duplicate(task)} />
+                <IconButton icon="layers" label={t("tasks.templates.saveAs")} disabled={task.invalid} onClick={() => setSaving(task)} />
                 <IconButton icon="download" label={t("common.export")} onClick={() => void exportTask(task)} />
                 <IconButton icon="trash" label={t("common.delete")} onClick={() => void remove(task)} />
               </div>
@@ -537,6 +539,7 @@ export function TaskList({ onView, onOpenExecution }: { onView: (v: TaskView) =>
           }}
         />
       ) : null}
+      {saving ? <SaveAsTemplateDialog task={saving} onClose={() => setSaving(null)} /> : null}
       {importing ? (
         <ImportDialog
           onClose={() => setImporting(false)}
