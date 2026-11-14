@@ -223,7 +223,7 @@ describe("sidebar", () => {
     await launch();
     expect(layout()).toBe("expanded");
     expect(sidebar().textContent).toContain("Local agents, real results.");
-    expect(sidebar().querySelectorAll('[role="meter"]')).toHaveLength(3); // CPU, RAM, and disk
+    expect(sidebar().querySelectorAll('[role="meter"]')).toHaveLength(5); // GitHub's REST and GraphQL; CPU, RAM, and disk
     expect(sidebar().textContent).toMatch(/v\d/);
 
     expect(await press()).toBe(true);

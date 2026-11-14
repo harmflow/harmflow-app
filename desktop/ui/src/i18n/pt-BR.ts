@@ -1588,5 +1588,9 @@ export const ptBR: Resources = {
     cpu: "CPU",
     ram: "RAM",
     disk: "Disco",
+    github: "GitHub",
+    rest: "REST",
+    graphql: "GraphQL",
+    resetsAt: "Renova às {{time}}",
   },
 };
