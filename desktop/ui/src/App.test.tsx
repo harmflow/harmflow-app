@@ -502,6 +502,60 @@ describe("new task", () => {
     expect(labels()).toEqual(offered);
   });
 
+  it("searches the catalog, filters it by source and type, and names what a template needs while still offering it", async () => {
+    const needy: Template = {
+      ...templates[1],
+      needs: { harness: "codex", harnessReady: false, missing: [{ kind: "agent", name: "review-agent" }, { kind: "skill", name: "review-notes" }] },
+    };
+    const ready: Template = { ...templates[0], needs: { harness: "claude-code", harnessReady: true, missing: [] } };
+    patchStateForTests({ templates: [ready, needy, templates[2]] });
+    await launch();
+    await act(async () => newTaskButton().click());
+    expect(labels()).toEqual(offered);
+    const card = (label: string) => [...host!.querySelectorAll(".template")].find((b) => b.textContent?.includes(label))!;
+    expect([...card("Implement GitHub issues").querySelectorAll(".template__needs li")].map((n) => n.textContent)).toEqual([
+      "Codex is not ready",
+      "Agent not found: review-agent",
+      "Skill not found: review-notes",
+    ]);
+    expect(card("General task").querySelector(".template__needs")).toBeNull();
+    expect(card("General task").querySelector(".template__meta")!.textContent).toBe("General · Built-in");
+
+    const dialog = host!.querySelector('[role="dialog"]')!;
+    const search = dialog.querySelector<HTMLInputElement>('input[type="search"]')!;
+    const select = (name: string) => dialog.querySelector<HTMLSelectElement>(`select[aria-label="${name}"]`)!;
+    const typeIn = (value: string) =>
+      act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(search, value);
+        search.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    const choose = (name: string, value: string) =>
+      act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(select(name), value);
+        select(name).dispatchEvent(new Event("change", { bubbles: true }));
+      });
+
+    await typeIn("github");
+    expect(labels()).toEqual(["Implement GitHub issues"]);
+    await typeIn("TASK");
+    expect(labels()).toEqual(["General task", "Script task"]);
+    await choose("Type", "script");
+    expect(labels()).toEqual(["Script task"]);
+    await choose("Source", "user");
+    expect(labels()).toEqual([]);
+    expect(dialog.textContent).toContain("No template matches the search and filters.");
+    await choose("Source", "builtin");
+    await choose("Type", "");
+    await typeIn("");
+    expect(labels()).toEqual(offered);
+
+    await pick("Implement GitHub issues");
+    expect(title()).toBe("Tasks");
+    expect(daemon.sent.filter((r) => r.path.endsWith("/draft"))).toEqual([
+      { method: "POST", path: "/templates/hf-github-issues/draft", body: { language: "en-US" } },
+    ]);
+  });
+
   it("offers the same templates in onboarding, and its pick opens the task the daemon drafts", async () => {
     patchStateForTests({ settings: { ...settings, onboardingCompleted: false } });
     await launch();

@@ -191,7 +191,7 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, 200, s.App.Catalog(r.Context(), q.Get("workspace"), q.Get("task"), q["addDir"]...))
 	})
 
-	h("GET /api/v1/templates", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.App.Templates()) })
+	h("GET /api/v1/templates", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.App.Templates(r.Context())) })
 	h("PUT /api/v1/templates/{templateId}", s.updateTemplate)
 	h("DELETE /api/v1/templates/{templateId}", s.deleteTemplate)
 	h("POST /api/v1/templates/{templateId}/draft", s.draftTask)

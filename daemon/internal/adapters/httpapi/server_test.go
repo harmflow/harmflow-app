@@ -346,7 +346,7 @@ func TestSaveAsTemplateRoute(t *testing.T) {
 		t.Errorf("POST /api/v1/tasks/busy/template again: status %d, body %s, want 409 template_exists", w.Code, w.Body)
 	}
 	var ids []string
-	for _, tp := range a.Templates() {
+	for _, tp := range a.Templates(t.Context()) {
 		ids = append(ids, tp.ID)
 	}
 	if !slices.Equal(ids, []string{"sleeper"}) {

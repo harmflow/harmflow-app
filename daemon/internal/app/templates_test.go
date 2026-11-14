@@ -97,7 +97,7 @@ func TestTemplatesLoad(t *testing.T) {
 		"hf-readme.md":   "not a template",
 		"hf-script.yaml": template("hf-script", "  type: script\n  script: {}\n"),
 	}))
-	got := e.app.Templates()
+	got := e.app.Templates(t.Context())
 	var ids []string
 	for _, tp := range got {
 		ids = append(ids, tp.ID)
@@ -131,7 +131,7 @@ func TestInvalidTemplateIsListed(t *testing.T) {
 		"hf-valid.yaml":  template("hf-valid", "  type: general\n"),
 	}))
 	byID := map[string]Template{}
-	for _, tp := range e.app.Templates() {
+	for _, tp := range e.app.Templates(t.Context()) {
 		byID[tp.ID] = tp
 	}
 	cases := []struct {
@@ -184,7 +184,7 @@ func TestBuiltinTemplatesAreReadOnly(t *testing.T) {
 		"hf-notes.yaml": template("hf-notes", "  type: general\n"),
 		"notes.yaml":    template("notes", "  type: general\n"),
 	}))
-	before := e.app.Templates()
+	before := e.app.Templates(t.Context())
 	for _, id := range []string{"hf-notes", "hf-new", "notes"} {
 		appError(t, "UpdateTemplate("+id+")", e.app.UpdateTemplate(id), CodeConflict, "template_read_only")
 		appError(t, "DeleteTemplate("+id+")", e.app.DeleteTemplate(id), CodeConflict, "template_read_only")
@@ -195,7 +195,7 @@ func TestBuiltinTemplatesAreReadOnly(t *testing.T) {
 	if err != nil || string(data) != template("hf-notes", "  type: general\n") {
 		t.Errorf("hf-notes.yaml after the refusals = %q, %v, want it unchanged", data, err)
 	}
-	if after := e.app.Templates(); len(after) != len(before) {
+	if after := e.app.Templates(t.Context()); len(after) != len(before) {
 		t.Errorf("Templates() after the refusals = %v, want %v", after, before)
 	}
 }
@@ -248,6 +248,74 @@ func TestDraftTaskWithAMissingAgent(t *testing.T) {
 		"spec":     map[string]any{"enabled": true, "type": "general", "skills": []any{"hf-own"}}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("DraftTask(hf-lost) = %v, want %v", got, want)
+	}
+}
+
+// Each template names what it needs of this machine, for the harness its tasks run on: every agent and skill it cites
+// that the harness cannot load, its selected agent included, once each, and whether that harness is ready, read again
+// each time the templates are listed. The hf- names are looked up among the built-ins and the others in the harness's
+// configuration, as validation looks them up. A template that names no harness runs on Claude Code; a script template
+// runs none and needs nothing; an invalid one is not read. A user's template is read as a built-in one is. A template
+// that needs something is still offered.
+func TestTemplatesNameWhatTheyNeed(t *testing.T) {
+	e := newEnv(t, withBuiltinAgent("hf-reviewer", reviewer), withTemplates(map[string]string{
+		"hf-codex.yaml": template("hf-codex", "  type: general\n  selectedAgent: review-agent\n"+
+			"  agents: [review-agent, user-agent, hf-reviewer]\n  skills: [review-notes, user-skill, hf-gone]\n"+
+			"  harness:\n    preferred:\n      provider: codex\n"),
+		"hf-lost.yaml":   template("hf-lost", "  type: general\n  selectedAgent: hf-absent\n"),
+		"hf-claude.yaml": template("hf-claude", "  type: general\n  prompt: Sum up.\n  agents: [review-agent]\n  skills: [review-notes]\n"),
+		"hf-script.yaml": template("hf-script", "  type: script\n  script: {}\n"),
+		"hf-broken.yaml": template("hf-broken", "  type: email\n"),
+	}), withUserTemplates(map[string]string{
+		"mine.yaml": template("mine", "  type: general\n  prompt: Sum up.\n  skills: [review-notes, hf-gone]\n"),
+	}))
+	e.codex.mu.Lock()
+	e.codex.unavailable = true
+	e.codex.mu.Unlock()
+	e.app.RefreshHarnesses(t.Context())
+	needs := func() map[string]*TemplateNeeds {
+		out := map[string]*TemplateNeeds{}
+		for _, tp := range e.app.Templates(t.Context()) {
+			out[tp.ID] = tp.Needs
+		}
+		return out
+	}
+	got := needs()
+	cases := []struct {
+		id   string
+		want *TemplateNeeds
+	}{
+		{"hf-codex", &TemplateNeeds{Harness: "codex", HarnessReady: false, Missing: []TemplateCited{
+			{Kind: "agent", Name: "review-agent"}, {Kind: "skill", Name: "review-notes"}, {Kind: "skill", Name: "hf-gone"}}}},
+		{"hf-lost", &TemplateNeeds{Harness: "claude-code", HarnessReady: true,
+			Missing: []TemplateCited{{Kind: "agent", Name: "hf-absent"}}}},
+		{"hf-claude", &TemplateNeeds{Harness: "claude-code", HarnessReady: true, Missing: []TemplateCited{}}},
+		{"mine", &TemplateNeeds{Harness: "claude-code", HarnessReady: true,
+			Missing: []TemplateCited{{Kind: "skill", Name: "hf-gone"}}}},
+		{"hf-script", nil},
+		{"hf-broken", nil},
+	}
+	for _, c := range cases {
+		t.Run(c.id, func(t *testing.T) {
+			if g := got[c.id]; !reflect.DeepEqual(g, c.want) {
+				if g != nil && c.want != nil {
+					t.Errorf("Templates() %s needs = %+v, want %+v", c.id, *g, *c.want)
+				} else {
+					t.Errorf("Templates() %s needs = %v, want %v", c.id, g, c.want)
+				}
+			}
+		})
+	}
+	if nt, err := e.app.DraftTask(t.Context(), "hf-codex", "en-US"); err != nil || nt.Document == nil {
+		t.Errorf("DraftTask(hf-codex) = %v, %v, want a document though it needs what this machine lacks", nt, err)
+	}
+
+	e.codex.mu.Lock()
+	e.codex.unavailable = false
+	e.codex.mu.Unlock()
+	e.app.RefreshHarnesses(t.Context())
+	if n := needs()["hf-codex"]; n == nil || !n.HarnessReady || len(n.Missing) != 3 {
+		t.Errorf("Templates() hf-codex needs after Codex is ready = %+v, want it ready, the same three missing", n)
 	}
 }
 
@@ -311,7 +379,7 @@ func TestSlugify(t *testing.T) {
 // agent.
 func TestGitHubTypeSelectsTheImplementer(t *testing.T) {
 	e := newEnv(t, withShippedTemplates)
-	for _, tp := range e.app.Templates() {
+	for _, tp := range e.app.Templates(t.Context()) {
 		want := ""
 		if tp.Type == domain.TypeGitHub {
 			want = "hf-github-issue-implementer"
@@ -364,7 +432,7 @@ func TestBuiltinTemplatesBuildThePickersDocuments(t *testing.T) {
 		{"hf-script", "Script task", map[string]any{"enabled": true, "type": "script", "script": map[string]any{}}},
 	}
 	var ids []string
-	for _, tp := range e.app.Templates() {
+	for _, tp := range e.app.Templates(t.Context()) {
 		ids = append(ids, tp.ID)
 	}
 	if want := []string{"hf-general", "hf-github-issues", "hf-script"}; !slices.Equal(ids, want) {

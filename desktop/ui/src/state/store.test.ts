@@ -1,12 +1,13 @@
 // Follows the daemon's event stream as the dashboard does, against a stand-in for the daemon's local API: when a
 // harness's check ends, the inventory is read again, once for a burst of checks, and never detected again, which
-// would announce another check. And the execution lists are shown as their own answers arrive, whatever /stats takes,
-// and their refresh never reads the sidebar's gauges. And a daemon that runs but does not answer reads as such, not as
-// stopped, and no periodic refresh starts while the previous one of its kind still waits for it.
+// would announce another check; so are the templates, which say whether their harness is ready. And the execution
+// lists are shown as their own answers arrive, whatever /stats takes, and their refresh never reads the sidebar's
+// gauges. And a daemon that runs but does not answer reads as such, not as stopped, and no periodic refresh starts
+// while the previous one of its kind still waits for it.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { native, type DaemonStatus } from "../api/native";
 import type { StreamHandlers } from "../api/transport";
-import type { ExecutionSummary, HarmflowEvent, Harness, Queue } from "../api/types";
+import type { ExecutionSummary, HarmflowEvent, Harness, Queue, Template } from "../api/types";
 import { actions, every, getState, patchStateForTests, startSync, type PeriodicRefresh } from "./store";
 
 // The daemon as the client sees it: an answer per route, or per path with its query; the routes that do not answer
@@ -82,6 +83,28 @@ describe("event stream", () => {
 
     expect(daemon.requests.filter((r) => r.includes("/harnesses"))).toEqual(["GET /harnesses"]);
     expect(getState().harnesses).toEqual([codex]);
+  });
+
+  it("reads the templates again when a harness's check ends, since each says whether its harness is ready", async () => {
+    startSync();
+    await vi.advanceTimersByTimeAsync(0);
+    daemon.requests.length = 0;
+    const ready: Template = {
+      id: "hf-notes",
+      source: "builtin",
+      path: "/builtins/templates/hf-notes.yaml",
+      type: "general",
+      needs: { harness: "codex", harnessReady: true, missing: [] },
+      validation: { valid: true, errors: [], warnings: [] },
+    };
+    daemon.answers.set("/templates", [ready]);
+
+    daemon.stream!.onEvent(checked(1));
+    daemon.stream!.onEvent(checked(2));
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(daemon.requests.filter((r) => r.includes("/templates"))).toEqual(["GET /templates"]);
+    expect(getState().templates).toEqual([ready]);
   });
 });
 

@@ -10,6 +10,7 @@ import { CUSTOM_LISTS, OPTION_FIELDS } from "../components/TaskForm";
 import { COPIED_FIELDS } from "../lib/agentCopy";
 import { RECEIPT_CLASSES, SUMMARY_CLASSES } from "../lib/costs";
 import { DAY_NAMES, INTERVAL_UNITS, MONTH_NAMES, REPEATS } from "../lib/schedule";
+import { templateSources } from "../lib/templates";
 import { HARNESS_PROVIDERS, NOTIFIABLE_EVENTS, schemaEnum } from "../lib/schema";
 import { SHORTCUTS, SHORTCUT_GROUPS } from "../lib/shortcuts";
 import { SPEND_REASONS, SPEND_VIEWS } from "../lib/spend";
@@ -156,6 +157,7 @@ const BUILT_KEYS: Record<string, (written: string[]) => readonly BuiltValue[]> =
   "harness.requirementsState.${}": literals,
   "tools.${}": () => contractEnum("Tool", "id"),
   "tasks.types.${}": () => schemaEnum(["spec", "type"]),
+  "tasks.templates.sources.${}": () => [...new Set([...contractEnum("Template", "source"), ...templateSources])],
   "tasks.fields.${}": () => [...CUSTOM_LISTS, ...COPIED_FIELDS.map((f) => f.field)],
   "tasks.fields.parametersOf.${}": () => ["skill", "agent"],
   "tasks.paramTypes.${}": () => contractEnum("ParameterDeclaration", "properties", "type"),

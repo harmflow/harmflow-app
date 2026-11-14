@@ -3576,6 +3576,25 @@ button.list-row--error:hover {
   border-radius: var(--hf-radius-md);
 }
 
+.template-catalog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--hf-space-3);
+}
+
+.template__meta {
+  color: var(--hf-color-text-muted);
+  font-size: var(--hf-font-size-sm);
+}
+
+/* What a template needs that this machine lacks; the template can still be picked. */
+.template__needs {
+  margin: 0;
+  padding-left: var(--hf-space-4);
+  color: var(--hf-color-warning);
+  font-size: var(--hf-font-size-sm);
+}
+
 /* A task type's tone, as lib/taskType.ts gives it, on the glyph of every view that shows the type: the template, the
    task row, and the execution card and detail. After those rules, so that its border color wins over the card's. */
 .type-glyph--blue {
