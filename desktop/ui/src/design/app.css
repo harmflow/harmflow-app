@@ -445,7 +445,13 @@ body:has([aria-modal="true"]) .tooltip {
   background: linear-gradient(90deg, var(--hf-color-blue), var(--hf-color-cyan));
 }
 
-.gauge__text {
+/* The GitHub gauges' labels, GraphQL the longest, take a wider column than CPU, RAM, and Disk. */
+.gauges--github .gauge {
+  grid-template-columns: 52px 1fr;
+}
+
+.gauge__text,
+.gauge__note {
   grid-column: 2;
   color: var(--hf-color-text-muted);
   text-align: right;

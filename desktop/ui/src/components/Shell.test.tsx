@@ -2,13 +2,14 @@
 // The topbar's warning for a daemon of another version, its banner for a window and a daemon built from different
 // commits, and that banner's restart of the daemon on the window's build, driven in a DOM against a stand-in for the
 // daemon's local API. And the More actions menu's Stop daemon…, whose question names one running execution in the
-// singular and more in the plural. And the sidebar's gauges, read from /system only while the sidebar is expanded. And
-// the topbar's state of a daemon that runs but does not answer, apart from a stopped one.
+// singular and more in the plural. And the sidebar's gauges, read from /system, and GitHub's from /github/rate-limit,
+// only while the sidebar is expanded. And the topbar's state of a daemon that runs but does not answer, apart from a
+// stopped one.
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { native, type DaemonStatus } from "../api/native";
-import type { Health, Stats, SystemGauges } from "../api/types";
+import type { GitHubRateLimit, Health, Stats, SystemGauges } from "../api/types";
 import i18n from "../i18n";
 import { formatTime } from "../lib/format";
 import { getState, patchStateForTests } from "../state/store";
@@ -354,7 +355,7 @@ describe("the draining state", () => {
 describe("the sidebar's gauges", () => {
   const gauges: SystemGauges = { cpuPercent: 12, memoryUsedBytes: 2.1e9, memoryTotalBytes: 16e9, diskUsedBytes: 48e9, diskTotalBytes: 500e9 };
   const reads = () => daemon.requests.filter((r) => r.method === "GET" && r.path === "/system").length;
-  const texts = () => Array.from(host!.querySelectorAll(".gauge__text"), (g) => g.textContent);
+  const texts = () => Array.from(host!.querySelectorAll("[aria-labelledby='gauges-title'] .gauge__text"), (g) => g.textContent);
 
   /** Moves the clock by ms, letting each read it starts answer. */
   async function elapse(ms: number) {
@@ -375,7 +376,7 @@ describe("the sidebar's gauges", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => {
     vi.useRealTimers();
-    patchStateForTests({ system: undefined, stats: undefined });
+    patchStateForTests({ system: undefined, github: undefined, stats: undefined });
   });
 
   it("reads /system at once and every 5 seconds while expanded, and shows its values", async () => {
@@ -396,7 +397,7 @@ describe("the sidebar's gauges", () => {
   it("titles the gauges System while expanded, and hides the title collapsed", async () => {
     daemon.answers.set("GET /system", { status: 200, body: gauges });
     await showSidebar(false);
-    const panel = host!.querySelector("section.gauges-panel");
+    const panel = host!.querySelector("#gauges-title")?.closest("section.gauges-panel");
     expect(panel?.getAttribute("aria-labelledby")).toBe("gauges-title");
     expect(host!.querySelector("#gauges-title")?.textContent).toBe("System");
 
@@ -440,5 +441,92 @@ describe("the sidebar's gauges", () => {
     await showSidebar(false);
     expect(host!.querySelector(".nav__badge")?.textContent).toBe("3");
     expect(texts()).toEqual(["—", "—", "—"]);
+  });
+
+  describe("GitHub's", () => {
+    const limits: GitHubRateLimit = {
+      rest: { limit: 2000, used: 500, resetAt: "2026-11-14T10:00:00Z" },
+      graphql: { limit: 5000, used: 1000, resetAt: "2026-11-14T10:30:00Z" },
+    };
+    const githubReads = () => daemon.requests.filter((r) => r.method === "GET" && r.path === "/github/rate-limit").length;
+    const panel = () => host!.querySelector("#github-gauges-title")?.closest("section.gauges-panel");
+    const githubGauges = () =>
+      Array.from(panel()?.querySelectorAll(".gauge") ?? [], (g) => ({
+        label: g.querySelector(".gauge__label")?.textContent,
+        percent: g.querySelector("[role=meter]")?.getAttribute("aria-valuenow"),
+        text: g.querySelector(".gauge__text")?.textContent,
+        note: g.querySelector(".gauge__note")?.textContent,
+      }));
+
+    it("sit in a widget titled GitHub directly above the System widget", async () => {
+      daemon.answers.set("GET /system", { status: 200, body: gauges });
+      daemon.answers.set("GET /github/rate-limit", { status: 200, body: limits });
+      await showSidebar(false);
+      const github = panel();
+      const system = host!.querySelector("#gauges-title")?.closest("section.gauges-panel");
+      expect(github?.getAttribute("aria-labelledby")).toBe("github-gauges-title");
+      expect(host!.querySelector("#github-gauges-title")?.textContent).toBe("GitHub");
+      expect(github?.nextElementSibling).toBe(system);
+      expect(githubGauges().map((g) => g.label)).toEqual(["REST", "GraphQL"]);
+    });
+
+    it("measure each bucket against the limit GitHub reports for it, and tell when it resets", async () => {
+      daemon.answers.set("GET /github/rate-limit", { status: 200, body: limits });
+      await showSidebar(false);
+      expect(getState().github).toEqual(limits);
+      expect(githubGauges()).toEqual([
+        { label: "REST", percent: "25", text: "500 / 2,000", note: `Resets at ${formatTime(limits.rest!.resetAt, "en-US", false)}` },
+        {
+          label: "GraphQL",
+          percent: "20",
+          text: "1,000 / 5,000",
+          note: `Resets at ${formatTime(limits.graphql!.resetAt, "en-US", false)}`,
+        },
+      ]);
+    });
+
+    it("fill a bar no further than full when a bucket reports more used than its limit", async () => {
+      daemon.answers.set("GET /github/rate-limit", {
+        status: 200,
+        body: { ...limits, rest: { limit: 2000, used: 2050, resetAt: "2026-11-14T10:00:00Z" } },
+      });
+      await showSidebar(false);
+      expect(githubGauges()[0]).toMatchObject({ percent: "100", text: "2,050 / 2,000" });
+    });
+
+    it.each([
+      ["gh answers no bucket", { status: 200, body: {} }],
+      ["the reading fails", { status: 0, body: null }],
+      ["an older daemon answers 404", { status: 404, body: null }],
+    ])("show — in both when %s, and the System gauges keep their readings", async (_, answer) => {
+      patchStateForTests({ github: limits });
+      daemon.answers.set("GET /system", { status: 200, body: gauges });
+      daemon.answers.set("GET /github/rate-limit", answer);
+      await showSidebar(false);
+      expect(getState().github).toEqual(answer.status === 200 ? {} : undefined);
+      expect(githubGauges().map((g) => [g.text, g.note, g.percent])).toEqual([
+        ["—", undefined, "0"],
+        ["—", undefined, "0"],
+      ]);
+      expect(texts()[0]).toBe("12%");
+    });
+
+    it("are read at once and on the System gauges' clock while expanded, and never while collapsed", async () => {
+      daemon.answers.set("GET /github/rate-limit", { status: 200, body: limits });
+      await showSidebar(true);
+      await elapse(15000);
+      expect(githubReads()).toBe(0);
+      expect(panel()).toBeFalsy();
+
+      await showSidebar(false);
+      expect(githubReads()).toBe(1);
+      await elapse(5000);
+      expect(githubReads()).toBe(2);
+      expect(reads()).toBe(2);
+
+      await showSidebar(true);
+      await elapse(15000);
+      expect(githubReads()).toBe(2);
+    });
   });
 });

@@ -9,6 +9,7 @@ import type {
   Diagnostics,
   Execution,
   ExecutionSummary,
+  GitHubRateLimit,
   Harness,
   HarmflowEvent,
   Health,
@@ -34,6 +35,8 @@ export interface State {
   spend?: Spend;
   /** The gauges of the sidebar foot, read only while it shows them; undefined from a daemon without /system. */
   system?: SystemGauges;
+  /** GitHub's count of the gh login's hourly limits, read only while the sidebar shows it; undefined while unknown. */
+  github?: GitHubRateLimit;
   active: ExecutionSummary[];
   recent: ExecutionSummary[];
   queue?: Queue;
@@ -181,7 +184,7 @@ async function settle<T>(p: Promise<T>): Promise<T | undefined> {
 }
 
 /** The refreshes the interface repeats on a clock of its own. */
-export type PeriodicRefresh = "stats" | "system" | "health" | "executions" | "spend";
+export type PeriodicRefresh = "stats" | "system" | "github" | "health" | "executions" | "spend";
 
 /** How many refreshes of each periodic kind still wait for the daemon's answer. */
 const inFlight = new Map<PeriodicRefresh, number>();
@@ -252,6 +255,19 @@ export const actions = {
         setState({ system: await api.system() });
       } catch (err) {
         if (err instanceof ApiError && err.status === 404) setState({ system: undefined });
+      }
+    });
+  },
+
+  // GitHub's count changes with every request made with the login, in HarmFlow or outside it, so a reading that fails,
+  // an older daemon's 404 included, shows nothing rather than an old figure. The daemon itself leaves out a bucket it
+  // cannot read.
+  refreshGitHub() {
+    return tracked("github", async () => {
+      try {
+        setState({ github: await api.githubRateLimit() });
+      } catch {
+        setState({ github: undefined });
       }
     });
   },
