@@ -432,6 +432,45 @@ func TestSystemRouteWithoutAReaderLeavesOutEveryGauge(t *testing.T) {
 	}
 }
 
+// harmflow-app#486: the typeface round-trips through the settings routes: GET /api/v1/settings reads harmflow before
+// anything is saved, PATCH saves system and answers it, GET then reads it, and a value outside the two is refused with
+// settings_typeface_invalid, nothing saved.
+func TestTypefaceRoundTripsThroughTheSettingsRoutes(t *testing.T) {
+	s := &Server{App: startedApp(t)}
+	s.SetToken(validToken)
+	if got := get(t, s, "/api/v1/settings")["typeface"]; got != "harmflow" {
+		t.Errorf("GET /api/v1/settings typeface = %v before anything is saved, want harmflow", got)
+	}
+	patch := func(body string) (int, map[string]any) {
+		t.Helper()
+		r := httptest.NewRequest("PATCH", "/api/v1/settings", strings.NewReader(body))
+		r.Host = "127.0.0.1:7000"
+		r.Header.Set("Authorization", "Bearer "+validToken)
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		var answer map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &answer); err != nil {
+			t.Fatalf("PATCH /api/v1/settings %s: body %q: %v", body, w.Body.String(), err)
+		}
+		return w.Code, answer
+	}
+	if status, answer := patch(`{"typeface":"system"}`); status != 200 || answer["typeface"] != "system" {
+		t.Errorf("PATCH /api/v1/settings typeface system = %d, typeface %v, want 200, system", status, answer["typeface"])
+	}
+	if got := get(t, s, "/api/v1/settings")["typeface"]; got != "system" {
+		t.Errorf("GET /api/v1/settings typeface = %v after saving system, want system", got)
+	}
+	status, answer := patch(`{"typeface":"serif"}`)
+	refusal, _ := answer["error"].(map[string]any)
+	if status != 422 || refusal["messageKey"] != "settings_typeface_invalid" {
+		t.Errorf("PATCH /api/v1/settings typeface serif = %d, error %v, want 422, settings_typeface_invalid", status,
+			answer["error"])
+	}
+	if got := get(t, s, "/api/v1/settings")["typeface"]; got != "system" {
+		t.Errorf("GET /api/v1/settings typeface = %v after a refused value, want system", got)
+	}
+}
+
 // A route added through Routes is served by the handler Prepare builds, behind the same checks as the API's own: a
 // request without the token is refused, and one with it reaches the route. The API's own routes still answer beside it.
 func TestAddedRouteIsServedBehindTheToken(t *testing.T) {

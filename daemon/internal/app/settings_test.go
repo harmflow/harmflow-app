@@ -156,6 +156,68 @@ func TestLanguageSettingTakesOnlyTheOfficialLanguages(t *testing.T) {
 	}
 }
 
+// harmflow-app#486: the typeface is harmflow on a fresh data folder, on settings saved before the setting existed, and
+// on a value written by hand outside the two; a patch to system outlives a restart and a patch of another setting, and
+// any other value is refused with settings_typeface_invalid, leaving the saved typeface as it was.
+func TestTypefaceSettingDefaultsToHarmFlowAndTakesOnlyItsTwoValues(t *testing.T) {
+	e := newEnv(t)
+	if got := e.app.GetSettings().Typeface; got != "harmflow" {
+		t.Fatalf("GetSettings().Typeface = %q on a fresh data folder, want harmflow", got)
+	}
+	for _, tc := range []struct {
+		name  string
+		saved map[string]any
+	}{
+		// Settings saved by a version without the setting.
+		{"unset", map[string]any{"schemaVersion": "1", "language": "en-US", "trayEnabled": true}},
+		{"serif", map[string]any{"schemaVersion": "1", "language": "en-US", "trayEnabled": true, "typeface": "serif"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			if err := e.app.d.State.Save("settings", tc.saved); err != nil {
+				t.Fatalf("Save(settings): %v", err)
+			}
+			e = e.restart(t)
+			if v := e.app.GetSettings(); v.Typeface != "harmflow" || v.Language != "en-US" {
+				t.Errorf("GetSettings() = typeface %q, language %q on settings saved as %v, want harmflow, en-US",
+					v.Typeface, v.Language, tc.saved)
+			}
+		})
+	}
+
+	system := "system"
+	if v, err := e.app.UpdateSettings(SettingsPatch{Typeface: &system}); err != nil || v.Typeface != system {
+		t.Fatalf("UpdateSettings(typeface system) = %q, %v, want system, nil", v.Typeface, err)
+	}
+	lang := "pt-BR"
+	if v, err := e.app.UpdateSettings(SettingsPatch{Language: &lang}); err != nil || v.Typeface != system {
+		t.Errorf("UpdateSettings(language) = typeface %q, %v, want system, nil", v.Typeface, err)
+	}
+	for _, tc := range []struct{ name, typeface string }{
+		{"empty", ""},
+		{"System", "System"},
+		{"serif", "serif"},
+		{"inter", "inter"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := e.app.UpdateSettings(SettingsPatch{Typeface: &tc.typeface})
+			if code, key := appErrorKey(err); code != CodeValidationFailed || key != "settings_typeface_invalid" {
+				t.Errorf("UpdateSettings(typeface %q) = %s %s %v, want %s settings_typeface_invalid", tc.typeface, code,
+					key, err, CodeValidationFailed)
+			}
+		})
+	}
+	e = e.restart(t)
+	if got := e.app.GetSettings().Typeface; got != system {
+		t.Errorf("GetSettings().Typeface = %q after refused patches and a restart, want system", got)
+	}
+
+	harmflow := "harmflow"
+	if v, err := e.app.UpdateSettings(SettingsPatch{Typeface: &harmflow}); err != nil || v.Typeface != harmflow {
+		t.Errorf("UpdateSettings(typeface harmflow) = %q, %v, want harmflow, nil", v.Typeface, err)
+	}
+}
+
 // harmflow-app#464: the tray is on in the settings of a fresh data folder, and a patch turns it off and back on,
 // each of which a restart of the daemon keeps: the shell reads the stored choice at start to decide what closing the
 // window does.

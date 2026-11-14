@@ -17,6 +17,7 @@ import { OverviewScreen } from "./screens/OverviewScreen";
 import { NOTHING_REGISTERED, RegisteredProvider, dynamicText, useRegistered, type Registered } from "./registrations";
 import { SettingsScreen, isSettingsSection, type SettingsSectionKey } from "./screens/SettingsScreen";
 import { TemplatePicker } from "./components/Templates";
+import { applyTypeface } from "./design/typeface";
 import { TasksScreen, type TaskView } from "./screens/TasksScreen";
 import { actions, setNotificationHandler, startSync, useStore } from "./state/store";
 
@@ -116,6 +117,10 @@ export function App() {
       }
     }
   }, [settings?.language, settings?.onboardingCompleted]);
+
+  useEffect(() => {
+    if (settings) applyTypeface(settings.typeface);
+  }, [settings?.typeface, settings !== undefined]);
 
   useEffect(() => {
     try {

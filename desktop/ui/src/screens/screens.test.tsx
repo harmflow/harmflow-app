@@ -1257,7 +1257,7 @@ describe("settings sections", () => {
   it.each([
     [
       "general",
-      ["Idioma", "Barra de menus", "Execuções"],
+      ["Idioma", "Fonte", "Barra de menus", "Execuções"],
       ["Mostrar o HarmFlow na barra de menus", "Manter o HarmFlow na barra de menus ao sair com ⌘Q", "Mostrar avisos de restrição"],
     ],
     ["notifications", ["Avisos"], ["Nível de notificação"]],

@@ -172,6 +172,7 @@ const BUILT_KEYS: Record<string, (written: string[]) => readonly BuiltValue[]> =
   "cronText.months.${}": () => Object.values(MONTH_NAMES),
   "settings.groups.${}": () => SECTION_GROUPS.map((g) => g.key),
   "settings.languages.${}": () => contractEnum("Settings", "language"),
+  "settings.typefaces.${}": () => contractEnum("Settings", "typeface"),
   "settings.notificationLevels.${}": () => contractEnum("Settings", "notificationLevel"),
   "settings.shortcuts.groups.${}": () => SHORTCUT_GROUPS,
   "settings.shortcuts.labels.${}": () => Object.keys(SHORTCUTS),

@@ -15,7 +15,10 @@ import (
 type Settings struct {
 	SchemaVersion string `json:"schemaVersion"`
 	Language      string `json:"language"`
-	TrayEnabled   bool   `json:"trayEnabled"`
+	// Typeface is the interface's typeface: harmflow, the fonts the app bundles, or system, the operating system's own.
+	// Settings saved without it read harmflow.
+	Typeface    string `json:"typeface"`
+	TrayEnabled bool   `json:"trayEnabled"`
 	// KeepTrayOnQuit makes ⌘Q, and Quit in the app menu, only hide the dashboard while the tray is shown, as closing
 	// the window does. Off by default.
 	KeepTrayOnQuit bool `json:"keepTrayOnQuit"`
@@ -38,6 +41,9 @@ type Settings struct {
 	// context. Empty by default, and then a session receives nothing of it.
 	SystemPrompt string `json:"systemPrompt"`
 }
+
+// typefaces are the values the typeface setting takes.
+var typefaces = []string{"harmflow", "system"}
 
 // maxSystemPromptLength is the most characters the general system prompt may hold.
 const maxSystemPromptLength = 20000
@@ -71,6 +77,7 @@ type SettingsView struct {
 // folder list that is set replaces the whole one. Autostart enables or disables the start with the user's session.
 type SettingsPatch struct {
 	Language                *string           `json:"language"`
+	Typeface                *string           `json:"typeface"`
 	TrayEnabled             *bool             `json:"trayEnabled"`
 	KeepTrayOnQuit          *bool             `json:"keepTrayOnQuit"`
 	ShowRestrictionWarnings *bool             `json:"showRestrictionWarnings"`
@@ -87,7 +94,7 @@ type SettingsPatch struct {
 }
 
 func defaultSettings() Settings {
-	return Settings{SchemaVersion: "1", Language: "system", TrayEnabled: true, ShowRestrictionWarnings: true,
+	return Settings{SchemaVersion: "1", Language: "system", Typeface: "harmflow", TrayEnabled: true, ShowRestrictionWarnings: true,
 		NotificationLevel: "all",
 		LogRetentionDays:  30, Theme: "harmflow-dark", PathVariables: map[string]string{}, AllowedFolders: []string{},
 		Quota: map[string]QuotaShare{}}
@@ -106,6 +113,10 @@ func (a *App) loadSettings() error {
 	}
 	if s.LogRetentionDays <= 0 {
 		s.LogRetentionDays = 30
+	}
+	if !containsString(typefaces, s.Typeface) {
+		// An empty or unknown typeface, written by hand, reads as the bundled fonts.
+		s.Typeface = "harmflow"
 	}
 	quota := map[string]QuotaShare{}
 	for _, h := range sortedKeys(s.Quota) {
@@ -158,6 +169,10 @@ func (a *App) UpdateSettings(p SettingsPatch) (SettingsView, error) {
 		return SettingsView{}, newError(CodeValidationFailed,
 			domain.T("settings_language_invalid", "language must be pt-BR, en-US, es-ES, or system"))
 	}
+	if p.Typeface != nil && !containsString(typefaces, *p.Typeface) {
+		return SettingsView{}, newError(CodeValidationFailed,
+			domain.T("settings_typeface_invalid", "typeface must be harmflow or system"))
+	}
 	if p.NotificationLevel != nil && !containsString([]string{"all", "failures_and_attention", "none"}, *p.NotificationLevel) {
 		return SettingsView{}, newError(CodeValidationFailed, domain.T("settings_notification_level_invalid",
 			"notificationLevel must be all, failures_and_attention, or none"))
@@ -206,6 +221,9 @@ func (a *App) UpdateSettings(p SettingsPatch) (SettingsView, error) {
 	s := &a.settings
 	if p.Language != nil {
 		s.Language = *p.Language
+	}
+	if p.Typeface != nil {
+		s.Typeface = *p.Typeface
 	}
 	if p.TrayEnabled != nil {
 		s.TrayEnabled = *p.TrayEnabled

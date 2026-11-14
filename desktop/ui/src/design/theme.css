@@ -154,3 +154,15 @@
   --hf-duration: 200ms;
   --hf-duration-scan: 2.2s;
 }
+
+/*
+ * The System typeface of Settings → General (typeface.ts sets the attribute): the platform's own fonts take the place of
+ * the bundled ones in all three stacks — macOS's first, then Windows's, then Linux's — and the display text keeps the
+ * font's own optical size. The bundled font files stay in the app: these stacks only leave them out.
+ */
+:root[data-typeface="system"] {
+  --hf-font-sans: -apple-system, "SF Pro", "Segoe UI Variable", "Segoe UI", system-ui, Cantarell, Ubuntu, "Noto Sans", "DejaVu Sans", sans-serif;
+  --hf-font-display: -apple-system, "SF Pro", "Segoe UI Variable", "Segoe UI", system-ui, Cantarell, Ubuntu, "Noto Sans", "DejaVu Sans", sans-serif;
+  --hf-font-display-settings: normal;
+  --hf-font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace;
+}
