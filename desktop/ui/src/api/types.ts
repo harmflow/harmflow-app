@@ -20,6 +20,7 @@ export type Template = S["Template"];
 export type LocalizedText = S["LocalizedText"];
 export type NewTask = S["NewTask"];
 export type TemplateLanguage = S["NewTaskRequest"]["language"];
+export type SaveAsTemplateRequest = S["SaveAsTemplateRequest"];
 export type TaskDocument = S["TaskDocument"];
 export type TaskInput = S["TaskInput"];
 export type TaskSummary = S["TaskSummary"];

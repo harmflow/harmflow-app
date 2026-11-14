@@ -1665,9 +1665,9 @@ components:
       type: object
       required: [id, name, description]
       properties:
-        id: { type: string, description: The template's identifier, which becomes its file's name. }
-        name: { type: string, description: The template's name, as the user writes it. }
-        description: { type: string, description: What the template is for, as the user writes it. }
+        id: { type: string, description: "The template's identifier, which becomes its file's name." }
+        name: { type: string, description: "The template's name, as the user writes it." }
+        description: { type: string, description: "What the template is for, as the user writes it." }
 
     NewTaskRequest:
       type: object

@@ -1074,6 +1074,15 @@ export const enUS = {
     templates: {
       title: "New task",
       none: "HarmFlow found no templates to start a task from.",
+      yours: "Yours",
+      saveAs: "Save as template",
+      saveTitle: "Save {{name}} as a template",
+      saveHint: "The template keeps this task's type and settings, its prompt included, and appears in the catalog after HarmFlow's templates. The task stays as it is.",
+      name: "Template name",
+      id: "Template ID",
+      idHint: "Lowercase letters, digits, and hyphens; it cannot start with hf-.",
+      description: "What it is for",
+      saved: "Template {{name}} saved",
     },
     types: {
       github: "GitHub",
