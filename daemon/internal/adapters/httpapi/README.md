@@ -7,7 +7,7 @@ This package serves the daemon's authenticated loopback HTTP API and event strea
 ## Interface
 
 - `Server` exposes listener setup, serving, shutdown, address reporting, token updates, and request handling. `[server.go:Server]` `[server.go:Listen]` `[server.go:Serve]` `[server.go:Shutdown]` `[server.go:Address]` `[server.go:SetToken]` `[server.go:Handler]`
-- `Handler` registers the documented health, task, execution, settings, and SSE routes. `[server.go:Handler]`
+- `Handler` registers the documented health, task, execution, settings, gauge, and SSE routes. `[server.go:Handler]`
 
 ## Invariants
 

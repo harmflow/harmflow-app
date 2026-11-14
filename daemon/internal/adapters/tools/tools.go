@@ -1,5 +1,5 @@
-// Package tools reports Git and the GitHub CLI, which the built-in GitHub skills use with the user's own login.
-// HarmFlow never installs or signs in to them.
+// Package tools reports Git and the GitHub CLI, which the built-in GitHub skills use with the user's own login, and
+// reads GitHub's count of that login's hourly rate limits. HarmFlow never installs or signs in to them.
 package tools
 
 import (
