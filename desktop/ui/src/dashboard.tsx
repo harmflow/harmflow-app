@@ -7,9 +7,12 @@ import { Root } from "./App";
 import { RootBoundary, rootOptions } from "./components/ErrorBoundary";
 import "./i18n";
 import { register, type Registered, type Registration } from "./registrations";
+import { applyStoredTypeface } from "./design/typeface";
 import "./design/fonts.css";
 import "./design/theme.css";
 import "./design/app.css";
+
+applyStoredTypeface();
 
 export type { RegisteredScreen, RegisteredSettingsSection, Registration, SettingsGroup } from "./registrations";
 

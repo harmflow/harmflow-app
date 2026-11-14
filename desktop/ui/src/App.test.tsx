@@ -7,7 +7,8 @@
 // (harmflow-app#170); a new GitHub task starts as the copy of the agent its type selects (harmflow-app#280). Every
 // place a task is created offers the daemon's templates, and a pick has the daemon draft the task (harmflow-app#177).
 // ⌘+, ⌘−, and ⌘0 zoom the dashboard everywhere, and the level outlives a restart (harmflow-app#55). Picking a language
-// in Settings switches the interface on screen at once, with no restart (harmflow-app#534).
+// in Settings switches the interface on screen at once, with no restart (harmflow-app#534), and so does picking a
+// typeface (harmflow-app#486).
 // A render error never leaves the window empty, and the interface tells the shell when it has painted (harmflow-app#96).
 // A first launch opens in the system's language when it is official, and in en-US otherwise (harmflow-app#633).
 // Notices the daemon held while no dashboard ran show as unread once it starts (harmflow-app#522).
@@ -1215,6 +1216,59 @@ describe("language switch", () => {
       // Puts back the language the other tests start in; the switch under test is the select's alone.
       await act(async () => void i18n.changeLanguage("en-US"));
     }
+  });
+});
+
+// Picking a typeface in Settings switches the fonts of the interface already on screen, at once and with no restart, and
+// the choice the daemon saved applies again at the next launch (harmflow-app#486).
+describe("typeface switch", () => {
+  const select = () => host!.querySelector<HTMLSelectElement>("#settings-typeface")!;
+  const chosen = () => document.documentElement.getAttribute("data-typeface");
+  const saved = () => daemon.sent.filter((r) => r.method === "PATCH" && r.path === "/settings").map((r) => r.body);
+
+  /** Picks a typeface in the Settings select, as the user does. The daemon saves it and answers it from then on. */
+  async function pick(typeface: "harmflow" | "system") {
+    daemon.answers.set("/settings", { ...settings, typeface });
+    const setValue = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!;
+    await act(async () => {
+      setValue.call(select(), typeface);
+      select().dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  }
+
+  afterEach(() => document.documentElement.removeAttribute("data-typeface"));
+
+  it("offers HarmFlow and System beside the language, HarmFlow when the settings name none, and switches the open window", async () => {
+    daemon.answers.set("/settings", settings);
+    await launch();
+    await act(async () => navButton("Settings").click());
+    // Its panel comes right after the language's.
+    expect(host!.querySelector("#settings-language")!.closest("section.panel")!.nextElementSibling).toBe(select().closest("section.panel"));
+    expect([...select().options].map((o) => [o.value, o.textContent])).toEqual([
+      ["harmflow", "HarmFlow"],
+      ["system", "System"],
+    ]);
+    expect(select().value).toBe("harmflow");
+    expect(chosen()).toBeNull();
+    const [shell, control] = [sidebar(), select()];
+
+    await pick("system");
+    expect(chosen()).toBe("system");
+    expect(select().value).toBe("system");
+    await pick("harmflow");
+    expect(chosen()).toBeNull();
+    expect(select().value).toBe("harmflow");
+    expect(saved()).toEqual([{ typeface: "system" }, { typeface: "harmflow" }]);
+    // Nothing was mounted again.
+    expect(sidebar()).toBe(shell);
+    expect(select()).toBe(control);
+  });
+
+  it("applies the saved System typeface at launch, and keeps it for the next launch's first paint", async () => {
+    patchStateForTests({ settings: { ...settings, typeface: "system" } });
+    await launch();
+    expect(chosen()).toBe("system");
+    expect(localStorage.getItem("harmflow.typeface")).toBe("system");
   });
 });
 

@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import { native } from "../../api/native";
 import type { Settings } from "../../api/types";
 import { Panel, Select, Toggle } from "../../components/ui";
+import { TYPEFACES, applyTypeface, resolveTypeface, type Typeface } from "../../design/typeface";
 import { applyLanguage } from "../../i18n";
 import { useStore } from "../../state/store";
 import { SettingRow } from "./SettingRow";
@@ -15,6 +16,11 @@ export function GeneralSection() {
   const setLanguage = async (language: Settings["language"]) => {
     applyLanguage(language);
     await patch({ language }, true);
+  };
+
+  const setTypeface = async (typeface: Typeface) => {
+    applyTypeface(typeface);
+    await patch({ typeface }, true);
   };
 
   const setTray = async (enabled: boolean) => {
@@ -41,6 +47,21 @@ export function GeneralSection() {
             {(["system", "pt-BR", "en-US", "es-ES"] as const).map((l) => (
               <option key={l} value={l}>
                 {t(`settings.languages.${l}`)}
+              </option>
+            ))}
+          </Select>
+        </SettingRow>
+      </Panel>
+      <Panel title={t("settings.subheads.typeface")}>
+        <SettingRow id="settings-typeface" label={t("settings.typeface")} hint={t("settings.typefaceHint")}>
+          <Select
+            id="settings-typeface"
+            value={resolveTypeface(settings?.typeface)}
+            onChange={(e) => void setTypeface(e.target.value as Typeface)}
+          >
+            {TYPEFACES.map((f) => (
+              <option key={f} value={f}>
+                {t(`settings.typefaces.${f}`)}
               </option>
             ))}
           </Select>

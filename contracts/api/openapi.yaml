@@ -977,6 +977,7 @@ components:
         - harness_path_not_absolute
         - harness_path_not_executable
         - settings_language_invalid
+        - settings_typeface_invalid
         - settings_notification_level_invalid
         - settings_log_retention_invalid
         - settings_path_variable_invalid
@@ -2165,6 +2166,12 @@ components:
         autostart, pathVariables, allowedFolders, onboardingCompleted, quota, systemPrompt]
       properties:
         language: { type: string, enum: [pt-BR, en-US, es-ES, system] }
+        typeface:
+          description: >-
+            The interface's typeface: harmflow, the fonts the app bundles, or system, the operating system's own. A
+            missing value reads as harmflow.
+          type: string
+          enum: [harmflow, system]
         trayEnabled: { type: boolean, default: true }
         keepTrayOnQuit:
           description: >-
@@ -2241,6 +2248,7 @@ components:
       type: object
       properties:
         language: { type: string, enum: [pt-BR, en-US, es-ES, system] }
+        typeface: { type: string, enum: [harmflow, system] }
         trayEnabled: { type: boolean }
         keepTrayOnQuit: { type: boolean }
         showRestrictionWarnings: { type: boolean }
