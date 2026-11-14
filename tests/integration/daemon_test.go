@@ -494,9 +494,9 @@ var rejectionEntry = regexp.MustCompile(`local API rejected (\S+) ("(?:[^"\\]|\\
 
 // No request without the token changes anything. Every operation of the contract, the control routes, the read routes,
 // /health, and the SSE stream, gets 401 with no Authorization header and with a wrong token. Each request would change
-// something if the guard let it through; afterwards the task files, the tasks, the executions, the notices, the
-// settings, the harness paths, and the token are as they were, the execution started before still runs, and the daemon
-// still answers.
+// something if the guard let it through; afterwards the task files, the tasks, the templates, the executions, the
+// notices, the settings, the harness paths, and the token are as they were, the execution started before still runs,
+// and the daemon still answers.
 func TestAPIGuardOnEveryRoute(t *testing.T) {
 	t.Parallel()
 	d := startDaemon(t, t.TempDir())
@@ -537,6 +537,8 @@ func TestAPIGuardOnEveryRoute(t *testing.T) {
 		{"DELETE /tasks/{taskId}", "/tasks/finished", nil},
 		{"POST /tasks/{taskId}/run", "/tasks/finished/run", nil},
 		{"POST /tasks/{taskId}/duplicate", "/tasks/finished/duplicate", nil},
+		{"POST /tasks/{taskId}/template", "/tasks/finished/template",
+			map[string]any{"id": "intruder", "name": "Intruder", "description": "p"}},
 		{"POST /tasks/{taskId}/enable", "/tasks/dormant/enable", nil},
 		{"POST /tasks/{taskId}/disable", "/tasks/finished/disable", nil},
 		{"POST /schedules/preview", "/schedules/preview",
@@ -714,8 +716,8 @@ func unauthorized(status int, kind, body string) bool {
 }
 
 // guardState is what a request the guard let through would change: the task files and the harness paths byte for
-// byte, the token, the settings, and the fields of the tasks, executions, and notices any change sets. A running
-// execution's record and the harness inventory change on their own, so they are left out.
+// byte, the token, the settings, and the fields of the tasks, templates, executions, and notices any change sets. A
+// running execution's record and the harness inventory change on their own, so they are left out.
 func (d *daemon) guardState() map[string]string {
 	d.t.Helper()
 	state := map[string]string{}
@@ -744,6 +746,7 @@ func (d *daemon) guardState() map[string]string {
 	}{
 		{"/settings", nil},
 		{"/tasks", []string{"id", "revision", "enabled", "running", "queued", "deletePending"}},
+		{"/templates", []string{"id", "source"}},
 		{"/executions", []string{"id", "taskId", "status"}},
 		{"/notifications", []string{"id", "read"}},
 	} {

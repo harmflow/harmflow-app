@@ -325,8 +325,9 @@ paths:
       operationId: listTemplates
       summary: List the task templates, each with its validity
       description: >-
-        The built-in templates, which ship with HarmFlow, sorted by identifier. An invalid one is listed with the
-        errors of its file, and is never offered for creating a task.
+        The built-in templates, which ship with HarmFlow, sorted by identifier, then the user's own, from the
+        templates directory beside the tasks, sorted by identifier. An invalid one is listed with the errors of its
+        file, and is never offered for creating a task.
       responses:
         "200":
           description: Every template.
@@ -546,6 +547,35 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Task" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /tasks/{taskId}/template:
+    parameters:
+      - $ref: "#/components/parameters/TaskId"
+    post:
+      tags: [tasks, templates]
+      operationId: saveTaskAsTemplate
+      summary: Save a task as a new template of the user's
+      description: >-
+        The template holds the task's type and fields but its identifier, name, enabled state, and origin: a prompt
+        copied from an agent stays as the task has it. It takes the identifier, name, and description the request
+        gives, the name and description written as they are in every language, and is written as one YAML file in the
+        templates directory beside the tasks. The task is left as it is, and holds no reference to the template. An
+        identifier with the hf- prefix, which only built-in templates carry, or one a template of the user's already
+        has, is refused, naming the identifier, and nothing is written.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SaveAsTemplateRequest" }
+      responses:
+        "201":
+          description: The new template.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Template" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Invalid" }
 
   /tasks/{taskId}/enable:
     parameters:
@@ -961,6 +991,7 @@ components:
         - template_read_only
         - template_invalid
         - template_language_invalid
+        - template_exists
         # Task syntax
         - yaml_syntax
         - document_empty
@@ -989,6 +1020,8 @@ components:
         - task_file_invalid
         - task_file_error
         - template_id_not_builtin
+        - template_id_reserved
+        - template_file_invalid
         - template_type_unknown
         - schedule_missing
         - schedule_empty
@@ -1107,6 +1140,9 @@ components:
         - task_was_deleted
         - task_file_removed
         - task_gone
+        - template_changed_externally
+        - template_changed_externally_invalid
+        - template_removed_externally
         - firing_queued
         - firing_coalesced
         - firing_skipped
@@ -1600,7 +1636,12 @@ components:
         id:
           type: string
           description: The template's identifier, which is its file's name without the extension.
-        source: { type: string, enum: [builtin] }
+        source:
+          type: string
+          enum: [builtin, user]
+          description: >-
+            builtin for a template that ships with HarmFlow; user for one of the user's, which names and describes
+            itself with the user's own text in every language.
         path: { type: string, description: The template's file. }
         type: { type: string, description: The task type of the tasks created from it. }
         name: { $ref: "#/components/schemas/LocalizedText" }
@@ -1619,6 +1660,14 @@ components:
       properties:
         yaml: { type: string }
         document: { $ref: "#/components/schemas/TemplateDocument" }
+
+    SaveAsTemplateRequest:
+      type: object
+      required: [id, name, description]
+      properties:
+        id: { type: string, description: The template's identifier, which becomes its file's name. }
+        name: { type: string, description: The template's name, as the user writes it. }
+        description: { type: string, description: What the template is for, as the user writes it. }
 
     NewTaskRequest:
       type: object

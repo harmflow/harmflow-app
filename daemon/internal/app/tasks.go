@@ -536,7 +536,7 @@ func (a *App) ExportTask(id string) ([]byte, error) {
 	return []byte(eventlog.Redact(string(content))), nil
 }
 
-// watchLoop detects external edits of task files.
+// watchLoop detects external edits of task files and of the user's template files.
 func (a *App) watchLoop(ctx context.Context) {
 	defer a.wg.Done()
 	t := time.NewTicker(2 * time.Second)
@@ -547,6 +547,7 @@ func (a *App) watchLoop(ctx context.Context) {
 			return
 		case <-t.C:
 			a.scanTaskFiles(ctx)
+			a.scanTemplateFiles()
 		}
 	}
 }

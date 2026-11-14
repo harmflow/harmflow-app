@@ -78,6 +78,8 @@ type Paths struct {
 	Home string
 	// Tasks holds the task documents.
 	Tasks string
+	// Templates holds the user's task templates.
+	Templates string
 	// State holds the daemon's state.
 	State string
 	// Executions holds the execution records.
@@ -104,7 +106,7 @@ type Event = domain.Event
 // Paths are the installation's directories.
 func (d *Daemon) Paths() Paths {
 	p := d.app.Paths()
-	return Paths{Home: p.Home, Tasks: p.Tasks, State: p.State, Executions: p.Executions, Logs: p.Logs,
+	return Paths{Home: p.Home, Tasks: p.Tasks, Templates: p.Templates, State: p.State, Executions: p.Executions, Logs: p.Logs,
 		Workspace: p.Workspace, Runs: p.Runs, Run: p.Run, Builtins: p.Builtins, RuntimeFile: p.RuntimeFile,
 		UserHome: p.UserHome}
 }
@@ -176,6 +178,10 @@ func Run(cfg Config, registrations ...Registration) error {
 	if err != nil {
 		return err
 	}
+	templates, err := fsstore.NewTasks(paths.Templates)
+	if err != nil {
+		return err
+	}
 	state, err := fsstore.NewState(paths.State)
 	if err != nil {
 		return err
@@ -223,7 +229,7 @@ func Run(cfg Config, registrations ...Registration) error {
 	system := sysinfo.New(paths.Home)
 	a, err := app.New(app.Deps{
 		Paths: paths, Version: cfg.Version, Commit: cfg.Commit, BuiltAt: cfg.BuiltAt, Wake: wake.NewMonitor(),
-		Tasks: tasks, State: state, Executions: execs, Events: events, Validator: validator,
+		Tasks: tasks, Templates: templates, State: state, Executions: execs, Events: events, Validator: validator,
 		Harnesses: []ports.HarnessAdapter{
 			&claudecode.Adapter{Home: userHome, PathEnv: pathEnv, Env: harnessEnv},
 			&codex.Adapter{Home: userHome, PathEnv: pathEnv, Env: harnessEnv, ClientVersion: cfg.Version},

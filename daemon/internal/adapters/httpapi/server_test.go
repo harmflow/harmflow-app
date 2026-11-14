@@ -52,6 +52,10 @@ func startedAppWith(t *testing.T, system ports.SystemInfo) *app.App {
 	if err != nil {
 		t.Fatal(err)
 	}
+	templates, err := fsstore.NewTasks(paths.Templates)
+	if err != nil {
+		t.Fatal(err)
+	}
 	state, err := fsstore.NewState(paths.State)
 	if err != nil {
 		t.Fatal(err)
@@ -68,9 +72,9 @@ func startedAppWith(t *testing.T, system ports.SystemInfo) *app.App {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := app.New(app.Deps{Paths: paths, Version: "test", Location: time.UTC, Tasks: tasks, State: state,
-		Executions: execs, Events: events, Validator: v, TickInterval: time.Hour, Logger: log.New(io.Discard, "", 0),
-		System: system})
+	a, err := app.New(app.Deps{Paths: paths, Version: "test", Location: time.UTC, Tasks: tasks, Templates: templates,
+		State: state, Executions: execs, Events: events, Validator: v, TickInterval: time.Hour,
+		Logger: log.New(io.Discard, "", 0), System: system})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,6 +315,43 @@ func get(t *testing.T, s *Server, path string) map[string]any {
 		t.Fatalf("GET %s: body %q: %v", path, w.Body.String(), err)
 	}
 	return keys
+}
+
+// POST /api/v1/tasks/{taskId}/template saves the task as a template of the user's and answers 201 with it, which GET
+// /api/v1/templates then lists; the same identifier again answers 409 with template_exists, and nothing more is
+// written.
+func TestSaveAsTemplateRoute(t *testing.T) {
+	a := startedApp(t)
+	if _, err := a.CreateTask(t.Context(), app.TaskInput{YAML: busyTask}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	s := &Server{App: a}
+	s.SetToken(validToken)
+	post := func() *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", "/api/v1/tasks/busy/template",
+			strings.NewReader(`{"id":"sleeper","name":"Sleeper","description":"Sleeps."}`))
+		r.Host = "127.0.0.1:7000"
+		r.Header.Set("Authorization", "Bearer "+validToken)
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		return w
+	}
+	w := post()
+	var created app.Template
+	if err := json.Unmarshal(w.Body.Bytes(), &created); w.Code != 201 || err != nil || created.ID != "sleeper" ||
+		created.Source != app.TemplateUser || created.Type != domain.TypeScriptTask {
+		t.Fatalf("POST /api/v1/tasks/busy/template: status %d, body %s, want 201 with the template", w.Code, w.Body)
+	}
+	if w := post(); w.Code != 409 || !strings.Contains(w.Body.String(), `"template_exists"`) {
+		t.Errorf("POST /api/v1/tasks/busy/template again: status %d, body %s, want 409 template_exists", w.Code, w.Body)
+	}
+	var ids []string
+	for _, tp := range a.Templates() {
+		ids = append(ids, tp.ID)
+	}
+	if !slices.Equal(ids, []string{"sleeper"}) {
+		t.Errorf("Templates() = %v, want [sleeper]", ids)
+	}
 }
 
 // GET /api/v1/system answers the machine's gauges, each under its key, a gauge not read yet left out and one read as

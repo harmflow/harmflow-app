@@ -41,6 +41,17 @@ type TaskRepository interface {
 	Dir() string
 }
 
+// TemplateRepository holds the YAML files of the user's task templates, one per template, as TaskRepository holds the
+// task files: a TaskFile's ID is the template's identifier. The daemon is their only writer.
+type TemplateRepository interface {
+	List() ([]TaskFile, error)
+	Get(id string) (TaskFile, error)
+	// Save writes atomically; expectedRevision, when set, must match the file on disk or ErrConflict is returned.
+	Save(id string, content []byte, expectedRevision string) (TaskFile, error)
+	Delete(id string) error
+	Dir() string
+}
+
 // StateStore persists operational state as versioned JSON, written atomically.
 type StateStore interface {
 	Load(name string, v any) (bool, error)

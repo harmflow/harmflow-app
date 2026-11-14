@@ -36,7 +36,7 @@
       }
     },
     "metadata": {
-      "description": "The template's own identifier, name, and description, none of which a task created from it keeps but its name. A built-in template's identifier carries the hf- prefix and is its file's name.",
+      "description": "The template's own identifier, name, and description, none of which a task created from it keeps but its name. A template's identifier is its file's name: a built-in template's carries the hf- prefix, and one of the user's, in the templates directory beside the tasks, never does. A template of the user's gives its name and description in each language as the user wrote them.",
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "name", "description"],

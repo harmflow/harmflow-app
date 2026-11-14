@@ -57,11 +57,16 @@ func (a *App) loadTemplates() {
 	a.mu.Unlock()
 }
 
-// readTemplate validates a built-in template's file: against template.schema.json, then for the rules a schema cannot
-// express, which are that its identifier is its file's name and carries the hf- prefix.
+// readTemplate validates a built-in template's file.
 func (a *App) readTemplate(f ports.TemplateFile) *Template {
-	t := &Template{ID: f.Name, Source: TemplateBuiltin, Path: f.Path}
-	r, doc := a.validateTemplate(f.Content, f.Err)
+	return a.loadTemplate(&Template{ID: f.Name, Source: TemplateBuiltin, Path: f.Path}, f.Content, f.Err)
+}
+
+// loadTemplate validates the content of t's file, read with readErr, and fills t from it: against
+// template.schema.json, then for the rules a schema cannot express, which are that its identifier is its file's name,
+// and carries the hf- prefix when, and only when, the template is built in.
+func (a *App) loadTemplate(t *Template, content []byte, readErr error) *Template {
+	r, doc := a.validateTemplate(content, readErr)
 	t.Validation = r
 	metadata, _ := doc["metadata"].(map[string]any)
 	spec, _ := doc["spec"].(map[string]any)
@@ -72,13 +77,17 @@ func (a *App) readTemplate(f ports.TemplateFile) *Template {
 		}
 	}
 	if id, ok := metadata["id"].(string); ok {
-		if id != f.Name {
+		if id != t.ID {
 			r.addError("/metadata/id", domain.T("id_file_mismatch", `metadata.id "{{id}}" must match the file name {{file}}.yaml`,
-				"id", id, "file", f.Name))
+				"id", id, "file", t.ID))
 		}
-		if !strings.HasPrefix(id, BuiltinPrefix) {
+		switch builtin := strings.HasPrefix(id, BuiltinPrefix); {
+		case t.Source == TemplateBuiltin && !builtin:
 			r.addError("/metadata/id", domain.T("template_id_not_builtin",
 				`a built-in template's identifier starts with hf-, and "{{id}}" does not`, "id", id))
+		case t.Source == TemplateUser && builtin:
+			r.addError("/metadata/id", domain.T("template_id_reserved",
+				`only a built-in template's identifier starts with hf-, and "{{id}}" does`, "id", id))
 		}
 	}
 	r.Valid = len(r.Errors) == 0
@@ -103,7 +112,8 @@ func texts(v any) map[string]string {
 	return out
 }
 
-// Templates lists the task templates, each with its validity: the built-in ones, sorted by identifier.
+// Templates lists the task templates, each with its validity: the built-in ones, sorted by identifier, then the
+// user's, sorted by identifier.
 func (a *App) Templates() []Template {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -111,23 +121,40 @@ func (a *App) Templates() []Template {
 	for _, t := range a.templates {
 		out = append(out, *t)
 	}
+	for _, id := range sortedKeys(a.userTemplates) {
+		out = append(out, *a.userTemplates[id].t)
+	}
 	return out
 }
 
+// template is the template with the identifier id, built in or the user's.
 func (a *App) template(id string) (*Template, error) {
+	if t := a.builtinTemplate(id); t != nil {
+		return t, nil
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	for _, t := range a.templates {
-		if t.ID == id {
-			return t, nil
-		}
+	if u, ok := a.userTemplates[id]; ok {
+		return u.t, nil
 	}
 	return nil, newError(CodeNotFound, domain.T("template_not_found", "no template {{template}}", "template", id))
 }
 
-// UpdateTemplate changes a template. Built-in templates are read-only, and no other template exists, so it always
-// refuses: an identifier a built-in template has, or one with the hf- prefix that none has yet, is a conflict, and any
-// other is not found.
+// builtinTemplate is the built-in template with the identifier id, nil when none has it.
+func (a *App) builtinTemplate(id string) *Template {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, t := range a.templates {
+		if t.ID == id {
+			return t
+		}
+	}
+	return nil
+}
+
+// UpdateTemplate changes a template. Built-in templates are read-only, and changing a template of the user's is not
+// offered here, so it always refuses: an identifier a built-in template has, or one with the hf- prefix that none has
+// yet, is a conflict, and any other is not found.
 func (a *App) UpdateTemplate(id string) error {
 	return a.refuseTemplateWrite(id)
 }
@@ -138,8 +165,8 @@ func (a *App) DeleteTemplate(id string) error {
 }
 
 func (a *App) refuseTemplateWrite(id string) error {
-	if _, err := a.template(id); err != nil && !strings.HasPrefix(id, BuiltinPrefix) {
-		return err
+	if a.builtinTemplate(id) == nil && !strings.HasPrefix(id, BuiltinPrefix) {
+		return newError(CodeNotFound, domain.T("template_not_found", "no template {{template}}", "template", id))
 	}
 	return newError(CodeConflict, domain.T("template_read_only",
 		"{{template}} is the identifier of a built-in template: built-in templates ship with HarmFlow, which never writes one",
