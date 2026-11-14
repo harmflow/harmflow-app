@@ -489,8 +489,10 @@ function handleEvent(e: HarmflowEvent) {
   }
   // A check ended, a sign-in started or ended, or a token was rejected or expires soon: read the inventory again,
   // without detecting again, which would announce another check.
+  // The templates say whether their harness is ready, so they are read again with it.
   if (e.type === "harness.checked" || e.type.startsWith("harness.sign_in_") || e.type.startsWith("harness.token_")) {
     debounce("harnesses", () => void actions.refreshHarnesses());
+    debounce("templates", () => void actions.refreshTemplates());
   }
   // Output lines change nothing in the record, and a program can print many of them.
   if (e.executionId && state.details[e.executionId] && e.type !== "harness.output" && e.type !== "script.output") {

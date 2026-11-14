@@ -22,7 +22,7 @@ const TemplateBuiltin = "builtin"
 var templateLanguages = []string{"pt-BR", "en-US", "es-ES"}
 
 // Template is a task template as the daemon lists it: its identifier, source, file, and validity, and, when it is
-// valid, its task type, its name and description in each language, and the agent its tasks select.
+// valid, its task type, its name and description in each language, the agent its tasks select, and what it needs.
 type Template struct {
 	ID            string            `json:"id"`
 	Source        string            `json:"source"`
@@ -31,9 +31,25 @@ type Template struct {
 	Name          map[string]string `json:"name,omitempty"`
 	Description   map[string]string `json:"description,omitempty"`
 	SelectedAgent string            `json:"selectedAgent,omitempty"`
+	Needs         *TemplateNeeds    `json:"needs,omitempty"`
 	Validation    *ValidationResult `json:"validation"`
 
 	spec map[string]any // the fields a new task starts with, the selected agent left out; nil when invalid
+}
+
+// TemplateNeeds is what a template needs of this machine, read each time the templates are listed: the harness its
+// tasks run on, whether that harness is ready, and the agents and skills the template cites that the harness cannot
+// load.
+type TemplateNeeds struct {
+	Harness      string          `json:"harness"`
+	HarnessReady bool            `json:"harnessReady"`
+	Missing      []TemplateCited `json:"missing"`
+}
+
+// TemplateCited is an agent or skill a template cites, by kind and name.
+type TemplateCited struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
 }
 
 // NewTask is the document of a task not yet saved.
@@ -113,10 +129,10 @@ func texts(v any) map[string]string {
 }
 
 // Templates lists the task templates, each with its validity: the built-in ones, sorted by identifier, then the
-// user's, sorted by identifier.
-func (a *App) Templates() []Template {
+// user's, sorted by identifier. Each valid template of a type that runs a harness carries what it needs of this
+// machine as it is now.
+func (a *App) Templates(ctx context.Context) []Template {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	out := []Template{}
 	for _, t := range a.templates {
 		out = append(out, *t)
@@ -124,7 +140,55 @@ func (a *App) Templates() []Template {
 	for _, id := range sortedKeys(a.userTemplates) {
 		out = append(out, *a.userTemplates[id].t)
 	}
+	a.mu.Unlock()
+	for i := range out {
+		if out[i].Validation.Valid && out[i].Type != domain.TypeScriptTask {
+			out[i].Needs = a.templateNeeds(ctx, &out[i])
+		}
+	}
 	return out
+}
+
+// templateNeeds reads whether the harness a template's tasks run on is ready, and looks up for that harness each agent
+// and skill the template cites, as validation looks up a task's: the hf- names among the built-ins, the others in the
+// harness's configuration for the folder the task would run in, which for a template that sets no workspace is the
+// folder of a task named after it in en-US. An item whose harness could not give its list is not known to be missing,
+// and is not named.
+func (a *App) templateNeeds(ctx context.Context, t *Template) *TemplateNeeds {
+	harness := templateHarness(t)
+	n := &TemplateNeeds{Harness: harness, HarnessReady: a.harnessInfo(ctx, harness).Ready(), Missing: []TemplateCited{}}
+	workspace, _ := lookup(t.spec, "workspace", "path").(string)
+	folder := a.taskFolder(workspace, slugify(t.Name["en-US"]))
+	var cited []TemplateCited
+	if t.SelectedAgent != "" {
+		cited = append(cited, TemplateCited{Kind: "agent", Name: t.SelectedAgent})
+	}
+	for _, kind := range []string{"agent", "skill"} {
+		names, _ := t.spec[kind+"s"].([]any)
+		for _, v := range names {
+			if name, ok := v.(string); ok {
+				cited = append(cited, TemplateCited{Kind: kind, Name: name})
+			}
+		}
+	}
+	for _, c := range cited {
+		if slices.Contains(n.Missing, c) {
+			continue
+		}
+		if l := a.resolveItem(ctx, c.Kind, c.Name, harness, "", folder, nil); !l.found && l.unreadable == nil {
+			n.Missing = append(n.Missing, c)
+		}
+	}
+	return n
+}
+
+// templateHarness is the harness a template's tasks run on: the provider of its preferred profile, Claude Code when it
+// names none.
+func templateHarness(t *Template) string {
+	if harness, _ := lookup(t.spec, "harness", "preferred", "provider").(string); harness != "" {
+		return harness
+	}
+	return domain.HarnessClaudeCode
 }
 
 // template is the template with the identifier id, built in or the user's.
@@ -210,10 +274,7 @@ func (a *App) DraftTask(ctx context.Context, id, language string) (*NewTask, err
 // accepts it, its skills are added, and the agent and its hash are the task's origin. The agent is looked up for the
 // template's preferred harness and the folder the task would run in; one this machine lacks copies nothing.
 func (a *App) copyAgent(ctx context.Context, metadata, spec map[string]any, t *Template, taskID string) {
-	harness, _ := lookup(t.spec, "harness", "preferred", "provider").(string)
-	if harness == "" {
-		harness = domain.HarnessClaudeCode
-	}
+	harness := templateHarness(t)
 	workspace, _ := lookup(t.spec, "workspace", "path").(string)
 	l := a.resolveItem(ctx, "agent", t.SelectedAgent, harness, "", a.taskFolder(workspace, taskID), nil)
 	if !l.found {

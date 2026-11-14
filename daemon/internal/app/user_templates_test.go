@@ -92,7 +92,7 @@ func mustJSON(t *testing.T, v any) json.RawMessage {
 
 // templateByID is the template Templates lists with the identifier id; ok is false when it lists none.
 func templateByID(e *env, id string) (tp Template, ok bool) {
-	for _, tp := range e.app.Templates() {
+	for _, tp := range e.app.Templates(e.t.Context()) {
 		if tp.ID == id {
 			return tp, true
 		}
@@ -135,7 +135,7 @@ func TestSaveTaskAsTemplate(t *testing.T) {
 		t.Errorf("the task file after SaveAsTemplate = %q, want it unchanged", after)
 	}
 	var ids []string
-	for _, tp := range e.app.Templates() {
+	for _, tp := range e.app.Templates(t.Context()) {
 		ids = append(ids, tp.Source+":"+tp.ID)
 	}
 	if want := []string{"builtin:hf-general", "user:weekly-notes"}; !slices.Equal(ids, want) {

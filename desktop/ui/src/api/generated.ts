@@ -252,8 +252,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List the task templates, each with its validity
-         * @description The built-in templates, which ship with HarmFlow, sorted by identifier, then the user's own, from the templates directory beside the tasks, sorted by identifier. An invalid one is listed with the errors of its file, and is never offered for creating a task.
+         * List the task templates, each with its validity and what it needs
+         * @description The built-in templates, which ship with HarmFlow, sorted by identifier, then the user's own, from the templates directory beside the tasks, sorted by identifier. An invalid one is listed with the errors of its file, and is never offered for creating a task. A valid one says what it needs of this machine as it is when it is listed: whether its harness is ready, and the agents and skills it cites that the harness cannot load.
          */
         get: operations["listTemplates"];
         put?: never;
@@ -1065,7 +1065,26 @@ export interface components {
             description?: components["schemas"]["LocalizedText"];
             /** @description The agent the tasks created from it select. */
             selectedAgent?: string;
+            needs?: components["schemas"]["TemplateNeeds"];
             validation: components["schemas"]["ValidationResult"];
+        };
+        /** @description What a valid template needs of this machine, read each time the templates are listed; a script template, which runs no harness, has none. A template that needs what this machine lacks is still offered, and a task created from it is validated as any task. */
+        TemplateNeeds: {
+            /**
+             * @description The harness its tasks run on, the provider of its preferred profile; claude-code when it names none.
+             * @enum {string}
+             */
+            harness: "claude-code" | "codex";
+            /** @description Whether that harness is ready. */
+            harnessReady: boolean;
+            /** @description The agents and skills it cites, its selected agent included, that the harness cannot load on this machine, each once: hf- names among the built-ins, the others in the harness's configuration. An item whose harness could not give its list is not named. */
+            missing: components["schemas"]["TemplateCited"][];
+        };
+        /** @description An agent or skill a template cites. */
+        TemplateCited: {
+            /** @enum {string} */
+            kind: "agent" | "skill";
+            name: string;
         };
         /** @description The template document of contracts/schemas/template.schema.json. */
         TemplateDocument: {
