@@ -4,7 +4,9 @@
 // its log is gone. That the daemon keeps the record and serves it so is app › TestRetentionDeletesOnlyExpiredLogs's and
 // itest › TestRetentionExpiresTheLogAtStart's. An execution that found no work is listed as No work, in the neutral
 // tone, and one that was interrupted as Interrupted, in the warning tone, neither as a failure; one that opened a draft
-// whose tests failed as Completed, with its Tests failed and PR chips, never as Failed. Its filter bar gives
+// whose tests failed as Completed, with its Tests failed and PR chips, never as Failed. Its Created column shows the
+// creation time the list is sorted by, with the wait beside it when the execution started a minute or more after its
+// creation, so the column reads in order however long an execution waited in the queue. Its filter bar gives
 // the date fields the class that keeps them on the filters' line. Opened again in the same app session, the screen
 // shows its kept rows and filters before any request answers, then refreshes them in the background only when an event
 // came since, or the connection was lost. Opened after a new launch, it keeps none of that: no filter is set and it loads
@@ -16,6 +18,7 @@ import { native } from "../api/native";
 import type { StreamHandlers } from "../api/transport";
 import type { Execution, ExecutionOutput, ExecutionSummary, HarmflowEvent, TaskSummary } from "../api/types";
 import i18n from "../i18n";
+import { formatDateTime, formatDuration } from "../lib/format";
 import { getState, patchStateForTests, startSync } from "../state/store";
 import { HistoryScreen } from "./HistoryScreen";
 
@@ -365,6 +368,46 @@ describe("an execution that was interrupted", () => {
     };
     expect(status(interrupted.id)).toEqual({ label: "Interrupted", tones: ["chip--warning"] });
     expect(status(failed.id)).toEqual({ label: "Failed", tones: ["chip--danger"] });
+  });
+});
+
+describe("the Created column", () => {
+  /** The rows of a History where one execution waited 1 h 24 min in the queue, newest first by creation. */
+  const merge: ExecutionSummary = { ...other, id: "exec-merge", createdAt: "2026-11-10T15:02:41Z", startedAt: "2026-11-10T15:03:00Z" };
+  const implement: ExecutionSummary = { ...aged, id: "exec-implement", createdAt: "2026-11-10T15:02:39Z", startedAt: "2026-11-10T16:26:50Z" };
+  const queued: ExecutionSummary = { ...other, id: "exec-queued", status: "queued", createdAt: "2026-11-10T15:02:27Z", startedAt: undefined, endedAt: undefined };
+  const earlier: ExecutionSummary = { ...other, id: "exec-earlier", createdAt: "2026-11-10T14:55:01Z", startedAt: "2026-11-10T14:55:01Z" };
+  const created = (id: string) => cell(rowOf(id)!, 6).textContent;
+
+  it("shows each row's creation time, the wait beside it when the start came a minute or more later, and reads in order", async () => {
+    daemon.executions = [merge, implement, queued, earlier];
+    await open();
+    expect(host!.querySelector("thead th:nth-child(6)")!.textContent).toBe("Created");
+
+    // The execution that waited in the queue: its creation time, and the wait, never its start time.
+    expect(created(implement.id)).toBe(`${formatDateTime(implement.createdAt, "en-US")} waited 1h 24m`);
+    // One that started at once, and one that has not started: the creation time alone.
+    expect(created(merge.id)).toBe(formatDateTime(merge.createdAt, "en-US"));
+    expect(created(queued.id)).toBe(formatDateTime(queued.createdAt, "en-US"));
+    expect(created(earlier.id)).toBe(formatDateTime(earlier.createdAt, "en-US"));
+
+    // The column reads in the list's order, newest first.
+    const shown = rows().map((r) => r.querySelector("td:nth-child(2) .mono")!.textContent);
+    expect(shown).toEqual([merge.id, implement.id, queued.id, earlier.id]);
+    const times = shown.map((id) => Date.parse(daemon.executions.find((x) => x.id === id)!.createdAt));
+    expect(times).toEqual([...times].sort((a, b) => b - a));
+  });
+
+  it("writes the header and the wait in the interface's language", async () => {
+    daemon.executions = [implement];
+    await i18n.changeLanguage("pt-BR");
+    try {
+      await open();
+      expect(host!.querySelector("thead th:nth-child(6)")!.textContent).toBe("Criada");
+      expect(created(implement.id)).toBe(`${formatDateTime(implement.createdAt, "pt-BR")} esperou ${formatDuration(84 * 60_000 + 11_000, "pt-BR")}`);
+    } finally {
+      await i18n.changeLanguage("en-US");
+    }
   });
 });
 

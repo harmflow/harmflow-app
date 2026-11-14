@@ -8,7 +8,7 @@ import type { ExecutionStatus, ExecutionSummary, Trigger } from "../api/types";
 import { ExecutionDetail } from "../components/ExecutionDetail";
 import { HarnessLabel } from "../components/Shell";
 import { Banner, Button, Chip, Drawer, EmptyState, IconButton, Select, StatusChip, TextInput } from "../components/ui";
-import { formatDateTime, formatElapsed, formatNumber } from "../lib/format";
+import { formatDateTime, formatDuration, formatElapsed, formatNumber } from "../lib/format";
 import { useDebounced } from "../lib/hooks";
 import { actions, getState, useStore } from "../state/store";
 
@@ -28,6 +28,25 @@ const STATUSES: ExecutionStatus[] = [
 ];
 const TRIGGERS: Trigger[] = ["manual", "schedule", "catch_up"];
 const PAGE = 50;
+// The shortest wait between an execution's creation and its start that its row shows.
+const SHOWN_WAIT_MS = 60_000;
+
+/**
+ * When an execution was created, the time the list is sorted by, and beside it how long it waited before it started,
+ * when that was a minute or more. The start time itself is the execution's detail's.
+ */
+function Created({ execution }: { execution: ExecutionSummary }) {
+  const { t, i18n } = useTranslation();
+  const wait = execution.startedAt ? Date.parse(execution.startedAt) - Date.parse(execution.createdAt) : 0;
+  return (
+    <>
+      {formatDateTime(execution.createdAt, i18n.language)}
+      {wait >= SHOWN_WAIT_MS ? (
+        <span className="muted"> {t("history.columns.waited", { duration: formatDuration(wait, i18n.language) })}</span>
+      ) : null}
+    </>
+  );
+}
 
 /** 00:00 of a date input's day (`YYYY-MM-DD`), days after it, in the user's time zone. */
 function midnight(day: string, after = 0): Date {
@@ -249,7 +268,7 @@ export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpe
                   <th>{t("history.columns.workItem")}</th>
                   <th>{t("history.columns.harness")}</th>
                   <th>{t("history.columns.trigger")}</th>
-                  <th>{t("history.columns.started")}</th>
+                  <th>{t("history.columns.created")}</th>
                   <th>{t("history.columns.duration")}</th>
                   <th>{t("history.columns.result")}</th>
                 </tr>
@@ -270,7 +289,9 @@ export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpe
                       {r.attemptCount && r.attemptCount > 1 ? <span className="muted small"> ×{r.attemptCount}</span> : null}
                     </td>
                     <td>{t(`trigger.${r.trigger}`)}</td>
-                    <td className="mono small">{formatDateTime(r.startedAt ?? r.createdAt, i18n.language)}</td>
+                    <td className="mono small">
+                      <Created execution={r} />
+                    </td>
                     <td className="mono">{r.startedAt ? formatElapsed(r.startedAt, r.endedAt, i18n.language) : "—"}</td>
                     <td>
                       {r.testsStatus ? (
