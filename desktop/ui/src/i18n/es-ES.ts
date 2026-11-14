@@ -152,6 +152,7 @@ export const esES: Resources = {
     manual: "Manual",
     schedule: "Programada",
     catch_up: "Recuperación",
+    run_again: "Ejecución seguida",
   },
   attemptOutcome: {
     running: "Ejecutando",
@@ -203,6 +204,7 @@ export const esES: Resources = {
       cancelled: "Ejecución cancelada",
       interrupted: "Ejecución interrumpida",
       needs_attention: "Requiere atención humana",
+      run_again_limit_reached: "Límite de ejecuciones seguidas alcanzado",
     },
     harness: {
       started: "Herramienta de IA iniciada",
@@ -488,6 +490,10 @@ export const esES: Resources = {
     firings_missed_catch_up_one: "se perdió {{count}} disparo; una ejecución de recuperación se ejecuta por él",
     firings_missed_catch_up_other:
       "se perdieron {{count}} disparos; una ejecución de recuperación se ejecuta por todos ellos",
+    run_again_limit_reached_one:
+      "la tarea se ejecutó de nuevo {{count}} vez seguida, su límite de ejecuciones seguidas; ahora espera su programación",
+    run_again_limit_reached_other:
+      "la tarea se ejecutó de nuevo {{count}} veces seguidas, su límite de ejecuciones seguidas; ahora espera su programación",
     firings_missed_skipped_one:
       "se perdió {{count}} disparo y se omitió, según la política de ejecuciones perdidas de la tarea",
     firings_missed_skipped_other:

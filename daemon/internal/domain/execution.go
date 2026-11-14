@@ -61,8 +61,9 @@ func (s ExecutionStatus) CanTransition(to ExecutionStatus) error {
 	return nil
 }
 
-// Trigger is what fired an execution: a run by hand, the schedule, or one catch-up for the firings missed while the
-// daemon or the machine was unavailable.
+// Trigger is what fired an execution: a run by hand, the schedule, one catch-up for the firings missed while the daemon
+// or the machine was unavailable, or a run again, which an execution that ended completed fires under its task's
+// run_again completion policy.
 type Trigger string
 
 // The triggers of an execution, as Trigger in contracts/api/openapi.yaml names them.
@@ -70,6 +71,7 @@ const (
 	TriggerManual   Trigger = "manual"
 	TriggerSchedule Trigger = "schedule"
 	TriggerCatchUp  Trigger = "catch_up"
+	TriggerRunAgain Trigger = "run_again"
 )
 
 // AttemptOutcome is how one harness process ended.
@@ -311,6 +313,11 @@ type Execution struct {
 	LogExpired         bool              `json:"logExpired,omitempty"`
 	// Script is the program a script task's execution ran, as it ran; absent for every other type.
 	Script *ScriptRun `json:"script,omitempty"`
+	// FollowsExecutionID is the execution whose completed end fired this one again: one whose trigger is run_again, or
+	// the firing that waited when that execution ended, which the run again coalesced into. RunAgainCount is how many
+	// runs again in a row led to it, from 1. Both are empty when no run again fired it.
+	FollowsExecutionID string `json:"followsExecutionId,omitempty"`
+	RunAgainCount      int    `json:"runAgainCount,omitempty"`
 
 	// revision counts the changes made to the record in memory, so a periodic save can skip a record it already wrote.
 	// It is never saved.

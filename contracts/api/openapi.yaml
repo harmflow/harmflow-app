@@ -1148,6 +1148,7 @@ components:
         - firing_skipped
         - firings_missed_catch_up
         - firings_missed_skipped
+        - run_again_limit_reached
         - cancel_requested
         - cancelled_before_start
         - execution_cancelled
@@ -1807,7 +1808,7 @@ components:
 
     Trigger:
       type: string
-      enum: [manual, schedule, catch_up]
+      enum: [manual, schedule, catch_up, run_again]
 
     Attempt:
       type: object
@@ -2027,6 +2028,18 @@ components:
           required: [attempts, workItems, warnings, changedFiles, commands]
           properties:
             scheduledFor: { type: string, format: date-time }
+            followsExecutionId:
+              type: string
+              description: >-
+                The execution whose completed end fired this one again, under the task's run_again completion policy:
+                its trigger is run_again, or the firing that waited when that execution ended, which the run again
+                coalesced into. Absent when no run again fired it.
+            runAgainCount:
+              type: integer
+              minimum: 1
+              description: >-
+                How many runs again in a row led to this execution, from 1 for the first after the execution that started
+                the sequence; absent when no run again fired it.
             cancelRequestedAt: { type: string, format: date-time }
             timeoutAt: { type: string, format: date-time }
             definitionRevision: { type: string }
