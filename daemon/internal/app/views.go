@@ -175,6 +175,8 @@ func holds(s *domain.ExecutionSummary, text string) bool {
 type ExecutionView struct {
 	ExecutionSummary
 	ScheduledFor       *time.Time              `json:"scheduledFor,omitempty"`
+	FollowsExecutionID string                  `json:"followsExecutionId,omitempty"`
+	RunAgainCount      int                     `json:"runAgainCount,omitempty"`
 	CancelRequestedAt  *time.Time              `json:"cancelRequestedAt,omitempty"`
 	TimeoutAt          *time.Time              `json:"timeoutAt,omitempty"`
 	DefinitionRevision string                  `json:"definitionRevision,omitempty"`
@@ -199,7 +201,8 @@ func (a *App) GetExecution(id string) (ExecutionView, error) {
 		return ExecutionView{}, err
 	}
 	return ExecutionView{
-		ExecutionSummary: summarize(c), ScheduledFor: c.ScheduledFor, CancelRequestedAt: c.CancelRequestedAt,
+		ExecutionSummary: summarize(c), ScheduledFor: c.ScheduledFor, FollowsExecutionID: c.FollowsExecutionID,
+		RunAgainCount: c.RunAgainCount, CancelRequestedAt: c.CancelRequestedAt,
 		TimeoutAt: c.TimeoutAt, DefinitionRevision: c.DefinitionRevision, WorkspacePath: c.WorkspacePath,
 		ExecutionDir: c.ExecutionDir, Attempts: c.Attempts, WorkItems: c.WorkItems, Warnings: c.Warnings,
 		ChangedFiles: c.ChangedFiles, Commands: c.Commands, LastOperation: c.LastOperation, LogExpired: c.LogExpired,

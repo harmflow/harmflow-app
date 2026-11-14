@@ -41,7 +41,8 @@
       "required": ["id", "trigger", "attempt", "timeoutAt"],
       "properties": {
         "id": { "type": "string" },
-        "trigger": { "type": "string", "enum": ["manual", "schedule", "catch_up"] },
+        "trigger": { "type": "string", "enum": ["manual", "schedule", "catch_up", "run_again"] },
+        "followsExecutionId": { "description": "The execution whose completed end fired this one again, under the task's run_again completion policy; absent when no run again fired it.", "type": "string" },
         "attempt": { "description": "The number of the attempt this file was written for, from 1.", "type": "integer", "minimum": 1 },
         "timeoutAt": { "description": "When the execution's one timeout, shared by all its attempts, ends it.", "type": ["string", "null"] }
       }
