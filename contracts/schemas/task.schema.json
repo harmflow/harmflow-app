@@ -104,7 +104,7 @@
       ]
     },
     "spec": {
-      "description": "Every type but script needs a prompt and a harness; a script task takes neither, nor agents, skills, a workspace, or execution.allowExtraUsage.",
+      "description": "Every type but script needs a prompt and a harness; a script task takes neither, nor agents, skills, a workspace, a completion policy, or execution.allowExtraUsage.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -169,6 +169,9 @@
         "concurrency": {
           "$ref": "#/$defs/concurrency"
         },
+        "completion": {
+          "$ref": "#/$defs/completion"
+        },
         "harness": {
           "$ref": "#/$defs/harness"
         },
@@ -212,6 +215,7 @@
               "parameters": false,
               "workspace": false,
               "harness": false,
+              "completion": false,
               "github": false,
               "execution": {
                 "properties": {
@@ -333,6 +337,27 @@
             "skip"
           ],
           "default": "queue"
+        }
+      }
+    },
+    "completion": {
+      "description": "What an execution of a task that runs a harness does once it ends completed: wait_for_schedule leaves the next execution to the schedule; run_again fires the task again at once, whatever fired the execution, until runAgainLimit runs again in a row. Any other result ends the sequence. A script task takes no completion policy.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "policy": {
+          "type": "string",
+          "enum": [
+            "wait_for_schedule",
+            "run_again"
+          ],
+          "default": "wait_for_schedule"
+        },
+        "runAgainLimit": {
+          "description": "How many runs again follow, in a row, the execution that started the sequence; the execution that ends completed at the limit fires none and notifies the user.",
+          "type": "integer",
+          "minimum": 1,
+          "default": 10
         }
       }
     },

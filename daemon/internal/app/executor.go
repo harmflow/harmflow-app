@@ -95,9 +95,13 @@ func (a *App) launch(x *domain.Execution, h *runHandle) {
 	a.runs.Go(func() { a.execute(x, h) })
 }
 
-// execute carries one execution to its terminal state, then starts the task's waiting firing, if any.
+// execute carries one execution to its terminal state, then applies its task's completion policy and starts the task's
+// waiting firing, if any.
 func (a *App) execute(x *domain.Execution, h *runHandle) {
 	defer func() {
+		// While the task still counts as running, so a firing that arrives meanwhile waits or coalesces with the run
+		// again, as it would with the execution, instead of starting beside it.
+		a.runAgainAfter(x)
 		a.mu.Lock()
 		delete(a.running, x.TaskID)
 		e := a.tasks[x.TaskID]
@@ -440,6 +444,7 @@ func (r *run) writeContext(prev []previousAttempt) error {
 				"lastOperation": x.LastOperation, "endedAt": x.EndedAt})
 		}
 	})
+	follows := r.x.FollowsExecutionID
 	a.mu.Unlock()
 	sort.Slice(history, func(i, j int) bool {
 		return history[i]["createdAt"].(time.Time).After(history[j]["createdAt"].(time.Time))
@@ -469,6 +474,9 @@ func (r *run) writeContext(prev []previousAttempt) error {
 		"interruptedExecutions": interrupted,
 		"recentExecutions":      history,
 		"previousAttempts":      prev,
+	}
+	if follows != "" {
+		ctxDoc["execution"].(map[string]any)["followsExecutionId"] = follows
 	}
 	data, err := json.MarshalIndent(ctxDoc, "", "  ")
 	if err != nil {

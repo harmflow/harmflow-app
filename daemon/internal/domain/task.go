@@ -38,14 +38,17 @@ const (
 )
 
 // The closed-set values of a task's fields, as contracts/schemas/task.schema.json names them: a schedule's missed-run
-// policy, a task's overlapping runs, a permissions profile and network, what a fallback fails over on, and an issue
-// queue's ordering and resume strategy.
+// policy, a task's overlapping runs and completion policy, a permissions profile and network, what a fallback fails
+// over on, and an issue queue's ordering and resume strategy.
 const (
 	MissedRunOnResume = "run_on_resume"
 	MissedRunSkip     = "skip"
 
 	OverlapQueue = "queue"
 	OverlapSkip  = "skip"
+
+	CompletionWaitForSchedule = "wait_for_schedule"
+	CompletionRunAgain        = "run_again"
 
 	ProfileReadOnly       = "read_only"
 	ProfileWorkspaceWrite = "workspace_write"
@@ -93,6 +96,7 @@ type TaskSpec struct {
 	Workspace     *Workspace          `yaml:"workspace,omitempty" json:"workspace,omitempty"`
 	Schedule      *Schedule           `yaml:"schedule,omitempty" json:"schedule,omitempty"`
 	Concurrency   *Concurrency        `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
+	Completion    *Completion         `yaml:"completion,omitempty" json:"completion,omitempty"`
 	Harness       HarnessSelection    `yaml:"harness,omitempty" json:"harness,omitzero"`
 	Permissions   *Permissions        `yaml:"permissions,omitempty" json:"permissions,omitempty"`
 	Execution     *ExecutionLimits    `yaml:"execution,omitempty" json:"execution,omitempty"`
@@ -148,6 +152,13 @@ type MissedRun struct {
 // Concurrency is whether a firing that arrives while the task runs waits in the queue or is skipped.
 type Concurrency struct {
 	OverlappingRuns string `yaml:"overlappingRuns,omitempty" json:"overlappingRuns,omitempty"`
+}
+
+// Completion is what an execution of a task that runs a harness does once it ends completed: wait for the schedule, or
+// fire the task again at once, up to RunAgainLimit runs again in a row. A script task has none.
+type Completion struct {
+	Policy        string `yaml:"policy,omitempty" json:"policy,omitempty"`
+	RunAgainLimit *int   `yaml:"runAgainLimit,omitempty" json:"runAgainLimit,omitempty"`
 }
 
 // HarnessProfile is one harness a task may run with: its provider, and the model and effort to ask it for, where
@@ -300,12 +311,14 @@ const (
 	DefaultMaxItemsPerCycle      = 1
 	DefaultMaxResumeAttempts     = 3
 	DefaultMaxFailedRetries      = 3
+	DefaultRunAgainLimit         = 10
 	DefaultTestRepairAttempts    = 2
 	DefaultBaseBranch            = "main"
 )
 
 // Effective returns a copy of the document with every default applied, so no optional field the task's type takes is
-// nil. A field the type does not take, such as a script task's harness or workspace, is left as it is.
+// nil. A field the type does not take, such as a script task's harness, workspace, or completion policy, is left as
+// it is.
 func (d TaskDocument) Effective() TaskDocument {
 	e := d.clone()
 	s := &e.Spec
@@ -348,6 +361,13 @@ func (d TaskDocument) Effective() TaskDocument {
 		if s.Workspace == nil {
 			s.Workspace = &Workspace{}
 		}
+		if s.Completion == nil {
+			s.Completion = &Completion{}
+		}
+		if s.Completion.Policy == "" {
+			s.Completion.Policy = CompletionWaitForSchedule
+		}
+		setDefault(&s.Completion.RunAgainLimit, DefaultRunAgainLimit)
 		s.Harness.Preferred = s.Harness.Preferred.withDefaults()
 		if s.Harness.Fallback == nil {
 			s.Harness.Fallback = &FallbackPolicy{}
@@ -593,6 +613,10 @@ func (d TaskDocument) clone() TaskDocument {
 	if s.Concurrency != nil {
 		cc := *s.Concurrency
 		s.Concurrency = &cc
+	}
+	if s.Completion != nil {
+		cp := Completion{Policy: s.Completion.Policy, RunAgainLimit: clonePtr(s.Completion.RunAgainLimit)}
+		s.Completion = &cp
 	}
 	if f := s.Harness.Fallback; f != nil {
 		fc := *f
