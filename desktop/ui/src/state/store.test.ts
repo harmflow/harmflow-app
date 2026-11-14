@@ -307,6 +307,7 @@ describe("a periodic refresh", () => {
   const kinds: Array<[PeriodicRefresh, string, number, () => Promise<void>]> = [
     ["stats", "GET /stats", 5000, () => actions.refreshStats()],
     ["system", "GET /system", 5000, () => actions.refreshSystem()],
+    ["github", "GET /github/rate-limit", 5000, () => actions.refreshGitHub()],
     ["health", "GET /health", 10000, () => actions.refreshHealth()],
     ["executions", "GET /queue", 30000, () => actions.refreshExecutions()],
     ["spend", "GET /spend", 60000, () => actions.refreshSpend()],

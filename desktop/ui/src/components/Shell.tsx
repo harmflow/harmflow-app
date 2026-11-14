@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObjec
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { native } from "../api/native";
+import type { RateLimitBucket } from "../api/types";
 import { askAndStopDaemon } from "../lib/daemonStop";
 import { errorMessage } from "../lib/errorMessage";
 import { formatBytes, formatNumber, formatTime } from "../lib/format";
@@ -79,8 +80,26 @@ export function useTooltip(place: Place) {
 }
 
 /**
+ * One of the GitHub widget's gauges: what its bucket used against the limit GitHub reports for it, and when it resets;
+ * — while it is unknown.
+ */
+function RateLimitGauge({ label, bucket, locale }: { label: string; bucket?: RateLimitBucket; locale: string }) {
+  const { t } = useTranslation();
+  return (
+    <Gauge
+      label={label}
+      value={bucket?.used}
+      max={bucket?.limit}
+      text={bucket ? `${formatNumber(bucket.used, locale)} / ${formatNumber(bucket.limit, locale)}` : "—"}
+      note={bucket ? t("gauges.resetsAt", { time: formatTime(bucket.resetAt, locale, false) }) : undefined}
+    />
+  );
+}
+
+/**
  * The sidebar, expanded or collapsed to its icons (⌘B). The daemon's connection state is the topbar's alone; the
- * gauges and the version show only while expanded, and the gauges are read from /system only then.
+ * gauges and the version show only while expanded, and the gauges are read from /system and /github/rate-limit only
+ * then.
  */
 export function Sidebar({
   screen,
@@ -96,6 +115,7 @@ export function Sidebar({
   const { t, i18n } = useTranslation();
   const registered = useRegistered();
   const system = useStore((s) => s.system);
+  const github = useStore((s) => s.github);
   const version = useStore((s) => s.appVersion);
   const running = useStore((s) => s.stats?.running ?? 0);
   const locale = i18n.language;
@@ -104,12 +124,17 @@ export function Sidebar({
   // The layout moves under a shown tooltip; the next hover or focus places it again.
   useEffect(hide, [collapsed, hide]);
 
-  // The gauges are read at once on expanding and then on their own clock; collapsed, nothing shows them.
+  // The gauges are read at once on expanding and then on their own clock; collapsed, nothing shows them. GitHub's are
+  // a refresh of their own kind, so a slow gh never holds the System gauges back.
   useEffect(() => {
     if (collapsed) return;
     void actions.refreshSystem();
-    const timer = every("system", GAUGES_EVERY_MS, actions.refreshSystem);
-    return () => clearInterval(timer);
+    void actions.refreshGitHub();
+    const timers = [
+      every("system", GAUGES_EVERY_MS, actions.refreshSystem),
+      every("github", GAUGES_EVERY_MS, actions.refreshGitHub),
+    ];
+    return () => timers.forEach(clearInterval);
   }, [collapsed]);
 
   const toggleLabel = collapsed ? t("sidebar.expand") : t("sidebar.collapse");
@@ -155,6 +180,17 @@ export function Sidebar({
       <div className="sidebar__spacer" />
 
       <div className="sidebar__foot">
+        {collapsed ? null : (
+          <section className="gauges-panel" aria-labelledby="github-gauges-title">
+            <h2 id="github-gauges-title" className="gauges-panel__title">
+              {t("gauges.github")}
+            </h2>
+            <div className="gauges gauges--github">
+              <RateLimitGauge label={t("gauges.rest")} bucket={github?.rest} locale={locale} />
+              <RateLimitGauge label={t("gauges.graphql")} bucket={github?.graphql} locale={locale} />
+            </div>
+          </section>
+        )}
         {collapsed ? null : (
           <section className="gauges-panel" aria-labelledby="gauges-title">
             <h2 id="gauges-title" className="gauges-panel__title">

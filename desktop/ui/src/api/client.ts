@@ -12,6 +12,7 @@ import type {
   ExecutionOutput,
   ExecutionSummary,
   FiringResult,
+  GitHubRateLimit,
   HarmflowEvent,
   Harness,
   HarnessId,
@@ -94,6 +95,8 @@ export const api = {
   /** The current month's spend per day, for the Overview's band. */
   spend: () => call<Spend>("GET", "/spend"),
   system: () => call<SystemGauges>("GET", "/system"),
+  /** GitHub's count of the gh login's hourly limits, REST and GraphQL, for the sidebar's GitHub gauges. */
+  githubRateLimit: () => call<GitHubRateLimit>("GET", "/github/rate-limit"),
 
   harnesses: () => call<Harness[]>("GET", "/harnesses"),
   refreshHarnesses: () => call<Harness[]>("POST", "/harnesses/refresh"),

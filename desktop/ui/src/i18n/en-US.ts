@@ -1508,6 +1508,10 @@ export const enUS = {
     cpu: "CPU",
     ram: "RAM",
     disk: "Disk",
+    github: "GitHub",
+    rest: "REST",
+    graphql: "GraphQL",
+    resetsAt: "Resets at {{time}}",
   },
 } as const;
 

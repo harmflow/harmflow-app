@@ -1536,5 +1536,9 @@ export const esES: Resources = {
     cpu: "CPU",
     ram: "RAM",
     disk: "Disco",
+    github: "GitHub",
+    rest: "REST",
+    graphql: "GraphQL",
+    resetsAt: "Se renueva a las {{time}}",
   },
 };

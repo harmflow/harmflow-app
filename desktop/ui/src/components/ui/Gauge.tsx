@@ -1,4 +1,4 @@
-export function Gauge({ label, value, max, text }: { label: string; value?: number; max?: number; text: string }) {
+export function Gauge({ label, value, max, text, note }: { label: string; value?: number; max?: number; text: string; note?: string }) {
   const ratio = value !== undefined && max ? Math.min(1, Math.max(0, value / max)) : 0;
   return (
     <div className="gauge">
@@ -7,6 +7,7 @@ export function Gauge({ label, value, max, text }: { label: string; value?: numb
         <span className="gauge__fill" style={{ width: `${ratio * 100}%` }} />
       </span>
       <span className="gauge__text">{text}</span>
+      {note ? <span className="gauge__note">{note}</span> : null}
     </div>
   );
 }
