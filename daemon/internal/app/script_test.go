@@ -702,6 +702,74 @@ func TestScriptStopEndsItsProcesses(t *testing.T) {
 	}
 }
 
+// Cancelling, and the timeout, end a program that ignores SIGTERM, and the child it started that ignores it too, once
+// the grace period is over: neither outlives the execution, and the attempt records SIGKILL's exit code, 137.
+//
+// The program ignores SIGTERM before it writes its pid, and its child inherits the ignore, sets it again, and writes
+// its own pid before it execs sleep: the test waits for both pids before it cancels or lets the timeout elapse, so a
+// SIGTERM that came before a trap was in place cannot end either process early and leave the grace unused.
+func TestScriptStopEndsAProgramIgnoringSIGTERM(t *testing.T) {
+	e := newEnv(t)
+	dir := t.TempDir()
+	body := fmt.Sprintf(`  script:
+    command: [/bin/sh, -c, "trap '' TERM; echo $$ > %[1]s/program; /bin/sh -c 'trap \"\" TERM; echo $$ > %[1]s/child; exec sleep 600' & sleep 600"]
+  execution:
+    cancelGraceSeconds: 1
+`, dir)
+	pids := func() (int, int) {
+		t.Helper()
+		return waitForPid(t, filepath.Join(dir, "program")), waitForPid(t, filepath.Join(dir, "child"))
+	}
+	ended := func(name string, x ExecutionView, outcome domain.AttemptOutcome, program, child int) {
+		t.Helper()
+		if alive(program) {
+			t.Errorf("%s: the program %d survived the grace period", name, program)
+		}
+		if alive(child) {
+			t.Errorf("%s: the background child %d survived the grace period", name, child)
+		}
+		at := x.Attempts[0]
+		if at.Outcome != outcome {
+			t.Errorf("%s: attempt outcome = %q, want %q", name, at.Outcome, outcome)
+		}
+		if c := at.ExitCode; c == nil || *c != 137 {
+			got := "none"
+			if c != nil {
+				got = strconv.Itoa(*c)
+			}
+			t.Errorf("%s: attempt exit code = %s, want 137, SIGKILL's once the grace was over", name, got)
+		}
+		if x.Script == nil || x.Script.Signal != "SIGKILL" {
+			t.Errorf("%s: script record %+v, want it ended by SIGKILL", name, x.Script)
+		}
+	}
+
+	e.createScript("cancel", body)
+	res, _ := e.app.RunTask("cancel")
+	program, child := pids()
+	if err := e.app.CancelExecution(res.ExecutionID); err != nil {
+		t.Fatal(err)
+	}
+	x := e.wait(res.ExecutionID, domain.StatusCancelled)
+	e.idle("cancel")
+	ended("cancelled", x, domain.AttemptCancelled, program, child)
+
+	// Set before the run starts, on this App alone: long enough on a loaded host for the program to set its trap and
+	// start its child first.
+	e.app.d.TimeoutUnit = 3 * time.Second
+	_ = os.Remove(filepath.Join(dir, "program"))
+	_ = os.Remove(filepath.Join(dir, "child"))
+	e.createScript("slow", strings.Replace(body, "cancelGraceSeconds: 1", "cancelGraceSeconds: 1\n    timeoutMinutes: 1", 1))
+	res, _ = e.app.RunTask("slow")
+	program, child = pids()
+	x = e.wait(res.ExecutionID, domain.StatusFailed)
+	e.idle("slow")
+	if x.ErrorKey != "execution_timed_out" {
+		t.Errorf("timed out: error key = %q, want execution_timed_out", x.ErrorKey)
+	}
+	ended("timed out", x, domain.AttemptTimedOut, program, child)
+}
+
 // heldStep holds the first call of a step that writes to disk until free is called, and closes held once it holds it.
 type heldStep struct {
 	first   sync.Once
