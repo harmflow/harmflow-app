@@ -929,6 +929,26 @@ func TestCommandCorrectedToDeclined(t *testing.T) {
 	}
 }
 
+// harmflow-app#1054: a call Claude Code refuses ends failed, then the session's end corrects it to declined. It never
+// ran, so it never becomes the last operation: that stays the last command that ran before it.
+func TestCorrectedCallIsNotTheLastOperation(t *testing.T) {
+	e := newEnv(t)
+	e.create("corrected", "")
+	const pushed, refused = "git push -u origin harmflow/7-x", "python3 /outside/script.py"
+	e.claude.setScript(func(ports.RunRequest) string {
+		return "echo 'CMD " + pushed + "'; echo 'FAILED " + refused + "'; sleep 0.2; echo 'REFUSED last'; echo 'END ok'"
+	})
+	r, _ := e.app.RunTask("corrected")
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	if len(x.Commands) != 2 || x.Commands[0].Command != pushed || x.Commands[0].Status != "succeeded" ||
+		x.Commands[1].Command != refused || x.Commands[1].Status != "declined" {
+		t.Fatalf("commands %+v; want %q succeeded, then %q declined", x.Commands, pushed, refused)
+	}
+	if x.LastOperation != pushed {
+		t.Errorf("last operation %q, want %q", x.LastOperation, pushed)
+	}
+}
+
 func TestRunAndReport(t *testing.T) {
 	e := newEnv(t)
 	e.create("reporter", "")
@@ -7285,6 +7305,12 @@ func TestRecoveryAfterACrashMatchesTheLog(t *testing.T) {
 		{"completed command", []string{progress(selected), logged("Fix the crash"), "echo 'CMD git commit -m x'",
 			"echo 'CMD git push -u origin harmflow/7-x'", "echo 'Pushed the branch'"},
 			"Pushed the branch", "git push -u origin harmflow/7-x"},
+		// harmflow-app#1054: a call Claude Code refuses first ends failed, and only the session's result line corrects it
+		// to declined. A crash before that line leaves it failed, and still not the last operation.
+		{"refused call before its correction", []string{progress(selected), logged("Fix the crash"),
+			"echo 'CMD git push -u origin harmflow/7-x'", "echo 'FAILED python3 /outside/script.py'",
+			"echo 'Waiting for the result'"},
+			"Waiting for the result", "git push -u origin harmflow/7-x"},
 		{"branch", []string{progress(selected), logged("Fix the crash"), progress(`{"type":"workspace.changed",`+
 			`"message":"Created the branch harmflow/7-x","branch":"harmflow/7-x"}`, step("Writing the fix"))},
 			"Writing the fix", "Created the branch harmflow/7-x"},
