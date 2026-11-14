@@ -51,6 +51,7 @@ func newError(code string, text domain.Text) *Error {
 type Paths struct {
 	Home        string
 	Tasks       string
+	Templates   string
 	State       string
 	Executions  string
 	Logs        string
@@ -68,6 +69,7 @@ func NewPaths(home, userHome, builtins string) Paths {
 	return Paths{
 		Home:        home,
 		Tasks:       filepath.Join(home, "tasks"),
+		Templates:   filepath.Join(home, "templates"),
 		State:       filepath.Join(home, "state"),
 		Executions:  filepath.Join(home, "state", "executions"),
 		Logs:        filepath.Join(home, "logs"),
@@ -83,14 +85,16 @@ func NewPaths(home, userHome, builtins string) Paths {
 // Deps is what New wires the use cases to: the installation's paths, the build, the ports, and the intervals tests
 // shorten. A zero clock, wake monitor, location, interval, operating system, or logger takes its default.
 type Deps struct {
-	Paths      Paths
-	Version    string
-	Commit     string    // the short commit it was built from, "-dirty" from uncommitted changes; empty without one
-	BuiltAt    time.Time // when it was built; zero without a build time
-	Clock      ports.Clock
-	Wake       ports.WakeMonitor
-	Location   *time.Location
-	Tasks      ports.TaskRepository
+	Paths    Paths
+	Version  string
+	Commit   string    // the short commit it was built from, "-dirty" from uncommitted changes; empty without one
+	BuiltAt  time.Time // when it was built; zero without a build time
+	Clock    ports.Clock
+	Wake     ports.WakeMonitor
+	Location *time.Location
+	Tasks    ports.TaskRepository
+	// Templates holds the user's task templates; without one, there are none, and saving a task as a template fails.
+	Templates  ports.TemplateRepository
 	State      ports.StateStore
 	Executions ports.ExecutionRepository
 	Events     ports.EventLog
@@ -167,6 +171,7 @@ type App struct {
 	mu            sync.Mutex
 	tasks         map[string]*taskEntry
 	templates     []*Template                         // the built-in templates, sorted by identifier, read at start
+	userTemplates map[string]*userTemplate            // the user's templates, by identifier
 	executions    map[string]*domain.Execution        // with the four below, the executions history.go describes
 	ended         map[string]*domain.ExecutionSummary // by execution id
 	byCreated     []placed
@@ -303,8 +308,9 @@ func New(d Deps) (*App, error) {
 	}
 	a := &App{
 		d: d, log: d.Logger, startedAt: d.Clock.Now(),
-		tasks: map[string]*taskEntry{}, executions: map[string]*domain.Execution{}, running: map[string]*runHandle{},
-		ended: map[string]*domain.ExecutionSummary{}, latest: map[string]placed{},
+		tasks: map[string]*taskEntry{}, userTemplates: map[string]*userTemplate{}, executions: map[string]*domain.Execution{},
+		running: map[string]*runHandle{},
+		ended:   map[string]*domain.ExecutionSummary{}, latest: map[string]placed{},
 		inventory: map[string]ports.HarnessInfo{}, manualPaths: map[string]string{}, sched: map[string]*scheduleState{},
 		firings: map[string][]firingRecord{}, ledger: map[string]map[string]*domain.WorkItem{},
 		applied: map[string][]string{}, accepting: true,
@@ -352,6 +358,7 @@ func (a *App) Start(ctx context.Context) error {
 		return err
 	}
 	a.loadTemplates()
+	a.loadUserTemplates()
 	a.loadSchedule()
 	if err := a.recover(ctx); err != nil {
 		return err

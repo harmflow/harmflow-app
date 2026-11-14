@@ -620,6 +620,7 @@ func openEnv(t *testing.T, home string, configure ...func(*env)) *env {
 func (e *env) start(t *testing.T, configure ...func(*env)) {
 	t.Helper()
 	tasks, _ := fsstore.NewTasks(e.paths.Tasks)
+	templates, _ := fsstore.NewTasks(e.paths.Templates)
 	state, _ := fsstore.NewState(e.paths.State)
 	execs, _ := fsstore.NewExecutions(e.paths.Executions)
 	e.records = execs
@@ -648,7 +649,7 @@ func (e *env) start(t *testing.T, configure ...func(*env)) {
 		loc = time.UTC
 	}
 	a, err := New(Deps{Paths: e.paths, Version: "test", Clock: e.clock, Wake: e.wake, Location: loc, Tasks: tasks,
-		State: e.state, Executions: e.records, Events: e.events, Validator: v, Harnesses: harnesses,
+		Templates: templates, State: e.state, Executions: e.records, Events: e.events, Validator: v, Harnesses: harnesses,
 		Service: e.service, Workspace: &workspace.Reader{}, TickInterval: time.Hour, TimeoutUnit: e.timeoutUnit,
 		SignInTimeout: e.signInTimeout, HarnessTokens: e.harnessTokens, Identify: e.identify,
 		StopDetectionWait: e.stopDetectionWait, StopExecutionsWait: e.stopExecutionsWait, Logger: logger})

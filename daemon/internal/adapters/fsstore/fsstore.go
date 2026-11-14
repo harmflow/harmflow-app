@@ -92,7 +92,8 @@ func Revision(content []byte) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-// Tasks is the TaskRepository: one <id>.yaml per task in one directory.
+// Tasks is the TaskRepository, one <id>.yaml per task in one directory, and over the templates directory the
+// TemplateRepository, one <id>.yaml per template of the user's.
 type Tasks struct {
 	dir string
 	mu  sync.Mutex
@@ -101,9 +102,13 @@ type Tasks struct {
 	HoldAt func(WritePoint)
 }
 
-var _ ports.TaskRepository = (*Tasks)(nil)
+var (
+	_ ports.TaskRepository     = (*Tasks)(nil)
+	_ ports.TemplateRepository = (*Tasks)(nil)
+)
 
-// NewTasks returns the repository of the task files in dir, creating the directory when it is missing.
+// NewTasks returns the repository of the task files in dir, or of the template files, creating the directory when it
+// is missing.
 func NewTasks(dir string) (*Tasks, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err

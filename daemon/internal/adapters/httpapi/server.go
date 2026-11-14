@@ -205,6 +205,7 @@ func (s *Server) Handler() http.Handler {
 	h("DELETE /api/v1/tasks/{taskId}", s.deleteTask)
 	h("POST /api/v1/tasks/{taskId}/run", s.runTask)
 	h("POST /api/v1/tasks/{taskId}/duplicate", s.duplicateTask)
+	h("POST /api/v1/tasks/{taskId}/template", s.saveAsTemplate)
 	h("POST /api/v1/tasks/{taskId}/enable", func(w http.ResponseWriter, r *http.Request) { s.setEnabled(w, r, true) })
 	h("POST /api/v1/tasks/{taskId}/disable", func(w http.ResponseWriter, r *http.Request) { s.setEnabled(w, r, false) })
 	h("GET /api/v1/tasks/{taskId}/export", s.exportTask)
@@ -555,6 +556,20 @@ func (s *Server) runTask(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) duplicateTask(w http.ResponseWriter, r *http.Request) {
 	v, err := s.App.DuplicateTask(r.Context(), r.PathValue("taskId"))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, 201, v)
+}
+
+func (s *Server) saveAsTemplate(w http.ResponseWriter, r *http.Request) {
+	var in app.SaveAsTemplateInput
+	if err := decode(r, &in); err != nil {
+		fail(w, err)
+		return
+	}
+	v, err := s.App.SaveAsTemplate(r.PathValue("taskId"), in)
 	if err != nil {
 		fail(w, err)
 		return
