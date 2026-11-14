@@ -270,9 +270,12 @@ func TestSignedOutRealClaudeCodeOnlyProbes(t *testing.T) {
 
 // harmflow-app#327: the same as TestSignedOutRealClaudeCodeOnlyProbes with the real Codex, signed out in the test
 // daemon's own Codex home, and its `codex login` (harmflow-app#572), which opens the browser at a sign-in nobody
-// approves and ends at the one-second timeout.
+// approves and ends at the one-second timeout. Every check, whatever the sign-in reads, also starts Codex's app server
+// to list its home's skills (harmflow-app#939): a read-only call, neither an installer, an updater, nor a sign-in, so
+// `app-server` is allowed beside them, and anything else still fails the test (harmflow-app#1051).
 func TestSignedOutRealCodexOnlyProbes(t *testing.T) {
-	signedOutOnlyProbes(t, realCodex(t), "codex", "Codex", "not_signed_in", append(codexProbes, codexSignIn))
+	signedOutOnlyProbes(t, realCodex(t), "codex", "Codex", "not_signed_in",
+		append(codexProbes, codexSignIn, "app-server"))
 }
 
 // signedOutOnlyProbes sets the real CLI at installed, through a wrapper that records each invocation, as the harness
