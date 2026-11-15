@@ -10,8 +10,13 @@
 //   file that holds that document and is listed; once a text editor changes that file, the list, the editor, and its
 //   YAML tab show the file, and the next save builds on the file's revision. TaskForm.test and TasksScreen.test cover
 //   each half against a stand-in for the transport; itest › TestFormDocumentIsTheFile covers the daemon's half.
+// - A GitHub task the daemon already holds, saved with that document's queue through the dashboard's own transport, is
+//   opened in its editor, which shows the saved queue in its controls; its order and limits changed there and saved
+//   are one update on the task's revision, and the task's file then holds them, the rest of the document unchanged.
+//   TaskForm.test covers the editor's half against a stand-in for the transport; itest ›
+//   TestEditedQueueReachesTheNextExecution covers the daemon's half, from the saved file to the next execution.
 //
-// Both run on one daemon and one dashboard, in this order: the store is the module's own and holds one daemon's state,
+// All run on one daemon and one dashboard, in this order: the store is the module's own and holds one daemon's state,
 // and the import starts from a daemon that holds no task.
 //
 // `make test-desktop-daemon` runs it; it stays out of `pnpm test` and its coverage (vite.config.ts, DAEMON_TESTS). Its
@@ -25,6 +30,7 @@ import { join } from "node:path";
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { api } from "../api/client";
 import type { Task, TaskSummary } from "../api/types";
 import { Toasts } from "../components/toast";
 import i18n from "../i18n";
@@ -466,5 +472,64 @@ describe("the task form and the Tasks screen against the real daemon", () => {
     await shown("the update", () => sent("PUT", "/tasks/complete").length > 0);
     expect(sent("PUT", "/tasks/complete")).toEqual([expect.objectContaining({ baseRevision: changed.revision })]);
     await shown("the edited name in the file", () => readFileSync(file, "utf8").includes("name: Every section, edited twice\n"));
+  });
+
+  it("show an existing task's saved queue in the editor, and save an edit of its order and limits to its file", async () => {
+    // The task the daemon holds before the editor opens: the form's document under another identifier, saved through
+    // the dashboard's own transport, with the queue newest first, five discovered, and two processed.
+    const original: Doc = {
+      ...FORM_DOCUMENT,
+      metadata: { ...(FORM_DOCUMENT.metadata as Record<string, unknown>), id: "queue-edit", name: "Queue edit" },
+    };
+    const queueOf = (doc: Doc) => (doc.spec as { github: { queue: Record<string, unknown> } }).github.queue;
+    expect(queueOf(original)).toMatchObject({ ordering: "newest_first", maxDiscoveredPerCycle: 5, maxItemsPerCycle: 2 });
+    const created = await api.createTask({ document: original });
+    expect(created.revision).toBeTruthy();
+    const file = join(daemon.home, "tasks", "queue-edit.yaml");
+    expect(await documentOf(readFileSync(file, "utf8"))).toStrictEqual(original);
+
+    // Opened in its editor from its row: the queue's controls show the saved order and limits.
+    startSync();
+    await mount({ kind: "list" });
+    await shown("the saved task in the list", () => rowName("queue-edit") === "Queue edit");
+    await click(rowButton("queue-edit", "Edit"));
+    await shown("the saved task in the editor", () => field("Name") && control("Name").value === "Queue edit");
+    expect(control<HTMLSelectElement>("Order").value).toBe("newest_first");
+    expect(control("Items discovered per cycle").value).toBe("5");
+    expect(control("Items processed per execution").value).toBe("2");
+
+    // Each changed to a valid value other than the saved one, and saved.
+    await enter(control<HTMLSelectElement>("Order"), "oldest_first");
+    await enter(control("Items discovered per cycle"), "8");
+    await enter(control("Items processed per execution"), "3");
+    await click(editorButton("Save"));
+    const answer = await shown("the update's answer", () => sentTo("PUT", "/tasks/queue-edit")[0]?.status);
+    expect(answer).toBe(200);
+
+    // One update, on the revision the creation gave, of the saved document with only the edited order and limits.
+    const edited: Doc = {
+      ...original,
+      spec: {
+        ...(original.spec as Record<string, unknown>),
+        github: {
+          ...(original.spec as { github: Record<string, unknown> }).github,
+          queue: { ...queueOf(original), ordering: "oldest_first", maxDiscoveredPerCycle: 8, maxItemsPerCycle: 3 },
+        },
+      },
+    };
+    const updates = sentTo("PUT", "/tasks/queue-edit");
+    expect(updates).toHaveLength(1);
+    expect(updates[0]!.sent).toEqual(expect.objectContaining({ document: edited, baseRevision: created.revision }));
+
+    // The task's file, as the daemon reads it, and the task the daemon answers hold the edited queue, the rest of the
+    // document unchanged, and the task valid.
+    const saved = readFileSync(file, "utf8");
+    expect(await documentOf(saved)).toStrictEqual(edited);
+    const stored = (await call(daemon, "GET", "/tasks/queue-edit")) as Task;
+    expect(stored.invalid ?? false).toBe(false);
+    expect(stored.validation?.valid ?? true).toBe(true);
+    expect(stored.document).toStrictEqual(edited);
+    expect(stored.yaml).toBe(saved);
+    expect(stored.revision).not.toBe(created.revision);
   });
 });
