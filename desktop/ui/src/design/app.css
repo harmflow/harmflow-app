@@ -1274,20 +1274,72 @@ body:has([aria-modal="true"]) .tooltip {
 
 /* ---------- Execution cards ---------- */
 
+/* The row of running cards pages as a carousel (ExecutionsScreen). Its cards are always as wide as three of them (two
+   below 1240 px) and a 48 px slice of the next fill the row, whether or not they overflow it, so a card starting or
+   ending resizes none of them; while they fit, the slice is empty space at the right. */
+.exec-carousel {
+  position: relative;
+}
+
 .exec-cards {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: calc((100% - 2 * var(--hf-space-4)) / 3);
+  grid-auto-columns: calc((100% - 3 * var(--hf-space-4) - 48px) / 3);
   gap: var(--hf-space-4);
   overflow-x: auto;
   padding: var(--hf-space-0-5) var(--hf-space-0-5) var(--hf-space-1-5);
-  scroll-snap-type: x proximity;
+  scroll-padding-inline: var(--hf-space-0-5);
+  scroll-snap-type: x mandatory;
 }
 
 @media (max-width: 1240px) {
   .exec-cards {
-    grid-auto-columns: calc((100% - var(--hf-space-4)) / 2);
+    grid-auto-columns: calc((100% - 2 * var(--hf-space-4) - 48px) / 2);
   }
+}
+
+/* A slice is dimmed by a static overlay on the wrapper, shown and hidden by opacity, never a mask on the scroller, so
+   scrolling repaints nothing more. While shown it takes the pointer: a click on it pages toward it and reaches no
+   card, nor the part of a Cancel button under it. */
+.exec-carousel::before,
+.exec-carousel::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: var(--hf-space-1-5);
+  z-index: 1;
+  width: calc(48px + var(--hf-space-0-5));
+  background: rgba(var(--hf-rgb-sunken), 0.72);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.exec-carousel::before {
+  left: 0;
+}
+
+.exec-carousel::after {
+  right: 0;
+}
+
+.exec-carousel--more-start::before,
+.exec-carousel--more-end::after {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.exec-carousel__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--hf-space-1);
+}
+
+.exec-carousel__position {
+  margin-right: var(--hf-space-1);
+  color: var(--hf-color-text-muted);
+  font-size: var(--hf-font-size-sm);
+  font-variant-numeric: tabular-nums;
 }
 
 .exec-card {

@@ -698,6 +698,12 @@ export const ptBR: Resources = {
     empty: "Nada está em execução agora.",
     emptyHint: "Tarefas agendadas começam aqui sozinhas; você também pode executar uma tarefa agora em Tarefas.",
     goToTasks: "Ir para tarefas",
+    carousel: {
+      label: "Execuções em andamento",
+      position: "{{first}}–{{last}} de {{total}}",
+      previous: "Execuções anteriores",
+      next: "Próximas execuções",
+    },
     card: {
       task: "Tarefa",
       agent: "Executada por",

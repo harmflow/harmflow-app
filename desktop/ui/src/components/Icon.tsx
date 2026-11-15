@@ -152,6 +152,7 @@ const paths: Record<string, ReactNode> = {
   ),
   chevronDown: <path d="m6.5 9.5 5.5 5.5 5.5-5.5" />,
   chevronRight: <path d="m9.5 6.5 5.5 5.5-5.5 5.5" />,
+  chevronLeft: <path d="m14.5 6.5-5.5 5.5 5.5 5.5" />,
   arrowRight: <path d="M5 12h14M13.5 6.5 19 12l-5.5 5.5" />,
   external: <path d="M14 4.5h5.5V10M19.5 4.5 11 13M17.5 14v4a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V8A1.5 1.5 0 0 1 6 6.5h4" />,
   upload: <path d="M12 15.5v-11M7.5 9 12 4.5 16.5 9M5 15v3.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V15" />,

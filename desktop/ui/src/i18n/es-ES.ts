@@ -696,6 +696,12 @@ export const esES: Resources = {
     empty: "No hay nada en ejecución ahora.",
     emptyHint: "Las tareas programadas empiezan aquí solas; también puedes ejecutar una tarea ahora desde Tareas.",
     goToTasks: "Ir a tareas",
+    carousel: {
+      label: "Ejecuciones en curso",
+      position: "{{first}}–{{last}} de {{total}}",
+      previous: "Ejecuciones anteriores",
+      next: "Ejecuciones siguientes",
+    },
     card: {
       task: "Tarea",
       agent: "Ejecutada por",
