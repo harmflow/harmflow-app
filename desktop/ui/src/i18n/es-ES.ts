@@ -951,6 +951,7 @@ export const esES: Resources = {
       view: "Mostrar el gasto en",
       cost: "Coste",
       tokens: "Tokens",
+      harness: "Herramienta de IA",
       totalCost: "este mes, una estimación a precios de lista de la API",
       totalTokens: "tokens este mes",
       noExecution: "Ninguna ejecución este mes",

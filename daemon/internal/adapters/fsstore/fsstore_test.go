@@ -295,6 +295,10 @@ func TestExecutionIndexRebuiltWhenMissing(t *testing.T) {
 		"of another version": func() error {
 			return os.WriteFile(index, []byte(`{"schemaVersion":"0","executions":[]}`), 0o600)
 		},
+		// Version 3 kept no attempt's harness among the month's spend figures.
+		"of version 3": func() error {
+			return os.WriteFile(index, []byte(`{"schemaVersion":"3","executions":[]}`), 0o600)
+		},
 	} {
 		if err := damage(); err != nil {
 			t.Fatal(err)

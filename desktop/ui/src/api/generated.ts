@@ -866,7 +866,7 @@ export interface components {
                 tokens: number;
             };
         };
-        /** @description One day's own totals, never a running sum, and the attempts behind each reason they undercount. */
+        /** @description One day's own totals, never a running sum, the attempts behind each reason they undercount, and the same totals split by harness. */
         SpendDay: {
             /** Format: date */
             date: string;
@@ -886,6 +886,17 @@ export interface components {
                 /** @description Today only, the attempts still running, which count on no day yet. */
                 running: number;
             };
+            /** @description Each harness whose attempts ended that day, once, in the order of their identifiers; empty on a day no attempt ended. Their figures sum to the day's own; what undercounts stays the day's. */
+            harnesses: components["schemas"]["SpendHarness"][];
+        };
+        /** @description One harness's share of a day, and nothing more. */
+        SpendHarness: {
+            /** @description The harness's identifier, such as claude-code or codex. */
+            harness: string;
+            /** @description The estimated cost in US dollars, at API prices. */
+            costUsd: number;
+            /** @description Every token class summed. */
+            tokens: number;
         };
         /** @description Gauges of the machine and of HarmFlow's own directory, for the sidebar foot. A gauge that cannot be read, or has not been sampled yet, is left out. */
         SystemGauges: {

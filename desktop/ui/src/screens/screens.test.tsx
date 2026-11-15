@@ -515,9 +515,9 @@ describe("the Overview's spend band", () => {
     month: "2026-10",
     daysInMonth: 31,
     days: [
-      { date: "2026-10-01", costUsd: 2.5, tokens: 1_200_000, attempts: 3, undercount: none },
-      { date: "2026-10-02", costUsd: 0.75, tokens: 3_000_000, attempts: 2, undercount: none },
-      { date: "2026-10-03", costUsd: 1, tokens: 400_000, attempts: 1, undercount: none },
+      { date: "2026-10-01", costUsd: 2.5, tokens: 1_200_000, attempts: 3, undercount: none, harnesses: [{ harness: "claude-code", costUsd: 2.5, tokens: 1_200_000 }] },
+      { date: "2026-10-02", costUsd: 0.75, tokens: 3_000_000, attempts: 2, undercount: none, harnesses: [{ harness: "codex", costUsd: 0.75, tokens: 3_000_000 }] },
+      { date: "2026-10-03", costUsd: 1, tokens: 400_000, attempts: 1, undercount: none, harnesses: [{ harness: "claude-code", costUsd: 1, tokens: 400_000 }] },
     ],
     total: { costUsd: 4.25, tokens: 4_600_000 },
   };

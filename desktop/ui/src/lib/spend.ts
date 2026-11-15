@@ -1,5 +1,6 @@
-// The Overview's band of the month's spend per day (harmflow-app#583): what each view shows of a day, what marks it, and
-// the top of the axis. The daemon sums the days; this only reads them.
+// The Overview's band of the month's spend per day (harmflow-app#583): what each view shows of a day, what marks it, the
+// top of the axis, and how the Harness toggle splits a day (harmflow-app#970). The daemon sums the days and each
+// harness's share of them; this only reads them.
 import type { Spend, SpendDay } from "../api/types";
 
 /** The units the band shows, in the order of its switch: the estimated cost in USD, or the tokens, every class summed. */
@@ -24,6 +25,47 @@ export function keepSpendView(view: SpendView) {
   } catch {
     // A storage the webview refuses keeps nothing; the band still switches.
   }
+}
+
+/** Where the band's Harness toggle is kept across launches, as its view is (harmflow-app#970). */
+export const SPEND_SPLIT_KEY = "harmflow.spendSplit";
+
+/** Whether the last launch kept the split by harness on; off, the default, when none was kept or the value is unknown. */
+export function keptSpendSplit(): boolean {
+  try {
+    return localStorage.getItem(SPEND_SPLIT_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+
+export function keepSpendSplit(on: boolean) {
+  try {
+    localStorage.setItem(SPEND_SPLIT_KEY, on ? "on" : "off");
+  } catch {
+    // A storage the webview refuses keeps nothing; the band still splits.
+  }
+}
+
+/** The harnesses the split stacks first, from a column's foot; any other comes after them, by its identifier. */
+export const SPLIT_ORDER = ["claude-code", "codex"];
+
+function compareHarnesses(a: string, b: string): number {
+  const rank = (h: string) => (SPLIT_ORDER.includes(h) ? SPLIT_ORDER.indexOf(h) : SPLIT_ORDER.length);
+  return rank(a) - rank(b) || a.localeCompare(b);
+}
+
+/** The harnesses that ran an attempt this month, in the split's order: the legend's, and the only ones a column stacks. */
+export function monthHarnesses(spend: Spend): string[] {
+  return [...new Set(spend.days.flatMap((d) => d.harnesses.map((h) => h.harness)))].sort(compareHarnesses);
+}
+
+/** A day's share of each harness in the view's unit, in the split's order, leaving out a harness with none in it. */
+export function daySegments(day: SpendDay, view: SpendView): { harness: string; value: number }[] {
+  return day.harnesses
+    .map((h) => ({ harness: h.harness, value: view === "cost" ? h.costUsd : h.tokens }))
+    .filter((s) => s.value > 0)
+    .sort((a, b) => compareHarnesses(a.harness, b.harness));
 }
 
 /** The axis tops out at no less than this until the month's dearest day passes it, so one day never fills the chart. */

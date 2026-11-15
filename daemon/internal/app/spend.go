@@ -1,6 +1,8 @@
 package app
 
 import (
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
@@ -17,13 +19,23 @@ type Spend struct {
 }
 
 // SpendDay is one day's own totals, never a running sum: the cost in USD and the tokens, every class summed, of the
-// attempts that ended that day, and what makes those figures undercount.
+// attempts that ended that day, what makes those figures undercount, and the same figures split by the harness that ran
+// each attempt (harmflow-app#970), which sum to the day's. What undercounts is the day's alone, never a harness's.
 type SpendDay struct {
 	Date       string          `json:"date"`
 	CostUSD    float64         `json:"costUsd"`
 	Tokens     int64           `json:"tokens"`
 	Attempts   int             `json:"attempts"`
 	Undercount SpendUndercount `json:"undercount"`
+	Harnesses  []SpendHarness  `json:"harnesses"`
+}
+
+// SpendHarness is one harness's share of a day: the cost in USD and the tokens of the attempts it ran that ended that
+// day, and nothing more. A day lists each harness of those attempts once, in the order of the harnesses' identifiers.
+type SpendHarness struct {
+	Harness string  `json:"harness"`
+	CostUSD float64 `json:"costUsd"`
+	Tokens  int64   `json:"tokens"`
 }
 
 // SpendUndercount counts the attempts behind each reason a day's figures undercount: an attempt whose model has no
@@ -54,6 +66,7 @@ func (a *App) Spend() Spend {
 		Days: make([]SpendDay, now.Day())}
 	for i := range s.Days {
 		s.Days[i].Date = first.AddDate(0, 0, i).Format("2006-01-02")
+		s.Days[i].Harnesses = []SpendHarness{}
 	}
 	today := &s.Days[len(s.Days)-1]
 	add := func(spend []domain.AttemptSpend, active bool) {
@@ -71,8 +84,11 @@ func (a *App) Spend() Spend {
 			d := &s.Days[t.Day()-1]
 			d.Attempts++
 			d.Tokens += at.Tokens
+			h := d.harness(at.Harness)
+			h.Tokens += at.Tokens
 			if at.CostUSD != nil {
 				d.CostUSD += *at.CostUSD
+				h.CostUSD += *at.CostUSD
 			}
 			switch {
 			case at.Usage == domain.UsagePartial:
@@ -100,4 +116,15 @@ func (a *App) Spend() Spend {
 		s.Total.Tokens += d.Tokens
 	}
 	return s
+}
+
+// harness returns the day's share of the harness named, adding it in its place among the day's when it has none yet.
+func (d *SpendDay) harness(name string) *SpendHarness {
+	i, found := slices.BinarySearchFunc(d.Harnesses, name, func(h SpendHarness, name string) int {
+		return strings.Compare(h.Harness, name)
+	})
+	if !found {
+		d.Harnesses = slices.Insert(d.Harnesses, i, SpendHarness{Harness: name})
+	}
+	return &d.Harnesses[i]
 }

@@ -70,11 +70,15 @@ func TestSpendSumsEachDayFromTheAttemptsThatEndedOnIt(t *testing.T) {
 		&domain.Execution{ID: "active", TaskID: "t", Status: domain.StatusRunning, CreatedAt: *at(11, 3, 11, 0),
 			Attempts: []domain.Attempt{attempt(1, at(11, 3, 12, 0), spendUsage(domain.UsageReported, 300, usd(2))), running}},
 	)
+	// The Codex attempt still running counts on no day, so no day lists Codex.
 	want := Spend{Month: "2026-11", DaysInMonth: 30, Days: []SpendDay{
-		{Date: "2026-11-01", CostUSD: 1.5, Tokens: 1000, Attempts: 1},
-		{Date: "2026-11-02", Tokens: 500, Attempts: 1, Undercount: SpendUndercount{Unpriced: 1}},
+		{Date: "2026-11-01", CostUSD: 1.5, Tokens: 1000, Attempts: 1,
+			Harnesses: []SpendHarness{{Harness: "claude-code", CostUSD: 1.5, Tokens: 1000}}},
+		{Date: "2026-11-02", Tokens: 500, Attempts: 1, Undercount: SpendUndercount{Unpriced: 1},
+			Harnesses: []SpendHarness{{Harness: "claude-code", Tokens: 500}}},
 		{Date: "2026-11-03", CostUSD: 2, Tokens: 500, Attempts: 3,
-			Undercount: SpendUndercount{NotReported: 1, Partial: 1, Running: 1}},
+			Undercount: SpendUndercount{NotReported: 1, Partial: 1, Running: 1},
+			Harnesses:  []SpendHarness{{Harness: "claude-code", CostUSD: 2, Tokens: 500}}},
 	}, Total: SpendTotal{CostUSD: 3.5, Tokens: 2000}}
 	if got := a.Spend(); !reflect.DeepEqual(got, want) {
 		t.Errorf("Spend() = %+v, want %+v", got, want)
@@ -84,7 +88,7 @@ func TestSpendSumsEachDayFromTheAttemptsThatEndedOnIt(t *testing.T) {
 func TestSpendOnTheFirstDayOfAMonthHasOneDay(t *testing.T) {
 	loc := time.FixedZone("UTC+9", 9*3600)
 	a := spendApp(time.Date(2027, time.February, 1, 0, 5, 0, 0, loc), loc)
-	want := Spend{Month: "2027-02", DaysInMonth: 28, Days: []SpendDay{{Date: "2027-02-01"}}}
+	want := Spend{Month: "2027-02", DaysInMonth: 28, Days: []SpendDay{{Date: "2027-02-01", Harnesses: []SpendHarness{}}}}
 	if got := a.Spend(); !reflect.DeepEqual(got, want) {
 		t.Errorf("Spend() = %+v, want %+v", got, want)
 	}
@@ -93,7 +97,7 @@ func TestSpendOnTheFirstDayOfAMonthHasOneDay(t *testing.T) {
 // spendAfterRestart keeps ended executions of this month and of the last one through the real file store, in a time
 // zone whose midnight is not UTC's, and restarts the daemon on the same home. It returns the restarted env, the IDs of
 // the executions kept, and the spend their records state. Every cost is a binary fraction, so each sum is exact, and
-// each day's sums and the month's totals are values no single attempt carries.
+// each day's sums, each harness's sums of a day, and the month's totals are values no single attempt carries.
 func spendAfterRestart(t *testing.T) (*env, []string, Spend) {
 	t.Helper()
 	loc := time.FixedZone("UTC-3", -3*3600)
@@ -103,6 +107,11 @@ func spendAfterRestart(t *testing.T) (*env, []string, Spend) {
 	}
 	attempt := func(n int, end *time.Time, u *domain.Usage) domain.Attempt {
 		return domain.Attempt{Number: n, Harness: "claude-code", StartedAt: end.Add(-time.Minute), EndedAt: end, Usage: u}
+	}
+	codex := func(n int, end *time.Time, u *domain.Usage) domain.Attempt {
+		a := attempt(n, end, u)
+		a.Harness = "codex"
+		return a
 	}
 	ended := func(id string, status domain.ExecutionStatus, attempts ...domain.Attempt) *domain.Execution {
 		return &domain.Execution{SchemaVersion: domain.ExecutionSchemaVersion, ID: id, TaskID: "t", Status: status,
@@ -130,14 +139,28 @@ func spendAfterRestart(t *testing.T) (*env, []string, Spend) {
 			attempt(1, at(11, 3, 8, 0), spendUsage(domain.UsagePartial, 533_377, nil)),
 			attempt(2, at(11, 3, 8, 30), reported(1_027_604, 0.6484375))),
 		ended("not-reported", domain.StatusFailed, attempt(1, at(11, 3, 14, 0), nil)),
+		ended("codex-first-day", domain.StatusCompleted,
+			codex(1, at(11, 1, 10, 0), reported(612_345, 0.3125)),
+			codex(2, at(11, 1, 10, 30), reported(1_048_577, 0.546875))),
+		ended("codex-third", domain.StatusCompleted,
+			codex(1, at(11, 3, 16, 0), reported(2_201_003, 1.0234375)),
+			codex(2, at(11, 3, 16, 30), reported(377_771, 0.1796875))),
 	}
+	// Each day's harnesses sum to the day's own figures; the undercount stays the day's.
 	want := Spend{Month: "2026-11", DaysInMonth: 30, Days: []SpendDay{
-		{Date: "2026-11-01", CostUSD: 1.5703125, Tokens: 3_580_245, Attempts: 2},
-		{Date: "2026-11-02", CostUSD: 3.3203125, Tokens: 6_463_753, Attempts: 3, Undercount: SpendUndercount{Unpriced: 1}},
-		{Date: "2026-11-03", CostUSD: 2.765625, Tokens: 4_479_387, Attempts: 4,
-			Undercount: SpendUndercount{NotReported: 1, Partial: 1}},
-		{Date: "2026-11-04"},
-	}, Total: SpendTotal{CostUSD: 7.65625, Tokens: 14_523_385}}
+		{Date: "2026-11-01", CostUSD: 2.4296875, Tokens: 5_241_167, Attempts: 4, Harnesses: []SpendHarness{
+			{Harness: "claude-code", CostUSD: 1.5703125, Tokens: 3_580_245},
+			{Harness: "codex", CostUSD: 0.859375, Tokens: 1_660_922},
+		}},
+		{Date: "2026-11-02", CostUSD: 3.3203125, Tokens: 6_463_753, Attempts: 3, Undercount: SpendUndercount{Unpriced: 1},
+			Harnesses: []SpendHarness{{Harness: "claude-code", CostUSD: 3.3203125, Tokens: 6_463_753}}},
+		{Date: "2026-11-03", CostUSD: 3.96875, Tokens: 7_058_161, Attempts: 6,
+			Undercount: SpendUndercount{NotReported: 1, Partial: 1}, Harnesses: []SpendHarness{
+				{Harness: "claude-code", CostUSD: 2.765625, Tokens: 4_479_387},
+				{Harness: "codex", CostUSD: 1.203125, Tokens: 2_578_774},
+			}},
+		{Date: "2026-11-04", Harnesses: []SpendHarness{}},
+	}, Total: SpendTotal{CostUSD: 9.71875, Tokens: 18_763_081}}
 	ids := make([]string, len(xs))
 	for i, x := range xs {
 		ids[i] = x.ID
@@ -221,6 +244,9 @@ func TestSpendKeepsNoFileOfTotals(t *testing.T) {
 	for _, d := range want.Days {
 		if d.Attempts > 0 {
 			sums = append(sums, strconv.FormatFloat(d.CostUSD, 'f', -1, 64), strconv.FormatInt(d.Tokens, 10))
+		}
+		for _, h := range d.Harnesses {
+			sums = append(sums, strconv.FormatFloat(h.CostUSD, 'f', -1, 64), strconv.FormatInt(h.Tokens, 10))
 		}
 	}
 	sums = append(sums, strconv.FormatFloat(want.Total.CostUSD, 'f', -1, 64), strconv.FormatInt(want.Total.Tokens, 10))

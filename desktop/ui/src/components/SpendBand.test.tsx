@@ -1,15 +1,17 @@
 // @vitest-environment happy-dom
 // The Overview's Spend this month band (harmflow-app#583): cost by default, the view kept across launches, one column
 // per day that has passed, a mark on a day that undercounts in the view shown and none on the month's total, a tooltip
-// beside the hovered column, and the grid kept for a month with no execution.
+// beside the hovered column, and the grid kept for a month with no execution. Its Harness toggle (harmflow-app#970):
+// off by default and kept across launches, independent of the view, stacking each column by harness in a fixed order
+// and color, with a legend of the month's harnesses, and leaving the tooltip and the marks to the day.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Spend, SpendDay } from "../api/types";
+import type { Spend, SpendDay, SpendHarness } from "../api/types";
 import i18n from "../i18n";
-import { SPEND_VIEW_KEY, axisTop, dayMarks, isEmptyMonth } from "../lib/spend";
+import { SPEND_SPLIT_KEY, SPEND_VIEW_KEY, axisTop, dayMarks, daySegments, isEmptyMonth, monthHarnesses } from "../lib/spend";
 import { patchStateForTests } from "../state/store";
 import { SpendBand } from "./SpendBand";
 
@@ -25,12 +27,21 @@ vi.mock("../api/transport", () => ({
 }));
 
 const none = { unpriced: 0, notReported: 0, partial: 0, running: 0 };
-const day = (date: string, costUsd: number, tokens: number, attempts: number, undercount = none): SpendDay => ({
+/** A day of the spend, every attempt of it Claude Code's unless the harnesses are given. */
+const day = (
+  date: string,
+  costUsd: number,
+  tokens: number,
+  attempts: number,
+  undercount = none,
+  harnesses: SpendHarness[] = attempts ? [{ harness: "claude-code", costUsd, tokens }] : [],
+): SpendDay => ({
   date,
   costUsd,
   tokens,
   attempts,
   undercount,
+  harnesses,
 });
 
 const october: Spend = {
@@ -322,6 +333,162 @@ describe("SpendBand's marks, columns, and tooltip", () => {
     const lastRight = plot - percent(last.style.right) - margin.right;
     expect(lastRight).toBeLessThanOrEqual(panelRight);
     expect(lastRight - tipWidth).toBeGreaterThanOrEqual(panelLeft);
+  });
+});
+
+/**
+ * October split between the two harnesses: on the first, $1.50 and 200K tokens of Claude Code and $0.50 and 600K of
+ * Codex, which the daemon lists Codex first; on the second, Codex alone, its model unpriced, so it has tokens and no
+ * cost; on the third, Claude Code alone.
+ */
+const split: Spend = {
+  month: "2026-10",
+  daysInMonth: 31,
+  days: [
+    day("2026-10-01", 2, 800_000, 4, none, [
+      { harness: "codex", costUsd: 0.5, tokens: 600_000 },
+      { harness: "claude-code", costUsd: 1.5, tokens: 200_000 },
+    ]),
+    day("2026-10-02", 0, 500_000, 1, { ...none, unpriced: 1 }, [{ harness: "codex", costUsd: 0, tokens: 500_000 }]),
+    day("2026-10-03", 1, 400_000, 1),
+  ],
+  total: { costUsd: 3, tokens: 1_700_000 },
+};
+
+function harnessToggle(): HTMLButtonElement {
+  return [...host.querySelectorAll<HTMLButtonElement>("button[aria-pressed]")].find((b) => b.textContent === "Harness")!;
+}
+
+/** Each day's segments, from the column's foot: the harness and the share of the column it takes. */
+function segments(): { harness: string; height: string; background: string }[][] {
+  return [...host.querySelectorAll(".spend__slot--day")].map((slot) =>
+    [...slot.querySelectorAll<HTMLElement>(".spend__segment")].map((s) => ({
+      harness: s.dataset.harness!,
+      height: s.style.height,
+      background: s.style.background,
+    })),
+  );
+}
+
+function legend(): string[] {
+  return [...host.querySelectorAll(".spend__legend li")].map((li) => li.textContent!);
+}
+
+describe("the split's order", () => {
+  it("lists the month's harnesses Claude Code first, then Codex, then any other by its identifier", () => {
+    const other = { ...split, days: [...split.days, day("2026-10-04", 1, 1, 1, none, [{ harness: "aider", costUsd: 1, tokens: 1 }])] };
+    expect(monthHarnesses(other)).toEqual(["claude-code", "codex", "aider"]);
+    expect(monthHarnesses({ ...split, days: [split.days[1]] })).toEqual(["codex"]);
+  });
+
+  it("leaves out of a day's segments a harness with nothing in the view's unit", () => {
+    expect(daySegments(split.days[1], "cost")).toEqual([]);
+    expect(daySegments(split.days[1], "tokens")).toEqual([{ harness: "codex", value: 500_000 }]);
+  });
+});
+
+describe("SpendBand's Harness toggle", () => {
+  it("is off by default, a pressed button beside the view, and the columns stay whole", () => {
+    render(split);
+    expect(harnessToggle().getAttribute("aria-pressed")).toBe("false");
+    expect(host.querySelector(".panel__actions")?.contains(harnessToggle())).toBe(true);
+    expect(host.querySelectorAll(".spend__segment")).toHaveLength(0);
+    expect(host.querySelector(".spend__legend")).toBeNull();
+  });
+
+  it("stacks each column by harness in the cost view, Claude Code at the foot, each in its harness's color", () => {
+    render(split);
+    act(() => harnessToggle().click());
+    expect(harnessToggle().getAttribute("aria-pressed")).toBe("true");
+    const claude = "var(--hf-color-claude)";
+    const codex = "var(--hf-color-codex)";
+    expect(segments()).toEqual([
+      [
+        { harness: "claude-code", height: "75%", background: claude },
+        { harness: "codex", height: "25%", background: codex },
+      ],
+      [],
+      [{ harness: "claude-code", height: "100%", background: claude }],
+    ]);
+    // The column keeps the day's height: $2 of the axis's top of $10.
+    expect(host.querySelectorAll<HTMLElement>(".spend__column")[0].style.height).toBe("20%");
+    expect(host.querySelectorAll(".spend__slot")).toHaveLength(31);
+  });
+
+  it("stacks each column by harness in the token view, in the same order", () => {
+    render(split);
+    act(() => harnessToggle().click());
+    chooseView("Tokens");
+    expect(segments().map((d) => d.map((s) => `${s.harness} ${s.height}`))).toEqual([
+      ["claude-code 25%", "codex 75%"],
+      ["codex 100%"],
+      ["claude-code 100%"],
+    ]);
+    expect(host.querySelectorAll<HTMLElement>(".spend__column")[0].style.height).toBe("40%");
+  });
+
+  it("is independent of the view: choosing a unit keeps the split, and toggling keeps the unit", () => {
+    render(split);
+    chooseView("Tokens");
+    act(() => harnessToggle().click());
+    expect(host.querySelector('[role="radio"][aria-checked="true"]')?.textContent).toBe("Tokens");
+    chooseView("Cost");
+    expect(harnessToggle().getAttribute("aria-pressed")).toBe("true");
+    act(() => harnessToggle().click());
+    expect(host.querySelector('[role="radio"][aria-checked="true"]')?.textContent).toBe("Cost");
+    expect(localStorage.getItem(SPEND_VIEW_KEY)).toBe("cost");
+  });
+
+  it("keeps the toggle across launches, and reads a stored value it does not know as off", () => {
+    render(split);
+    act(() => harnessToggle().click());
+    expect(localStorage.getItem(SPEND_SPLIT_KEY)).toBe("on");
+    act(() => root?.unmount());
+    host.remove();
+    render(split);
+    expect(harnessToggle().getAttribute("aria-pressed")).toBe("true");
+    act(() => harnessToggle().click());
+    expect(localStorage.getItem(SPEND_SPLIT_KEY)).toBe("off");
+
+    act(() => root?.unmount());
+    host.remove();
+    localStorage.setItem(SPEND_SPLIT_KEY, "yes");
+    render(split);
+    expect(harnessToggle().getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("names in its legend only the harnesses that ran an attempt this month", () => {
+    localStorage.setItem(SPEND_SPLIT_KEY, "on");
+    render(split);
+    expect(legend()).toEqual(["Claude Code", "Codex"]);
+    act(() => root?.unmount());
+    host.remove();
+    render({ ...split, days: [split.days[1]] });
+    expect(legend()).toEqual(["Codex"]);
+  });
+
+  it("leaves the tooltip, the column's name, and the marks to the day, naming no harness", () => {
+    render(split);
+    const off = { tip: hover(1).textContent, marks: host.querySelectorAll(".spend__mark--day").length, note: host.querySelector(".spend__note")?.textContent };
+    const label = host.querySelectorAll(".spend__slot--day")[0].getAttribute("aria-label");
+    unhover(1);
+    act(() => harnessToggle().click());
+    const tip = hover(1);
+    expect(tip.textContent).toBe(off.tip);
+    expect(tip.textContent).not.toMatch(/Claude Code|Codex/);
+    expect(host.querySelectorAll(".spend__mark--day")).toHaveLength(off.marks);
+    expect(host.querySelector(".spend__note")?.textContent).toBe(off.note);
+    expect(host.querySelectorAll(".spend__slot--day")[0].getAttribute("aria-label")).toBe(label);
+    expect(host.querySelector(".spend__total .spend__mark")).toBeNull();
+  });
+
+  it("shows the same empty state for a month with no execution", () => {
+    localStorage.setItem(SPEND_SPLIT_KEY, "on");
+    render(emptyMonth);
+    expect(host.querySelector(".spend__empty")?.textContent).toBe("No execution this month");
+    expect(host.querySelectorAll(".spend__grid")).toHaveLength(3);
+    expect(host.querySelector(".spend__legend")).toBeNull();
+    expect(host.querySelectorAll(".spend__segment")).toHaveLength(0);
   });
 });
 

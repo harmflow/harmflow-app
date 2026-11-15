@@ -3844,6 +3844,47 @@ button.list-row--error:hover {
   background: rgba(var(--hf-rgb-cyan), 1);
 }
 
+/* Split by harness: the segments stack from the column's foot, each in its harness's color. */
+.spend__slot--day .spend__column--split {
+  display: flex;
+  flex-direction: column-reverse;
+  overflow: hidden;
+  background: transparent;
+}
+
+.spend__segment {
+  flex: none;
+  opacity: 0.8;
+}
+
+.spend__slot--day:hover .spend__segment,
+.spend__slot--day:focus-visible .spend__segment {
+  opacity: 1;
+}
+
+.spend__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--hf-space-1) var(--hf-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--hf-color-text-muted);
+  font-size: var(--hf-font-size-xs);
+}
+
+.spend__legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--hf-space-1-5);
+}
+
+.spend__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--hf-radius-sm);
+}
+
 .spend__mark {
   color: var(--hf-color-warning);
   font-size: var(--hf-font-size-2xs);
