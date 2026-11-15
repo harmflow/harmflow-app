@@ -926,6 +926,7 @@ export const enUS = {
       view: "Show the spend in",
       cost: "Cost",
       tokens: "Tokens",
+      harness: "Harness",
       totalCost: "this month, an estimate at API list prices",
       totalTokens: "tokens this month",
       noExecution: "No execution this month",

@@ -953,6 +953,7 @@ export const ptBR: Resources = {
       view: "Mostrar o gasto em",
       cost: "Custo",
       tokens: "Tokens",
+      harness: "Ferramenta de IA",
       totalCost: "neste mês, uma estimativa a preços de tabela da API",
       totalTokens: "tokens neste mês",
       noExecution: "Nenhuma execução neste mês",

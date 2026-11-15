@@ -498,11 +498,13 @@ type ExecutionSummary struct {
 	Spend []AttemptSpend `json:"spend,omitempty"`
 }
 
-// AttemptSpend is what the month's spend reads of one attempt: when it ended, absent while it runs; its cost in USD,
-// absent when it has none, as an unpriced model or a partial count leaves it; its tokens, every class summed; and how
-// complete its count is, not reported when its harness reported no usage.
+// AttemptSpend is what the month's spend reads of one attempt: when it ended, absent while it runs; the harness that
+// ran it, by which the month's spend splits each day (harmflow-app#970); its cost in USD, absent when it has none, as
+// an unpriced model or a partial count leaves it; its tokens, every class summed; and how complete its count is, not
+// reported when its harness reported no usage.
 type AttemptSpend struct {
 	EndedAt *time.Time  `json:"endedAt,omitempty"`
+	Harness string      `json:"harness"`
 	CostUSD *float64    `json:"costUsd,omitempty"`
 	Tokens  int64       `json:"tokens"`
 	Usage   UsageStatus `json:"usage"`
@@ -515,7 +517,7 @@ func (t Tokens) Count() int64 {
 
 // spendOf is the attempt's figures for the month's spend.
 func spendOf(at *Attempt) AttemptSpend {
-	s := AttemptSpend{EndedAt: at.EndedAt, Usage: UsageNotReported}
+	s := AttemptSpend{EndedAt: at.EndedAt, Harness: at.Harness, Usage: UsageNotReported}
 	if u := at.Usage; u != nil {
 		s.CostUSD, s.Tokens, s.Usage = u.CostUSD, u.Total().Count(), u.Status
 	}

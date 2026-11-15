@@ -9,6 +9,7 @@ export type Diagnostics = S["Diagnostics"];
 export type Stats = S["Stats"];
 export type Spend = S["Spend"];
 export type SpendDay = S["SpendDay"];
+export type SpendHarness = S["SpendHarness"];
 export type SystemGauges = S["SystemGauges"];
 export type GitHubRateLimit = S["GitHubRateLimit"];
 export type RateLimitBucket = S["RateLimitBucket"];

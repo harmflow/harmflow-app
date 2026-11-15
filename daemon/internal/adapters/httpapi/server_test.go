@@ -415,10 +415,14 @@ func TestSpendRouteAnswersTheMonthPerDay(t *testing.T) {
 		t.Fatalf("GET /api/v1/spend days = %v, want today at least", got["days"])
 	}
 	day, _ := days[0].(map[string]any)
-	for _, k := range []string{"date", "costUsd", "tokens", "attempts", "undercount"} {
+	for _, k := range []string{"date", "costUsd", "tokens", "attempts", "undercount", "harnesses"} {
 		if _, ok := day[k]; !ok {
 			t.Errorf("GET /api/v1/spend days[0] = %v, want %s", day, k)
 		}
+	}
+	// A day no attempt ended on lists no harness, as an empty list rather than null.
+	if harnesses, ok := day["harnesses"].([]any); !ok || len(harnesses) != 0 {
+		t.Errorf("GET /api/v1/spend days[0].harnesses = %v, want [] with no execution", day["harnesses"])
 	}
 	if total, _ := got["total"].(map[string]any); total["costUsd"] != 0.0 || total["tokens"] != 0.0 {
 		t.Errorf("GET /api/v1/spend total = %v, want zero in both units with no execution", got["total"])

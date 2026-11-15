@@ -18,7 +18,7 @@ This package holds deterministic presentation, task-editing, scheduling, timelin
 
 ## Side Effects
 
-- Layout, zoom, and spend-view helpers read or write browser storage; React helpers schedule intervals and timeouts. `[taskLayout.ts:storedLayout]` `[taskLayout.ts:storeLayout]` `[zoom.ts:storedZoom]` `[zoom.ts:storeZoom]` `[spend.ts:keptSpendView]` `[spend.ts:keepSpendView]` `[hooks.ts:useNow]` `[hooks.ts:useDebounced]`
+- Layout, zoom, spend-view, and spend-split helpers read or write browser storage; React helpers schedule intervals and timeouts. `[taskLayout.ts:storedLayout]` `[taskLayout.ts:storeLayout]` `[zoom.ts:storedZoom]` `[zoom.ts:storeZoom]` `[spend.ts:keptSpendView]` `[spend.ts:keepSpendView]` `[spend.ts:keptSpendSplit]` `[spend.ts:keepSpendSplit]` `[hooks.ts:useNow]` `[hooks.ts:useDebounced]`
 
 ## Verification
 

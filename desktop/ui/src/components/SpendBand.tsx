@@ -1,16 +1,40 @@
 // The Overview's Spend this month band (harmflow-app#583): one column per day that has passed, in the estimated cost or
-// the tokens, the month's total in the corner, and a mark on each day whose figure undercounts in the view shown.
+// the tokens, the month's total in the corner, and a mark on each day whose figure undercounts in the view shown. Its
+// Harness toggle (harmflow-app#970) stacks each column by harness, with a legend; the tooltip and the marks stay the
+// day's, naming no harness.
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Spend, SpendDay } from "../api/types";
+import { color } from "../design/theme";
 import { formatCompact, formatUsd } from "../lib/costs";
 import { formatNumber } from "../lib/format";
-import { SPEND_VIEWS, axisTop, dayMarks, dayValue, isEmptyMonth, keepSpendView, keptSpendView, totalValue, type SpendView } from "../lib/spend";
+import {
+  SPEND_VIEWS,
+  axisTop,
+  dayMarks,
+  daySegments,
+  dayValue,
+  isEmptyMonth,
+  keepSpendSplit,
+  keepSpendView,
+  keptSpendSplit,
+  keptSpendView,
+  monthHarnesses,
+  totalValue,
+  type SpendView,
+} from "../lib/spend";
 import { useStore } from "../state/store";
-import { Panel, SegmentedControl } from "./ui";
+import { Panel, SegmentedControl, cx } from "./ui";
 
 /** The fractions of the axis's top that carry a grid line and a label. */
 const GRID = [1, 0.5, 0];
+
+/** Each harness's color in the split, the one the interface already gives it; a harness it does not know is muted. */
+const HARNESS_COLORS: Record<string, string> = { "claude-code": color.claude, codex: color.codex };
+
+function harnessColor(harness: string): string {
+  return HARNESS_COLORS[harness] ?? color.textMuted;
+}
 
 function formatValue(value: number, view: SpendView, locale: string): string {
   return view === "cost" ? formatUsd(value, locale) : formatCompact(value, locale);
@@ -41,9 +65,14 @@ export function SpendBand() {
   const { t, i18n } = useTranslation();
   const spend = useStore((s) => s.spend);
   const [view, setView] = useState<SpendView>(keptSpendView);
+  const [split, setSplit] = useState<boolean>(keptSpendSplit);
   const choose = (v: SpendView) => {
     setView(v);
     keepSpendView(v);
+  };
+  const toggleSplit = () => {
+    setSplit(!split);
+    keepSpendSplit(!split);
   };
   const month = spend ? spendMonth(spend.month, i18n.language) : undefined;
   return (
@@ -52,20 +81,27 @@ export function SpendBand() {
       icon="coin"
       className="spend"
       actions={
-        <SegmentedControl
-          aria-label={t("overview.spend.view")}
-          value={view}
-          options={SPEND_VIEWS.map((v) => ({ value: v, label: t(`overview.spend.${v}`) }))}
-          onChange={choose}
-        />
+        <>
+          <SegmentedControl
+            aria-label={t("overview.spend.view")}
+            value={view}
+            options={SPEND_VIEWS.map((v) => ({ value: v, label: t(`overview.spend.${v}`) }))}
+            onChange={choose}
+          />
+          <div className="segmented">
+            <button type="button" aria-pressed={split} className={cx("segmented__item", split && "segmented__item--active")} onClick={toggleSplit}>
+              {t("overview.spend.harness")}
+            </button>
+          </div>
+        </>
       }
     >
-      {spend ? <SpendChart spend={spend} view={view} /> : <div className="spend__plot" aria-busy="true" />}
+      {spend ? <SpendChart spend={spend} view={view} split={split} /> : <div className="spend__plot" aria-busy="true" />}
     </Panel>
   );
 }
 
-function SpendChart({ spend, view }: { spend: Spend; view: SpendView }) {
+function SpendChart({ spend, view, split }: { spend: Spend; view: SpendView; split: boolean }) {
   const { t, i18n } = useTranslation();
   const locale = i18n.language;
   const [hovered, setHovered] = useState<number | null>(null);
@@ -74,6 +110,7 @@ function SpendChart({ spend, view }: { spend: Spend; view: SpendView }) {
   const slots = Array.from({ length: spend.daysInMonth }, (_, i) => spend.days[i]);
   const marked = spend.days.some((d) => dayMarks(d, view).length > 0);
   const day = hovered === null ? undefined : spend.days[hovered];
+  const harnesses = split ? monthHarnesses(spend) : [];
 
   return (
     <div className="spend__chart">
@@ -94,7 +131,7 @@ function SpendChart({ spend, view }: { spend: Spend; view: SpendView }) {
           <div className="spend__columns" style={{ gridTemplateColumns: `repeat(${spend.daysInMonth}, minmax(0, 1fr))` }}>
             {slots.map((d, i) =>
               d ? (
-                <SpendColumn key={d.date} day={d} view={view} top={top} onHover={(on) => setHovered(on ? i : null)} />
+                <SpendColumn key={d.date} day={d} view={view} split={split} top={top} onHover={(on) => setHovered(on ? i : null)} />
               ) : (
                 <span key={i} className="spend__slot" />
               ),
@@ -111,6 +148,16 @@ function SpendChart({ spend, view }: { spend: Spend; view: SpendView }) {
           <span key={i}>{i === 0 || (i + 1) % 5 === 0 ? i + 1 : ""}</span>
         ))}
       </div>
+      {harnesses.length ? (
+        <ul className="spend__legend">
+          {harnesses.map((h) => (
+            <li key={h}>
+              <span className="spend__swatch" style={{ background: harnessColor(h) }} aria-hidden="true" />
+              {t(`harness.names.${h}` as never, { defaultValue: h }) as string}
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {marked ? (
         <p className="spend__note">
           <span className="spend__mark" aria-hidden="true">
@@ -123,7 +170,7 @@ function SpendChart({ spend, view }: { spend: Spend; view: SpendView }) {
   );
 }
 
-function SpendColumn({ day, view, top, onHover }: { day: SpendDay; view: SpendView; top: number; onHover: (on: boolean) => void }) {
+function SpendColumn({ day, view, split, top, onHover }: { day: SpendDay; view: SpendView; split: boolean; top: number; onHover: (on: boolean) => void }) {
   const { t, i18n } = useTranslation();
   const value = dayValue(day, view);
   const marks = dayMarks(day, view);
@@ -144,7 +191,22 @@ function SpendColumn({ day, view, top, onHover }: { day: SpendDay; view: SpendVi
           ▲
         </span>
       ) : null}
-      <span className="spend__column" style={{ height: `${top > 0 ? (value / top) * 100 : 0}%` }} />
+      {split ? (
+        // The day's column, its harnesses stacked inside it from the foot, each its share of the day's figure.
+        <span className="spend__column spend__column--split" style={{ height: `${top > 0 ? (value / top) * 100 : 0}%` }}>
+          {daySegments(day, view).map((s) => (
+            <span
+              key={s.harness}
+              className="spend__segment"
+              data-harness={s.harness}
+              style={{ height: `${(s.value / value) * 100}%`, background: harnessColor(s.harness) }}
+              aria-hidden="true"
+            />
+          ))}
+        </span>
+      ) : (
+        <span className="spend__column" style={{ height: `${top > 0 ? (value / top) * 100 : 0}%` }} />
+      )}
     </span>
   );
 }

@@ -1359,9 +1359,11 @@ components:
             tokens: { type: integer, description: Every token class summed. }
 
     SpendDay:
-      description: One day's own totals, never a running sum, and the attempts behind each reason they undercount.
+      description: >-
+        One day's own totals, never a running sum, the attempts behind each reason they undercount, and the same totals
+        split by harness.
       type: object
-      required: [date, costUsd, tokens, attempts, undercount]
+      required: [date, costUsd, tokens, attempts, undercount, harnesses]
       properties:
         date: { type: string, format: date }
         costUsd: { type: number, description: "The estimated cost in US dollars, at API prices." }
@@ -1375,6 +1377,21 @@ components:
             notReported: { type: integer, description: Attempts whose harness reported no usage. }
             partial: { type: integer, description: "Attempts that ended with only a partial count, before their harness reported." }
             running: { type: integer, description: "Today only, the attempts still running, which count on no day yet." }
+        harnesses:
+          description: >-
+            Each harness whose attempts ended that day, once, in the order of their identifiers; empty on a day no
+            attempt ended. Their figures sum to the day's own; what undercounts stays the day's.
+          type: array
+          items: { $ref: "#/components/schemas/SpendHarness" }
+
+    SpendHarness:
+      description: One harness's share of a day, and nothing more.
+      type: object
+      required: [harness, costUsd, tokens]
+      properties:
+        harness: { type: string, description: "The harness's identifier, such as claude-code or codex." }
+        costUsd: { type: number, description: "The estimated cost in US dollars, at API prices." }
+        tokens: { type: integer, description: Every token class summed. }
 
     SystemGauges:
       description: >-
