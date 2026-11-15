@@ -345,7 +345,7 @@ func (a *App) createTask(ctx context.Context, in TaskInput, mode catalogMode, ov
 	if err != nil {
 		return TaskView{}, err
 	}
-	a.afterWrite(f, domain.EventTaskCreated, r)
+	a.afterWrite(f, domain.EventTaskCreated, *r.doc, issuesToWarnings(r.Warnings))
 	v, _ := a.GetTask(id) // fails only for a task that is not there, and this one was just written
 	v.Validation = r
 	return v, nil
@@ -392,7 +392,7 @@ func (a *App) UpdateTask(ctx context.Context, id string, in TaskInput) (TaskView
 	if err != nil {
 		return TaskView{}, err
 	}
-	a.afterWrite(f, domain.EventTaskUpdated, r)
+	a.afterWrite(f, domain.EventTaskUpdated, *r.doc, issuesToWarnings(r.Warnings))
 	v, _ := a.GetTask(id) // fails only for a task that is not there, and this one was just written
 	v.Validation = r
 	return v, nil
@@ -404,7 +404,8 @@ func withError(r *ValidationResult, path string, text domain.Text) *ValidationRe
 	return r
 }
 
-func (a *App) afterWrite(f ports.TaskFile, eventType string, r *ValidationResult) {
+// afterWrite makes f, which the daemon just wrote, the task's current file, with its definition and warnings.
+func (a *App) afterWrite(f ports.TaskFile, eventType string, doc domain.TaskDocument, warnings []domain.Warning) {
 	a.mu.Lock()
 	e := a.tasks[f.ID]
 	if e == nil {
@@ -412,18 +413,18 @@ func (a *App) afterWrite(f ports.TaskFile, eventType string, r *ValidationResult
 		a.tasks[f.ID] = e
 	}
 	e.file = f
-	e.doc = *r.doc
+	e.doc = doc
 	e.invalid = nil
-	e.warnings = issuesToWarnings(r.Warnings)
+	e.warnings = warnings
 	e.selfRevision = f.Revision
-	e.loadedRevision = "" // validated in full before it was written
+	e.loadedRevision = "" // validated in full before it was written, or a valid one with only spec.enabled changed
 	enabled := e.doc.IsEnabled()
 	a.mu.Unlock()
 	a.rescheduleTask(f.ID)
 	if !enabled {
 		a.dropQueued(f.ID, domain.T("task_was_disabled", "the task was disabled"))
 	}
-	a.emit(domain.Event{Type: eventType, TaskID: f.ID, Message: r.doc.Metadata.Name,
+	a.emit(domain.Event{Type: eventType, TaskID: f.ID, Message: doc.Metadata.Name,
 		Payload: map[string]any{"revision": f.Revision}})
 }
 
@@ -503,16 +504,19 @@ func disableImported(r *ValidationResult) error {
 	return nil
 }
 
-// SetEnabled toggles spec.enabled in place, keeping the file's comments. Disabling lets a running execution finish
-// and drops a waiting firing.
-func (a *App) SetEnabled(ctx context.Context, id string, enabled bool) (TaskView, error) {
+// SetEnabled toggles spec.enabled in place, keeping the file's comments. The file is the task's last valid one with
+// that field alone changed, so it is not validated again: the toggle asks no harness for the task's agents and skills,
+// and the task keeps the warnings its last save or load gave it. A file changed meanwhile is a conflict. Disabling lets
+// a running execution finish and drops a waiting firing.
+func (a *App) SetEnabled(_ context.Context, id string, enabled bool) (TaskView, error) {
 	e, err := a.entry(id)
 	if err != nil {
 		return TaskView{}, err
 	}
 	a.mu.Lock()
 	content, rev := e.file.Content, e.file.Revision
-	invalid := e.invalid
+	invalid, doc, warnings := e.invalid, e.doc, slices.Clone(e.warnings)
+	unchecked := e.loadedRevision != "" && e.loadedRevision == rev // loaded at start, not yet checked by checkTasks
 	a.mu.Unlock()
 	if invalid != nil {
 		return TaskView{}, a.invalidError(invalid)
@@ -521,7 +525,25 @@ func (a *App) SetEnabled(ctx context.Context, id string, enabled bool) (TaskView
 	if err != nil {
 		return TaskView{}, err
 	}
-	return a.UpdateTask(ctx, id, TaskInput{YAML: string(out), BaseRevision: rev})
+	f, err := a.d.Tasks.Save(id, out, rev)
+	if errors.Is(err, ports.ErrConflict) {
+		return TaskView{}, &Error{Code: CodeConflict, CurrentRevision: f.Revision, Text: domain.T("task_changed_on_disk",
+			"the task file changed since this edit started; reload it before saving")}
+	}
+	if err != nil {
+		return TaskView{}, err
+	}
+	doc.Spec.Enabled = boolPtr(enabled)
+	a.afterWrite(f, domain.EventTaskUpdated, doc, warnings)
+	if unchecked {
+		// The toggle checked nothing, so a file checkTasks has not checked yet is still its to check.
+		a.mu.Lock()
+		if e := a.tasks[id]; e != nil && e.file.Revision == f.Revision {
+			e.loadedRevision = f.Revision
+		}
+		a.mu.Unlock()
+	}
+	return a.GetTask(id)
 }
 
 // ExportTask returns the portable YAML: the definition only, with no state, logs, or credentials.
