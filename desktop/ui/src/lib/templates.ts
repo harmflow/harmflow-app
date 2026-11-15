@@ -7,6 +7,16 @@ export function offeredTemplates(templates: Template[] | undefined): Template[] 
   return (templates ?? []).filter((t) => t.validation.valid);
 }
 
+/** The template files that fail validation, in the daemon's order: the catalog lists them with their errors, never offers them. */
+export function invalidTemplates(templates: Template[] | undefined): Template[] {
+  return (templates ?? []).filter((t) => !t.validation.valid);
+}
+
+/** A template file's name, the last part of its path. */
+export function templateFileName(path: string): string {
+  return path.split(/[\\/]/).pop() || path;
+}
+
 /** A template's text in the interface's language, or in en-US for a language the text lacks. */
 export function localized(text: LocalizedText | undefined, language: string): string {
   if (!text) return "";

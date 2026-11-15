@@ -3595,6 +3595,33 @@ button.list-row--error:hover {
   font-size: var(--hf-font-size-sm);
 }
 
+/* The template files that fail validation, below the offered templates: each names its file and its errors, and cannot
+   be picked. */
+.templates-invalid > ul {
+  display: flex;
+  flex-direction: column;
+  gap: var(--hf-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.template-invalid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--hf-space-1);
+  padding: var(--hf-space-3) var(--hf-space-4);
+  border: 1px dashed var(--hf-color-border-strong);
+  border-radius: var(--hf-radius-lg);
+}
+
+.template-invalid__errors {
+  margin: 0;
+  padding-left: var(--hf-space-4);
+  color: var(--hf-color-danger);
+  font-size: var(--hf-font-size-sm);
+}
+
 /* A task type's tone, as lib/taskType.ts gives it, on the glyph of every view that shows the type: the template, the
    task row, and the execution card and detail. After those rules, so that its border color wins over the card's. */
 .type-glyph--blue {

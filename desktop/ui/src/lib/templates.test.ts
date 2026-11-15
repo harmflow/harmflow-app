@@ -2,7 +2,7 @@
 // whatever their case and accents, and the filters by source and type narrow the list and combine with it.
 import { describe, expect, it } from "vitest";
 import type { LocalizedText, Template } from "../api/types";
-import { filterTemplates, templateTypes } from "./templates";
+import { filterTemplates, invalidTemplates, offeredTemplates, templateFileName, templateTypes } from "./templates";
 
 const text = (en: string, pt: string, es: string): LocalizedText => ({ "en-US": en, "pt-BR": pt, "es-ES": es });
 
@@ -52,5 +52,23 @@ describe("filterTemplates", () => {
 describe("templateTypes", () => {
   it("names each type once, in the templates' order", () => {
     expect(templateTypes(templates)).toEqual(["general", "github"]);
+  });
+});
+
+// A template file that fails validation is listed with its errors and never offered; the valid ones stay offered.
+describe("offeredTemplates and invalidTemplates", () => {
+  const broken = { id: "broken", source: "user", path: "/data/templates/broken.yaml", validation: { valid: false, errors: [], warnings: [] } } as Template;
+  const listed = [templates[0], broken, templates[2]];
+
+  it("offers only the valid templates and lists the invalid ones apart, each in the daemon's order", () => {
+    expect(ids(offeredTemplates(listed))).toEqual(["hf-general", "meeting-notes"]);
+    expect(ids(invalidTemplates(listed))).toEqual(["broken"]);
+    expect(invalidTemplates(undefined)).toEqual([]);
+  });
+
+  it("names a template's file by the last part of its path", () => {
+    expect(templateFileName("/data/templates/broken.yaml")).toBe("broken.yaml");
+    expect(templateFileName("C:\\HarmFlow\\templates\\broken.yaml")).toBe("broken.yaml");
+    expect(templateFileName("broken.yaml")).toBe("broken.yaml");
   });
 });

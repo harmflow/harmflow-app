@@ -4,10 +4,19 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
 import type { TaskSummary, Template } from "../api/types";
+import { daemonText } from "../lib/daemonText";
 import { errorMessage } from "../lib/errorMessage";
 import { slugify } from "../lib/taskForm";
 import { toneClass, typeGlyph } from "../lib/taskType";
-import { filterTemplates, localized, offeredTemplates, templateSources, templateTypes } from "../lib/templates";
+import {
+  filterTemplates,
+  invalidTemplates,
+  localized,
+  offeredTemplates,
+  templateFileName,
+  templateSources,
+  templateTypes,
+} from "../lib/templates";
 import { actions, useStore } from "../state/store";
 import { Icon } from "./Icon";
 import { toast } from "./toast";
@@ -16,15 +25,24 @@ import { Banner, Button, Chip, Field, Modal, Select, TextArea, TextInput, cx } f
 /**
  * The catalog of the templates the daemon offers, named and described in the interface's language, with their type
  * and source, and what each needs that this machine lacks: a search over the names and descriptions, and filters by
- * source and by type. A template that needs something can still be picked.
+ * source and by type. A template that needs something can still be picked. A template file that fails validation is
+ * listed below them with its errors, and cannot be picked.
  */
 export function TemplateButtons({ onPick, disabled }: { onPick: (template: string) => void; disabled?: boolean }) {
   const { t, i18n } = useTranslation();
-  const templates = offeredTemplates(useStore((s) => s.templates));
+  const all = useStore((s) => s.templates);
+  const templates = offeredTemplates(all);
+  const invalid = invalidTemplates(all);
   const [query, setQuery] = useState("");
   const [source, setSource] = useState("");
   const [type, setType] = useState("");
-  if (!templates.length) return <p className="muted">{t("tasks.templates.none")}</p>;
+  if (!templates.length)
+    return (
+      <div className="template-catalog">
+        <p className="muted">{t("tasks.templates.none")}</p>
+        <InvalidTemplates templates={invalid} />
+      </div>
+    );
   const shown = filterTemplates(templates, { query, source, type }, i18n.language);
   return (
     <div className="template-catalog">
@@ -89,6 +107,38 @@ export function TemplateButtons({ onPick, disabled }: { onPick: (template: strin
       ) : (
         <p className="muted">{t("tasks.templates.noMatch")}</p>
       )}
+      <InvalidTemplates templates={invalid} />
+    </div>
+  );
+}
+
+/**
+ * The template files that fail validation, each named by its file with the daemon's errors and, when it gives them, their
+ * line and column. Neither the search nor the filters hide them, and none can be picked.
+ */
+function InvalidTemplates({ templates }: { templates: Template[] }) {
+  const { t } = useTranslation();
+  if (!templates.length) return null;
+  return (
+    <div className="templates-invalid">
+      <p className="muted">{t("tasks.templates.invalid")}</p>
+      <ul>
+        {templates.map((tpl) => (
+          <li key={tpl.path} className="template-invalid" aria-disabled="true">
+            <strong className="mono" title={tpl.path}>
+              {templateFileName(tpl.path)}
+            </strong>
+            <ul className="template-invalid__errors">
+              {tpl.validation.errors.map((e, i) => (
+                <li key={i}>
+                  {daemonText(e)}
+                  {e.line ? <span className="mono"> — {t("tasks.editor.line", { line: e.line, column: e.column ?? 1 })}</span> : null}
+                </li>
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
