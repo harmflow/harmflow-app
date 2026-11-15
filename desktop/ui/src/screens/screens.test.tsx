@@ -3,7 +3,7 @@
 // screen's cards are also driven in a DOM, against a stand-in for the daemon's local API.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { act, type ReactNode } from "react";
+import { act, useState, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
@@ -791,6 +791,203 @@ describe("the executions screen's cards", () => {
       .filter((field) => field.querySelector("dt")!.textContent === "Executada por")
       .map((field) => field.querySelector("dd")!.textContent);
     expect(runBy).toEqual(["Claude Code", "Programa"]);
+  });
+
+  describe("their row as a carousel", () => {
+    // happy-dom lays nothing out, so every size reads 0: each test gives the row the sizes of a window 1440 px wide,
+    // whose row shows three cards and a 48 px slice in 1000 px, and spies on the scrolls it asks for.
+    const runningMany = (n: number): ExecutionSummary[] =>
+      Array.from({ length: n }, (_, i) => ({ ...running, id: `exec-row-${i + 1}`, taskId: `row-${i + 1}`, taskName: `Row ${i + 1}` }));
+    const PAGE = 1000 - 48;
+    let reducedMotion = false;
+    let select: (id: string | null) => void = () => {};
+    const onSelect = vi.fn();
+
+    /** The Executions screen with its own selection, which select changes as the queue or the history does. */
+    function Screen() {
+      const [selected, setSelected] = useState<string | null>(null);
+      select = setSelected;
+      return (
+        <ExecutionsScreen
+          selectedId={selected}
+          onSelect={(id) => {
+            onSelect(id);
+            setSelected(id);
+          }}
+          onGoToTasks={() => {}}
+          onSeeHistory={() => {}}
+        />
+      );
+    }
+
+    const row = () => host!.querySelector<HTMLElement>(".exec-cards")!;
+    const wrapper = () => host!.querySelector<HTMLElement>(".exec-carousel")!;
+    const controls = () => host!.querySelector(".exec-carousel__controls");
+    const buttons = () => [...host!.querySelectorAll<HTMLButtonElement>(".exec-carousel__controls button")];
+    const position = () => host!.querySelector(".exec-carousel__position")?.textContent;
+    const rect = (left: number, width: number) => ({ left, right: left + width, width, top: 0, bottom: 200, height: 200, x: left, y: 0, toJSON: () => ({}) }) as DOMRect;
+
+    /** Renders n running cards, gives the row its sizes and the scroll position, and lets it measure on a scroll. */
+    async function showRow(n: number, scrollLeft = 0) {
+      for (const e of runningMany(n)) daemon.answers.set(`/executions/${e.id}/events`, { events: [], logExpired: false });
+      patchStateForTests({ active: runningMany(n) });
+      await render(<Screen />);
+      const element = row();
+      const step = PAGE / 3;
+      Object.defineProperty(element, "clientWidth", { configurable: true, value: 1000 });
+      Object.defineProperty(element, "scrollWidth", { configurable: true, value: Math.max(1000, n * step - 16 + 48) });
+      Object.defineProperty(element, "scrollLeft", { configurable: true, writable: true, value: scrollLeft });
+      vi.spyOn(element, "getBoundingClientRect").mockReturnValue(rect(0, 1000));
+      vi.spyOn(wrapper(), "getBoundingClientRect").mockReturnValue(rect(0, 1000));
+      const scrollTo = vi.fn();
+      element.scrollTo = scrollTo as never;
+      await act(async () => void element.dispatchEvent(new Event("scroll")));
+      return scrollTo;
+    }
+
+    beforeEach(() => {
+      reducedMotion = false;
+      onSelect.mockClear();
+      vi.stubGlobal("matchMedia", (query: string) => ({
+        matches: query === "(prefers-reduced-motion: reduce)" ? reducedMotion : false,
+        media: query,
+        addEventListener() {},
+        removeEventListener() {},
+      }));
+    });
+
+    let saved: ReturnType<typeof getState>;
+    beforeEach(() => {
+      saved = getState();
+    });
+    // This runs before the outer afterEach unmounts the screen, so React sees each change.
+    afterEach(async () => {
+      await act(async () => {
+        patchStateForTests({ active: saved.active });
+        await i18n.changeLanguage("pt-BR");
+      });
+    });
+
+    it("shows no control while the cards fit the row, and is a labelled region announced as a carousel", async () => {
+      await showRow(3);
+      expect(host!.querySelectorAll(".exec-card")).toHaveLength(3);
+      expect(controls()).toBeNull();
+      expect(wrapper().className).toBe("exec-carousel");
+      expect(row().getAttribute("role")).toBe("region");
+      expect(row().getAttribute("aria-roledescription")).toBe("carousel");
+      expect(row().getAttribute("aria-label")).toBe("Execuções em andamento");
+    });
+
+    it("with four cards at its start, enables Next, disables Previous, and reads which cards show, in each language", async () => {
+      await showRow(4);
+      expect(host!.querySelector(".screen__main .section-title")!.contains(controls())).toBe(true);
+      const [previous, next] = buttons();
+      expect(previous.disabled).toBe(true);
+      expect(next.disabled).toBe(false);
+      expect(wrapper().classList.contains("exec-carousel--more-end")).toBe(true);
+      expect(wrapper().classList.contains("exec-carousel--more-start")).toBe(false);
+
+      const shown: Record<string, { position: string; previous: string; next: string }> = {
+        "en-US": { position: "1–3 of 4", previous: "Previous executions", next: "Next executions" },
+        "pt-BR": { position: "1–3 de 4", previous: "Execuções anteriores", next: "Próximas execuções" },
+        "es-ES": { position: "1–3 de 4", previous: "Ejecuciones anteriores", next: "Ejecuciones siguientes" },
+      };
+      for (const [language, expected] of Object.entries(shown)) {
+        await act(async () => void i18n.changeLanguage(language));
+        expect(position(), language).toBe(expected.position);
+        expect(buttons().map((b) => b.getAttribute("aria-label")), language).toEqual([expected.previous, expected.next]);
+      }
+    });
+
+    it("pages by the cards visible: Next asks for a scroll of one page, and the last page disables Next", async () => {
+      const scrollTo = await showRow(6);
+      await act(async () => buttons()[1].click());
+      expect(scrollTo).toHaveBeenCalledWith({ left: expect.closeTo(PAGE), behavior: "smooth" });
+
+      // At its end, the last three cards show, and Previous asks for a scroll back to the start.
+      const element = row();
+      element.scrollLeft = element.scrollWidth - element.clientWidth;
+      await act(async () => void element.dispatchEvent(new Event("scroll")));
+      expect(position()).toBe("4–6 de 6");
+      expect(buttons().map((b) => b.disabled)).toEqual([false, true]);
+      expect(wrapper().classList.contains("exec-carousel--more-start")).toBe(true);
+      expect(wrapper().classList.contains("exec-carousel--more-end")).toBe(false);
+      await act(async () => buttons()[0].click());
+      expect(scrollTo).toHaveBeenLastCalledWith({ left: 0, behavior: "smooth" });
+    });
+
+    it("between its ends, shows a whole card at the left with no slice over it, and a slice at the left only at the end", async () => {
+      // Seven cards, a page in: the fourth to the sixth show whole, the fourth flush left, and a slice of the seventh
+      // at the right.
+      const scrollTo = await showRow(7, PAGE);
+      expect(position()).toBe("4–6 de 7");
+      expect(buttons().map((b) => b.disabled)).toEqual([false, false]);
+      expect(wrapper().classList.contains("exec-carousel--more-start")).toBe(false);
+      expect(wrapper().classList.contains("exec-carousel--more-end")).toBe(true);
+
+      // No overlay covers the whole card at the left: a click near the left edge pages nothing, and a click on that
+      // card selects it and leaves the row where it is.
+      await act(async () => void wrapper().dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10 })));
+      expect(scrollTo).not.toHaveBeenCalled();
+      await act(async () => host!.querySelectorAll<HTMLElement>(".exec-card")[3].click());
+      expect(onSelect).toHaveBeenCalledWith("exec-row-4");
+      expect(scrollTo).not.toHaveBeenCalled();
+
+      // At the end, a slice of the card before the visible ones shows at the left, and a click on it pages back.
+      const element = row();
+      element.scrollLeft = element.scrollWidth - element.clientWidth;
+      await act(async () => void element.dispatchEvent(new Event("scroll")));
+      expect(position()).toBe("5–7 de 7");
+      expect(wrapper().classList.contains("exec-carousel--more-start")).toBe(true);
+      expect(wrapper().classList.contains("exec-carousel--more-end")).toBe(false);
+      await act(async () => void wrapper().dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10 })));
+      expect(scrollTo).toHaveBeenCalledWith({ left: expect.closeTo(PAGE / 3), behavior: "smooth" });
+    });
+
+    it("jumps instead of scrolling smoothly while the system asks for reduced motion", async () => {
+      reducedMotion = true;
+      const scrollTo = await showRow(4);
+      await act(async () => buttons()[1].click());
+      expect(scrollTo).toHaveBeenCalledWith({ left: expect.closeTo(PAGE), behavior: "auto" });
+    });
+
+    it("pages one page toward the right slice on a click there, cancelling and selecting nothing", async () => {
+      const confirm = vi.fn((_message?: string) => true);
+      vi.stubGlobal("confirm", confirm);
+      const scrollTo = await showRow(4);
+      // The slice's overlay is the wrapper's pseudo-element: a click on it targets the wrapper itself.
+      await act(async () => void wrapper().dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 990 })));
+      expect(scrollTo).toHaveBeenCalledWith({ left: expect.closeTo(PAGE), behavior: "smooth" });
+      expect(confirm).not.toHaveBeenCalled();
+      expect(writes()).toEqual([]);
+      expect(onSelect).not.toHaveBeenCalled();
+
+      // At the start, the left edge shows no slice: a click there moves nothing.
+      scrollTo.mockClear();
+      await act(async () => void wrapper().dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10 })));
+      expect(scrollTo).not.toHaveBeenCalled();
+    });
+
+    it("scrolls a card selected from the queue into view, and a click on a whole card moves nothing", async () => {
+      const scrollTo = await showRow(5);
+      const cards = [...host!.querySelectorAll<HTMLElement>(".exec-card")];
+      const intoView = cards.map((card, i) => {
+        vi.spyOn(card, "getBoundingClientRect").mockReturnValue(rect(i * (PAGE / 3), PAGE / 3 - 16));
+        const spy = vi.fn();
+        card.scrollIntoView = spy;
+        return spy;
+      });
+
+      await act(async () => select("exec-row-5"));
+      expect(intoView[4]).toHaveBeenCalledWith({ block: "nearest", inline: "nearest", behavior: "smooth" });
+
+      // The second card shows whole: clicking it selects it and leaves the row where it is.
+      await act(async () => cards[1].click());
+      expect(onSelect).toHaveBeenCalledWith("exec-row-2");
+      expect(cards[1].classList.contains("exec-card--selected")).toBe(true);
+      expect(intoView[1]).not.toHaveBeenCalled();
+      expect(scrollTo).not.toHaveBeenCalled();
+    });
   });
 
   describe("its effort beside the model", () => {

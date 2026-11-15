@@ -677,6 +677,12 @@ export const enUS = {
     empty: "Nothing is running right now.",
     emptyHint: "Scheduled tasks start here on their own; you can also run a task now from Tasks.",
     goToTasks: "Go to tasks",
+    carousel: {
+      label: "Running executions",
+      position: "{{first}}–{{last}} of {{total}}",
+      previous: "Previous executions",
+      next: "Next executions",
+    },
     card: {
       task: "Task",
       agent: "Run by",
