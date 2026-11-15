@@ -1425,7 +1425,7 @@ describe("settings sections", () => {
       sections: [...g.querySelectorAll(".settings-nav__item")].map((b) => b.textContent),
     }));
     expect(groups).toEqual([
-      { heading: "Interface", sections: ["Geral", "Notificações", "Atalhos"] },
+      { heading: "Interface", sections: ["Geral", "Aparência", "Notificações", "Atalhos"] },
       { heading: "Execução", sections: ["Ferramentas de IA", "Caminhos"] },
       { heading: "Este computador", sections: ["Daemon", "Armazenamento", "Segurança"] },
     ]);
@@ -1454,9 +1454,10 @@ describe("settings sections", () => {
   it.each([
     [
       "general",
-      ["Idioma", "Fonte", "Barra de menus", "Execuções"],
+      ["Idioma", "Barra de menus", "Execuções"],
       ["Mostrar o HarmFlow na barra de menus", "Manter o HarmFlow na barra de menus ao sair com ⌘Q", "Mostrar avisos de restrição"],
     ],
+    ["appearance", ["Zoom", "Fonte"], ["O mesmo nível de ⌘+, ⌘− e ⌘0", "HarmFlow", "Sistema"]],
     ["notifications", ["Avisos"], ["Nível de notificação"]],
     [
       "shortcuts",
@@ -1479,6 +1480,34 @@ describe("settings sections", () => {
     expect(titles).toEqual(panels);
     for (const text of shown) expect(html).toContain(text);
     if (section !== "general") expect(html).not.toContain("Mostrar o HarmFlow na barra de menus");
+    // The typeface choice is Appearance's alone.
+    if (section !== "appearance") expect(html).not.toContain('id="settings-typeface"');
+  });
+
+  // Appearance holds the zoom and the typeface and nothing else, the zoom at the level the shell gives and set through
+  // it; no control has a reset action (harmflow-app#825).
+  it("shows Zoom at the shell's level and Font in Appearance, with no reset action, and sets the zoom through the shell", async () => {
+    const set: number[] = [];
+    await render(<SettingsScreen section="appearance" zoom={110} onZoom={(level) => set.push(level)} />);
+    const section = host!.querySelector(".settings__section")!;
+    expect([...section.querySelectorAll("select")].map((s) => s.id)).toEqual(["settings-zoom", "settings-typeface"]);
+    expect([...section.querySelectorAll("button, input, textarea")]).toEqual([]);
+
+    const zoom = section.querySelector<HTMLSelectElement>("#settings-zoom")!;
+    expect([...zoom.options].map((o) => o.textContent)).toEqual(["80%", "90%", "100%", "110%", "125%", "150%"]);
+    expect(zoom.value).toBe("110");
+    const setValue = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!;
+    await act(async () => {
+      setValue.call(zoom, "150");
+      zoom.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(set).toEqual([150]);
+
+    const typeface = section.querySelector<HTMLSelectElement>("#settings-typeface")!;
+    expect([...typeface.options].map((o) => [o.value, o.textContent])).toEqual([
+      ["harmflow", "HarmFlow"],
+      ["system", "Sistema"],
+    ]);
   });
 
   // Every shortcut of the table, in its group, as keycaps, in the interface's language; none it does not hold.

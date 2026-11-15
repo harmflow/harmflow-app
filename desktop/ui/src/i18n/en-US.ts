@@ -1331,6 +1331,7 @@ export const enUS = {
   settings: {
     sections: {
       general: "General",
+      appearance: "Appearance",
       notifications: "Notifications",
       shortcuts: "Shortcuts",
       agents: "AI tools",
@@ -1378,7 +1379,8 @@ export const enUS = {
     subheads: {
       executions: "Executions",
       language: "Language",
-      typeface: "Typeface",
+      zoom: "Zoom",
+      typeface: "Font",
       menuBar: "Menu bar",
       notices: "Notices",
       agents: "AI tools",
@@ -1401,7 +1403,9 @@ export const enUS = {
     language: "Language",
     languageHint: "Switches at once, with no restart.",
     languages: { system: "System language", "pt-BR": "Português (Brasil)", "en-US": "English (US)", "es-ES": "Español" },
-    typeface: "Typeface",
+    zoom: "Zoom",
+    zoomHint: "The same level as ⌘+, ⌘−, and ⌘0; it scales the text too. Changes at once.",
+    typeface: "Font",
     typefaceHint: "HarmFlow uses its own fonts on every system; System uses your operating system's. Switches at once, with no restart.",
     typefaces: { harmflow: "HarmFlow", system: "System" },
     tray: "Show HarmFlow in the menu bar",

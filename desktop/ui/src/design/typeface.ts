@@ -1,4 +1,4 @@
-// The interface's typeface, the choice of Settings → General: HarmFlow, the fonts the app bundles, or System, the
+// The interface's typeface, the Font of Settings → Appearance: HarmFlow, the fonts the app bundles, or System, the
 // operating system's own. One attribute on the root element switches the three font stacks of theme.css, so a change
 // shows at once in the open window, with no restart.
 

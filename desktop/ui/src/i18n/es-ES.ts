@@ -1356,6 +1356,7 @@ export const esES: Resources = {
   settings: {
     sections: {
       general: "General",
+      appearance: "Apariencia",
       notifications: "Notificaciones",
       shortcuts: "Atajos",
       agents: "Herramientas de IA",
@@ -1403,7 +1404,8 @@ export const esES: Resources = {
     subheads: {
       executions: "Ejecuciones",
       language: "Idioma",
-      typeface: "Tipografía",
+      zoom: "Zoom",
+      typeface: "Fuente",
       menuBar: "Barra de menús",
       notices: "Avisos",
       agents: "Herramientas de IA",
@@ -1426,7 +1428,9 @@ export const esES: Resources = {
     language: "Idioma",
     languageHint: "Cambia al instante, sin reiniciar.",
     languages: { system: "Idioma del sistema", "pt-BR": "Português (Brasil)", "en-US": "English (US)", "es-ES": "Español" },
-    typeface: "Tipografía",
+    zoom: "Zoom",
+    zoomHint: "El mismo nivel que ⌘+, ⌘− y ⌘0; también escala el texto. Cambia al instante.",
+    typeface: "Fuente",
     typefaceHint: "HarmFlow usa sus propias fuentes en todos los sistemas; Sistema usa las de tu sistema operativo. Cambia al instante, sin reiniciar.",
     typefaces: { harmflow: "HarmFlow", system: "Sistema" },
     tray: "Mostrar HarmFlow en la barra de menús",

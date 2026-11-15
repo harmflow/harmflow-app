@@ -1,5 +1,5 @@
 // Settings, divided into sections: a list of them on the left, and the open one beside it. Interface: the language, the
-// menu bar, notifications, and the keyboard shortcuts. Execution: the AI tools, the general system prompt, and the command-line tools, and the paths a task may use. This
+// menu bar, the zoom and the typeface, notifications, and the keyboard shortcuts. Execution: the AI tools, the general system prompt, and the command-line tools, and the paths a task may use. This
 // computer: the daemon, storage, and local API security. About stands alone at the foot of the list.
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
@@ -9,10 +9,12 @@ import { tipBeside, useTooltip } from "../components/Shell";
 import type { LeaveCheck } from "../components/TaskEditor";
 import { cx } from "../components/ui";
 import type { DraftReport } from "../lib/hooks";
+import { storedZoom, type Zoom } from "../lib/zoom";
 import { dynamicText, useRegistered } from "../registrations";
 import { actions } from "../state/store";
 import { AboutSection } from "./settings/AboutSection";
 import { AgentsSection } from "./settings/AgentsSection";
+import { AppearanceSection } from "./settings/AppearanceSection";
 import { DaemonSection } from "./settings/DaemonSection";
 import { GeneralSection } from "./settings/GeneralSection";
 import { NotificationsSection } from "./settings/NotificationsSection";
@@ -23,20 +25,21 @@ import { StorageSection } from "./settings/StorageSection";
 
 export { DIRECTORIES } from "./settings/directories";
 
-export type SettingsSection = "general" | "notifications" | "shortcuts" | "agents" | "paths" | "daemon" | "storage" | "security" | "about";
+export type SettingsSection = "general" | "appearance" | "notifications" | "shortcuts" | "agents" | "paths" | "daemon" | "storage" | "security" | "about";
 
 /** A built-in section, or the key of a section a registration added. */
 export type SettingsSectionKey = SettingsSection | (string & {});
 
 /** The section list's groups, in order; About follows them alone, under a divider. */
 export const SECTION_GROUPS: ReadonlyArray<{ key: "interface" | "agents" | "computer"; sections: SettingsSection[] }> = [
-  { key: "interface", sections: ["general", "notifications", "shortcuts"] },
+  { key: "interface", sections: ["general", "appearance", "notifications", "shortcuts"] },
   { key: "agents", sections: ["agents", "paths"] },
   { key: "computer", sections: ["daemon", "storage", "security"] },
 ];
 
 const SECTION_ICONS: Record<SettingsSection, IconName> = {
   general: "globe",
+  appearance: "search",
   notifications: "bell",
   shortcuts: "keyboard",
   agents: "agent",
@@ -72,12 +75,18 @@ export function SettingsScreen({
   section = "general",
   onSection,
   onLeaveCheck,
+  zoom,
+  onZoom,
 }: {
   section?: SettingsSectionKey;
   /** Opens another section; the shell asks first while a draft is held. */
   onSection?: (s: SettingsSectionKey) => void;
   /** Receives the question to ask before leaving while a section holds a draft, and null once it holds none. */
   onLeaveCheck?: (check: LeaveCheck | null) => void;
+  /** The window's zoom, which the shell holds with its keys; the kept level when the shell gives none. */
+  zoom?: Zoom;
+  /** Sets the window's zoom, as ⌘+ and ⌘− do. */
+  onZoom?: (level: Zoom) => void;
 }) {
   const { t } = useTranslation();
   const registered = useRegistered();
@@ -154,6 +163,7 @@ export function SettingsScreen({
           {dynamicText(t, `settings.sections.${section}`)}
         </h2>
         {section === "general" ? <GeneralSection /> : null}
+        {section === "appearance" ? <AppearanceSection zoom={zoom ?? storedZoom()} onZoom={onZoom} /> : null}
         {section === "notifications" ? <NotificationsSection /> : null}
         {section === "shortcuts" ? <ShortcutsSection /> : null}
         {section === "agents" ? <AgentsSection report={report} /> : null}

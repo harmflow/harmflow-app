@@ -6,7 +6,7 @@ This folder contains the sections the settings screen opens, one module per sect
 
 ## Interface
 
-- Each built-in section is a component the settings screen renders when it is open. `[GeneralSection.tsx:GeneralSection]` `[NotificationsSection.tsx:NotificationsSection]` `[ShortcutsSection.tsx:ShortcutsSection]` `[AgentsSection.tsx:AgentsSection]` `[PathsSection.tsx:PathsSection]` `[DaemonSection.tsx:DaemonSection]` `[StorageSection.tsx:StorageSection]` `[SecuritySection.tsx:SecuritySection]` `[AboutSection.tsx:AboutSection]`
+- Each built-in section is a component the settings screen renders when it is open. `[GeneralSection.tsx:GeneralSection]` `[AppearanceSection.tsx:AppearanceSection]` `[NotificationsSection.tsx:NotificationsSection]` `[ShortcutsSection.tsx:ShortcutsSection]` `[AgentsSection.tsx:AgentsSection]` `[PathsSection.tsx:PathsSection]` `[DaemonSection.tsx:DaemonSection]` `[StorageSection.tsx:StorageSection]` `[SecuritySection.tsx:SecuritySection]` `[AboutSection.tsx:AboutSection]`
 - `SettingRow` lays out one setting, and `usePatch` saves a change to the settings, for every section. `[SettingRow.tsx:SettingRow]` `[usePatch.ts:usePatch]`
 - `DIRECTORIES` lists the daemon's folders and files Storage shows; the settings screen re-exports it. `[directories.ts:DIRECTORIES]`
 
