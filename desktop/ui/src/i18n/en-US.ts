@@ -1098,6 +1098,7 @@ export const enUS = {
       harnessNotReady: "{{harness}} is not ready",
       missingAgent: "Agent not found: {{name}}",
       missingSkill: "Skill not found: {{name}}",
+      invalid: "These template files have errors and cannot start a task:",
     },
     types: {
       github: "GitHub",

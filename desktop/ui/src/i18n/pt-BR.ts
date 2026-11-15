@@ -1125,6 +1125,7 @@ export const ptBR: Resources = {
       harnessNotReady: "{{harness}} não está pronto",
       missingAgent: "Agente não encontrado: {{name}}",
       missingSkill: "Skill não encontrada: {{name}}",
+      invalid: "Estes arquivos de modelo têm erros e não podem iniciar uma tarefa:",
     },
     types: {
       github: "GitHub",

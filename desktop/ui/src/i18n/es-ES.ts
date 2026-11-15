@@ -1123,6 +1123,7 @@ export const esES: Resources = {
       harnessNotReady: "{{harness}} no está listo",
       missingAgent: "Agente no encontrado: {{name}}",
       missingSkill: "Skill no encontrada: {{name}}",
+      invalid: "Estos archivos de plantilla tienen errores y no pueden iniciar una tarea:",
     },
     types: {
       github: "GitHub",
