@@ -38,7 +38,16 @@ const PROMINENT = new Set([
 ]);
 const BANNER_ICON: Record<string, IconName> = { "harness.switched": "switch", "work_item.conflicting_activity": "alert" };
 
-export function ExecutionDetail({ executionId, summary }: { executionId: string; summary?: ExecutionSummary }) {
+export function ExecutionDetail({
+  executionId,
+  summary,
+  onOpenExecution,
+}: {
+  executionId: string;
+  summary?: ExecutionSummary;
+  /** Opens another execution's detail, such as the one a run again follows. */
+  onOpenExecution?: (id: string) => void;
+}) {
   const { t, i18n } = useTranslation();
   const detail = useStore((s) => s.details[executionId]);
   const events = useStore((s) => s.events[executionId]);
@@ -92,6 +101,8 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
   // cost.
   const isScript = exec.taskType === "script";
   const glyph = typeGlyph(exec.taskType);
+  // A run again names the execution whose completed end fired it.
+  const follows = detail?.followsExecutionId;
 
   const tabs: TabDef<TabKey>[] = isScript
     ? [
@@ -151,6 +162,18 @@ export function ExecutionDetail({ executionId, summary }: { executionId: string;
               <span className="meta mono">
                 <Icon name="branch" size={14} /> {branch}
               </span>
+            ) : null}
+            <span className="meta" title={t("executions.detail.trigger")}>
+              <Icon name="history" size={14} /> {t(`trigger.${exec.trigger}`)}
+            </span>
+            {follows ? (
+              onOpenExecution ? (
+                <Button variant="link" className="meta mono" onClick={() => onOpenExecution(follows)}>
+                  {t("executions.detail.follows", { id: follows })}
+                </Button>
+              ) : (
+                <span className="meta mono">{t("executions.detail.follows", { id: follows })}</span>
+              )
             ) : null}
             <span className="meta mono">
               <Icon name="clock" size={14} /> <Elapsed start={exec.startedAt ?? exec.createdAt} end={exec.endedAt} locale={i18n.language} />

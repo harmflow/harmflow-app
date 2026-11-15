@@ -60,7 +60,7 @@ export function ExecutionsScreen({
         ) : (
           <RunningCards running={running} selectedId={effective} onSelect={onSelect} />
         )}
-        {effective ? <ExecutionDetail executionId={effective} summary={summary} /> : null}
+        {effective ? <ExecutionDetail executionId={effective} summary={summary} onOpenExecution={onSelect} /> : null}
       </div>
       {asideHidden ? null : (
         <div className="screen__aside">

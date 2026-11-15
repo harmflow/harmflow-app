@@ -14,6 +14,7 @@ export const OPTION_FIELDS = {
   network: ["spec", "permissions", "network"],
   missedRun: ["spec", "schedule", "missedRun", "policy"],
   overlap: ["spec", "concurrency", "overlappingRuns"],
+  completion: ["spec", "completion", "policy"],
 } as const satisfies Record<string, Path>;
 
 /** Removes undefined and empty-string keys from a list row, keeping the row itself. */
