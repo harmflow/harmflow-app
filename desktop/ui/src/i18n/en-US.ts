@@ -649,9 +649,8 @@ export const enUS = {
       cancelled: { title: "{{taskName}} cancelled", body: "The execution was cancelled." },
       needs_attention: { title: "{{taskName}} needs attention", body: "A human must act: {{reason}}" },
       run_again_limit_reached: {
-        title: "{{taskName}}: run-again limit reached",
-        body_one: "{{taskName}} ran again {{count}} time in a row, its run-again limit; it now waits for its schedule.",
-        body_other: "{{taskName}} ran again {{count}} times in a row, its run-again limit; it now waits for its schedule.",
+        title: "{{taskName}}: $t(eventTypes.execution.run_again_limit_reached)",
+        body: "{{taskName}}: $t(messages.run_again_limit_reached)",
       },
     },
     pull_request: {

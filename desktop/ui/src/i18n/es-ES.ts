@@ -669,9 +669,8 @@ export const esES: Resources = {
       cancelled: { title: "{{taskName}} cancelada", body: "La ejecución fue cancelada." },
       needs_attention: { title: "{{taskName}} requiere atención", body: "Una persona debe actuar: {{reason}}" },
       run_again_limit_reached: {
-        title: "{{taskName}}: límite de ejecuciones seguidas alcanzado",
-        body_one: "{{taskName}} se ejecutó de nuevo {{count}} vez seguida, su límite de ejecuciones seguidas; ahora espera su programación.",
-        body_other: "{{taskName}} se ejecutó de nuevo {{count}} veces seguidas, su límite de ejecuciones seguidas; ahora espera su programación.",
+        title: "{{taskName}}: $t(eventTypes.execution.run_again_limit_reached)",
+        body: "{{taskName}}: $t(messages.run_again_limit_reached)",
       },
     },
     pull_request: {
