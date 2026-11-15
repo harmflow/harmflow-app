@@ -39,8 +39,9 @@ type ValidationResult struct {
 	items   []domain.ItemParameters // what the cited agents and skills declare, as validation read them
 }
 
-// catalogMode decides whether a missing agent or skill is an error (saving) or a warning (import and external edits),
-// and whether the harnesses are asked at all (start).
+// catalogMode decides whether a save drops the parameter values no cited item declares (saving, not import or
+// external edits), and whether the harnesses are asked at all (start). A missing agent or skill only warns in every
+// mode.
 type catalogMode int
 
 const (
@@ -214,26 +215,23 @@ func (a *App) semanticChecks(ctx context.Context, r *ValidationResult, doc domai
 			r.addWarning(path+"/provider", domain.WarningHarnessNotReady, domain.T("harness_not_ready",
 				"{{harness}} is not ready: {{detail}}", "harness", ad.Name()).Nest("detail", info.DiagnosticText()))
 		}
-		// Agents and skills must be available to every harness of the chain. Those a harness loads itself, whose list it
-		// could not give, are unverified on the preferred harness and on a fallback alike.
+		// An agent or skill a harness of the chain cannot load only warns, on the preferred harness and on a fallback
+		// alike, in every mode: the task is saved, and its executions pass the name on. Those a harness loads itself,
+		// whose list it could not give, are unverified. A fallback's warning is under its candidate's path.
 		missing := a.missingItems(ctx, doc, p.Provider, p.Installation, a.itemWorkspace(doc), a.addedFolders(doc))
 		for _, m := range missing {
 			code := domain.WarningMissingSkill
-			kindPath := "/spec/skills"
+			at := "/spec/skills"
 			if m.kind == "agent" {
-				code, kindPath = domain.WarningMissingAgent, "/spec/agents"
+				code, at = domain.WarningMissingAgent, "/spec/agents"
 			}
-			switch {
-			case i == 0 && m.leftUnverified():
-				r.addWarning(kindPath, code, m.unverified(ad.Name()))
-			case m.leftUnverified():
-				r.addWarning(path, code, m.unverified(ad.Name()))
-			case i == 0 && mode == catalogStrict:
-				r.addError(kindPath, m.notFound(ad.Name()))
-			case i == 0:
-				r.addWarning(kindPath, code, m.missing(ad.Name()))
-			default:
-				r.addWarning(path, domain.WarningInvalidFallback, m.invalidFallback(ad.Name()))
+			if i > 0 {
+				at = path
+			}
+			if m.leftUnverified() {
+				r.addWarning(at, code, m.unverified(ad.Name()))
+			} else {
+				r.addWarning(at, code, m.missing(ad.Name()))
 			}
 		}
 	}
@@ -406,12 +404,12 @@ type missingItem struct {
 	errors            string // the discovery errors, as one line
 	unreadable        error
 	// unverifiable says the harness loads the task's items of this kind itself, so a list it could not give leaves them
-	// unverified: validation warns instead of refusing.
+	// unverified rather than missing.
 	unverifiable bool
 }
 
 // leftUnverified says the harness's list could not be read and the harness loads the items of this kind itself, so the
-// item is not missing but unverified: the harness keeps its place in the chain.
+// item is not missing but unverified.
 func (m missingItem) leftUnverified() bool { return m.unreadable != nil && m.unverifiable }
 
 // unverified says a harness could not give the list of skills its installation loads, so the task's skills are not
@@ -429,19 +427,9 @@ func listUnreadable(harness string, err error) domain.Text {
 		"harness", harness).Nest("detail", domain.TextOf(err))
 }
 
-// notFound, missing, and invalidFallback say an item is missing for a harness: on save, on import, and for a fallback.
-// The source param names where it was looked for, for the desktop to translate. An item whose harness's list could not
-// be read is said to be so instead.
-func (m missingItem) notFound(harness string) domain.Text {
-	if m.unreadable != nil {
-		return listUnreadable(harness, m.unreadable)
-	}
-	if m.kind == "agent" {
-		return domain.T("agent_not_found", `agent "{{name}}" cannot be found for {{harness}} ({{where}})`, m.params(harness)...)
-	}
-	return domain.T("skill_not_found", `skill "{{name}}" cannot be found for {{harness}} ({{where}})`, m.params(harness)...)
-}
-
+// missing says an item is missing for a harness, the preferred one or a fallback, in validation and in an execution
+// alike. The source param names where it was looked for, for the desktop to translate. An item whose harness's list
+// could not be read is said to be so instead.
 func (m missingItem) missing(harness string) domain.Text {
 	if m.unreadable != nil {
 		return listUnreadable(harness, m.unreadable)
@@ -452,20 +440,6 @@ func (m missingItem) missing(harness string) domain.Text {
 	}
 	return domain.T("skill_missing", `skill "{{name}}" is missing on this machine for {{harness}} ({{where}})`,
 		m.params(harness)...)
-}
-
-func (m missingItem) invalidFallback(harness string) domain.Text {
-	if m.unreadable != nil {
-		return domain.T("fallback_skill_list_unreadable",
-			"{{harness}} is not a valid fallback: its skill list could not be read: {{detail}}",
-			"harness", harness).Nest("detail", domain.TextOf(m.unreadable))
-	}
-	if m.kind == "agent" {
-		return domain.T("fallback_agent_missing",
-			`{{harness}} is not a valid fallback: agent "{{name}}" cannot be found for it ({{where}})`, m.params(harness)...)
-	}
-	return domain.T("fallback_skill_missing",
-		`{{harness}} is not a valid fallback: skill "{{name}}" cannot be found for it ({{where}})`, m.params(harness)...)
 }
 
 func (m missingItem) params(harness string) []string {

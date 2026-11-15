@@ -3021,91 +3021,62 @@ func TestFilesIn(t *testing.T) {
 	}
 }
 
-// harmflow-app#216: a fallback that cannot load the task's skill is not valid. The task saves with a warning that names
-// Codex and the skill, and a run that exhausts Claude Code's quota does not switch to Codex.
-func TestFallbackMissingASkillIsNotValid(t *testing.T) {
-	e := newEnv(t)
-	view, err := e.app.CreateTask(t.Context(), TaskInput{YAML: taskYAML("notes", codexFallback+"  skills: [review-notes]\n")})
-	if err != nil {
-		t.Fatalf("CreateTask(notes): %v", err)
-	}
-	var warned []schema.Issue
-	for _, w := range view.Validation.Warnings {
-		if w.Code == domain.WarningInvalidFallback {
-			warned = append(warned, w)
-		}
-	}
-	want := `codex is not a valid fallback: skill "review-notes" cannot be found for it (the codex configuration)`
-	if len(warned) != 1 || warned[0].Key != "fallback_skill_missing" || warned[0].Message != want ||
-		warned[0].Params["harness"] != domain.HarnessCodex || warned[0].Params["name"] != "review-notes" {
-		t.Fatalf("CreateTask(notes) warnings %+v, want one %s: %s", view.Validation.Warnings,
-			domain.WarningInvalidFallback, want)
-	}
+// harmflow-app#1062: a fallback that lacks the task's skill or agent still counts as a fallback. The task saves with a
+// warning under the candidate's path that names Codex and the item, and a run that exhausts Claude Code's quota
+// switches to Codex, whose attempt is given the item by name and records the same warning.
+func TestFallbackMissingAnItemStillCountsAsAFallback(t *testing.T) {
+	for _, c := range []struct {
+		kind, name, cites, code, key string
+		given                        func(ports.RunRequest) []ports.ResolvedItem
+	}{
+		{"skill", "review-notes", "  skills: [review-notes]\n", domain.WarningMissingSkill, "skill_missing",
+			func(req ports.RunRequest) []ports.ResolvedItem { return req.Skills }},
+		{"agent", "review-agent", "  agents: [review-agent]\n", domain.WarningMissingAgent, "agent_missing",
+			func(req ports.RunRequest) []ports.ResolvedItem { return req.Agents }},
+	} {
+		t.Run(c.kind, func(t *testing.T) {
+			e := newEnv(t)
+			view, err := e.app.CreateTask(t.Context(), TaskInput{YAML: taskYAML("fb", codexFallback+c.cites)})
+			if err != nil {
+				t.Fatalf("CreateTask(fb): %v", err)
+			}
+			want := c.kind + ` "` + c.name + `" is missing on this machine for codex (the codex configuration)`
+			var warned []schema.Issue
+			for _, w := range view.Validation.Warnings {
+				if w.Code == c.code || w.Code == domain.WarningInvalidFallback {
+					warned = append(warned, w)
+				}
+			}
+			if len(warned) != 1 || warned[0].Code != c.code || warned[0].Key != c.key || warned[0].Message != want ||
+				warned[0].Path != "/spec/harness/fallback/candidates/0" || warned[0].Params["harness"] != domain.HarnessCodex ||
+				warned[0].Params["name"] != c.name {
+				t.Fatalf("CreateTask(fb) warnings %+v, want one %s on the fallback: %s", view.Validation.Warnings, c.code, want)
+			}
 
-	e.claude.setScript(func(ports.RunRequest) string { return "echo 'END quota'" })
-	r, _ := e.app.RunTask("notes")
-	x := e.wait(r.ExecutionID, domain.StatusFailed)
-	if len(x.Attempts) != 1 || x.HarnessSwitches != 0 || !strings.Contains(x.ErrorMessage, "no alternative") {
-		t.Errorf("attempts %+v, %d switches, error %q; want one attempt failing with no alternative", x.Attempts,
-			x.HarnessSwitches, x.ErrorMessage)
-	}
-	if n := e.codex.promptCount(); n != 0 {
-		t.Errorf("Codex got %d prompts, want 0", n)
-	}
-	if counts, _ := e.eventCounts(r.ExecutionID); counts[domain.EventHarnessSwitched] != 0 {
-		t.Errorf("%d %s events, want 0", counts[domain.EventHarnessSwitched], domain.EventHarnessSwitched)
-	}
-	if !slices.ContainsFunc(x.Warnings, func(w domain.Warning) bool {
-		return w.Code == domain.WarningInvalidFallback && w.Text.Message == want
-	}) {
-		t.Errorf("the execution's warnings %+v, want %s: %s", x.Warnings, domain.WarningInvalidFallback, want)
+			e.claude.setScript(func(ports.RunRequest) string { return "echo 'END quota'" })
+			r, _ := e.app.RunTask("fb")
+			x := e.wait(r.ExecutionID, domain.StatusCompleted)
+			if len(x.Attempts) != 2 || x.Attempts[1].Harness != domain.HarnessCodex || x.HarnessSwitches != 1 {
+				t.Errorf("attempts %+v, %d switches; want Claude Code, then Codex after the switch", x.Attempts, x.HarnessSwitches)
+			}
+			e.codex.mu.Lock()
+			runs := slices.Clone(e.codex.runs)
+			e.codex.mu.Unlock()
+			if len(runs) != 1 || !slices.ContainsFunc(c.given(runs[0].req), func(it ports.ResolvedItem) bool { return it.Name == c.name }) {
+				t.Errorf("Codex was prepared for %d attempts, want one given the %s %s by name", len(runs), c.kind, c.name)
+			}
+			if !slices.ContainsFunc(x.Warnings, func(w domain.Warning) bool {
+				return w.Code == c.code && w.Key == c.key && w.Message == want
+			}) || slices.ContainsFunc(x.Warnings, func(w domain.Warning) bool { return w.Code == domain.WarningInvalidFallback }) {
+				t.Errorf("the execution's warnings %+v, want %s: %s, and no %s", x.Warnings, c.code, want,
+					domain.WarningInvalidFallback)
+			}
+		})
 	}
 }
 
-// harmflow-app#347: a fallback that cannot load the task's agent is not valid, as one missing its skill is not. The
-// task saves with a warning that names Codex and the agent, and a run that exhausts Claude Code's quota does not switch
-// to Codex.
-func TestFallbackMissingAnAgentIsNotValid(t *testing.T) {
-	e := newEnv(t)
-	view, err := e.app.CreateTask(t.Context(), TaskInput{YAML: taskYAML("reviewer", codexFallback+"  agents: [review-agent]\n")})
-	if err != nil {
-		t.Fatalf("CreateTask(reviewer): %v", err)
-	}
-	var warned []schema.Issue
-	for _, w := range view.Validation.Warnings {
-		if w.Code == domain.WarningInvalidFallback {
-			warned = append(warned, w)
-		}
-	}
-	want := `codex is not a valid fallback: agent "review-agent" cannot be found for it (the codex configuration)`
-	if len(warned) != 1 || warned[0].Key != "fallback_agent_missing" || warned[0].Message != want ||
-		warned[0].Params["harness"] != domain.HarnessCodex || warned[0].Params["name"] != "review-agent" {
-		t.Fatalf("CreateTask(reviewer) warnings %+v, want one %s: %s", view.Validation.Warnings,
-			domain.WarningInvalidFallback, want)
-	}
-
-	e.claude.setScript(func(ports.RunRequest) string { return "echo 'END quota'" })
-	r, _ := e.app.RunTask("reviewer")
-	x := e.wait(r.ExecutionID, domain.StatusFailed)
-	if len(x.Attempts) != 1 || x.HarnessSwitches != 0 || !strings.Contains(x.ErrorMessage, "no alternative") {
-		t.Errorf("attempts %+v, %d switches, error %q; want one attempt failing with no alternative", x.Attempts,
-			x.HarnessSwitches, x.ErrorMessage)
-	}
-	if n := e.codex.promptCount(); n != 0 {
-		t.Errorf("Codex got %d prompts, want 0", n)
-	}
-	if counts, _ := e.eventCounts(r.ExecutionID); counts[domain.EventHarnessSwitched] != 0 {
-		t.Errorf("%d %s events, want 0", counts[domain.EventHarnessSwitched], domain.EventHarnessSwitched)
-	}
-	if !slices.ContainsFunc(x.Warnings, func(w domain.Warning) bool {
-		return w.Code == domain.WarningInvalidFallback && w.Text.Key == "fallback_agent_missing" && w.Text.Message == want
-	}) {
-		t.Errorf("the execution's warnings %+v, want %s: %s", x.Warnings, domain.WarningInvalidFallback, want)
-	}
-}
-
-// harmflow-app#347: a fallback that cannot load the task's agent nor its skill gets two warnings on save, one naming
-// the agent and one naming the skill.
+// harmflow-app#347: a fallback that lacks the task's agent and its skill gets two warnings on save, one naming the
+// agent and one naming the skill, each under the candidate's path.
 func TestFallbackMissingAnAgentAndASkillNamesBoth(t *testing.T) {
 	e := newEnv(t)
 	view, err := e.app.CreateTask(t.Context(), TaskInput{YAML: taskYAML("both",
@@ -3115,26 +3086,24 @@ func TestFallbackMissingAnAgentAndASkillNamesBoth(t *testing.T) {
 	}
 	var warned []schema.Issue
 	for _, w := range view.Validation.Warnings {
-		if w.Code == domain.WarningInvalidFallback {
+		if w.Path == "/spec/harness/fallback/candidates/0" {
 			warned = append(warned, w)
 		}
 	}
-	want := []struct{ key, name, message string }{
-		{"fallback_agent_missing", "review-agent",
-			`codex is not a valid fallback: agent "review-agent" cannot be found for it (the codex configuration)`},
-		{"fallback_skill_missing", "review-notes",
-			`codex is not a valid fallback: skill "review-notes" cannot be found for it (the codex configuration)`},
+	want := []struct{ code, key, name, message string }{
+		{domain.WarningMissingAgent, "agent_missing", "review-agent",
+			`agent "review-agent" is missing on this machine for codex (the codex configuration)`},
+		{domain.WarningMissingSkill, "skill_missing", "review-notes",
+			`skill "review-notes" is missing on this machine for codex (the codex configuration)`},
 	}
 	if len(warned) != len(want) {
-		t.Fatalf("CreateTask(both) warnings %+v, want %d %s", view.Validation.Warnings, len(want),
-			domain.WarningInvalidFallback)
+		t.Fatalf("CreateTask(both) warnings %+v, want %d on the fallback", view.Validation.Warnings, len(want))
 	}
 	for _, w := range want {
 		i := slices.IndexFunc(warned, func(is schema.Issue) bool { return is.Key == w.key })
-		if i < 0 || warned[i].Message != w.message || warned[i].Params["harness"] != domain.HarnessCodex ||
-			warned[i].Params["name"] != w.name {
-			t.Errorf("CreateTask(both) %s warnings %+v, want one %s naming %s: %s", domain.WarningInvalidFallback, warned,
-				w.key, w.name, w.message)
+		if i < 0 || warned[i].Code != w.code || warned[i].Message != w.message ||
+			warned[i].Params["harness"] != domain.HarnessCodex || warned[i].Params["name"] != w.name {
+			t.Errorf("CreateTask(both) fallback warnings %+v, want one %s naming %s: %s", warned, w.code, w.name, w.message)
 		}
 	}
 }
@@ -6160,8 +6129,8 @@ func TestAutostartChangesOnlyOnRequest(t *testing.T) {
 	calls("autostart: false", 1, 1)
 }
 
-// An invalid change keeps the valid file; a missing skill is an error on save and a warning on import.
-func TestValidationAndImport(t *testing.T) {
+// An invalid change keeps the valid file.
+func TestInvalidEditKeepsTheValidFile(t *testing.T) {
 	e := newEnv(t)
 	e.create("valid", "")
 	view, _ := e.app.GetTask("valid")
@@ -6174,26 +6143,148 @@ func TestValidationAndImport(t *testing.T) {
 	if after.YAML != view.YAML {
 		t.Error("the valid definition was replaced")
 	}
+}
+
+// harmflow-app#1062: a missing skill never rejects a task, and only warns, naming it, at every entry point: validate,
+// create and update from the YAML editor and from the form, import, duplicate, and a task file loaded from disk. The
+// skills the harness finds are not reported. A file that breaks a schema rule is still rejected.
+func TestMissingSkillOnlyWarnsAtEveryEntryPoint(t *testing.T) {
+	e := newEnv(t)
+	ctx := t.Context()
 	skills := "  skills: [hf-github-draft-pr, user-skill, nowhere-skill]\n"
-	_, err = e.app.CreateTask(t.Context(), TaskInput{YAML: taskYAML("skilled", skills)})
-	if err == nil || !strings.Contains(err.Error(), "nowhere-skill") {
-		t.Fatalf("missing skill on save: %v", err)
+	warns := func(what string, warnings []domain.Warning) {
+		t.Helper()
+		var named []string
+		for _, w := range warnings {
+			if w.Code != domain.WarningMissingSkill {
+				continue
+			}
+			named = append(named, w.Params["name"])
+			if w.Key != "skill_missing" || w.Subject != "/spec/skills" || w.Params["harness"] != domain.HarnessClaudeCode {
+				t.Errorf("%s warns %+v, want skill_missing on /spec/skills for Claude Code", what, w)
+			}
+		}
+		if !slices.Equal(named, []string{"nowhere-skill"}) {
+			t.Errorf("%s warns of missing skills %q, want nowhere-skill alone", what, named)
+		}
 	}
-	imported, err := e.app.ImportTask(t.Context(), taskYAML("skilled", skills), false)
+
+	res := e.app.Validate(ctx, TaskInput{YAML: taskYAML("skilled", skills)})
+	if !res.Valid {
+		t.Errorf("Validate(skilled) errors = %+v, want none", res.Errors)
+	}
+	warns("Validate(skilled)", issuesToWarnings(res.Warnings))
+
+	created, err := e.app.CreateTask(ctx, TaskInput{YAML: taskYAML("skilled", skills)})
 	if err != nil {
-		t.Fatalf("import: %v", err)
+		t.Fatalf("CreateTask(skilled) = %v, want no error", err)
 	}
-	warned := false
-	for _, w := range imported.Validation.Warnings {
-		if strings.Contains(w.Message, "nowhere-skill") {
-			warned = true
+	warns("CreateTask(skilled)", created.Warnings)
+	edited, err := e.app.UpdateTask(ctx, "skilled", TaskInput{YAML: strings.Replace(taskYAML("skilled", skills), "Do the work",
+		"Now do the work", 1), BaseRevision: created.Revision})
+	if err != nil {
+		t.Fatalf("UpdateTask(skilled) = %v, want no error", err)
+	}
+	warns("UpdateTask(skilled)", edited.Warnings)
+
+	form := func(id string) json.RawMessage {
+		doc, err := json.Marshal(map[string]any{"apiVersion": "harmflow/v1alpha1", "kind": "Task",
+			"metadata": map[string]any{"id": id, "name": "Task " + id},
+			"spec": map[string]any{"type": domain.TypeGeneral, "prompt": "Do the work of " + id + ".", "skills": []string{"nowhere-skill"},
+				"harness": map[string]any{"preferred": map[string]any{"provider": domain.HarnessClaudeCode}}}})
+		if err != nil {
+			t.Fatal(err)
 		}
-		if strings.Contains(w.Message, "user-skill") || strings.Contains(w.Message, "hf-github-draft-pr") {
-			t.Errorf("a resolvable skill was reported missing: %s", w.Message)
+		return doc
+	}
+	fromForm, err := e.app.CreateTask(ctx, TaskInput{Document: form("formed")})
+	if err != nil {
+		t.Fatalf("CreateTask(formed), from the form = %v, want no error", err)
+	}
+	warns("CreateTask(formed), from the form", fromForm.Warnings)
+	if updated, err := e.app.UpdateTask(ctx, "formed", TaskInput{Document: form("formed"), BaseRevision: fromForm.Revision}); err != nil {
+		t.Errorf("UpdateTask(formed), from the form = %v, want no error", err)
+	} else {
+		warns("UpdateTask(formed), from the form", updated.Warnings)
+	}
+
+	imported, err := e.app.ImportTask(ctx, taskYAML("imported", skills), false)
+	if err != nil {
+		t.Fatalf("ImportTask(imported) = %v, want no error", err)
+	}
+	warns("ImportTask(imported)", imported.Warnings)
+	copied, err := e.app.DuplicateTask(ctx, "skilled")
+	if err != nil {
+		t.Fatalf("DuplicateTask(skilled) = %v, want no error", err)
+	}
+	warns("DuplicateTask(skilled)", copied.Warnings)
+
+	if err := os.WriteFile(filepath.Join(filepath.Dir(created.Path), "on-disk.yaml"), []byte(taskYAML("on-disk", skills)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.app.scanTaskFiles(ctx)
+	loaded, err := e.app.GetTask("on-disk")
+	if err != nil || loaded.Invalid {
+		t.Fatalf("GetTask(on-disk), a file written outside HarmFlow = %+v, %v; want it loaded, valid", loaded, err)
+	}
+	warns("the task file on-disk", loaded.Warnings)
+
+	if _, err := e.app.CreateTask(ctx, TaskInput{YAML: strings.Replace(taskYAML("broken", skills), "type: general", "type: nope", 1)}); err == nil ||
+		err.(*Error).Code != CodeValidationFailed {
+		t.Errorf("CreateTask(broken), breaking the schema = %v, want %s", err, CodeValidationFailed)
+	}
+}
+
+// harmflow-app#1062: a task that cites a missing skill can be disabled and enabled, and the parameter values it gives
+// that skill stay in its file through both.
+func TestTaskWithAMissingSkillCanBeDisabledAndEnabled(t *testing.T) {
+	e := newEnv(t)
+	ctx := t.Context()
+	view, err := e.app.CreateTask(ctx, TaskInput{YAML: taskYAML("toggled", "  skills: [nowhere-skill]\n"+
+		"  parameters:\n    skills:\n      nowhere-skill:\n        depth: 3\n")})
+	if err != nil {
+		t.Fatalf("CreateTask(toggled) = %v, want no error", err)
+	}
+	for _, enabled := range []bool{false, true} {
+		view, err = e.app.SetEnabled(ctx, "toggled", enabled)
+		if err != nil {
+			t.Fatalf("SetEnabled(toggled, %v) = %v, want no error", enabled, err)
+		}
+		if view.Enabled != enabled {
+			t.Errorf("SetEnabled(toggled, %v) enabled = %v, want %v", enabled, view.Enabled, enabled)
+		}
+		if !strings.Contains(view.YAML, "nowhere-skill:\n        depth: 3") {
+			t.Errorf("SetEnabled(toggled, %v) wrote\n%s\nwant the value of nowhere-skill's depth kept", enabled, view.YAML)
+		}
+		if !slices.ContainsFunc(view.Warnings, func(w domain.Warning) bool {
+			return w.Code == domain.WarningMissingSkill && w.Params["name"] == "nowhere-skill"
+		}) {
+			t.Errorf("SetEnabled(toggled, %v) warnings = %+v, want the missing skill named", enabled, view.Warnings)
 		}
 	}
-	if !warned {
-		t.Error("import did not warn about the missing skill")
+}
+
+// harmflow-app#1062: a firing of a task that cites a missing skill runs: the harness is given the skill by name, as the
+// task cites it, and the execution records the warning validation gives, naming it.
+func TestFiringWithAMissingSkillOnlyWarns(t *testing.T) {
+	e := newEnv(t)
+	e.create("firing", "  skills: [nowhere-skill]\n")
+	r, err := e.app.RunTask("firing")
+	if err != nil {
+		t.Fatalf("RunTask(firing) = %+v, %v; want started", r, err)
+	}
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	e.claude.mu.Lock()
+	runs := slices.Clone(e.claude.runs)
+	e.claude.mu.Unlock()
+	if len(runs) != 1 || !slices.Equal(runs[0].req.Skills, []ports.ResolvedItem{{Name: "nowhere-skill", Kind: "skill"}}) {
+		t.Errorf("Claude Code was prepared for %d attempts, want one given nowhere-skill by name", len(runs))
+	}
+	want := `skill "nowhere-skill" is missing on this machine for claude-code (the claude-code configuration)`
+	if !slices.ContainsFunc(x.Warnings, func(w domain.Warning) bool {
+		return w.Code == domain.WarningMissingSkill && w.Key == "skill_missing" && w.Subject == "/spec/skills" && w.Message == want
+	}) {
+		t.Errorf("the execution's warnings %+v, want %s: %s", x.Warnings, domain.WarningMissingSkill, want)
 	}
 }
 
@@ -6362,14 +6453,13 @@ func TestUpdateOfABrokenFileKeepsTheLastValidType(t *testing.T) {
 // task keeps, and a use-case error — beside its en-US text.
 func TestMessagesCarryKeys(t *testing.T) {
 	e := newEnv(t)
-	skills := "  skills: [nowhere-skill]\n"
-	_, err := e.app.CreateTask(t.Context(), TaskInput{YAML: taskYAML("skilled", skills)})
+	_, err := e.app.CreateTask(t.Context(), TaskInput{YAML: taskYAML("scheduled", "  schedule:\n    cron: \"61 * * * *\"\n")})
 	ae, ok := err.(*Error)
-	if !ok || ae.Key != "skill_not_found" || ae.Params["name"] != "nowhere-skill" || ae.Params["source"] != "harness" ||
-		ae.Validation == nil || ae.Validation.Errors[0].Key != "skill_not_found" {
-		t.Fatalf("missing skill on save: %#v", err)
+	if !ok || ae.Key != "cron_value_out_of_range" || ae.Params["value"] != "61" ||
+		ae.Validation == nil || ae.Validation.Errors[0].Key != "cron_value_out_of_range" {
+		t.Fatalf("minute out of range on save: %#v", err)
 	}
-	imported, err := e.app.ImportTask(t.Context(), taskYAML("skilled", skills), false)
+	imported, err := e.app.ImportTask(t.Context(), taskYAML("skilled", "  skills: [nowhere-skill]\n"), false)
 	if err != nil {
 		t.Fatal(err)
 	}

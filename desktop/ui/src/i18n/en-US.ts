@@ -352,8 +352,6 @@ export const enUS = {
     harness_not_ready: "{{harness}} is not ready: {{detail}}",
     harness_installation_missing: "{{harness}} has no installation \"{{installation}}\" on this machine",
     harness_installation_signed_out: "{{harness}}'s installation \"{{installation}}\" is not signed in",
-    agent_not_found: 'agent "{{name}}" cannot be found for {{harness}} ($t(itemSource.{{source}}))',
-    skill_not_found: 'skill "{{name}}" cannot be found for {{harness}} ($t(itemSource.{{source}}))',
     agent_missing: 'agent "{{name}}" is missing on this machine for {{harness}} ($t(itemSource.{{source}}))',
     skill_missing: 'skill "{{name}}" is missing on this machine for {{harness}} ($t(itemSource.{{source}}))',
     parameter_required: '{{kind}} "{{item}}" needs a value for its parameter "{{name}}"',
@@ -368,15 +366,9 @@ export const enUS = {
       'no cited {{kind}} "{{item}}" declares the parameter "{{name}}", so its value is left out of the session and dropped on the next save',
     parameters_unverified:
       'the file of {{kind}} "{{item}}" cannot be read, so its parameter values are passed as the task gives them, unchecked',
-    fallback_agent_missing:
-      '{{harness}} is not a valid fallback: agent "{{name}}" cannot be found for it ($t(itemSource.{{source}}))',
-    fallback_skill_missing:
-      '{{harness}} is not a valid fallback: skill "{{name}}" cannot be found for it ($t(itemSource.{{source}}))',
     skill_list_unreadable: "{{harness}}'s skill list could not be read: {{detail}}",
     skill_list_unverified:
       "{{harness}} could not say which skills it loads, so the task's skills are not verified: {{detail}}",
-    fallback_skill_list_unreadable:
-      "{{harness}} is not a valid fallback: its skill list could not be read: {{detail}}",
     claude_skill_list_unrecognized: "{{command}} printed no skill list HarmFlow can read",
     claude_skill_list_timed_out: "{{command}} printed no init line within {{timeout}}, so the skills Claude Code loads are unknown",
     codex_app_server_missing: "Codex {{version}} has no app server",

@@ -538,10 +538,7 @@ func (r *run) repositoryPaths() map[string]string {
 // returns a terminal status when the attempts themselves decide it, or "" when the report decides.
 func (r *run) attempts(ctx context.Context, start func(harness string) error) (domain.ExecutionStatus, domain.Text) {
 	a := r.a
-	chain, invalid := r.chain(ctx)
-	for _, w := range invalid {
-		r.warn(domain.Warning{Code: domain.WarningInvalidFallback, Text: w}, domain.EventHarnessNoAlternative, false)
-	}
+	chain := r.chain()
 	fallback := r.eff.Spec.Harness.Fallback
 	idx, rateRetries := 0, 0
 	reason := domain.T("attempt_first", "first attempt")
@@ -713,25 +710,17 @@ func (r *run) quotaExhausted(ad ports.HarnessAdapter, harness string, end domain
 		"{{harness}} exhausted its quota", "harness", ad.Name())))
 }
 
-// chain returns the preferred profile and the fallbacks that can load the task's agents and skills. A fallback that
-// loads them itself, whose list it could not give, stays, unverified, as validation keeps it.
-func (r *run) chain(ctx context.Context) ([]domain.HarnessProfile, []domain.Text) {
+// chain returns the preferred profile and the fallbacks of a known harness. A fallback that lacks an agent or skill the
+// task cites stays: its attempt warns of it, as the preferred harness's does (resolve).
+func (r *run) chain() []domain.HarnessProfile {
 	profiles := r.def.Profiles()
 	out := []domain.HarnessProfile{profiles[0]}
-	var invalid []domain.Text
 	for _, p := range profiles[1:] {
-		ad, ok := r.a.adapters[p.Provider]
-		if !ok {
-			continue
+		if _, ok := r.a.adapters[p.Provider]; ok {
+			out = append(out, p)
 		}
-		missing := r.a.missingItems(ctx, r.def, p.Provider, p.Installation, r.itemWorkspace(), r.addedFolders())
-		if missing = slices.DeleteFunc(missing, missingItem.leftUnverified); len(missing) > 0 {
-			invalid = append(invalid, missing[0].invalidFallback(ad.Name()))
-			continue
-		}
-		out = append(out, p)
 	}
-	return out, invalid
+	return out
 }
 
 func (r *run) cancelRequested() bool {
@@ -767,10 +756,7 @@ func warningEvent(w domain.Warning, eventType string) domain.Event {
 func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info ports.HarnessInfo, p domain.HarnessProfile, reason domain.Text,
 	prev []previousAttempt) (domain.AttemptEnd, bool) {
 	a := r.a
-	agents, skills, warnings, err := r.resolve(ctx, ad, p.Installation)
-	if err != nil {
-		return domain.AttemptEnd{Class: domain.ClassTaskError, Error: domain.TextOf(err)}, false
-	}
+	agents, skills, warnings := r.resolve(ctx, ad, p.Installation)
 	for _, w := range warnings {
 		r.warn(w, "", false)
 	}
@@ -1026,11 +1012,11 @@ func attemptOutcome(c domain.ErrorClass) domain.AttemptOutcome {
 
 // resolve finds the task's agents and skills for one installation of a harness, the one in use for an empty one, as it
 // finds them for the execution's working directory.
-// When the harness loads the task's items of a kind itself and could not give its list of them, those items are passed
-// through by name, unverified, and the warning validation gives says so; the list is not asked for again for the rest
-// of them. A list that could not be read fails the attempt for any other harness or kind, as a missing item does.
-func (r *run) resolve(ctx context.Context, ad ports.HarnessAdapter, installation string) (agents, skills []ports.ResolvedItem, warnings []domain.Warning,
-	err error) {
+// An item the harness cannot load only warns: it is passed through by name, as the task cites it, with the warning
+// validation gives, and what the harness does with a name it lacks is the harness's. When the harness's list of a kind
+// could not be read, the warning says so, and the list is not asked for again for the rest of them, which are passed
+// through by name, unverified.
+func (r *run) resolve(ctx context.Context, ad ports.HarnessAdapter, installation string) (agents, skills []ports.ResolvedItem, warnings []domain.Warning) {
 	for _, kind := range []string{"agent", "skill"} {
 		names, code, path := r.eff.Spec.Agents, domain.WarningMissingAgent, "/spec/agents"
 		if kind == "skill" {
@@ -1052,7 +1038,9 @@ func (r *run) resolve(ctx context.Context, ad ports.HarnessAdapter, installation
 					warnings = append(warnings, domain.Warning{Code: code, Subject: path, Text: l.missing.unverified(ad.Name())})
 					it = ports.ResolvedItem{Name: name, Kind: kind}
 				case l.unreadable != nil || !l.found:
-					return nil, nil, nil, &domain.TextError{Text: l.missing.notFound(ad.Name())}
+					unverified = l.unreadable != nil
+					warnings = append(warnings, domain.Warning{Code: code, Subject: path, Text: l.missing.missing(ad.Name())})
+					it = ports.ResolvedItem{Name: name, Kind: kind}
 				default:
 					it = l.item
 				}
@@ -1064,7 +1052,7 @@ func (r *run) resolve(ctx context.Context, ad ports.HarnessAdapter, installation
 			}
 		}
 	}
-	return agents, skills, warnings, nil
+	return agents, skills, warnings
 }
 
 // itemWorkspace is the folder the execution's agents and skills are looked up for: its working directory, or, before

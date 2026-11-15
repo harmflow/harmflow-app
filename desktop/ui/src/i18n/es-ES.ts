@@ -359,8 +359,6 @@ export const esES: Resources = {
     harness_not_ready: "{{harness}} no está listo: {{detail}}",
     harness_installation_missing: "{{harness}} no tiene la instalación \"{{installation}}\" en este equipo",
     harness_installation_signed_out: "la instalación \"{{installation}}\" de {{harness}} no tiene la sesión iniciada",
-    agent_not_found: 'no se encuentra el agente "{{name}}" para {{harness}} ($t(itemSource.{{source}}))',
-    skill_not_found: 'no se encuentra la skill "{{name}}" para {{harness}} ($t(itemSource.{{source}}))',
     agent_missing: 'el agente "{{name}}" no existe en esta máquina para {{harness}} ($t(itemSource.{{source}}))',
     skill_missing: 'la skill "{{name}}" no existe en esta máquina para {{harness}} ($t(itemSource.{{source}}))',
     parameter_required: '{{kind}} "{{item}}" necesita un valor para el parámetro "{{name}}"',
@@ -375,13 +373,7 @@ export const esES: Resources = {
       'ningún {{kind}} "{{item}}" citado declara el parámetro "{{name}}", así que su valor queda fuera de la sesión y se quita al guardar',
     parameters_unverified:
       'el archivo de {{kind}} "{{item}}" no se puede leer, así que los valores de sus parámetros pasan como la tarea los da, sin verificar',
-    fallback_agent_missing:
-      '{{harness}} no es un fallback válido: no se encuentra el agente "{{name}}" para él ($t(itemSource.{{source}}))',
-    fallback_skill_missing:
-      '{{harness}} no es un fallback válido: no se encuentra la skill "{{name}}" para él ($t(itemSource.{{source}}))',
     skill_list_unreadable: "no se pudo leer la lista de skills de {{harness}}: {{detail}}",
-    fallback_skill_list_unreadable:
-      "{{harness}} no es un fallback válido: no se pudo leer su lista de skills: {{detail}}",
     skill_list_unverified:
       "{{harness}} no pudo decir qué skills carga, así que las skills de la tarea no están verificadas: {{detail}}",
     claude_skill_list_unrecognized: "{{command}} no imprimió una lista de skills que HarmFlow pueda leer",
