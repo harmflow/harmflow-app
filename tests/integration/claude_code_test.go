@@ -144,7 +144,8 @@ func TestCitedUserItemsReachARealClaudeCode(t *testing.T) {
 // started in the home folder reports them, whatever the task's workspace and the folders it adds. A skill in Claude
 // Code's configuration directory is offered by GET /catalog for any workspace and folder, and a task citing it saves
 // with no skill_list_unverified warning; a skill in the workspace's .claude/skills, or in that of a custom profile's
-// writable path, is not offered, and a task citing it is refused with skill_not_found, naming Claude Code's skill list.
+// writable path, is not offered, and a task citing it saves with a skill_missing warning, naming Claude Code's skill
+// list.
 // Every skill has a name unique to the run, and the configuration directory's is removed when the test ends. The daemon
 // writes no line of its own for a listing, so a failure prints what it says of one: the skills its catalog offers on
 // Claude Code and the problems it reports, and daemon.log.
@@ -198,22 +199,19 @@ func TestRealClaudeCodeListsInstalledSkills(t *testing.T) {
 		t.Errorf("POST /tasks listed-skills warns %v, want no skill_list_unverified and no missing skill", w)
 	}
 
-	for _, skill := range []string{workSkill, addedSkill} {
-		refused := d.call("POST", "/tasks", map[string]any{"document": map[string]any{"apiVersion": "harmflow/v1alpha1",
-			"kind": "Task", "metadata": map[string]any{"id": "project-skill", "name": "Project skill"},
-			"spec": spec(skill)}}, 422)
-		e, _ := refused["error"].(map[string]any)
-		validation, _ := e["validation"].(map[string]any)
-		errs, _ := validation["errors"].([]any)
-		if !slices.ContainsFunc(errs, func(x any) bool {
-			issue, _ := x.(map[string]any)
-			params, _ := issue["params"].(map[string]any)
-			message, _ := issue["message"].(string)
-			return issue["messageKey"] == "skill_not_found" && params["name"] == skill && params["source"] == "skill_list" &&
+	for i, skill := range []string{workSkill, addedSkill} {
+		saved := d.call("POST", "/tasks", map[string]any{"document": map[string]any{"apiVersion": "harmflow/v1alpha1",
+			"kind": "Task", "metadata": map[string]any{"id": fmt.Sprintf("project-skill-%d", i), "name": "Project skill"},
+			"spec": spec(skill)}}, 201)
+		warnings := skillListWarnings(saved)
+		if !slices.ContainsFunc(warnings, func(w map[string]any) bool {
+			params, _ := w["params"].(map[string]any)
+			message, _ := w["message"].(string)
+			return w["messageKey"] == "skill_missing" && params["name"] == skill && params["source"] == "skill_list" &&
 				strings.Contains(message, "Claude Code's skill list")
 		}) {
-			t.Errorf("POST /tasks citing %s errors %v, want skill_not_found naming %s and Claude Code's skill list", skill,
-				errs, skill)
+			t.Errorf("POST /tasks citing %s warns %v, want skill_missing naming %s and Claude Code's skill list", skill,
+				warnings, skill)
 		}
 	}
 }

@@ -106,9 +106,9 @@ func TestCitedItemsReachClaudeCodeByName(t *testing.T) {
 
 // The task editor asks GET /catalog for a Claude Code task with the task's workspace and ID. The daemon answers with
 // the skills the installed Claude Code lists, a plugin's by the name the CLI reports, the same as with no workspace: a
-// skill only the workspace's .claude/skills holds is not offered. A task in that workspace citing that skill is
-// refused with skill_not_found naming it, and one citing the plugin's skill saves. The daemon's HOME, where Claude
-// Code's listing runs, is the test's own, so no folder of the user's adds a skill to the list.
+// skill only the workspace's .claude/skills holds is not offered. A task in that workspace citing that skill saves
+// with a skill_missing warning naming it, and one citing the plugin's skill saves with none. The daemon's HOME, where
+// Claude Code's listing runs, is the test's own, so no folder of the user's adds a skill to the list.
 func TestEditorCatalogOffersTheInstallationsSkills(t *testing.T) {
 	t.Parallel()
 	home, work := t.TempDir(), resolvedTempDir(t)
@@ -142,18 +142,16 @@ func TestEditorCatalogOffersTheInstallationsSkills(t *testing.T) {
 				"workspace": map[string]any{"path": work},
 			}}}
 	}
-	refused := d.call("POST", "/tasks", document("release", "release-notes"), 422)
-	e, _ := refused["error"].(map[string]any)
-	validation, _ := e["validation"].(map[string]any)
-	errs, _ := validation["errors"].([]any)
-	if !slices.ContainsFunc(errs, func(x any) bool {
-		issue, _ := x.(map[string]any)
-		params, _ := issue["params"].(map[string]any)
-		return issue["messageKey"] == "skill_not_found" && params["name"] == "release-notes"
+	missing := skillListWarnings(d.call("POST", "/tasks", document("release", "release-notes"), 201))
+	if !slices.ContainsFunc(missing, func(w map[string]any) bool {
+		params, _ := w["params"].(map[string]any)
+		return w["messageKey"] == "skill_missing" && params["name"] == "release-notes"
 	}) {
-		t.Errorf("POST /tasks citing release-notes errors %v, want skill_not_found naming release-notes", errs)
+		t.Errorf("POST /tasks citing release-notes warns %v, want skill_missing naming release-notes", missing)
 	}
-	d.call("POST", "/tasks", document("release", "pdf:pdf"), 201)
+	if w := skillListWarnings(d.call("POST", "/tasks", document("plugin", "pdf:pdf"), 201)); len(w) != 0 {
+		t.Errorf("POST /tasks citing pdf:pdf warns %v, want no missing skill", w)
+	}
 }
 
 // claudeCodeUserSkills are the names of the user's skills among the skills of GET /catalog that Claude Code can load.

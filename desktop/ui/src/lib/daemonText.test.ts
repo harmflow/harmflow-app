@@ -9,22 +9,22 @@ describe("daemonText", () => {
 
   it("translates a daemon text from its key and params", () => {
     const text = {
-      message: 'skill "lint" cannot be found for Codex (the Codex configuration)',
-      messageKey: "skill_not_found" as const,
+      message: 'skill "lint" is missing on this machine for Codex (the Codex configuration)',
+      messageKey: "skill_missing" as const,
       params: { name: "lint", harness: "Codex", where: "the Codex configuration", source: "harness" },
     };
-    expect(daemonText(text)).toBe('a skill "lint" não foi encontrada para Codex (na configuração do Codex)');
+    expect(daemonText(text)).toBe('a skill "lint" não existe nesta máquina para Codex (na configuração do Codex)');
   });
 
   it("names the harness's skill list a skill was looked for in", () => {
     const where = "Claude Code's skill list";
     const text = {
-      message: `skill "release-notes" cannot be found for Claude Code (${where})`,
-      messageKey: "skill_not_found" as const,
+      message: `skill "release-notes" is missing on this machine for Claude Code (${where})`,
+      messageKey: "skill_missing" as const,
       params: { name: "release-notes", harness: "Claude Code", where, source: "skill_list" },
     };
     expect(daemonText(text)).toBe(
-      'a skill "release-notes" não foi encontrada para Claude Code (na lista de skills do Claude Code)',
+      'a skill "release-notes" não existe nesta máquina para Claude Code (na lista de skills do Claude Code)',
     );
   });
 
@@ -32,12 +32,12 @@ describe("daemonText", () => {
     const errors = "/w/.codex/skills/lint/SKILL.md: invalid front matter";
     const where = `Codex's skill list, which could not load ${errors}`;
     const text = {
-      message: `skill "lint" cannot be found for Codex (${where})`,
-      messageKey: "skill_not_found" as const,
+      message: `skill "lint" is missing on this machine for Codex (${where})`,
+      messageKey: "skill_missing" as const,
       params: { name: "lint", harness: "Codex", where, source: "skill_list_errors", errors },
     };
     expect(daemonText(text)).toBe(
-      `a skill "lint" não foi encontrada para Codex (na lista de skills do Codex, que não conseguiu carregar ${errors})`,
+      `a skill "lint" não existe nesta máquina para Codex (na lista de skills do Codex, que não conseguiu carregar ${errors})`,
     );
   });
 

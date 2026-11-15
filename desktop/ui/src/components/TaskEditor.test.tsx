@@ -130,31 +130,31 @@ const syntaxError: ValidationIssue = {
 /** A task named REVIEW_NOTES cites a skill only Claude Code has, which its Codex fallback cannot load. */
 const REVIEW_NOTES = "Review notes";
 
-/** The daemon's warning that Codex is not a valid fallback for that task, as the daemon sends it. */
+/** The daemon's warning that the skill is missing for the Codex fallback, as the daemon sends it. */
 const fallbackWarning: ValidationIssue = {
   path: "/spec/harness/fallback/candidates/0",
-  code: "invalid_fallback",
-  message: 'Codex is not a valid fallback: skill "review-notes" cannot be found for it (the Codex configuration)',
-  messageKey: "fallback_skill_missing",
+  code: "missing_skill",
+  message: 'skill "review-notes" is missing on this machine for Codex (the Codex configuration)',
+  messageKey: "skill_missing",
   params: { name: "review-notes", harness: "Codex", where: "the Codex configuration", source: "harness" },
 };
 const fallbackWarningText =
-  'Invalid fallback: Codex is not a valid fallback: skill "review-notes" cannot be found for it (the Codex configuration) ' +
+  'Skill not found: skill "review-notes" is missing on this machine for Codex (the Codex configuration) ' +
   "/spec/harness/fallback/candidates/0";
 
 /** A task named REVIEW_AGENT cites an agent only Claude Code has, which its Codex fallback cannot load. */
 const REVIEW_AGENT = "Review agent";
 
-/** The daemon's warning that Codex is not a valid fallback for that task, as the daemon sends it. */
+/** The daemon's warning that the agent is missing for the Codex fallback, as the daemon sends it. */
 const agentFallbackWarning: ValidationIssue = {
   path: "/spec/harness/fallback/candidates/0",
-  code: "invalid_fallback",
-  message: 'Codex is not a valid fallback: agent "review-agent" cannot be found for it (the Codex configuration)',
-  messageKey: "fallback_agent_missing",
+  code: "missing_agent",
+  message: 'agent "review-agent" is missing on this machine for Codex (the Codex configuration)',
+  messageKey: "agent_missing",
   params: { name: "review-agent", harness: "Codex", where: "the Codex configuration", source: "harness" },
 };
 const agentFallbackWarningText =
-  'Invalid fallback: Codex is not a valid fallback: agent "review-agent" cannot be found for it (the Codex configuration) ' +
+  'Agent not found: agent "review-agent" is missing on this machine for Codex (the Codex configuration) ' +
   "/spec/harness/fallback/candidates/0";
 
 /** The warnings the daemon gives a task, by its name; a task of any other name gets none. */
@@ -516,7 +516,7 @@ describe("task editor warnings", () => {
   it.each([
     ["skill", REVIEW_NOTES, fallbackWarningText],
     ["agent", REVIEW_AGENT, agentFallbackWarningText],
-  ])("shows the daemon's warning that a fallback cannot load the task's %s once the task is saved", async (_, name, text) => {
+  ])("shows the daemon's warning that a fallback lacks the task's %s once the task is saved", async (_, name, text) => {
     await open("edit");
     expect(warnings()).toEqual([]);
     await type(nameField().querySelector("input")!, name);
