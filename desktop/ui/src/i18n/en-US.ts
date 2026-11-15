@@ -648,6 +648,11 @@ export const enUS = {
       failed: { title: "{{taskName}} failed", body: "The execution failed: {{error}}" },
       cancelled: { title: "{{taskName}} cancelled", body: "The execution was cancelled." },
       needs_attention: { title: "{{taskName}} needs attention", body: "A human must act: {{reason}}" },
+      run_again_limit_reached: {
+        title: "{{taskName}}: run-again limit reached",
+        body_one: "{{taskName}} ran again {{count}} time in a row, its run-again limit; it now waits for its schedule.",
+        body_other: "{{taskName}} ran again {{count}} times in a row, its run-again limit; it now waits for its schedule.",
+      },
     },
     pull_request: {
       created: { title: "Draft PR created", body: "{{taskName}} opened {{url}} for review." },
@@ -741,6 +746,7 @@ export const enUS = {
       noResults: "No results reported yet.",
       noAttempts: "No attempts yet.",
       follow: "Follow",
+      follows: "Follows {{id}}",
       timeline: "Event timeline",
       execId: "Execution",
       workspace: "Workspace",
@@ -1231,6 +1237,9 @@ export const enUS = {
       timezoneHint: "IANA name; the system's ({{zone}}) when empty.",
       missedRun: "Missed runs",
       overlap: "Overlapping firings",
+      completion: "When an execution completes",
+      runAgainLimit: "Run-again limit",
+      runAgainLimitHint: "Runs again in a row before the task waits for its schedule.",
       preview: "Next occurrences",
       previewEmpty: "No schedule — the task runs only when triggered by hand.",
       profile: "Profile",
@@ -1280,6 +1289,7 @@ export const enUS = {
       resumeStrategy: { resume_first: "Resume first", new_first: "New first", alternate: "Alternate" },
       missedRun: { run_on_resume: "Run once on return", skip: "Skip" },
       overlap: { queue: "Wait in the queue", skip: "Skip" },
+      completion: { wait_for_schedule: "Wait for the schedule", run_again: "Run again" },
       repeat: {
         minutes: "Every N minutes",
         hourly: "Hourly",

@@ -7,6 +7,7 @@ import { NOTIFIABLE_EVENTS, schemaDefault, schemaEnum } from "../lib/schema";
 import { getIn, setIn, slugify, type Doc, type Path } from "../lib/taskForm";
 import { Icon, type IconName } from "./Icon";
 import { AgentOrigin } from "./taskform/AgentOrigin";
+import { CompletionFields } from "./taskform/CompletionFields";
 import { DeclaredParameters, declaredGroups } from "./taskform/DeclaredParameters";
 import { EnumField } from "./taskform/EnumField";
 import type { Item } from "./taskform/formModel";
@@ -221,6 +222,8 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
 
       <Section id="schedule" title={t("tasks.sections.schedule")} icon="clock">
         <ScheduleFields doc={doc} onChange={onChange} set={set} defLabel={defLabel} locale={i18n.language} errorPaths={errorPaths} />
+        {/* A script task has no completion policy: it runs a program, not a harness. */}
+        {isScript ? null : <CompletionFields doc={doc} set={set} err={err} />}
       </Section>
 
       <Section id="permissions" title={t("tasks.sections.permissions")} icon="shield">

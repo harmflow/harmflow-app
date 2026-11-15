@@ -2,11 +2,11 @@
 
 ## Overview
 
-This folder contains the parts that `TaskForm` renders inside its sections: the agent the prompt is copied from, the script fields, the agent and skill pickers, the repository list, the harness profile and its fallback list, the custom permission lists, the whole-number and closed-set fields, the schedule builder, and the parameters the cited skills and agents declare.
+This folder contains the parts that `TaskForm` renders inside its sections: the agent the prompt is copied from, the script fields, the agent and skill pickers, the repository list, the harness profile and its fallback list, the custom permission lists, the whole-number and closed-set fields, the schedule builder, the completion policy with its run-again limit, and the parameters the cited skills and agents declare.
 
 ## Interface
 
-- Each part is exported by its named module. `[AgentOrigin.tsx:AgentOrigin]` `[ScriptFields.tsx:ScriptFields]` `[NamePicker.tsx:NamePicker]` `[RepositoryList.tsx:RepositoryList]` `[HarnessProfile.tsx:HarnessProfile]` `[HarnessProfile.tsx:FallbackList]` `[ListArea.tsx:ListArea]` `[IntField.tsx:IntField]` `[EnumField.tsx:EnumField]` `[ScheduleFields.tsx:ScheduleFields]` `[DeclaredParameters.tsx:DeclaredParameters]` `[DeclaredParameters.tsx:declaredGroups]`
+- Each part is exported by its named module. `[AgentOrigin.tsx:AgentOrigin]` `[ScriptFields.tsx:ScriptFields]` `[NamePicker.tsx:NamePicker]` `[RepositoryList.tsx:RepositoryList]` `[HarnessProfile.tsx:HarnessProfile]` `[HarnessProfile.tsx:FallbackList]` `[ListArea.tsx:ListArea]` `[IntField.tsx:IntField]` `[EnumField.tsx:EnumField]` `[ScheduleFields.tsx:ScheduleFields]` `[CompletionFields.tsx:CompletionFields]` `[DeclaredParameters.tsx:DeclaredParameters]` `[DeclaredParameters.tsx:declaredGroups]`
 - What several modules share lives in `formModel.ts`: the list row type, the setter type, the closed sets, and the row cleaner. `OPTION_FIELDS` is also re-exported by `TaskForm.tsx` for its existing importers. `[formModel.ts:OPTION_FIELDS]` `[formModel.ts:cleanRow]` `[formModel.ts:SetFn]` `[formModel.ts:Item]`
 
 ## Invariants
@@ -15,6 +15,7 @@ This folder contains the parts that `TaskForm` renders inside its sections: the 
 - A cleared field writes `undefined`, so the key is removed and its default applies. `[EnumField.tsx:EnumField]` `[ListArea.tsx:ListArea]`
 - The text areas keep their text in sync with YAML edits of the document. `[ListArea.tsx:ListArea]` `[ScriptFields.tsx:ScriptFields]`
 - A cron schedule is described only once the daemon accepted the same expression. `[ScheduleFields.tsx:ScheduleFields]`
+- The run-again limit is editable only under Run again; a limit the YAML holds stays while the policy waits for the schedule. `[CompletionFields.tsx:CompletionFields]`
 
 ## Side Effects
 

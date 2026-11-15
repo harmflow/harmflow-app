@@ -26,7 +26,7 @@ const STATUSES: ExecutionStatus[] = [
   "interrupted",
   "needs_attention",
 ];
-const TRIGGERS: Trigger[] = ["manual", "schedule", "catch_up"];
+const TRIGGERS: Trigger[] = ["manual", "schedule", "catch_up", "run_again"];
 const PAGE = 50;
 // The shortest wait between an execution's creation and its start that its row shows.
 const SHOWN_WAIT_MS = 60_000;
@@ -326,7 +326,7 @@ export function HistoryScreen({ openId, onOpen }: { openId: string | null; onOpe
 
       {openId ? (
         <Drawer label={t("executions.detail.execId")} onClose={() => onOpen(null)}>
-          <ExecutionDetail executionId={openId} summary={opened} />
+          <ExecutionDetail executionId={openId} summary={opened} onOpenExecution={onOpen} />
         </Drawer>
       ) : null}
     </div>

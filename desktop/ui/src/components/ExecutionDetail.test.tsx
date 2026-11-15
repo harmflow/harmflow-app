@@ -1107,6 +1107,68 @@ describe("a script task's execution", () => {
   });
 });
 
+// The header names what fired the execution, in the interface's language, and a run again links to the execution it
+// follows, which a click opens as the Desktop's other links to an execution do (harmflow-app#1041).
+describe("the trigger and the execution a run again follows", () => {
+  const meta = () => host!.querySelector(".detail__meta")!.textContent ?? "";
+  const link = () => host!.querySelector<HTMLButtonElement>(".detail__meta button");
+  const ranAgain = (id: string): Execution => ({ ...completed, id, trigger: "run_again", followsExecutionId: "exec-done", runAgainCount: 1 });
+
+  async function show(x: Execution, onOpenExecution?: (id: string) => void) {
+    daemon.answers.set(`/executions/${x.id}`, x);
+    daemon.answers.set(`/executions/${x.id}/events`, { events: [], logExpired: false });
+    daemon.answers.set(`/executions/${x.id}/output`, capture());
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(<ExecutionDetail executionId={x.id} summary={x} onOpenExecution={onOpenExecution} />));
+    await settle();
+  }
+
+  it.each([
+    ["manual", "Manual"],
+    ["schedule", "Scheduled"],
+    ["catch_up", "Catch-up"],
+    ["run_again", "Run again"],
+  ] as const)("names the %s trigger as %s", async (trigger, label) => {
+    await show({ ...completed, id: `exec-trigger-${trigger}`, trigger });
+    expect(meta()).toContain(label);
+  });
+
+  it("links a run again to the execution it follows, and opens that one when clicked", async () => {
+    const opened = vi.fn();
+    await show(ranAgain("exec-again-link"), opened);
+    expect(link()?.textContent).toBe("Follows exec-done");
+    await act(async () => link()!.click());
+    expect(opened).toHaveBeenCalledWith("exec-done");
+  });
+
+  it("names the execution a run again follows without a link where nothing opens it", async () => {
+    await show(ranAgain("exec-again-text"));
+    expect(link()).toBeNull();
+    expect(meta()).toContain("Follows exec-done");
+  });
+
+  it("shows no execution followed on one no run again fired", async () => {
+    await show({ ...completed, id: "exec-not-again" }, vi.fn());
+    expect(link()).toBeNull();
+    expect(meta()).not.toContain("Follows");
+  });
+
+  it.each([
+    ["pt-BR", "Execução seguida", "Segue exec-done"],
+    ["es-ES", "Ejecución seguida", "Sigue a exec-done"],
+  ])("names the trigger and the execution followed in %s", async (language, trigger, follows) => {
+    await i18n.changeLanguage(language);
+    try {
+      await show(ranAgain(`exec-again-${language}`), vi.fn());
+      expect(meta()).toContain(trigger);
+      expect(link()?.textContent).toBe(follows);
+    } finally {
+      await i18n.changeLanguage("en-US");
+    }
+  });
+});
+
 describe("the detail header's glyph", () => {
   const glyph = () => {
     const span = host!.querySelector<HTMLElement>(".detail__header .exec-card__glyph")!;

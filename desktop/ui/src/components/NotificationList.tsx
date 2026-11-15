@@ -20,9 +20,11 @@ export function noticeText(t: TFn, n: Notification): { title: string; body: stri
   const key = `notify.${n.eventType}`;
   // The key is built at run time, so the typed overloads, which walk every key of the resources, are left out: past
   // a size, checking them exceeds TypeScript's instantiation depth.
-  const translate = t as unknown as (key: string, options: Record<string, string>) => string;
-  const title = translate(`${key}.title`, { ...params, defaultValue: n.title });
-  const body = translate(`${key}.body`, { ...params, defaultValue: n.body });
+  const translate = t as unknown as (key: string, options: Record<string, string | number>) => string;
+  // i18next picks a plural form only from a numeric count, such as the run-again limit's.
+  const counted = params.count ? { ...params, count: Number(params.count) } : params;
+  const title = translate(`${key}.title`, { ...counted, defaultValue: n.title });
+  const body = translate(`${key}.body`, { ...counted, defaultValue: n.body });
   return { title, body };
 }
 

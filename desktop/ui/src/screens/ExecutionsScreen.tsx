@@ -70,7 +70,7 @@ export function ExecutionsScreen({
             ))}
           </div>
         )}
-        {effective ? <ExecutionDetail executionId={effective} summary={summary} /> : null}
+        {effective ? <ExecutionDetail executionId={effective} summary={summary} onOpenExecution={onSelect} /> : null}
       </div>
       {asideHidden ? null : (
         <div className="screen__aside">

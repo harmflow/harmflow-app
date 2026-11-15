@@ -673,6 +673,11 @@ export const ptBR: Resources = {
       failed: { title: "{{taskName}} falhou", body: "A execução falhou: {{error}}" },
       cancelled: { title: "{{taskName}} cancelada", body: "A execução foi cancelada." },
       needs_attention: { title: "{{taskName}} requer atenção", body: "Uma pessoa precisa agir: {{reason}}" },
+      run_again_limit_reached: {
+        title: "{{taskName}}: limite de execuções seguidas atingido",
+        body_one: "{{taskName}} rodou de novo {{count}} vez seguida, seu limite de execuções seguidas; agora aguarda seu agendamento.",
+        body_other: "{{taskName}} rodou de novo {{count}} vezes seguidas, seu limite de execuções seguidas; agora aguarda seu agendamento.",
+      },
     },
     pull_request: {
       created: { title: "PR em rascunho criado", body: "{{taskName}} abriu {{url}} para revisão." },
@@ -768,6 +773,7 @@ export const ptBR: Resources = {
       noResults: "Nenhum resultado informado ainda.",
       noAttempts: "Nenhuma tentativa ainda.",
       follow: "Seguir",
+      follows: "Segue {{id}}",
       timeline: "Linha do tempo dos eventos",
       execId: "Execução",
       workspace: "Workspace",
@@ -1258,6 +1264,9 @@ export const ptBR: Resources = {
       timezoneHint: "Nome IANA; o do sistema ({{zone}}) quando vazio.",
       missedRun: "Execuções perdidas",
       overlap: "Disparos sobrepostos",
+      completion: "Ao concluir uma execução",
+      runAgainLimit: "Limite de execuções seguidas",
+      runAgainLimitHint: "Execuções seguidas em sequência antes de a tarefa aguardar seu agendamento.",
       preview: "Próximas ocorrências",
       previewEmpty: "Sem agendamento — a tarefa só executa quando disparada à mão.",
       profile: "Perfil",
@@ -1307,6 +1316,7 @@ export const ptBR: Resources = {
       resumeStrategy: { resume_first: "Retomadas primeiro", new_first: "Novos primeiro", alternate: "Alternar" },
       missedRun: { run_on_resume: "Executar uma vez ao retornar", skip: "Ignorar" },
       overlap: { queue: "Aguardar na fila", skip: "Ignorar" },
+      completion: { wait_for_schedule: "Aguardar o agendamento", run_again: "Execução seguida" },
       repeat: {
         minutes: "A cada N minutos",
         hourly: "De hora em hora",

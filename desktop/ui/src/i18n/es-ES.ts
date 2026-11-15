@@ -668,6 +668,11 @@ export const esES: Resources = {
       failed: { title: "{{taskName}} falló", body: "La ejecución falló: {{error}}" },
       cancelled: { title: "{{taskName}} cancelada", body: "La ejecución fue cancelada." },
       needs_attention: { title: "{{taskName}} requiere atención", body: "Una persona debe actuar: {{reason}}" },
+      run_again_limit_reached: {
+        title: "{{taskName}}: límite de ejecuciones seguidas alcanzado",
+        body_one: "{{taskName}} se ejecutó de nuevo {{count}} vez seguida, su límite de ejecuciones seguidas; ahora espera su programación.",
+        body_other: "{{taskName}} se ejecutó de nuevo {{count}} veces seguidas, su límite de ejecuciones seguidas; ahora espera su programación.",
+      },
     },
     pull_request: {
       created: { title: "PR en borrador creado", body: "{{taskName}} abrió {{url}} para revisión." },
@@ -766,6 +771,7 @@ export const esES: Resources = {
       noResults: "Aún no se informaron resultados.",
       noAttempts: "Aún no hay intentos.",
       follow: "Seguir",
+      follows: "Sigue a {{id}}",
       timeline: "Línea de tiempo de eventos",
       execId: "Ejecución",
       workspace: "Espacio de trabajo",
@@ -1256,6 +1262,9 @@ export const esES: Resources = {
       timezoneHint: "Nombre IANA; la del sistema ({{zone}}) si está vacío.",
       missedRun: "Ejecuciones perdidas",
       overlap: "Disparos superpuestos",
+      completion: "Al completarse una ejecución",
+      runAgainLimit: "Límite de ejecuciones seguidas",
+      runAgainLimitHint: "Ejecuciones seguidas en fila antes de que la tarea espere su programación.",
       preview: "Próximas ocurrencias",
       previewEmpty: "Sin programación — la tarea solo se ejecuta cuando la disparas a mano.",
       profile: "Perfil",
@@ -1305,6 +1314,7 @@ export const esES: Resources = {
       resumeStrategy: { resume_first: "Reanudaciones primero", new_first: "Nuevos primero", alternate: "Alternar" },
       missedRun: { run_on_resume: "Ejecutar una vez al volver", skip: "Omitir" },
       overlap: { queue: "Esperar en la cola", skip: "Omitir" },
+      completion: { wait_for_schedule: "Esperar la programación", run_again: "Ejecución seguida" },
       repeat: {
         minutes: "Cada N minutos",
         hourly: "Cada hora",

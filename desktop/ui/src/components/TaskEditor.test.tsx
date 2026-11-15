@@ -62,8 +62,14 @@ const CRON = "0 9 * * 1-5";
 /** A cron the daemon refuses, a rule the form marks on the Cron field: minute 61. */
 const BAD_CRON = "61 9 * * 1-5";
 
-/** The one task the stand-in knows, as a document; it sets whether it allows extra usage only when told. */
-const taskDoc = (name: string, cron = CRON, allowExtraUsage?: boolean): Doc => ({
+/** A task's completion policy, as the task schema names its keys. */
+type Completion = { policy: string; runAgainLimit?: number };
+
+/**
+ * The one task the stand-in knows, as a document; it sets whether it allows extra usage, and its completion policy,
+ * only when told.
+ */
+const taskDoc = (name: string, cron = CRON, allowExtraUsage?: boolean, completion?: Completion): Doc => ({
   apiVersion: "harmflow/v1alpha1",
   kind: "Task",
   metadata: { id: "standup", name },
@@ -72,11 +78,12 @@ const taskDoc = (name: string, cron = CRON, allowExtraUsage?: boolean): Doc => (
     schedule: { cron },
     prompt: "Write the standup notes.",
     ...(allowExtraUsage === undefined ? {} : { execution: { allowExtraUsage } }),
+    ...(completion === undefined ? {} : { completion }),
   },
 });
 
 /** The same task as the daemon writes it in YAML; the cron is on line 9, among the lines CodeMirror draws. */
-const taskYaml = (name: string, cron = CRON, allowExtraUsage?: boolean) =>
+const taskYaml = (name: string, cron = CRON, allowExtraUsage?: boolean, completion?: Completion) =>
   [
     "apiVersion: harmflow/v1alpha1",
     "kind: Task",
@@ -89,6 +96,9 @@ const taskYaml = (name: string, cron = CRON, allowExtraUsage?: boolean) =>
     `    cron: "${cron}"`,
     "  prompt: Write the standup notes.",
     ...(allowExtraUsage === undefined ? [] : ["  execution:", `    allowExtraUsage: ${allowExtraUsage}`]),
+    ...(completion === undefined
+      ? []
+      : ["  completion:", `    policy: ${completion.policy}`, ...(completion.runAgainLimit === undefined ? [] : [`    runAgainLimit: ${completion.runAgainLimit}`])]),
     "",
   ].join("\n");
 
@@ -98,7 +108,12 @@ function parse(yaml: string): Doc | undefined {
   const cron = /^ {4}cron: "(.*)"$/m.exec(yaml)?.[1];
   const extra = /^ {4}allowExtraUsage: (true|false)$/m.exec(yaml)?.[1];
   const allowExtraUsage = extra === undefined ? undefined : extra === "true";
-  return name !== undefined && cron !== undefined && yaml === taskYaml(name, cron, allowExtraUsage) ? taskDoc(name, cron, allowExtraUsage) : undefined;
+  const policy = /^ {4}policy: (.*)$/m.exec(yaml)?.[1];
+  const limit = /^ {4}runAgainLimit: (\d+)$/m.exec(yaml)?.[1];
+  const completion = policy === undefined ? undefined : { policy, ...(limit === undefined ? {} : { runAgainLimit: Number(limit) }) };
+  return name !== undefined && cron !== undefined && yaml === taskYaml(name, cron, allowExtraUsage, completion)
+    ? taskDoc(name, cron, allowExtraUsage, completion)
+    : undefined;
 }
 
 /** The YAML of a document of this task; a document the stand-in cannot write fails the request. */
@@ -106,8 +121,9 @@ function write(doc: Doc): string {
   const name = (doc.metadata as { name: string }).name;
   const cron = (doc.spec as { schedule: { cron: string } }).schedule.cron;
   const allowExtraUsage = (doc.spec as { execution?: { allowExtraUsage?: boolean } }).execution?.allowExtraUsage;
-  if (!isDeepStrictEqual(doc, taskDoc(name, cron, allowExtraUsage))) throw new Error(`The stand-in cannot write ${JSON.stringify(doc)}`);
-  return taskYaml(name, cron, allowExtraUsage);
+  const completion = (doc.spec as { completion?: Completion }).completion;
+  if (!isDeepStrictEqual(doc, taskDoc(name, cron, allowExtraUsage, completion))) throw new Error(`The stand-in cannot write ${JSON.stringify(doc)}`);
+  return taskYaml(name, cron, allowExtraUsage, completion);
 }
 
 /** The daemon's refusal of BAD_CRON, at the field's path and at its key's line and column in the YAML. */
@@ -380,6 +396,33 @@ describe("task editor tabs", () => {
     await click(tab("YAML"));
     expect(sent("POST", "/tasks/validate")).not.toContainEqual({ document: taskDoc("Standup notes") });
     expect(yamlText()).toBe(taskYaml("Standup notes"));
+  });
+
+  // The completion policy and the run-again limit cross as every other field does, under the task schema's own keys
+  // (harmflow-app#1041).
+  it("carries the completion policy and the run-again limit set in the form to the YAML tab, and back from it unchanged", async () => {
+    const policy = () => field("When an execution completes").querySelector("select")!;
+    const limit = () => field("Run-again limit").querySelector("input")!;
+    await open("edit");
+    expect(policy().value).toBe("wait_for_schedule");
+    await choose(policy(), "run_again");
+    await type(limit(), "3");
+    await click(tab("YAML"));
+    const set = { policy: "run_again", runAgainLimit: 3 };
+    expect(sent("POST", "/tasks/validate")).toContainEqual({ document: taskDoc("Standup notes", CRON, undefined, set) });
+    expect(yamlText()).toBe(taskYaml("Standup notes", CRON, undefined, set));
+
+    const edited = { policy: "run_again", runAgainLimit: 5 };
+    await typeYaml(taskYaml("Standup notes", CRON, undefined, edited));
+    await click(tab("Form"));
+    expect(sent("POST", "/tasks/validate")).toContainEqual({ yaml: taskYaml("Standup notes", CRON, undefined, edited) });
+    expect(openTab()).toBe("Form");
+    expect(policy().value).toBe("run_again");
+    expect(limit().value).toBe("5");
+
+    // Back on the YAML tab with no change in the form, the text is the one the form read.
+    await click(tab("YAML"));
+    expect(yamlText()).toBe(taskYaml("Standup notes", CRON, undefined, edited));
   });
 
   // The file's text, a comment included, is not the daemon's serialization of its document (harmflow-app#461).

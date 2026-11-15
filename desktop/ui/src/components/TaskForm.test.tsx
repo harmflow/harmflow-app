@@ -770,6 +770,117 @@ describe("task form extra usage", () => {
   });
 });
 
+// A task that runs a harness shows in its Schedule section, after the missed-run and overlap fields, what an execution
+// does once it ends completed: wait for the schedule, the default, or run again, up to the run-again limit, editable
+// only under Run again. Both are the task schema's own keys, written as they are. A script task shows neither
+// (harmflow-app#1041). What the daemon does with them is app › TestRunAgainStopsAtItsLimit's and
+// TestScriptTaskTakesNoCompletionPolicy's.
+describe("task form completion policy", () => {
+  let current: Doc = {};
+
+  function Form({ doc, errorPaths = new Set() }: { doc: Doc; errorPaths?: Set<string> }) {
+    const [value, setValue] = useState(doc);
+    current = value;
+    return <TaskForm doc={value} onChange={(d) => setValue((current = d))} mode="edit" harnesses={[]} errorPaths={errorPaths} />;
+  }
+
+  async function openForm(doc: Doc, errorPaths?: Set<string>) {
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(<Form doc={doc} errorPaths={errorPaths} />));
+    await settle();
+  }
+
+  const harnessTask = (type: "general" | "github", completion?: Doc): Doc => {
+    const doc = task({});
+    return { ...doc, spec: { ...(doc.spec as Doc), type, ...(completion ? { completion } : {}) } };
+  };
+  const script: Doc = {
+    apiVersion: "harmflow/v1alpha1",
+    kind: "Task",
+    metadata: { id: "audit", name: "Audit" },
+    spec: { type: "script", script: { command: ["/bin/date"] } },
+  };
+
+  const spec = () => current.spec as Doc;
+  const section = () => host!.querySelector("#section-schedule")!;
+  const scheduleField = (label: string) =>
+    [...section().querySelectorAll<HTMLElement>("label.field")].find((f) => f.querySelector(".field__label")?.textContent === label);
+  const policy = () => scheduleField("When an execution completes")?.querySelector("select");
+  const limit = () => scheduleField("Run-again limit")?.querySelector("input");
+
+  it.each(["general", "github"] as const)("shows a %s task waiting for the schedule when its document sets nothing, the limit at its default and locked", async (kind) => {
+    await openForm(harnessTask(kind));
+    expect(policy()!.value).toBe("wait_for_schedule");
+    expect([...policy()!.options].map((o) => o.textContent)).toEqual(["Wait for the schedule", "Run again"]);
+    expect(limit()!.disabled).toBe(true);
+    expect(limit()!.value).toBe("");
+    expect(limit()!.placeholder).toBe("Default: 10");
+    expect(limit()!.min).toBe("1");
+    expect(scheduleField("Overlapping firings")!.compareDocumentPosition(policy()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(spec().completion).toBeUndefined();
+  });
+
+  it("shows a script task neither the policy nor the limit", async () => {
+    await openForm(script);
+    expect(scheduleField("Overlapping firings")).toBeDefined();
+    expect(policy()).toBeUndefined();
+    expect(limit()).toBeUndefined();
+    expect(spec().completion).toBeUndefined();
+  });
+
+  it.each(["general", "github"] as const)("writes the policy and the limit of a %s task as the schema names them", async (kind) => {
+    await openForm(harnessTask(kind));
+    await enter(policy()!, "run_again");
+    expect(spec().completion).toStrictEqual({ policy: "run_again" });
+    expect(limit()!.disabled).toBe(false);
+
+    await enter(limit()!, "3");
+    expect(spec().completion).toStrictEqual({ policy: "run_again", runAgainLimit: 3 });
+
+    // Cleared, the limit's key goes, so its default applies again.
+    await enter(limit()!, "");
+    expect(spec().completion).toStrictEqual({ policy: "run_again" });
+
+    await enter(policy()!, "wait_for_schedule");
+    expect(spec().completion).toStrictEqual({ policy: "wait_for_schedule" });
+    expect(limit()!.disabled).toBe(true);
+  });
+
+  it("opens a task whose file sets both with each in its control, and keeps the limit while the policy waits", async () => {
+    await openForm(harnessTask("github", { policy: "run_again", runAgainLimit: 4 }));
+    expect(policy()!.value).toBe("run_again");
+    expect(limit()!.value).toBe("4");
+    expect(limit()!.disabled).toBe(false);
+
+    await enter(policy()!, "wait_for_schedule");
+    expect(limit()!.value).toBe("4");
+    expect(spec().completion).toStrictEqual({ policy: "wait_for_schedule", runAgainLimit: 4 });
+  });
+
+  it("marks the limit's field with the daemon's error at its path, as every other field is marked", async () => {
+    await openForm(harnessTask("general", { policy: "run_again", runAgainLimit: 0 }), new Set(["/spec/completion/runAgainLimit"]));
+    expect(scheduleField("Run-again limit")!.classList.contains("field--error")).toBe(true);
+    expect(scheduleField("Run-again limit")!.querySelector(".field__error")?.textContent).toBe("Error");
+    expect(scheduleField("When an execution completes")!.classList.contains("field--error")).toBe(false);
+  });
+
+  it.each([
+    ["pt-BR", "Ao concluir uma execução", ["Aguardar o agendamento", "Execução seguida"], "Limite de execuções seguidas"],
+    ["es-ES", "Al completarse una ejecución", ["Esperar la programación", "Ejecución seguida"], "Límite de ejecuciones seguidas"],
+  ])("labels the policy, its choices, and the limit in %s", async (language, policyLabel, choices, limitLabel) => {
+    await i18n.changeLanguage(language);
+    try {
+      await openForm(harnessTask("general"));
+      const select = scheduleField(policyLabel)!.querySelector("select")!;
+      expect([...select.options].map((o) => o.textContent)).toEqual(choices);
+      expect(scheduleField(limitLabel)?.querySelector("input")).toBeTruthy();
+    } finally {
+      await i18n.changeLanguage("en-US");
+    }
+  });
+});
+
 // The name picker, the model, the time zone, and the schedule's time are TextInputs set in the monospaced face, each
 // keeping its suggestions, its type, and its keys.
 describe("task form text fields", () => {
