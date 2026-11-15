@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// The typeface choice of Settings → General (harmflow-app#486): a missing or unknown value reads as HarmFlow, and each
+// The typeface choice of Settings → Appearance (harmflow-app#486, harmflow-app#825): a missing or unknown value reads as HarmFlow, and each
 // option gives the three font stacks theme.css declares for it — the bundled fonts for HarmFlow, the platform's own for
 // System, with no optical size forced on the display text. theme.css is in the document, and the root element's
 // computed tokens are read after each choice, as the components read them.

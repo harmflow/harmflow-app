@@ -1274,9 +1274,11 @@ describe("language switch", () => {
 });
 
 // Picking a typeface in Settings switches the fonts of the interface already on screen, at once and with no restart, and
-// the choice the daemon saved applies again at the next launch (harmflow-app#486).
+// the choice the daemon saved applies again at the next launch (harmflow-app#486). The choice is the Font of Appearance,
+// and General no longer shows it (harmflow-app#825).
 describe("typeface switch", () => {
   const select = () => host!.querySelector<HTMLSelectElement>("#settings-typeface")!;
+  const section = (name: string) => [...host!.querySelectorAll<HTMLButtonElement>(".settings-nav__item")].find((b) => b.textContent === name)!;
   const chosen = () => document.documentElement.getAttribute("data-typeface");
   const saved = () => daemon.sent.filter((r) => r.method === "PATCH" && r.path === "/settings").map((r) => r.body);
 
@@ -1292,12 +1294,15 @@ describe("typeface switch", () => {
 
   afterEach(() => document.documentElement.removeAttribute("data-typeface"));
 
-  it("offers HarmFlow and System beside the language, HarmFlow when the settings name none, and switches the open window", async () => {
+  it("offers HarmFlow and System in Appearance, HarmFlow when the settings name none, and switches the open window", async () => {
     daemon.answers.set("/settings", settings);
     await launch();
     await act(async () => navButton("Settings").click());
-    // Its panel comes right after the language's.
-    expect(host!.querySelector("#settings-language")!.closest("section.panel")!.nextElementSibling).toBe(select().closest("section.panel"));
+    // General, where Settings opens, holds the language and no typeface choice.
+    expect(host!.querySelector("#settings-language")).not.toBeNull();
+    expect(host!.querySelector("#settings-typeface")).toBeNull();
+    await act(async () => section("Appearance").click());
+    expect(host!.querySelector('label[for="settings-typeface"]')!.textContent).toBe("Font");
     expect([...select().options].map((o) => [o.value, o.textContent])).toEqual([
       ["harmflow", "HarmFlow"],
       ["system", "System"],
@@ -1904,6 +1909,106 @@ describe("zoom", () => {
       ready.mockRestore();
       logged.mockRestore();
     }
+  });
+
+  // Settings → Appearance shows the level the keys set and sets the same one, at its fixed steps (harmflow-app#825).
+  describe("in Settings → Appearance", () => {
+    const control = () => host!.querySelector<HTMLSelectElement>("#settings-zoom")!;
+    const typeface = () => host!.querySelector<HTMLSelectElement>("#settings-typeface")!;
+    const appearance = () => host!.querySelector(".settings__section")!;
+
+    async function openAppearance() {
+      await act(async () => navButton("Settings").click());
+      await act(async () => [...host!.querySelectorAll<HTMLButtonElement>(".settings-nav__item")].find((b) => b.textContent === "Appearance")!.click());
+    }
+
+    /** Picks a value in a select, as the user does. */
+    async function pick(select: HTMLSelectElement, value: string) {
+      const setValue = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!;
+      await act(async () => {
+        setValue.call(select, value);
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    }
+
+    afterEach(() => document.documentElement.removeAttribute("data-typeface"));
+
+    it("holds Zoom and Font alone, and no Font size control", async () => {
+      await launch();
+      await openAppearance();
+      expect([...appearance().querySelectorAll(".panel__title")].map((h) => h.textContent)).toEqual(["Zoom", "Font"]);
+      expect([...appearance().querySelectorAll("select")].map((s) => s.id)).toEqual(["settings-zoom", "settings-typeface"]);
+      expect([...appearance().querySelectorAll(".setting-row__label")].map((l) => l.textContent)).toEqual(["Zoom", "Font"]);
+      expect(appearance().textContent).not.toMatch(/font size/i);
+    });
+
+    it("shows the level the keys set, sets it at the fixed steps alone, and the keys move on from the pick", async () => {
+      await launch();
+      expect(await press(undefined, zoomIn)).toBe(true);
+      await openAppearance();
+      expect([...control().options].map((o) => [o.value, o.textContent])).toEqual([
+        ["80", "80%"],
+        ["90", "90%"],
+        ["100", "100%"],
+        ["110", "110%"],
+        ["125", "125%"],
+        ["150", "150%"],
+      ]);
+      expect(control().value).toBe("110");
+
+      await pick(control(), "125");
+      expect(level()).toBe(125);
+      expect(control().value).toBe("125");
+      expect(await press(undefined, zoomOut)).toBe(true);
+      expect(level()).toBe(110);
+      expect(control().value).toBe("110");
+      expect(await press(undefined, actualSize)).toBe(true);
+      expect(level()).toBe(100);
+      expect(control().value).toBe("100");
+    });
+
+    it("keeps the picked level across a restart of the app", async () => {
+      await launch();
+      await openAppearance();
+      await pick(control(), "90");
+      expect(level()).toBe(90);
+      quit();
+
+      setZoom.mockClear();
+      await launch();
+      expect(setZoom.mock.calls.map(([percent]) => percent)).toEqual([90]);
+      await openAppearance();
+      expect(control().value).toBe("90");
+    });
+
+    it("has no reset action: picking 100% and HarmFlow is the reset, and ⌘0 leaves the typeface alone", async () => {
+      localStorage.setItem("harmflow.zoom", "125");
+      patchStateForTests({ settings: { ...settings, typeface: "system" } });
+      daemon.answers.set("/settings", { ...settings, typeface: "system" });
+      await launch();
+      await openAppearance();
+      expect(control().value).toBe("125");
+      expect(typeface().value).toBe("system");
+      expect(document.documentElement.getAttribute("data-typeface")).toBe("system");
+      // Nothing to press in the section: its two selects are all it holds.
+      expect([...appearance().querySelectorAll("button, input, textarea")]).toEqual([]);
+
+      // ⌘0 is the zoom's Actual Size, never the font's.
+      expect(await press(undefined, actualSize)).toBe(true);
+      expect(level()).toBe(100);
+      expect(typeface().value).toBe("system");
+      expect(document.documentElement.getAttribute("data-typeface")).toBe("system");
+
+      await pick(control(), "150");
+      await pick(control(), "100");
+      expect(level()).toBe(100);
+      daemon.answers.set("/settings", { ...settings, typeface: "harmflow" });
+      await pick(typeface(), "harmflow");
+      expect(typeface().value).toBe("harmflow");
+      expect(document.documentElement.getAttribute("data-typeface")).toBeNull();
+      expect(daemon.sent.filter((r) => r.method === "PATCH" && r.path === "/settings").map((r) => r.body)).toEqual([{ typeface: "harmflow" }]);
+      expect([...appearance().querySelectorAll("button, input, textarea")]).toEqual([]);
+    });
   });
 });
 

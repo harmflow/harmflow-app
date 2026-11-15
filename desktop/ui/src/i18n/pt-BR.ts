@@ -1357,6 +1357,7 @@ export const ptBR: Resources = {
   settings: {
     sections: {
       general: "Geral",
+      appearance: "Aparência",
       notifications: "Notificações",
       shortcuts: "Atalhos",
       agents: "Ferramentas de IA",
@@ -1404,6 +1405,7 @@ export const ptBR: Resources = {
     subheads: {
       executions: "Execuções",
       language: "Idioma",
+      zoom: "Zoom",
       typeface: "Fonte",
       menuBar: "Barra de menus",
       notices: "Avisos",
@@ -1427,6 +1429,8 @@ export const ptBR: Resources = {
     language: "Idioma",
     languageHint: "Muda na hora, sem reiniciar.",
     languages: { system: "Idioma do sistema", "pt-BR": "Português (Brasil)", "en-US": "English (US)", "es-ES": "Español" },
+    zoom: "Zoom",
+    zoomHint: "O mesmo nível de ⌘+, ⌘− e ⌘0; ele também aumenta ou diminui o texto. Muda na hora.",
     typeface: "Fonte",
     typefaceHint: "HarmFlow usa as fontes próprias do app em todo sistema; Sistema usa as do seu sistema operacional. Muda na hora, sem reiniciar.",
     typefaces: { harmflow: "HarmFlow", system: "Sistema" },

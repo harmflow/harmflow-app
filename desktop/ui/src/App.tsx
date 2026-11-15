@@ -382,7 +382,7 @@ export function App() {
             />
           ) : null}
           {screen === "history" ? <HistoryScreen openId={historyOpen} onOpen={setHistoryOpen} /> : null}
-          {screen === "settings" ? <SettingsScreen section={settingsSection} onSection={openSettings} onLeaveCheck={holdLeaveCheck} /> : null}
+          {screen === "settings" ? <SettingsScreen section={settingsSection} onSection={openSettings} onLeaveCheck={holdLeaveCheck} zoom={zoom} onZoom={setZoom} /> : null}
           {RegisteredScreen ? <RegisteredScreen /> : null}
         </ScreenBoundary>
       </main>

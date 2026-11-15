@@ -156,7 +156,7 @@
 }
 
 /*
- * The System typeface of Settings → General (typeface.ts sets the attribute): the platform's own fonts take the place of
+ * The System typeface of Settings → Appearance (typeface.ts sets the attribute): the platform's own fonts take the place of
  * the bundled ones in all three stacks — macOS's first, then Windows's, then Linux's — and the display text keeps the
  * font's own optical size. The bundled font files stay in the app: these stacks only leave them out.
  */
