@@ -114,6 +114,8 @@ type fakeHarness struct {
 	// are the homes ReadQuota read with, one per read.
 	homeSkills map[string][]string
 	quotaHomes []string
+	// itemLookups counts the agents and skills UserItem was asked for.
+	itemLookups int
 	// runs are the installation and the request each attempt was prepared with, in order.
 	runs []preparedRun
 	// parsedBy, when set, is the adapter whose parser reads each attempt's output in place of the fake's own, so that a
@@ -233,6 +235,9 @@ func (f *fakeHarness) reads() int {
 	return f.quotaReads
 }
 func (f *fakeHarness) UserItem(_ context.Context, _ ports.HarnessInfo, kind, name, _ string, _ []string) (ports.ResolvedItem, bool, []ports.DiscoveryError, error) {
+	f.mu.Lock()
+	f.itemLookups++
+	f.mu.Unlock()
 	found := kind == "skill" && name == "user-skill" || kind == "agent" && name == "user-agent" ||
 		kind == "skill" && name == "review-notes" && f.id == domain.HarnessClaudeCode ||
 		kind == "agent" && name == "review-agent" && f.id == domain.HarnessClaudeCode
@@ -6235,8 +6240,9 @@ func TestMissingSkillOnlyWarnsAtEveryEntryPoint(t *testing.T) {
 	}
 }
 
-// harmflow-app#1062: a task that cites a missing skill can be disabled and enabled, and the parameter values it gives
-// that skill stay in its file through both.
+// harmflow-app#1062: a task that cites a missing skill can be disabled and enabled. The toggle does not go through the
+// agent and skill check: it asks no harness for the task's items, and the task keeps the warning its save gave it and
+// the parameter values it gives that skill.
 func TestTaskWithAMissingSkillCanBeDisabledAndEnabled(t *testing.T) {
 	e := newEnv(t)
 	ctx := t.Context()
@@ -6245,8 +6251,21 @@ func TestTaskWithAMissingSkillCanBeDisabledAndEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTask(toggled) = %v, want no error", err)
 	}
+	lookups := func() int {
+		n := 0
+		for _, f := range []*fakeHarness{e.claude, e.codex} {
+			f.mu.Lock()
+			n += f.itemLookups
+			f.mu.Unlock()
+		}
+		return n
+	}
 	for _, enabled := range []bool{false, true} {
+		before := lookups()
 		view, err = e.app.SetEnabled(ctx, "toggled", enabled)
+		if n := lookups() - before; n != 0 {
+			t.Errorf("SetEnabled(toggled, %v) looked up %d agents or skills, want none", enabled, n)
+		}
 		if err != nil {
 			t.Fatalf("SetEnabled(toggled, %v) = %v, want no error", enabled, err)
 		}
