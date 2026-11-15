@@ -68,20 +68,21 @@ async function show(notice: Notification, onOpenExecution: (id: string) => void 
 const row = () => host!.querySelector<HTMLElement>("li > *")!;
 
 describe("the run-again limit's notice", () => {
+  // In the words the event's name and the daemon's message already have in each language.
   it.each([
-    ["en-US", "10", "Core issues: run-again limit reached", "Core issues ran again 10 times in a row, its run-again limit; it now waits for its schedule."],
-    ["en-US", "1", "Core issues: run-again limit reached", "Core issues ran again 1 time in a row, its run-again limit; it now waits for its schedule."],
+    ["en-US", "10", "Core issues: Run-again limit reached", "Core issues: the task ran again 10 times in a row, its run-again limit; it now waits for its schedule"],
+    ["en-US", "1", "Core issues: Run-again limit reached", "Core issues: the task ran again 1 time in a row, its run-again limit; it now waits for its schedule"],
     [
       "pt-BR",
       "3",
-      "Core issues: limite de execuções seguidas atingido",
-      "Core issues rodou de novo 3 vezes seguidas, seu limite de execuções seguidas; agora aguarda seu agendamento.",
+      "Core issues: Limite de execuções seguidas atingido",
+      "Core issues: a tarefa rodou de novo 3 vezes seguidas, seu limite de execuções seguidas; agora aguarda seu agendamento",
     ],
     [
       "es-ES",
       "3",
-      "Core issues: límite de ejecuciones seguidas alcanzado",
-      "Core issues se ejecutó de nuevo 3 veces seguidas, su límite de ejecuciones seguidas; ahora espera su programación.",
+      "Core issues: Límite de ejecuciones seguidas alcanzado",
+      "Core issues: la tarea se ejecutó de nuevo 3 veces seguidas, su límite de ejecuciones seguidas; ahora espera su programación",
     ],
   ])("reads in %s with a limit of %s", async (language, count, title, body) => {
     await i18n.changeLanguage(language);

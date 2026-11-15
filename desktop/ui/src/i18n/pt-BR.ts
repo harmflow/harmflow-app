@@ -674,9 +674,8 @@ export const ptBR: Resources = {
       cancelled: { title: "{{taskName}} cancelada", body: "A execução foi cancelada." },
       needs_attention: { title: "{{taskName}} requer atenção", body: "Uma pessoa precisa agir: {{reason}}" },
       run_again_limit_reached: {
-        title: "{{taskName}}: limite de execuções seguidas atingido",
-        body_one: "{{taskName}} rodou de novo {{count}} vez seguida, seu limite de execuções seguidas; agora aguarda seu agendamento.",
-        body_other: "{{taskName}} rodou de novo {{count}} vezes seguidas, seu limite de execuções seguidas; agora aguarda seu agendamento.",
+        title: "{{taskName}}: $t(eventTypes.execution.run_again_limit_reached)",
+        body: "{{taskName}}: $t(messages.run_again_limit_reached)",
       },
     },
     pull_request: {
