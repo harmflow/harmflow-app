@@ -154,6 +154,84 @@ func TestEditorCatalogOffersTheInstallationsSkills(t *testing.T) {
 	}
 }
 
+// harmflow-app#1078: a saved Claude Code task that cites a skill and an agent the stand-in Claude Code does not have is
+// disabled and then enabled over the local API, as the Desktop's toggle asks: each request is accepted, the task's
+// file reads spec.enabled false and then true, and the task, as the answer, GET /tasks/{taskId}, and GET /tasks give
+// it, keeps one warning naming each missing item. The daemon's HOME and Claude Code's configuration directory are the
+// test's own and hold no agent or skill, so neither item is found.
+func TestTaskWithMissingItemsIsDisabledAndEnabled(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	claudeConfig := filepath.Join(home, "claude")
+	if err := os.MkdirAll(claudeConfig, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	d := startDaemon(t, home, "CLAUDE_CONFIG_DIR="+claudeConfig, "HOME="+resolvedTempDir(t))
+	d.call("PUT", "/harnesses/claude-code", map[string]any{"path": recordingStandIn(t, "fake-claude", "claude")}, 200)
+	saved := d.call("POST", "/tasks", map[string]any{"document": map[string]any{"apiVersion": "harmflow/v1alpha1",
+		"kind": "Task", "metadata": map[string]any{"id": "missing-items", "name": "Missing items"},
+		"spec": map[string]any{
+			"type":    "general",
+			"prompt":  "Review the change with review notes, and have the tester try it.",
+			"agents":  []any{"tester"},
+			"skills":  []any{"review-notes"},
+			"harness": map[string]any{"preferred": map[string]any{"provider": "claude-code"}},
+		}}}, 201)
+	if saved["enabled"] != true {
+		t.Fatalf("POST /tasks missing-items reads enabled %v, want true", saved["enabled"])
+	}
+	checkMissingItems(t, "POST /tasks missing-items", saved)
+
+	file := filepath.Join(home, "tasks", "missing-items.yaml")
+	for _, step := range []struct {
+		command string
+		enabled bool
+	}{{"disable", false}, {"enable", true}} {
+		route := "POST /tasks/missing-items/" + step.command
+		answer := d.call("POST", "/tasks/missing-items/"+step.command, nil, 200)
+		if answer["enabled"] != step.enabled {
+			t.Errorf("%s answered enabled %v, want %v", route, answer["enabled"], step.enabled)
+		}
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("after %s: %v", route, err)
+		}
+		doc, _ := yamlAsJSON(t, data).(map[string]any)
+		if spec, _ := doc["spec"].(map[string]any); spec["enabled"] != step.enabled {
+			t.Errorf("after %s the file reads spec.enabled %v, want %v:\n%s", route, spec["enabled"], step.enabled, data)
+		}
+		got := d.call("GET", "/tasks/missing-items", nil, 200)
+		listed := d.listedTask("missing-items")
+		if got["enabled"] != step.enabled || listed["enabled"] != step.enabled {
+			t.Errorf("after %s GET /tasks/missing-items reads enabled %v and GET /tasks %v, want %v", route,
+				got["enabled"], listed["enabled"], step.enabled)
+		}
+		checkMissingItems(t, route, answer)
+		checkMissingItems(t, "GET /tasks/missing-items after "+route, got)
+		checkMissingItems(t, "GET /tasks after "+route, listed)
+	}
+}
+
+// checkMissingItems fails the test unless the task, as source gives it, has exactly one missing_agent warning naming
+// the agent tester and one missing_skill warning naming the skill review-notes.
+func checkMissingItems(t *testing.T, source string, view map[string]any) {
+	t.Helper()
+	warnings, _ := view["warnings"].([]any)
+	for _, want := range []struct{ code, name string }{{"missing_agent", "tester"}, {"missing_skill", "review-notes"}} {
+		n := 0
+		for _, x := range warnings {
+			w, _ := x.(map[string]any)
+			params, _ := w["params"].(map[string]any)
+			if w["code"] == want.code && params["name"] == want.name {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Errorf("%s warnings = %v, want one %s naming %s", source, warnings, want.code, want.name)
+		}
+	}
+}
+
 // claudeCodeUserSkills are the names of the user's skills among the skills of GET /catalog that Claude Code can load.
 func claudeCodeUserSkills(skills any) []string {
 	var names []string
