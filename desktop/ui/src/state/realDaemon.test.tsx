@@ -15,6 +15,12 @@
 //   are one update on the task's revision, and the task's file then holds them, the rest of the document unchanged.
 //   TaskForm.test covers the editor's half against a stand-in for the transport; itest ›
 //   TestEditedQueueReachesTheNextExecution covers the daemon's half, from the saved file to the next execution.
+// - A user's agent in the test's own configuration of Claude Code, selected in a new task's form, is copied into it
+//   once: its instructions, description, model, and skills, its tools left out and named, and the saved file holds its
+//   name and hash as the task's origin. After an edit of the prompt, choosing another agent asks first, and declining
+//   keeps the edit. Once the agent's file changes, the reopened task shows a notice, and copying again shows the
+//   difference and replaces the copy only once confirmed. AgentOrigin.test › "task form agent" and agentCopy.test cover
+//   the form's half against a stand-in for the transport; catalog_test and app_test cover the daemon's copy and hash.
 //
 // All run on one daemon and one dashboard, in this order: the store is the module's own and holds one daemon's state,
 // and the import starts from a daemon that holds no task.
@@ -29,11 +35,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { api } from "../api/client";
-import type { Task, TaskSummary } from "../api/types";
+import type { Catalog, Task, TaskSummary } from "../api/types";
 import { Toasts } from "../components/toast";
 import i18n from "../i18n";
+import type { AgentCopy } from "../lib/agentCopy";
 import type { Doc } from "../lib/taskForm";
 import { TasksScreen, type TaskView } from "../screens/TasksScreen";
 import { call, serveDashboard, shutDown, startDaemon, until, type Dashboard, type RealDaemon } from "./realDaemon";
@@ -531,5 +538,152 @@ describe("the task form and the Tasks screen against the real daemon", () => {
     expect(stored.document).toStrictEqual(edited);
     expect(stored.yaml).toBe(saved);
     expect(stored.revision).not.toBe(created.revision);
+  });
+});
+
+describe("a user's agent selected in the task form against the real daemon", () => {
+  const agents = () => join(daemon.home, "claude", "agents");
+  /** The agent the form copies: every field the copy takes, and tools, which a task has no place for. */
+  const REVIEWER = [
+    "---",
+    "name: change-reviewer",
+    "description: Reviews a change.",
+    "model: sonnet",
+    "skills: hf-github-draft-pr",
+    "tools: Read, Grep",
+    "---",
+    "Review the change, and say what it breaks.",
+    "",
+  ].join("\n");
+
+  beforeAll(() => {
+    // Beside issue-reviewer, in the test's own configuration of Claude Code, which the daemon reads on each catalog read:
+    // the agent the form copies, and another agent to choose once the prompt is edited.
+    writeFileSync(join(agents(), "change-reviewer.md"), REVIEWER);
+    writeFileSync(join(agents(), "change-tester.md"), "---\nname: change-tester\ndescription: Tries a change.\n---\nTry the change.\n");
+  });
+
+  /** What selecting the user's agent copies, as the daemon's catalog gives it to the form. */
+  async function copyOf(name: string): Promise<AgentCopy> {
+    const catalog = (await call(daemon, "GET", "/catalog")) as Catalog;
+    const copy = catalog.agents.find((a) => a.name === name && a.source === "user")?.copy;
+    if (!copy) throw new Error(`GET /catalog gives no copy of the user's agent ${name}: ${JSON.stringify(catalog.agents.map((a) => a.name))}`);
+    return copy;
+  }
+
+  const agent = () => host!.querySelector<HTMLSelectElement>('select[aria-label="Agent"]');
+  const offered = (name: string) => [...(agent()?.options ?? [])].some((o) => o.value === name);
+  const copyAgain = () => [...host!.querySelectorAll<HTMLButtonElement>(".banner button")].find((b) => b.textContent === "Copy again from the agent");
+
+  it("copies the agent once, asks before another replaces an edited prompt, and copies it again only once confirmed", async () => {
+    const copied = await copyOf("change-reviewer");
+    expect(copied).toMatchObject({
+      prompt: "Review the change, and say what it breaks.",
+      description: "Reviews a change.",
+      model: "sonnet",
+      skills: ["hf-github-draft-pr"],
+      omittedFields: ["tools"],
+    });
+    expect(copied.modelHarnesses).toContain("claude-code");
+
+    // Outside the desktop shell, the form asks through the page's own confirm, which the test DOM lacks.
+    const confirm = vi.fn((_message?: string) => false);
+    Object.assign(window, { confirm });
+    try {
+      // A new general task: the template has no prompt, so the first agent's copy replaces nothing of the user's.
+      startSync();
+      await mount({ kind: "new", template: "hf-general" });
+      await shown("both agents in the form's Agent select", () => offered("change-reviewer") && offered("change-tester") && field("Name"));
+      expect(control<HTMLTextAreaElement>("Prompt").value).toBe("");
+      await enter(control("Name"), "Agent copy");
+      expect(control("Identifier").value).toBe("agent-copy");
+
+      // Selected: the prompt, description, model, and skills are the agent's, and tools is named as left out.
+      await enter(agent()!, "change-reviewer");
+      expect(confirm).not.toHaveBeenCalled();
+      expect(control<HTMLTextAreaElement>("Prompt").value).toBe(copied.prompt);
+      expect(control<HTMLTextAreaElement>("Description").value).toBe("Reviews a change.");
+      expect(profiles()[0]!.model.value).toBe("sonnet");
+      expect(chips("Skills")).toEqual(["hf-github-draft-pr"]);
+      expect(host!.querySelector(".agent-left-out")?.textContent).toContain("Not copied from the agent: tools.");
+
+      // Saved: the file holds the copy and the agent's name and hash as its origin, and nothing of its tools.
+      const creations = sentTo("POST", "/tasks").length;
+      await click(button("Save"));
+      await shown("the editor on the saved task", () => sentTo("POST", "/tasks").length > creations && field("Identifier") && control("Identifier").disabled);
+      const file = join(daemon.home, "tasks", "agent-copy.yaml");
+      const first = await documentOf(readFileSync(file, "utf8"));
+      expect(first).toMatchObject({
+        metadata: { id: "agent-copy", name: "Agent copy", description: "Reviews a change." },
+        spec: {
+          type: "general",
+          prompt: copied.prompt,
+          harness: { preferred: { provider: "claude-code", model: "sonnet" } },
+          skills: ["hf-github-draft-pr"],
+          origin: { agent: "change-reviewer", hash: copied.hash },
+        },
+      });
+      expect(JSON.stringify(first)).not.toContain("Grep");
+      const stored = (await call(daemon, "GET", "/tasks/agent-copy")) as Task;
+      expect(stored.invalid ?? false).toBe(false);
+      expect(stored.validation?.valid ?? true).toBe(true);
+
+      // Edited, then another agent chosen: the form asks first, and declining keeps the edited prompt and the origin.
+      const edited = `${copied.prompt}\nThen say why.`;
+      await enter(control<HTMLTextAreaElement>("Prompt"), edited);
+      await enter(agent()!, "change-tester");
+      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(confirm.mock.calls[0]![0]).toContain("Copying change-tester replaces the prompt you edited");
+      expect(control<HTMLTextAreaElement>("Prompt").value).toBe(edited);
+      expect(agent()!.value).toBe("change-reviewer");
+
+      // The agent's file changes on disk: the catalog then gives another copy, with another hash.
+      writeFileSync(join(agents(), "change-reviewer.md"), REVIEWER.replace("say what it breaks.\n", "say what it breaks.\nRun its tests.\n"));
+      const changed = await copyOf("change-reviewer");
+      expect(changed.prompt).toBe(`${copied.prompt}\nRun its tests.`);
+      expect(changed.hash).not.toBe(copied.hash);
+
+      // Reopened from its row, the edit above left unsaved: the task shows the notice that the agent has changed.
+      await mount({ kind: "list" });
+      await shown("the saved task in the list", () => rowName("agent-copy") === "Agent copy");
+      await click(rowButton("agent-copy", "Edit"));
+      await shown("the notice of the changed agent", () =>
+        [...host!.querySelectorAll(".banner")].some((b) => b.textContent?.includes("The agent change-reviewer has changed")) && copyAgain(),
+      );
+      expect(control<HTMLTextAreaElement>("Prompt").value).toBe(copied.prompt);
+
+      // Copy again shows the difference; the description, model, and skills are the agent's still, so only the prompt
+      // changes. Cancel keeps the copy.
+      await click(copyAgain()!);
+      await shown("the difference", () => dialog()?.querySelector(".prompt-diff"));
+      expect([...dialog()!.querySelectorAll(".prompt-diff__line")].map((l) => l.textContent)).toEqual([
+        "  Review the change, and say what it breaks.\n",
+        "+ Run its tests.\n",
+      ]);
+      expect(dialog()!.querySelector(".copy-changes")).toBeNull();
+      await click(dialogButton("Cancel")!);
+      expect(dialog()).toBeNull();
+      expect(control<HTMLTextAreaElement>("Prompt").value).toBe(copied.prompt);
+      expect(copyAgain()).toBeTruthy();
+
+      // Confirmed: the form holds the new copy, and the notice is gone; the file holds the first copy until the save.
+      await click(copyAgain()!);
+      await click(dialogButton("Replace the copy")!);
+      expect(dialog()).toBeNull();
+      expect(control<HTMLTextAreaElement>("Prompt").value).toBe(changed.prompt);
+      expect(copyAgain()).toBeUndefined();
+      expect(await documentOf(readFileSync(file, "utf8"))).toMatchObject({ spec: { prompt: copied.prompt, origin: { hash: copied.hash } } });
+
+      const updates = sentTo("PUT", "/tasks/agent-copy").length;
+      await click(editorButton("Save"));
+      await shown("the update", () => sentTo("PUT", "/tasks/agent-copy").length > updates);
+      await shown("the new copy in the file", () => readFileSync(file, "utf8").includes("Run its tests."));
+      expect(await documentOf(readFileSync(file, "utf8"))).toMatchObject({
+        metadata: { description: "Reviews a change." },
+        spec: { prompt: changed.prompt, skills: ["hf-github-draft-pr"], origin: { agent: "change-reviewer", hash: changed.hash } },
+      });
+    } finally {
+      Reflect.deleteProperty(window, "confirm");
+    }
   });
 });
