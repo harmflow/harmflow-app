@@ -827,7 +827,10 @@ describe("the executions screen's cards", () => {
     const position = () => host!.querySelector(".exec-carousel__position")?.textContent;
     const rect = (left: number, width: number) => ({ left, right: left + width, width, top: 0, bottom: 200, height: 200, x: left, y: 0, toJSON: () => ({}) }) as DOMRect;
 
-    /** Renders n running cards, gives the row its sizes and the scroll position, and lets it measure on a scroll. */
+    /**
+     * Renders n running cards, gives the row its sizes and the scroll position, and lets it measure on a scroll. The
+     * row's width follows its cards, so a card starting or ending widens or narrows it as the layout would.
+     */
     async function showRow(n: number, scrollLeft = 0) {
       for (const e of runningMany(n)) daemon.answers.set(`/executions/${e.id}/events`, { events: [], logExpired: false });
       patchStateForTests({ active: runningMany(n) });
@@ -835,7 +838,7 @@ describe("the executions screen's cards", () => {
       const element = row();
       const step = PAGE / 3;
       Object.defineProperty(element, "clientWidth", { configurable: true, value: 1000 });
-      Object.defineProperty(element, "scrollWidth", { configurable: true, value: Math.max(1000, n * step - 16 + 48) });
+      Object.defineProperty(element, "scrollWidth", { configurable: true, get: () => Math.max(1000, element.children.length * step - 16 + 48) });
       Object.defineProperty(element, "scrollLeft", { configurable: true, writable: true, value: scrollLeft });
       vi.spyOn(element, "getBoundingClientRect").mockReturnValue(rect(0, 1000));
       vi.spyOn(wrapper(), "getBoundingClientRect").mockReturnValue(rect(0, 1000));
@@ -860,10 +863,11 @@ describe("the executions screen's cards", () => {
     beforeEach(() => {
       saved = getState();
     });
-    // This runs before the outer afterEach unmounts the screen, so React sees each change.
+    // This runs before the outer afterEach unmounts the screen, so React sees each change. The stand-in answers the
+    // running and the recent executions from one route, so a refresh sets both.
     afterEach(async () => {
       await act(async () => {
-        patchStateForTests({ active: saved.active });
+        patchStateForTests({ active: saved.active, recent: saved.recent });
         await i18n.changeLanguage("pt-BR");
       });
     });
@@ -987,6 +991,102 @@ describe("the executions screen's cards", () => {
       expect(cards[1].classList.contains("exec-card--selected")).toBe(true);
       expect(intoView[1]).not.toHaveBeenCalled();
       expect(scrollTo).not.toHaveBeenCalled();
+    });
+
+    it("keeps the cards in view where they were as executions start and end, and hides its controls once they fit", async () => {
+      // The local API lists the running executions newest first, so one that starts comes before the others. Five run,
+      // the row paged to its end: the third to the fifth show.
+      const STEP = PAGE / 3;
+      const [one, two, three, four, five] = runningMany(5);
+      const sixth: ExecutionSummary = { ...running, id: "exec-row-new", taskId: "row-new", taskName: "Row new" };
+      daemon.answers.set(`/executions/${sixth.id}/events`, { events: [], logExpired: false });
+      const scrollTo = await showRow(5, 5 * STEP + 32 - 1000);
+      const element = row();
+      // The row lands on each scroll it asks for, within its ends.
+      scrollTo.mockImplementation(({ left = 0 }: ScrollToOptions) => {
+        element.scrollLeft = Math.min(Math.max(left, 0), element.scrollWidth - element.clientWidth);
+      });
+      const intoView = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
+
+      /** Where each whole card in view sits from the row's left edge, by its task's name. */
+      const inView = () => {
+        const places = new Map<string, number>();
+        host!.querySelectorAll(".exec-card__title").forEach((title, i) => {
+          const left = i * STEP - element.scrollLeft;
+          if (left > -1 && left + STEP - 16 < element.clientWidth + 1) places.set(title.getAttribute("title")!, left);
+        });
+        return places;
+      };
+
+      /**
+       * Lists next as the running executions, lets the store read them through its own refresh, and checks that the
+       * scroll the row asks for keeps each card that was in view and still runs where it was.
+       */
+      async function change(next: ExecutionSummary[]) {
+        const before = inView();
+        const from = element.scrollLeft;
+        scrollTo.mockClear();
+        daemon.answers.set("/executions", next);
+        await act(async () => {
+          await actions.refreshExecutions();
+        });
+        await settle();
+        const asked = (scrollTo.mock.calls.at(-1)?.[0] as ScrollToOptions | undefined)?.left ?? from;
+        const names = [...host!.querySelectorAll(".exec-card__title")].map((title) => title.getAttribute("title"));
+        expect(names).toEqual(next.map((e) => e.taskName));
+        for (const [name, left] of before) {
+          if (names.includes(name)) expect(names.indexOf(name) * STEP - asked, name).toBeCloseTo(left);
+        }
+        expect(intoView).not.toHaveBeenCalled();
+      }
+
+      try {
+        expect(position()).toBe("3–5 de 5");
+        expect([...inView().keys()]).toEqual(["Row 3", "Row 4", "Row 5"]);
+
+        // A sixth starts, before the others: the row moves one card along, and the same three show.
+        await change([sixth, one, two, three, four, five]);
+        expect(scrollTo).toHaveBeenCalledTimes(1);
+        expect(position()).toBe("4–6 de 6");
+        expect([...inView().keys()]).toEqual(["Row 3", "Row 4", "Row 5"]);
+
+        // The first and the sixth end, both before the cards in view: the row moves back two cards.
+        await change([two, three, four, five]);
+        expect(position()).toBe("2–4 de 4");
+        expect([...inView().keys()]).toEqual(["Row 3", "Row 4", "Row 5"]);
+
+        // Two more end, one at a time. With three left the row fits: no Previous, no Next, no position.
+        await change([three, four, five]);
+        expect(controls()).toBeNull();
+        expect(buttons()).toEqual([]);
+        expect(position()).toBeUndefined();
+        await change([three, four]);
+        expect(controls()).toBeNull();
+        expect(position()).toBeUndefined();
+      } finally {
+        intoView.mockRestore();
+      }
+    });
+
+    it("never moves on its own: left untouched for five minutes at its start, it asks for no scroll", async () => {
+      // Every kind of timer a rotation could use is fake from before the row mounts, so one it started would run
+      // within the five minutes. setImmediate stays real: the stand-in's answers arrive through it.
+      vi.useFakeTimers({
+        toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval", "requestAnimationFrame", "cancelAnimationFrame"],
+      });
+      const intoView = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
+      try {
+        const scrollTo = await showRow(6);
+        expect(position()).toBe("1–3 de 6");
+        await act(async () => void vi.advanceTimersByTime(5 * 60 * 1000));
+        expect(scrollTo).not.toHaveBeenCalled();
+        expect(intoView).not.toHaveBeenCalled();
+        expect(row().scrollLeft).toBe(0);
+        expect(position()).toBe("1–3 de 6");
+      } finally {
+        intoView.mockRestore();
+        vi.useRealTimers();
+      }
     });
   });
 
