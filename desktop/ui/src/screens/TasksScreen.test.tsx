@@ -240,6 +240,62 @@ describe("the Tasks screen's toggle", () => {
     expect(toasts()).toEqual([]);
   });
 
+  // harmflow-app#1078: a task that cites an agent and a skill its harness does not have toggles like any other, and
+  // keeps its two warnings. That the daemon accepts each change and keeps the warnings is
+  // itest › TestTaskWithMissingItemsIsDisabledAndEnabled's.
+  it("disables and enables a task whose cited agent and skill are missing, and keeps its two warnings", async () => {
+    const missingAgent = {
+      code: "missing_agent",
+      subject: "/spec/agents",
+      message: 'agent "tester" is missing on this machine for claude-code (the claude-code configuration)',
+      messageKey: "agent_missing",
+      params: { name: "tester", harness: "claude-code", where: "the claude-code configuration", source: "harness" },
+    } as const;
+    const missingSkill = {
+      code: "missing_skill",
+      subject: "/spec/skills",
+      message: `skill "review-notes" is missing on this machine for claude-code (claude-code's skill list)`,
+      messageKey: "skill_missing",
+      params: { name: "review-notes", harness: "claude-code", where: "claude-code's skill list", source: "skill_list" },
+    } as const;
+    const cited: TaskSummary = { ...standup, id: "cited", name: "Cited items", warnings: [missingAgent, missingSkill] };
+    const warningChip = () => {
+      const chip = row("cited")!.querySelector<HTMLElement>(".task-row__title .chip--warning")!;
+      return { text: chip.textContent, title: chip.title };
+    };
+    const shownWarnings = {
+      text: "2 warnings",
+      title:
+        'Agent not found: agent "tester" is missing on this machine for claude-code (the claude-code configuration)\n' +
+        `Skill not found: skill "review-notes" is missing on this machine for claude-code (claude-code's skill list)`,
+    };
+
+    answer("POST", "/tasks/cited/disable", { ...cited, enabled: false });
+    answer("GET", "/tasks", [{ ...cited, enabled: false, revision: "r2" }]);
+    await open([cited]);
+    expect(toggleLabel("cited")).toBe("Enabled");
+    expect(warningChip()).toEqual(shownWarnings);
+
+    await click(toggle("cited"));
+    expect(daemon.requests).toEqual([req("POST", "/tasks/cited/disable"), req("GET", "/tasks")]);
+    expect(toggle("cited").checked).toBe(false);
+    expect(toggleLabel("cited")).toBe("Disabled");
+    expect(row("cited")!.className).toContain("task-row--disabled");
+    expect(warningChip()).toEqual(shownWarnings);
+    expect(toasts()).toEqual([]);
+
+    daemon.requests.length = 0;
+    answer("POST", "/tasks/cited/enable", cited);
+    answer("GET", "/tasks", [{ ...cited, revision: "r3" }]);
+    await click(toggle("cited"));
+    expect(daemon.requests).toEqual([req("POST", "/tasks/cited/enable"), req("GET", "/tasks")]);
+    expect(toggle("cited").checked).toBe(true);
+    expect(toggleLabel("cited")).toBe("Enabled");
+    expect(row("cited")!.className).not.toContain("task-row--disabled");
+    expect(warningChip()).toEqual(shownWarnings);
+    expect(toasts()).toEqual([]);
+  });
+
   it("shows the daemon's refusal as an error toast, and keeps the state the list reports", async () => {
     answer("POST", "/tasks/standup/enable", { error: { code: "validation_failed", message: "/spec/schedule: the schedule sets both cron and interval" } }, 422);
     await open([{ ...standup, enabled: false }]);
