@@ -6307,6 +6307,164 @@ func TestFiringWithAMissingSkillOnlyWarns(t *testing.T) {
 	}
 }
 
+// harmflow-app#1076: a missing agent never rejects a task, and only warns, naming it, at every entry point: validate,
+// create and update from the YAML editor and from the form, import, duplicate, and a task file loaded from disk. The
+// agents the harness finds are not reported. A file that breaks a schema rule is still rejected.
+func TestMissingAgentOnlyWarnsAtEveryEntryPoint(t *testing.T) {
+	e := newEnv(t)
+	ctx := t.Context()
+	agents := "  agents: [user-agent, review-agent, nowhere-agent]\n"
+	warns := func(what string, warnings []domain.Warning) {
+		t.Helper()
+		var named []string
+		for _, w := range warnings {
+			if w.Code != domain.WarningMissingAgent {
+				continue
+			}
+			named = append(named, w.Params["name"])
+			if w.Key != "agent_missing" || w.Subject != "/spec/agents" || w.Params["harness"] != domain.HarnessClaudeCode {
+				t.Errorf("%s warns %+v, want agent_missing on /spec/agents for Claude Code", what, w)
+			}
+		}
+		if !slices.Equal(named, []string{"nowhere-agent"}) {
+			t.Errorf("%s warns of missing agents %q, want nowhere-agent alone", what, named)
+		}
+	}
+
+	res := e.app.Validate(ctx, TaskInput{YAML: taskYAML("agented", agents)})
+	if !res.Valid {
+		t.Errorf("Validate(agented) errors = %+v, want none", res.Errors)
+	}
+	warns("Validate(agented)", issuesToWarnings(res.Warnings))
+
+	created, err := e.app.CreateTask(ctx, TaskInput{YAML: taskYAML("agented", agents)})
+	if err != nil {
+		t.Fatalf("CreateTask(agented) = %v, want no error", err)
+	}
+	warns("CreateTask(agented)", created.Warnings)
+	edited, err := e.app.UpdateTask(ctx, "agented", TaskInput{YAML: strings.Replace(taskYAML("agented", agents), "Do the work",
+		"Now do the work", 1), BaseRevision: created.Revision})
+	if err != nil {
+		t.Fatalf("UpdateTask(agented) = %v, want no error", err)
+	}
+	warns("UpdateTask(agented)", edited.Warnings)
+
+	form := func(id string) json.RawMessage {
+		doc, err := json.Marshal(map[string]any{"apiVersion": "harmflow/v1alpha1", "kind": "Task",
+			"metadata": map[string]any{"id": id, "name": "Task " + id},
+			"spec": map[string]any{"type": domain.TypeGeneral, "prompt": "Do the work of " + id + ".",
+				"agents":  []string{"user-agent", "nowhere-agent"},
+				"harness": map[string]any{"preferred": map[string]any{"provider": domain.HarnessClaudeCode}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return doc
+	}
+	fromForm, err := e.app.CreateTask(ctx, TaskInput{Document: form("formed")})
+	if err != nil {
+		t.Fatalf("CreateTask(formed), from the form = %v, want no error", err)
+	}
+	warns("CreateTask(formed), from the form", fromForm.Warnings)
+	if updated, err := e.app.UpdateTask(ctx, "formed", TaskInput{Document: form("formed"), BaseRevision: fromForm.Revision}); err != nil {
+		t.Errorf("UpdateTask(formed), from the form = %v, want no error", err)
+	} else {
+		warns("UpdateTask(formed), from the form", updated.Warnings)
+	}
+
+	imported, err := e.app.ImportTask(ctx, taskYAML("imported", agents), false)
+	if err != nil {
+		t.Fatalf("ImportTask(imported) = %v, want no error", err)
+	}
+	warns("ImportTask(imported)", imported.Warnings)
+	copied, err := e.app.DuplicateTask(ctx, "agented")
+	if err != nil {
+		t.Fatalf("DuplicateTask(agented) = %v, want no error", err)
+	}
+	warns("DuplicateTask(agented)", copied.Warnings)
+
+	if err := os.WriteFile(filepath.Join(filepath.Dir(created.Path), "on-disk.yaml"), []byte(taskYAML("on-disk", agents)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.app.scanTaskFiles(ctx)
+	loaded, err := e.app.GetTask("on-disk")
+	if err != nil || loaded.Invalid {
+		t.Fatalf("GetTask(on-disk), a file written outside HarmFlow = %+v, %v; want it loaded, valid", loaded, err)
+	}
+	warns("the task file on-disk", loaded.Warnings)
+
+	if _, err := e.app.CreateTask(ctx, TaskInput{YAML: strings.Replace(taskYAML("broken", agents), "type: general", "type: nope", 1)}); err == nil ||
+		err.(*Error).Code != CodeValidationFailed {
+		t.Errorf("CreateTask(broken), breaking the schema = %v, want %s", err, CodeValidationFailed)
+	}
+}
+
+// harmflow-app#1076: a task that cites a missing agent can be disabled and enabled. The toggle does not go through the
+// agent and skill check: it asks no harness for the task's items, and the task keeps the warning its save gave it and
+// the parameter values it gives that agent.
+func TestTaskWithAMissingAgentCanBeDisabledAndEnabled(t *testing.T) {
+	e := newEnv(t)
+	ctx := t.Context()
+	view, err := e.app.CreateTask(ctx, TaskInput{YAML: taskYAML("toggled", "  agents: [nowhere-agent]\n"+
+		"  parameters:\n    agents:\n      nowhere-agent:\n        depth: 3\n")})
+	if err != nil {
+		t.Fatalf("CreateTask(toggled) = %v, want no error", err)
+	}
+	lookups := func() int {
+		n := 0
+		for _, f := range []*fakeHarness{e.claude, e.codex} {
+			f.mu.Lock()
+			n += f.itemLookups
+			f.mu.Unlock()
+		}
+		return n
+	}
+	for _, enabled := range []bool{false, true} {
+		before := lookups()
+		view, err = e.app.SetEnabled(ctx, "toggled", enabled)
+		if n := lookups() - before; n != 0 {
+			t.Errorf("SetEnabled(toggled, %v) looked up %d agents or skills, want none", enabled, n)
+		}
+		if err != nil {
+			t.Fatalf("SetEnabled(toggled, %v) = %v, want no error", enabled, err)
+		}
+		if view.Enabled != enabled {
+			t.Errorf("SetEnabled(toggled, %v) enabled = %v, want %v", enabled, view.Enabled, enabled)
+		}
+		if !strings.Contains(view.YAML, "nowhere-agent:\n        depth: 3") {
+			t.Errorf("SetEnabled(toggled, %v) wrote\n%s\nwant the value of nowhere-agent's depth kept", enabled, view.YAML)
+		}
+		if !slices.ContainsFunc(view.Warnings, func(w domain.Warning) bool {
+			return w.Code == domain.WarningMissingAgent && w.Params["name"] == "nowhere-agent"
+		}) {
+			t.Errorf("SetEnabled(toggled, %v) warnings = %+v, want the missing agent named", enabled, view.Warnings)
+		}
+	}
+}
+
+// harmflow-app#1076: a firing of a task that cites a missing agent runs on its preferred harness: Claude Code is given
+// the agent by name, as the task cites it, and the execution records the warning validation gives, naming it.
+func TestFiringWithAMissingAgentOnlyWarns(t *testing.T) {
+	e := newEnv(t)
+	e.create("firing", "  agents: [nowhere-agent]\n")
+	r, err := e.app.RunTask("firing")
+	if err != nil {
+		t.Fatalf("RunTask(firing) = %+v, %v; want started", r, err)
+	}
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	e.claude.mu.Lock()
+	runs := slices.Clone(e.claude.runs)
+	e.claude.mu.Unlock()
+	if len(runs) != 1 || !slices.Equal(runs[0].req.Agents, []ports.ResolvedItem{{Name: "nowhere-agent", Kind: "agent"}}) {
+		t.Errorf("Claude Code was prepared for %d attempts, want one given nowhere-agent by name", len(runs))
+	}
+	want := `agent "nowhere-agent" is missing on this machine for claude-code (the claude-code configuration)`
+	if !slices.ContainsFunc(x.Warnings, func(w domain.Warning) bool {
+		return w.Code == domain.WarningMissingAgent && w.Key == "agent_missing" && w.Subject == "/spec/agents" && w.Message == want
+	}) {
+		t.Errorf("the execution's warnings %+v, want %s: %s", x.Warnings, domain.WarningMissingAgent, want)
+	}
+}
+
 // A saved task keeps its type. A duplicate inherits it, and an update that changes it is refused at the type and writes
 // nothing, from the form's document and from the YAML editor alike. The file is the source of truth: a direct edit
 // that changes the type loads, and the task keeps that type from then on.
