@@ -658,6 +658,115 @@ func TestClaudeCodePluginSkillsSurviveExportAndImport(t *testing.T) {
 	})
 }
 
+// newClaudeConfigApp is newClaudeApp on a stand-in Claude Code that is signed in and whose skill list is the folders
+// of the skills folder of its configuration directory, which it returns. Each call starts on a configuration of its
+// own, empty, so a second call stands for another machine.
+func newClaudeConfigApp(t *testing.T) (*App, string) {
+	t.Helper()
+	a, config := newClaudeApp(t)
+	bin := t.TempDir()
+	list := `skills=
+    for d in '` + config + `'/skills/*/; do
+      [ -d "$d" ] && skills="$skills${skills:+,}\"$(basename "$d")\""
+    done
+    echo '{"type":"system","subtype":"init","skills":['"$skills"']}'`
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte(claudeListing(list)), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	a.adapters[domain.HarnessClaudeCode].(*claudecode.Adapter).PathEnv = bin
+	return a, config
+}
+
+// An export carries the names of the agents and skills a task cites, never the items. A Claude Code task cites a
+// user's agent and a user's skill, each a file of its own in the configuration of the machine that exports it: the
+// exported document names both, and holds no text of either file and no path of that configuration. Imported on a
+// machine whose configuration has neither, it is saved with both names unchanged, and warns once for each, naming it.
+func TestExportCarriesOnlyTheNamesOfTheUsersAgentsAndSkills(t *testing.T) {
+	ctx := t.Context()
+	a, config := newClaudeConfigApp(t)
+	files := map[string]string{
+		filepath.Join(config, "agents", "review-agent.md"): "---\nname: review-agent\n" +
+			"description: Reviews a change as the exporting user asks.\n---\nAgent instructions kept on the exporting machine.\n",
+		filepath.Join(config, "skills", "review-notes", "SKILL.md"): "---\nname: review-notes\n" +
+			"description: Writes review notes as the exporting user asks.\n---\nSkill instructions kept on the exporting machine.\n",
+	}
+	for path, content := range files {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	missing := func(warnings []domain.Warning) map[string][]string {
+		names := map[string][]string{}
+		for _, w := range warnings {
+			if w.Key == "agent_missing" || w.Key == "skill_missing" {
+				names[w.Key] = append(names[w.Key], w.Params["name"])
+			}
+		}
+		return names
+	}
+
+	created, err := a.CreateTask(ctx, TaskInput{YAML: taskYAML("cites", "  agents: [review-agent]\n  skills: [review-notes]\n")})
+	if err != nil {
+		t.Fatalf("CreateTask(cites), citing a user's agent and a user's skill = %v, want no error", err)
+	}
+	if slices.ContainsFunc(created.Warnings, func(w domain.Warning) bool {
+		return w.Code == domain.WarningMissingAgent || w.Code == domain.WarningMissingSkill
+	}) {
+		t.Fatalf("CreateTask(cites) warnings = %+v, want the agent and the skill found on the exporting machine",
+			created.Warnings)
+	}
+	data, err := a.ExportTask("cites")
+	if err != nil {
+		t.Fatalf("ExportTask(cites) = %v, want no error", err)
+	}
+	exported := string(data)
+	for _, name := range []string{"agents: [review-agent]", "skills: [review-notes]"} {
+		if !strings.Contains(exported, name) {
+			t.Errorf("ExportTask(cites) =\n%s\nwant %q", exported, name)
+		}
+	}
+	// The items' names are in the export by design; every other line of their files, and every path to them, is not.
+	var held []string
+	for path, content := range files {
+		for _, line := range strings.Split(content, "\n") {
+			if line != "" && line != "---" && !strings.HasPrefix(line, "name: ") {
+				held = append(held, line)
+			}
+		}
+		rel, err := filepath.Rel(config, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		held = append(held, rel)
+	}
+	held = append(held, config)
+	if resolved, err := filepath.EvalSymlinks(config); err == nil {
+		held = append(held, resolved)
+	}
+	for _, text := range held {
+		if strings.Contains(exported, text) {
+			t.Errorf("ExportTask(cites) =\n%s\nholds %q, want no text of the agent's or the skill's file and no path of "+
+				"the configuration", exported, text)
+		}
+	}
+
+	elsewhere, _ := newClaudeConfigApp(t)
+	imported, err := elsewhere.ImportTask(ctx, exported, false)
+	if err != nil {
+		t.Fatalf("ImportTask(export of cites), on a machine with neither item = %v, want no error", err)
+	}
+	if !strings.Contains(imported.YAML, "agents: [review-agent]") || !strings.Contains(imported.YAML, "skills: [review-notes]") {
+		t.Errorf("ImportTask(export of cites) wrote\n%s\nwant the agent's and the skill's names unchanged", imported.YAML)
+	}
+	want := map[string][]string{"agent_missing": {"review-agent"}, "skill_missing": {"review-notes"}}
+	if got := missing(imported.Warnings); !reflect.DeepEqual(got, want) {
+		t.Errorf("ImportTask(export of cites) warns %v, want one warning for each, naming it: %v", got, want)
+	}
+}
+
 // writeSkill writes a SKILL.md into dir, named for the folder.
 func writeSkill(t *testing.T, dir string) {
 	t.Helper()
