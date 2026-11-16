@@ -654,6 +654,19 @@ describe("the AI tools section's general system prompt", () => {
     expect(toasts()).toEqual([{ tone: "success", text: "Settings saved." }]);
   });
 
+  it("gives the counter its normal style alone below the limit, with no warning style however close the text comes", async () => {
+    patchStateForTests({ harnesses: [claudeCode, codex], tools });
+    await open("agents");
+    // The whole class list, not the absence of named classes: a style of any name added below the limit fails it.
+    await write("abc" + "paste 😀 ok");
+    expect(text(counter())).toBe("13 / 20,000");
+    expect([...counter()!.classList]).toEqual(["field__count"]);
+
+    await write("😀".repeat(19999));
+    expect(text(counter())).toBe("19,999 / 20,000");
+    expect([...counter()!.classList]).toEqual(["field__count"]);
+  });
+
   it("lets typing take the text past the limit, marking the field and allowing no Save until the user deletes it", async () => {
     const most = "é".repeat(20000);
     daemon.settings = { ...daemon.settings, systemPrompt: most };
