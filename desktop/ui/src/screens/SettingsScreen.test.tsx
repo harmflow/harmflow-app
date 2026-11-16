@@ -793,6 +793,20 @@ describe("the spend band's view", () => {
     );
     expect(named.map((el) => el.outerHTML)).toEqual([]);
   });
+
+  // The band's Harness toggle is kept the same way, beside the band's view, with no row in Settings either.
+  it.each(sections)("has no control, label, or row for the Harness toggle in the %s section", async (section) => {
+    patchStateForTests({ harnesses: [claudeCode, codex], tools, diagnostics });
+    await open(section);
+    expect(text(host!.querySelector(".settings__title"))).toBe(i18n.t(`settings.sections.${section}`));
+
+    const toggle = i18n.t("overview.spend.harness");
+    // No element with the toggle's text, accessible name, or tooltip.
+    const named = [...host!.querySelectorAll("*")].filter(
+      (el) => text(el) === toggle || el.getAttribute("aria-label") === toggle || el.getAttribute("title") === toggle,
+    );
+    expect(named.map((el) => el.outerHTML)).toEqual([]);
+  });
 });
 
 describe("starting the daemon by hand, with its running and autostart states shown apart", () => {
