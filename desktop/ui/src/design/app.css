@@ -2829,6 +2829,18 @@ button.list-row--error:hover {
   font-size: var(--hf-font-size-xs);
 }
 
+/* A field's character counter, under its text area; it takes the error style at the field's limit. */
+.field__count {
+  align-self: flex-end;
+  color: var(--hf-color-text-faint);
+  font-size: var(--hf-font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.field__count--error {
+  color: var(--hf-color-danger);
+}
+
 .field--toggle {
   justify-content: flex-end;
   padding-bottom: var(--hf-space-1-5);

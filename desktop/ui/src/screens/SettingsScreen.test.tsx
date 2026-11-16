@@ -5,7 +5,8 @@
 // Drives the same section's Clean workspaces control too: one clean-up request, no second click while it runs, and
 // what the daemon removed and kept, or its error. Which worktrees the daemon removes is app › CleanWorkspaces' tests'.
 // Drives the AI tools section's general system prompt too: a draft until Save, the text sent alone, an emptied field
-// that clears it, and a text the daemon refuses shown on the field.
+// that clears it, its character counter in code points, a text over 20,000 characters that marks the field and cannot
+// be saved, and a text the daemon refuses shown on the field.
 // Then shows what AI tools, Security, and Storage read from the harnesses, the tools, and the diagnostics in the store:
 // each harness's readiness and path, the command-line tools, the token store, the disk used, and the directories with
 // their Show in Finder buttons, which ask the desktop's bridge to open the row's path. And the Daemon section's Stop
@@ -16,6 +17,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { api } from "../api/client";
 import { native, type DaemonStatus } from "../api/native";
 import type { StreamHandlers } from "../api/transport";
 import type { Diagnostics, Harness, Health, Settings, SettingsPatch, Stats, Tool } from "../api/types";
@@ -554,6 +556,9 @@ describe("the AI tools section's general system prompt", () => {
   const area = () => host!.querySelector<HTMLTextAreaElement>("#settings-system-prompt")!;
   const save = () => area().closest(".row-list")!.querySelector<HTMLButtonElement>(".inline-actions button")!;
   const fieldError = () => text(area().closest(".field")!.querySelector(".field__error"));
+  const counter = () => area().closest(".field")!.querySelector(".field__count");
+  /** Whether the field is marked in red, as over the limit or refused. */
+  const marked = () => area().closest(".field")!.classList.contains("field--error");
 
   /** Types into the text area as React sees it. */
   async function write(value: string) {
@@ -609,23 +614,110 @@ describe("the AI tools section's general system prompt", () => {
     expect(save().disabled).toBe(true);
   });
 
-  it("saves a text of 20,000 characters, and shows the refusal of one more on the field, keeping it a draft", async () => {
+  it("counts the text's characters in code points on every change, a paste included, an emoji outside the BMP as one", async () => {
     patchStateForTests({ harnesses: [claudeCode, codex], tools });
     await open("agents");
-    const most = "é".repeat(20000);
-    await write(most);
-    await click(save());
-    expect(daemon.settings.systemPrompt).toBe(most);
-    expect(fieldError()).toBeUndefined();
+    expect(text(counter())).toBe("0 / 20,000");
 
-    await write(most + "é");
+    await write("abc");
+    expect(text(counter())).toBe("3 / 20,000");
+    // A paste of 10 characters reaches the field as one change holding the whole text.
+    await write("abc" + "paste 😀 ok");
+    expect(text(counter())).toBe("13 / 20,000");
+    expect(counter()!.classList.contains("field__count--error")).toBe(false);
+    // No maxLength, which counts UTF-16 code units and would cut a paste or stop typing at the limit.
+    expect(area().hasAttribute("maxlength")).toBe(false);
+  });
+
+  it("keeps the counter's normal style below the limit, and at exactly 20,000 characters styles the counter alone and saves", async () => {
+    patchStateForTests({ harnesses: [claudeCode, codex], tools });
+    await open("agents");
+    // Each emoji is one code point and two UTF-16 code units: 20,000 of them are 40,000 units, which the field accepts.
+    await write("😀".repeat(19999));
+    expect(text(counter())).toBe("19,999 / 20,000");
+    expect(counter()!.classList.contains("field__count--error")).toBe(false);
+    expect(marked()).toBe(false);
+
+    const most = "😀".repeat(20000);
+    await write(most);
+    expect(text(counter())).toBe("20,000 / 20,000 · limit reached");
+    expect(counter()!.classList.contains("field__count--error")).toBe(true);
+    expect(marked()).toBe(false);
+    expect(fieldError()).toBeUndefined();
+    expect(area().hasAttribute("aria-invalid")).toBe(false);
+    expect(save().disabled).toBe(false);
+
     daemon.requests.length = 0;
     await click(save());
-    expect(updates().map((r) => r.body)).toStrictEqual([{ systemPrompt: most + "é" }]);
+    expect(updates().map((r) => r.body)).toStrictEqual([{ systemPrompt: most }]);
     expect(daemon.settings.systemPrompt).toBe(most);
-    expect(fieldError()).toBe("systemPrompt must be at most 20000 characters");
-    expect(area().getAttribute("aria-invalid")).toBe("true");
+    expect(toasts()).toEqual([{ tone: "success", text: "Settings saved." }]);
+  });
+
+  it("lets typing take the text past the limit, marking the field and allowing no Save until the user deletes it", async () => {
+    const most = "é".repeat(20000);
+    daemon.settings = { ...daemon.settings, systemPrompt: most };
+    patchStateForTests({ harnesses: [claudeCode, codex], tools });
+    await open("agents");
+    expect(marked()).toBe(false);
+
+    await write(most + "é");
     expect(area().value).toBe(most + "é");
+    expect(text(counter())).toBe("20,001 / 20,000 · over the limit");
+    expect(counter()!.classList.contains("field__count--error")).toBe(true);
+    expect(marked()).toBe(true);
+    expect(fieldError()).toBe("The text is over the 20,000-character limit. Shorten it to save.");
+    expect(area().getAttribute("aria-invalid")).toBe("true");
+    expect(save().disabled).toBe(true);
+    expect(leaveCheck).not.toBeNull();
+    daemon.requests.length = 0;
+    await click(save());
+    expect(updates()).toEqual([]);
+
+    await write(most);
+    expect(marked()).toBe(false);
+    expect(area().hasAttribute("aria-invalid")).toBe(false);
+  });
+
+  it("takes a paste past the limit whole, marking the field and allowing no Save until the user trims it", async () => {
+    patchStateForTests({ harnesses: [claudeCode, codex], tools });
+    await open("agents");
+    const start = "a".repeat(19990);
+    await write(start);
+    await write(start + "b".repeat(20));
+    expect(area().value).toBe(start + "b".repeat(20));
+    expect(text(counter())).toBe("20,010 / 20,000 · over the limit");
+    expect(marked()).toBe(true);
+    expect(save().disabled).toBe(true);
+
+    await write(start + "b".repeat(10));
+    expect(marked()).toBe(false);
+    expect(fieldError()).toBeUndefined();
+    expect(save().disabled).toBe(false);
+  });
+
+  it("marks an over-limit text saved before and allows no Save until the user trims it", async () => {
+    daemon.settings = { ...daemon.settings, systemPrompt: "x".repeat(20001) };
+    patchStateForTests({ harnesses: [claudeCode, codex], tools });
+    await open("agents");
+    expect(text(counter())).toBe("20,001 / 20,000 · over the limit");
+    expect(marked()).toBe(true);
+    expect(save().disabled).toBe(true);
+
+    await write("x".repeat(20000));
+    expect(marked()).toBe(false);
+    expect(save().disabled).toBe(false);
+  });
+
+  it("shows a text the daemon refuses on the field, keeping it a draft", async () => {
+    patchStateForTests({ harnesses: [claudeCode, codex], tools });
+    await open("agents");
+    vi.spyOn(api, "updateSettings").mockRejectedValueOnce(new Error("systemPrompt is invalid"));
+    await write("Answer in pt-BR.");
+    await click(save());
+    expect(fieldError()).toBe("systemPrompt is invalid");
+    expect(area().getAttribute("aria-invalid")).toBe("true");
+    expect(area().value).toBe("Answer in pt-BR.");
     expect(save().disabled).toBe(false);
     expect(leaveCheck).not.toBeNull();
   });
