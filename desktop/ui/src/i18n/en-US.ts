@@ -1413,6 +1413,10 @@ export const enUS = {
     systemPrompt: "Instructions for every session",
     systemPromptHint:
       "Every session of a GitHub or general task receives this text on each AI tool, before HarmFlow's own instructions. Script tasks never do. At most 20,000 characters; leave it empty to send nothing.",
+    systemPromptCount: "{{used}} / {{limit}}",
+    systemPromptCountAtLimit: "{{used}} / {{limit}} · limit reached",
+    systemPromptCountOver: "{{used}} / {{limit}} · over the limit",
+    systemPromptTooLong: "The text is over the {{limit}}-character limit. Shorten it to save.",
     showRestrictionWarnings: "Show restriction warnings",
     showRestrictionWarningsHint:
       "Shows a banner in an execution's detail for each restriction its AI tool does not enforce. The Events tab lists them either way.",

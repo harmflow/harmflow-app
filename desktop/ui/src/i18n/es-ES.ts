@@ -1438,6 +1438,10 @@ export const esES: Resources = {
     systemPrompt: "Instrucciones para todas las sesiones",
     systemPromptHint:
       "Cada sesión de una tarea de GitHub o general recibe este texto en cada herramienta de IA, antes de las instrucciones propias de HarmFlow. Las tareas de script nunca lo reciben. Como máximo 20.000 caracteres; déjalo vacío para no enviar nada.",
+    systemPromptCount: "{{used}} / {{limit}}",
+    systemPromptCountAtLimit: "{{used}} / {{limit}} · límite alcanzado",
+    systemPromptCountOver: "{{used}} / {{limit}} · por encima del límite",
+    systemPromptTooLong: "El texto supera el límite de {{limit}} caracteres. Acórtalo para guardarlo.",
     showRestrictionWarnings: "Mostrar avisos de restricción",
     showRestrictionWarningsHint:
       "Muestra un aviso en el detalle de una ejecución por cada restricción que la herramienta de IA no aplica. La pestaña Eventos las lista de todos modos.",

@@ -3,8 +3,9 @@ import { useTranslation } from "react-i18next";
 import { api } from "../../api/client";
 import { HarnessInventory, ToolRow } from "../../components/Harnesses";
 import { toast } from "../../components/toast";
-import { Button, Field, NumberInput, Panel, TextArea } from "../../components/ui";
+import { Button, cx, Field, NumberInput, Panel, TextArea } from "../../components/ui";
 import { errorMessage } from "../../lib/errorMessage";
+import { formatNumber } from "../../lib/format";
 import { useDraft, type DraftReport } from "../../lib/hooks";
 import { actions, useStore } from "../../state/store";
 import { SettingRow } from "./SettingRow";
@@ -80,19 +81,29 @@ export function AgentsSection({ report }: { report: DraftReport }) {
   );
 }
 
+/** The most characters the daemon accepts in the general system prompt. */
+const MAX_SYSTEM_PROMPT_LENGTH = 20000;
+
 /**
  * The general system prompt, which every harness session of a GitHub or general task receives. It stays a draft until
- * Save, which sends the text whole, an emptied one included; a text the daemon refuses shows the daemon's error on the
- * field and stays a draft.
+ * Save, which sends the text whole, an emptied one included. A counter under it counts the text's characters in Unicode
+ * code points, as the daemon does, and takes the error style at the limit. Neither typing nor a paste is held at the
+ * limit: a text over it marks the field and cannot be saved until the user trims it, a value saved before included. A
+ * text the daemon refuses shows the daemon's error on the field and stays a draft.
  */
 function SystemPromptField({ value, onDraft }: { value: string; onDraft: DraftReport }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [text, setText] = useState(value);
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
   useEffect(() => setText(value), [value]);
   const changed = text !== value;
   useDraft(onDraft, "systemPrompt", changed);
+  const length = Array.from(text).length;
+  const atLimit = length >= MAX_SYSTEM_PROMPT_LENGTH;
+  const over = length > MAX_SYSTEM_PROMPT_LENGTH;
+  const counted = { used: formatNumber(length, i18n.language), limit: formatNumber(MAX_SYSTEM_PROMPT_LENGTH, i18n.language) };
+  const shownError = error ?? (over ? t("settings.systemPromptTooLong", { limit: counted.limit }) : undefined);
   const save = async () => {
     setSaving(true);
     try {
@@ -108,20 +119,27 @@ function SystemPromptField({ value, onDraft }: { value: string; onDraft: DraftRe
   };
   return (
     <div className="row-list">
-      <Field label={t("settings.systemPrompt")} hint={t("settings.systemPromptHint")} error={error}>
+      <Field label={t("settings.systemPrompt")} hint={t("settings.systemPromptHint")} error={shownError}>
         <TextArea
           id="settings-system-prompt"
           rows={6}
           value={text}
-          aria-invalid={error ? true : undefined}
+          aria-invalid={shownError ? true : undefined}
           onChange={(e) => {
             setText(e.target.value);
             setError(undefined);
           }}
         />
+        <span className={cx("field__count", atLimit && "field__count--error")}>
+          {over
+            ? t("settings.systemPromptCountOver", counted)
+            : atLimit
+              ? t("settings.systemPromptCountAtLimit", counted)
+              : t("settings.systemPromptCount", counted)}
+        </span>
       </Field>
       <div className="inline-actions">
-        <Button size="sm" variant="primary" disabled={!changed || saving} onClick={() => void save()}>
+        <Button size="sm" variant="primary" disabled={!changed || saving || over} onClick={() => void save()}>
           {t("common.save")}
         </Button>
       </div>
