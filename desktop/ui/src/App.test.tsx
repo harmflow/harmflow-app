@@ -92,6 +92,8 @@ const settings: Settings = {
   trayEnabled: true,
   keepTrayOnQuit: false,
   showRestrictionWarnings: true,
+  showSystemWidget: true,
+  showGitHubWidget: true,
   notificationLevel: "all",
   logRetentionDays: 30,
   theme: "harmflow-dark",

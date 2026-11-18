@@ -552,3 +552,43 @@ func TestShowRestrictionWarningsIsOnByDefaultAndKeepsAPatch(t *testing.T) {
 		t.Errorf("GetSettings().ShowRestrictionWarnings = %v after a restart, want false", got)
 	}
 }
+
+// The sidebar's System and GitHub widgets show on a fresh data folder and on one saved before their settings existed;
+// a patch hides one of them alone, and that outlives a restart of the daemon.
+func TestSidebarWidgetsAreOnByDefaultAndKeepAPatch(t *testing.T) {
+	widgets := func(s SettingsView) [2]bool { return [2]bool{s.ShowSystemWidget, s.ShowGitHubWidget} }
+	off := false
+	for _, tc := range []struct {
+		name  string
+		patch SettingsPatch
+		want  [2]bool
+	}{
+		{"system off", SettingsPatch{ShowSystemWidget: &off}, [2]bool{false, true}},
+		{"github off", SettingsPatch{ShowGitHubWidget: &off}, [2]bool{true, false}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			if got := widgets(e.app.GetSettings()); got != [2]bool{true, true} {
+				t.Fatalf("GetSettings() system, github widgets = %v on a fresh data folder, want [true true]", got)
+			}
+
+			// Settings saved by a version without the options.
+			if err := e.app.d.State.Save("settings", map[string]any{"schemaVersion": "1", "language": "en-US", "trayEnabled": true}); err != nil {
+				t.Fatalf("Save(settings): %v", err)
+			}
+			e = e.restart(t)
+			if got := widgets(e.app.GetSettings()); got != [2]bool{true, true} {
+				t.Fatalf("GetSettings() system, github widgets = %v on settings saved without them, want [true true]", got)
+			}
+
+			v, err := e.app.UpdateSettings(tc.patch)
+			if err != nil || widgets(v) != tc.want {
+				t.Fatalf("UpdateSettings(%s) = %v, %v, want %v, nil", tc.name, widgets(v), err, tc.want)
+			}
+			e = e.restart(t)
+			if got := widgets(e.app.GetSettings()); got != tc.want {
+				t.Errorf("GetSettings() system, github widgets = %v after a restart, want %v", got, tc.want)
+			}
+		})
+	}
+}

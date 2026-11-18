@@ -1407,6 +1407,7 @@ export const esES: Resources = {
       zoom: "Zoom",
       typeface: "Fuente",
       menuBar: "Barra de menús",
+      sidebar: "Barra lateral",
       notices: "Avisos",
       agents: "Herramientas de IA",
       tools: "Herramientas de línea de comandos",
@@ -1445,6 +1446,12 @@ export const esES: Resources = {
     showRestrictionWarnings: "Mostrar avisos de restricción",
     showRestrictionWarningsHint:
       "Muestra un aviso en el detalle de una ejecución por cada restricción que la herramienta de IA no aplica. La pestaña Eventos las lista de todos modos.",
+    showSystemWidget: "Mostrar el widget Sistema",
+    showSystemWidgetHint:
+      "Muestra u oculta los medidores de CPU, RAM y disco en la barra lateral expandida. Mientras está oculto, HarmFlow no los lee.",
+    showGitHubWidget: "Mostrar el widget GitHub",
+    showGitHubWidgetHint:
+      "Muestra u oculta los medidores del límite de solicitudes de GitHub en la barra lateral expandida. Mientras está oculto, HarmFlow no los lee.",
     keepTrayOnQuit: "Mantener HarmFlow en la barra de menús al salir con ⌘Q",
     keepTrayOnQuitHint:
       "Activado, ⌘Q solo oculta la ventana, como cerrarla; Salir de la interfaz, en la barra de menús, sigue saliendo. Desactivado, ⌘Q cierra el panel y la barra de menús. El daemon sigue en ejecución en cualquier caso.",

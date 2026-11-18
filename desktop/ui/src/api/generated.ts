@@ -1597,6 +1597,16 @@ export interface components {
              */
             showRestrictionWarnings: boolean;
             /**
+             * @description Shows the System widget, the machine's CPU, RAM, and disk, in the expanded sidebar. Off, the sidebar hides it and the dashboard reads nothing from /system.
+             * @default true
+             */
+            showSystemWidget: boolean;
+            /**
+             * @description Shows the GitHub widget, the signed-in gh login's rate-limit use, in the expanded sidebar. Off, the sidebar hides it and the dashboard reads nothing from /github/rate-limit.
+             * @default true
+             */
+            showGitHubWidget: boolean;
+            /**
              * @default all
              * @enum {string}
              */
@@ -1648,6 +1658,8 @@ export interface components {
             trayEnabled?: boolean;
             keepTrayOnQuit?: boolean;
             showRestrictionWarnings?: boolean;
+            showSystemWidget?: boolean;
+            showGitHubWidget?: boolean;
             /** @enum {string} */
             notificationLevel?: "all" | "failures_and_attention" | "none";
             logRetentionDays?: number;

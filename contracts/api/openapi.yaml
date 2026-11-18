@@ -2254,8 +2254,9 @@ components:
 
     Settings:
       type: object
-      required: [language, trayEnabled, keepTrayOnQuit, showRestrictionWarnings, notificationLevel, logRetentionDays,
-        autostart, pathVariables, allowedFolders, onboardingCompleted, quota, systemPrompt]
+      required: [language, trayEnabled, keepTrayOnQuit, showRestrictionWarnings, showSystemWidget, showGitHubWidget,
+        notificationLevel, logRetentionDays, autostart, pathVariables, allowedFolders, onboardingCompleted, quota,
+        systemPrompt]
       properties:
         language: { type: string, enum: [pt-BR, en-US, es-ES, system] }
         typeface:
@@ -2275,6 +2276,18 @@ components:
           description: >-
             Shows, in an execution's detail, a banner for each restriction the harness does not enforce. It changes
             only what the dashboard shows: the execution's events and logs name each restriction whatever it says.
+          type: boolean
+          default: true
+        showSystemWidget:
+          description: >-
+            Shows the System widget, the machine's CPU, RAM, and disk, in the expanded sidebar. Off, the sidebar hides
+            it and the dashboard reads nothing from /system.
+          type: boolean
+          default: true
+        showGitHubWidget:
+          description: >-
+            Shows the GitHub widget, the signed-in gh login's rate-limit use, in the expanded sidebar. Off, the sidebar
+            hides it and the dashboard reads nothing from /github/rate-limit.
           type: boolean
           default: true
         notificationLevel: { type: string, enum: [all, failures_and_attention, none], default: all }
@@ -2344,6 +2357,8 @@ components:
         trayEnabled: { type: boolean }
         keepTrayOnQuit: { type: boolean }
         showRestrictionWarnings: { type: boolean }
+        showSystemWidget: { type: boolean }
+        showGitHubWidget: { type: boolean }
         notificationLevel: { type: string, enum: [all, failures_and_attention, none] }
         logRetentionDays: { type: integer, minimum: 1, maximum: 3650 }
         autostart: { type: boolean }

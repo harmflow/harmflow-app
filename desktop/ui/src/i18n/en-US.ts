@@ -1382,6 +1382,7 @@ export const enUS = {
       zoom: "Zoom",
       typeface: "Font",
       menuBar: "Menu bar",
+      sidebar: "Sidebar",
       notices: "Notices",
       agents: "AI tools",
       tools: "Command-line tools",
@@ -1420,6 +1421,12 @@ export const enUS = {
     showRestrictionWarnings: "Show restriction warnings",
     showRestrictionWarningsHint:
       "Shows a banner in an execution's detail for each restriction its AI tool does not enforce. The Events tab lists them either way.",
+    showSystemWidget: "Show System widget",
+    showSystemWidgetHint:
+      "Shows or hides the CPU, RAM, and disk gauges in the expanded sidebar. While hidden, HarmFlow does not read them.",
+    showGitHubWidget: "Show GitHub widget",
+    showGitHubWidgetHint:
+      "Shows or hides the GitHub rate-limit gauges in the expanded sidebar. While hidden, HarmFlow does not read them.",
     keepTrayOnQuit: "Keep HarmFlow in the menu bar when quitting with ⌘Q",
     keepTrayOnQuitHint:
       "With it on, ⌘Q only hides the window, as closing it does; Quit interface in the menu bar still quits. With it off, ⌘Q closes the dashboard and the menu bar. The daemon keeps running either way.",

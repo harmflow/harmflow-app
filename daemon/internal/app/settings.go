@@ -25,11 +25,17 @@ type Settings struct {
 	// ShowRestrictionWarnings shows, in an execution's detail, a banner for each restriction the harness does not
 	// enforce. It changes only what the dashboard shows: the events and the logs name each restriction whatever it
 	// says. On by default.
-	ShowRestrictionWarnings bool              `json:"showRestrictionWarnings"`
-	NotificationLevel       string            `json:"notificationLevel"`
-	LogRetentionDays        int               `json:"logRetentionDays"`
-	Theme                   string            `json:"theme"`
-	PathVariables           map[string]string `json:"pathVariables"`
+	ShowRestrictionWarnings bool `json:"showRestrictionWarnings"`
+	// ShowSystemWidget shows the System widget, the machine's CPU, RAM, and disk, in the expanded sidebar; off, the
+	// dashboard reads nothing from /system. On by default.
+	ShowSystemWidget bool `json:"showSystemWidget"`
+	// ShowGitHubWidget shows the GitHub widget, the gh login's rate-limit use, in the expanded sidebar; off, the
+	// dashboard reads nothing from /github/rate-limit. On by default.
+	ShowGitHubWidget  bool              `json:"showGitHubWidget"`
+	NotificationLevel string            `json:"notificationLevel"`
+	LogRetentionDays  int               `json:"logRetentionDays"`
+	Theme             string            `json:"theme"`
+	PathVariables     map[string]string `json:"pathVariables"`
 	// AllowedFolders are where, beside the home folder and the mounted volumes, a path that lets a harness write may
 	// lead.
 	AllowedFolders      []string `json:"allowedFolders"`
@@ -81,6 +87,8 @@ type SettingsPatch struct {
 	TrayEnabled             *bool             `json:"trayEnabled"`
 	KeepTrayOnQuit          *bool             `json:"keepTrayOnQuit"`
 	ShowRestrictionWarnings *bool             `json:"showRestrictionWarnings"`
+	ShowSystemWidget        *bool             `json:"showSystemWidget"`
+	ShowGitHubWidget        *bool             `json:"showGitHubWidget"`
 	NotificationLevel       *string           `json:"notificationLevel"`
 	LogRetentionDays        *int              `json:"logRetentionDays"`
 	Autostart               *bool             `json:"autostart"`
@@ -95,8 +103,8 @@ type SettingsPatch struct {
 
 func defaultSettings() Settings {
 	return Settings{SchemaVersion: "1", Language: "system", Typeface: "harmflow", TrayEnabled: true, ShowRestrictionWarnings: true,
-		NotificationLevel: "all",
-		LogRetentionDays:  30, Theme: "harmflow-dark", PathVariables: map[string]string{}, AllowedFolders: []string{},
+		ShowSystemWidget: true, ShowGitHubWidget: true, NotificationLevel: "all",
+		LogRetentionDays: 30, Theme: "harmflow-dark", PathVariables: map[string]string{}, AllowedFolders: []string{},
 		Quota: map[string]QuotaShare{}}
 }
 
@@ -233,6 +241,12 @@ func (a *App) UpdateSettings(p SettingsPatch) (SettingsView, error) {
 	}
 	if p.ShowRestrictionWarnings != nil {
 		s.ShowRestrictionWarnings = *p.ShowRestrictionWarnings
+	}
+	if p.ShowSystemWidget != nil {
+		s.ShowSystemWidget = *p.ShowSystemWidget
+	}
+	if p.ShowGitHubWidget != nil {
+		s.ShowGitHubWidget = *p.ShowGitHubWidget
 	}
 	if p.NotificationLevel != nil {
 		s.NotificationLevel = *p.NotificationLevel
