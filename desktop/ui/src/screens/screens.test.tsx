@@ -153,6 +153,8 @@ const settings: Settings = {
   trayEnabled: true,
   keepTrayOnQuit: false,
   showRestrictionWarnings: true,
+  showSystemWidget: true,
+  showGitHubWidget: true,
   notificationLevel: "all",
   logRetentionDays: 30,
   theme: "harmflow-dark",
@@ -1554,8 +1556,14 @@ describe("settings sections", () => {
   it.each([
     [
       "general",
-      ["Idioma", "Barra de menus", "Execuções"],
-      ["Mostrar o HarmFlow na barra de menus", "Manter o HarmFlow na barra de menus ao sair com ⌘Q", "Mostrar avisos de restrição"],
+      ["Idioma", "Barra de menus", "Execuções", "Barra lateral"],
+      [
+        "Mostrar o HarmFlow na barra de menus",
+        "Manter o HarmFlow na barra de menus ao sair com ⌘Q",
+        "Mostrar avisos de restrição",
+        "Mostrar o widget Sistema",
+        "Mostrar o widget GitHub",
+      ],
     ],
     ["appearance", ["Zoom", "Fonte"], ["O mesmo nível de ⌘+, ⌘− e ⌘0", "HarmFlow", "Sistema"]],
     ["notifications", ["Avisos"], ["Nível de notificação"]],

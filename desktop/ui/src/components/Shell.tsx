@@ -99,7 +99,7 @@ function RateLimitGauge({ label, bucket, locale }: { label: string; bucket?: Rat
 /**
  * The sidebar, expanded or collapsed to its icons (⌘B). The daemon's connection state is the topbar's alone; the
  * gauges and the version show only while expanded, and the gauges are read from /system and /github/rate-limit only
- * then.
+ * then. Each widget of gauges shows, and is read, only while its setting in Settings → General is on.
  */
 export function Sidebar({
   screen,
@@ -118,24 +118,35 @@ export function Sidebar({
   const github = useStore((s) => s.github);
   const version = useStore((s) => s.appVersion);
   const running = useStore((s) => s.stats?.running ?? 0);
+  const settings = useStore((s) => s.settings);
   const locale = i18n.language;
   const { tipped, tooltip, hide } = useTooltip(tipBeside);
+
+  // A widget shows while its setting is on, as it is by default, and an older daemon's settings lack it. Its gauges
+  // are read only once the settings are known, so a widget the user hid is never read while they load.
+  const showSystem = !collapsed && (settings?.showSystemWidget ?? true);
+  const showGitHub = !collapsed && (settings?.showGitHubWidget ?? true);
+  const readSystem = showSystem && settings !== undefined;
+  const readGitHub = showGitHub && settings !== undefined;
 
   // The layout moves under a shown tooltip; the next hover or focus places it again.
   useEffect(hide, [collapsed, hide]);
 
-  // The gauges are read at once on expanding and then on their own clock; collapsed, nothing shows them. GitHub's are
-  // a refresh of their own kind, so a slow gh never holds the System gauges back.
+  // Each widget's gauges are read at once when it shows and then on their own clock; collapsed or hidden, nothing
+  // shows them. Each is a refresh of its own kind, so a slow gh never holds the System gauges back, and hiding one
+  // widget never stops or restarts the other's reads.
   useEffect(() => {
-    if (collapsed) return;
+    if (!readSystem) return;
     void actions.refreshSystem();
+    const timer = every("system", GAUGES_EVERY_MS, actions.refreshSystem);
+    return () => clearInterval(timer);
+  }, [readSystem]);
+  useEffect(() => {
+    if (!readGitHub) return;
     void actions.refreshGitHub();
-    const timers = [
-      every("system", GAUGES_EVERY_MS, actions.refreshSystem),
-      every("github", GAUGES_EVERY_MS, actions.refreshGitHub),
-    ];
-    return () => timers.forEach(clearInterval);
-  }, [collapsed]);
+    const timer = every("github", GAUGES_EVERY_MS, actions.refreshGitHub);
+    return () => clearInterval(timer);
+  }, [readGitHub]);
 
   const toggleLabel = collapsed ? t("sidebar.expand") : t("sidebar.collapse");
   // The registered screens follow the built-in ones, with no shortcut of their own.
@@ -180,7 +191,7 @@ export function Sidebar({
       <div className="sidebar__spacer" />
 
       <div className="sidebar__foot">
-        {collapsed ? null : (
+        {showGitHub ? (
           <section className="gauges-panel" aria-labelledby="github-gauges-title">
             <h2 id="github-gauges-title" className="gauges-panel__title">
               {t("gauges.github")}
@@ -190,8 +201,8 @@ export function Sidebar({
               <RateLimitGauge label={t("gauges.graphql")} bucket={github?.graphql} locale={locale} />
             </div>
           </section>
-        )}
-        {collapsed ? null : (
+        ) : null}
+        {showSystem ? (
           <section className="gauges-panel" aria-labelledby="gauges-title">
             <h2 id="gauges-title" className="gauges-panel__title">
               {t("gauges.title")}
@@ -225,7 +236,7 @@ export function Sidebar({
               />
             </div>
           </section>
-        )}
+        ) : null}
         <div className="sidebar__bar">
           {collapsed ? null : <span className="sidebar__version">{t("common.version", { version })}</span>}
           <button

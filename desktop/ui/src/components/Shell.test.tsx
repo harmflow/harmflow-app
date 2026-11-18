@@ -3,13 +3,13 @@
 // commits, and that banner's restart of the daemon on the window's build, driven in a DOM against a stand-in for the
 // daemon's local API. And the More actions menu's Stop daemon…, whose question names one running execution in the
 // singular and more in the plural. And the sidebar's gauges, read from /system, and GitHub's from /github/rate-limit,
-// only while the sidebar is expanded. And the topbar's state of a daemon that runs but does not answer, apart from a
-// stopped one.
+// only while the sidebar is expanded and each widget's setting is on. And the topbar's state of a daemon that runs but
+// does not answer, apart from a stopped one.
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { native, type DaemonStatus } from "../api/native";
-import type { GitHubRateLimit, Health, Stats, SystemGauges } from "../api/types";
+import type { GitHubRateLimit, Health, Settings, Stats, SystemGauges } from "../api/types";
 import i18n from "../i18n";
 import { formatTime } from "../lib/format";
 import { getState, patchStateForTests } from "../state/store";
@@ -373,10 +373,31 @@ describe("the sidebar's gauges", () => {
     await elapse(0);
   }
 
-  beforeEach(() => vi.useFakeTimers());
+  const settings: Settings = {
+    language: "en-US",
+    trayEnabled: true,
+    keepTrayOnQuit: false,
+    showRestrictionWarnings: true,
+    showSystemWidget: true,
+    showGitHubWidget: true,
+    notificationLevel: "all",
+    logRetentionDays: 30,
+    theme: "harmflow-dark",
+    autostart: { enabled: false, mechanism: "launchd" },
+    pathVariables: {},
+    allowedFolders: [],
+    onboardingCompleted: true,
+    quota: {},
+    systemPrompt: "",
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    patchStateForTests({ settings });
+  });
   afterEach(() => {
     vi.useRealTimers();
-    patchStateForTests({ system: undefined, github: undefined, stats: undefined });
+    patchStateForTests({ system: undefined, github: undefined, stats: undefined, settings: undefined });
   });
 
   it("reads /system at once and every 5 seconds while expanded, and shows its values", async () => {
@@ -527,6 +548,109 @@ describe("the sidebar's gauges", () => {
       await showSidebar(true);
       await elapse(15000);
       expect(githubReads()).toBe(2);
+    });
+  });
+
+  describe("widgets hidden by their settings", () => {
+    const limits: GitHubRateLimit = { rest: { limit: 2000, used: 500, resetAt: "2026-11-14T10:00:00Z" } };
+    const githubReads = () => daemon.requests.filter((r) => r.method === "GET" && r.path === "/github/rate-limit").length;
+    const systemPanel = () => host!.querySelector("#gauges-title")?.closest("section.gauges-panel") ?? null;
+    const githubPanel = () => host!.querySelector("#github-gauges-title")?.closest("section.gauges-panel") ?? null;
+
+    async function set(patch: Partial<Settings>) {
+      await act(async () => patchStateForTests({ settings: { ...settings, ...patch } }));
+      await elapse(0);
+    }
+
+    beforeEach(() => {
+      daemon.answers.set("GET /system", { status: 200, body: gauges });
+      daemon.answers.set("GET /github/rate-limit", { status: 200, body: limits });
+    });
+
+    it("show no System widget and read no /system while its setting is off, the GitHub widget shown and read", async () => {
+      patchStateForTests({ settings: { ...settings, showSystemWidget: false } });
+      await showSidebar(false);
+      await elapse(15000);
+      expect(systemPanel()).toBeNull();
+      expect(reads()).toBe(0);
+      expect(githubPanel()).not.toBeNull();
+      expect(githubReads()).toBe(4);
+    });
+
+    it("show no GitHub widget and read no rate limit while its setting is off, the System widget shown and read", async () => {
+      patchStateForTests({ settings: { ...settings, showGitHubWidget: false } });
+      await showSidebar(false);
+      await elapse(15000);
+      expect(githubPanel()).toBeNull();
+      expect(githubReads()).toBe(0);
+      expect(systemPanel()).not.toBeNull();
+      expect(reads()).toBe(4);
+      expect(texts()[0]).toBe("12%");
+    });
+
+    it("leave only the version and the toggle at the sidebar's foot with both off, the navigation in place", async () => {
+      await showSidebar(false);
+      const nav = host!.querySelector(".nav");
+      await set({ showSystemWidget: false, showGitHubWidget: false });
+      const foot = host!.querySelector(".sidebar__foot")!;
+      expect([...foot.children].map((c) => c.className)).toEqual(["sidebar__bar"]);
+      expect(foot.querySelector(".sidebar__version")?.textContent).toBe("v0.1.0");
+      expect(host!.querySelector(".nav")).toBe(nav);
+      expect(host!.querySelector(".sidebar")?.children[1]).toBe(nav);
+      const before = [reads(), githubReads()];
+      await elapse(15000);
+      expect([reads(), githubReads()]).toEqual(before);
+    });
+
+    it.each([
+      ["System", { showSystemWidget: false }, { showSystemWidget: true }],
+      ["GitHub", { showGitHubWidget: false }, { showGitHubWidget: true }],
+    ] as const)("show the %s widget again and read it at once when turned back on, with no restart", async (name, off, on) => {
+      const [own, other, panel] =
+        name === "System" ? [reads, githubReads, systemPanel] : [githubReads, reads, githubPanel];
+      patchStateForTests({ settings: { ...settings, ...off } });
+      await showSidebar(false);
+      await elapse(6000);
+      expect(own()).toBe(0);
+      expect(panel()).toBeNull();
+      expect(other()).toBe(2);
+
+      await set(on);
+      expect(panel()).not.toBeNull();
+      expect(own()).toBe(1);
+      await elapse(5000);
+      expect(own()).toBe(2);
+      // The other widget's reads kept their own clock: no read of their own came with the change.
+      expect(other()).toBe(3);
+    });
+
+    it("keep each other's place and reads while one is turned off and on and the other off", async () => {
+      await showSidebar(false);
+      expect([reads(), githubReads()]).toEqual([1, 1]);
+
+      await set({ showSystemWidget: false });
+      expect(systemPanel()).toBeNull();
+      expect(githubPanel()?.nextElementSibling?.className).toBe("sidebar__bar");
+      await elapse(5000);
+      expect([reads(), githubReads()]).toEqual([1, 2]);
+
+      await set({ showGitHubWidget: false });
+      expect(githubPanel()).toBeNull();
+      expect(systemPanel()?.nextElementSibling?.className).toBe("sidebar__bar");
+      expect([reads(), githubReads()]).toEqual([2, 2]);
+      await elapse(5000);
+      expect([reads(), githubReads()]).toEqual([3, 2]);
+    });
+
+    it("read nothing before the settings are known, and start once they say a widget shows", async () => {
+      patchStateForTests({ settings: undefined });
+      await showSidebar(false);
+      await elapse(15000);
+      expect([reads(), githubReads()]).toEqual([0, 0]);
+
+      await set({ showGitHubWidget: false });
+      expect([reads(), githubReads()]).toEqual([1, 0]);
+      expect(githubPanel()).toBeNull();
     });
   });
 });

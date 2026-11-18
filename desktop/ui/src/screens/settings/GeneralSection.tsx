@@ -73,6 +73,22 @@ export function GeneralSection() {
           />
         </SettingRow>
       </Panel>
+      <Panel title={t("settings.subheads.sidebar")}>
+        <SettingRow id="settings-system-widget" label={t("settings.showSystemWidget")} hint={t("settings.showSystemWidgetHint")}>
+          <Toggle
+            id="settings-system-widget"
+            checked={settings?.showSystemWidget ?? true}
+            onChange={(v) => void patch({ showSystemWidget: v })}
+          />
+        </SettingRow>
+        <SettingRow id="settings-github-widget" label={t("settings.showGitHubWidget")} hint={t("settings.showGitHubWidgetHint")}>
+          <Toggle
+            id="settings-github-widget"
+            checked={settings?.showGitHubWidget ?? true}
+            onChange={(v) => void patch({ showGitHubWidget: v })}
+          />
+        </SettingRow>
+      </Panel>
     </>
   );
 }

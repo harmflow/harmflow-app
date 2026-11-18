@@ -6,7 +6,8 @@
 // what the daemon removed and kept, or its error. Which worktrees the daemon removes is app › CleanWorkspaces' tests'.
 // Drives the AI tools section's general system prompt too: a draft until Save, the text sent alone, an emptied field
 // that clears it, its character counter in code points, a text over 20,000 characters that marks the field and cannot
-// be saved, and a text the daemon refuses shown on the field.
+// be saved, and a text the daemon refuses shown on the field. And the General section's Sidebar group, whose two
+// settings each save as soon as they flip; what the sidebar does with them is Shell.test's.
 // Then shows what AI tools, Security, and Storage read from the harnesses, the tools, and the diagnostics in the store:
 // each harness's readiness and path, the command-line tools, the token store, the disk used, and the directories with
 // their Show in Finder buttons, which ask the desktop's bridge to open the row's path. And the Daemon section's Stop
@@ -101,6 +102,8 @@ const saved: Settings = {
   trayEnabled: true,
   keepTrayOnQuit: false,
   showRestrictionWarnings: true,
+  showSystemWidget: true,
+  showGitHubWidget: true,
   notificationLevel: "all",
   logRetentionDays: 30,
   theme: "harmflow-dark",
@@ -733,6 +736,45 @@ describe("the AI tools section's general system prompt", () => {
     expect(area().value).toBe("Answer in pt-BR.");
     expect(save().disabled).toBe(false);
     expect(leaveCheck).not.toBeNull();
+  });
+});
+
+describe("the General section's Sidebar group", () => {
+  const widgets = [
+    ["Show System widget", "showSystemWidget", "CPU, RAM, and disk gauges"],
+    ["Show GitHub widget", "showGitHubWidget", "GitHub rate-limit gauges"],
+  ] as const;
+  const toggle = (label: string) => settingRow(label)!.querySelector<HTMLInputElement>("input[type=checkbox]")!;
+
+  it("holds the two widgets' settings, each on and with its hint, after the existing groups", async () => {
+    await open("general");
+    const group = panel("Sidebar")!;
+    expect(group).not.toBeNull();
+    expect(group.nextElementSibling).toBeNull();
+    expect([...group.querySelectorAll(".setting-row__label")].map((l) => text(l))).toEqual(widgets.map(([label]) => label));
+    for (const [label, , gauges] of widgets) {
+      expect(toggle(label).checked).toBe(true);
+      expect(text(settingRow(label)!.querySelector(".field__hint"))).toBe(
+        `Shows or hides the ${gauges} in the expanded sidebar. While hidden, HarmFlow does not read them.`,
+      );
+    }
+  });
+
+  it.each(widgets)("saves %s as soon as it is flipped, alone, and leaves the other setting on", async (label, key) => {
+    await open("general");
+    daemon.requests.length = 0;
+    await click(toggle(label));
+    expect(updates().map((r) => r.body)).toStrictEqual([{ [key]: false }]);
+    expect(daemon.settings[key]).toBe(false);
+    expect(toggle(label).checked).toBe(false);
+    const [other] = widgets.filter(([l]) => l !== label);
+    expect(toggle(other[0]).checked).toBe(true);
+    expect(toasts()).toEqual([{ tone: "success", text: "Settings saved." }]);
+
+    // Flipped back, it is saved on again.
+    await click(toggle(label));
+    expect(updates().map((r) => r.body)).toStrictEqual([{ [key]: false }, { [key]: true }]);
+    expect(toggle(label).checked).toBe(true);
   });
 });
 
