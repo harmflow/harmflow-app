@@ -30,7 +30,7 @@ func scanStats(a *App) Stats {
 		return min(int(t.Sub(start)/time.Hour), hours-1)
 	}
 	s := Stats{Activity: Activity{Running: make([]int, hours), Queued: make([]int, hours), Completed: make([]int, hours),
-		Failed: make([]int, hours)}}
+		Failed: make([]int, hours), NoWork: make([]int, hours)}}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.eachSummaryLocked(func(x *domain.ExecutionSummary) {
@@ -40,11 +40,14 @@ func scanStats(a *App) Stats {
 		case x.Status == domain.StatusQueued:
 			s.Queued++
 		}
-		done := x.Status == domain.StatusCompleted || x.Status == domain.StatusNoWork
+		done := x.Status == domain.StatusCompleted
+		noWork := x.Status == domain.StatusNoWork
 		failed := x.Status == domain.StatusFailed || x.Status == domain.StatusInterrupted
 		if x.EndedAt != nil && !x.EndedAt.Before(midnight) {
 			if done {
 				s.CompletedToday++
+			} else if noWork {
+				s.NoWorkToday++
 			} else if failed {
 				s.FailedToday++
 			}
@@ -58,6 +61,8 @@ func scanStats(a *App) Stats {
 		if i := bucket(x.EndedAt); i >= 0 {
 			if done {
 				s.Activity.Completed[i]++
+			} else if noWork {
+				s.Activity.NoWork[i]++
 			} else if failed {
 				s.Activity.Failed[i]++
 			}
@@ -180,6 +185,56 @@ func TestKeptOrdersMatchAScan(t *testing.T) {
 	checkAgainstAScan(t, e, tasks, 8)
 	if v, err := e.app.GetExecution(waiting.ID); err != nil || v.Status != domain.StatusInterrupted {
 		t.Errorf("after the restart, GetExecution(%q) = %s, %v; want interrupted", waiting.ID, v.Status, err)
+	}
+}
+
+// An execution that found no work counts in the No work counter and its hourly series alone, never as completed or
+// failed, and only from midnight in the machine's time zone, as the other two counters do.
+func TestStatsCountsNoWorkApart(t *testing.T) {
+	e := newEnv(t)
+	e.create("alpha", "")
+	now := e.clock.Now() // 08:00, so midnight is 8 hours ago and the counted hours start at 21:00 yesterday
+	at := func(d time.Duration) *time.Time { t := now.Add(d); return &t }
+	add := func(status domain.ExecutionStatus, ended time.Duration) {
+		x := domain.NewExecution(domain.TaskDocument{Metadata: domain.TaskMetadata{ID: "alpha"}}, domain.TriggerManual,
+			nil, *at(ended - time.Minute))
+		x.Status, x.StartedAt, x.EndedAt = status, at(ended-time.Minute), at(ended)
+		e.app.mu.Lock()
+		e.app.addExecutionLocked(x)
+		e.app.mu.Unlock()
+		e.app.persistExecution(x)
+	}
+	add(domain.StatusNoWork, -2*time.Hour)
+	add(domain.StatusNoWork, -time.Hour)
+	add(domain.StatusCompleted, -3*time.Hour)
+	add(domain.StatusFailed, -4*time.Hour)
+	add(domain.StatusNoWork, -10*time.Hour) // yesterday at 22:00: in the counted hours, not today
+
+	s := e.app.Stats()
+	if s.NoWorkToday != 2 || s.CompletedToday != 1 || s.FailedToday != 1 {
+		t.Errorf("Stats() today = no work %d, completed %d, failed %d; want 2, 1, 1", s.NoWorkToday, s.CompletedToday,
+			s.FailedToday)
+	}
+	want := make([]int, 12)
+	want[1], want[9], want[10] = 1, 1, 1 // 22:00 yesterday, 06:00 and 07:00 today
+	if !slices.Equal(s.Activity.NoWork, want) {
+		t.Errorf("Activity.NoWork = %v, want %v", s.Activity.NoWork, want)
+	}
+	sum := func(xs []int) (n int) {
+		for _, x := range xs {
+			n += x
+		}
+		return n
+	}
+	if sum(s.Activity.Completed) != 1 || sum(s.Activity.Failed) != 1 {
+		t.Errorf("Activity.Completed %v and Failed %v, want one each: no work counts in neither", s.Activity.Completed,
+			s.Activity.Failed)
+	}
+
+	// A fifth execution that ends with no work counts at once.
+	add(domain.StatusNoWork, 0)
+	if got := e.app.Stats().NoWorkToday; got != 3 {
+		t.Errorf("after one more ends with no work, NoWorkToday = %d, want 3", got)
 	}
 }
 

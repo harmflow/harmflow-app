@@ -135,6 +135,7 @@ export const ptBR: Resources = {
     queued: "Na fila",
     completedToday: "Concluídas hoje",
     failedToday: "Com erro hoje",
+    noWorkToday: "Sem trabalho hoje",
   },
   status: {
     scheduled: "Agendada",

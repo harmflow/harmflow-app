@@ -144,7 +144,7 @@ export function QuoteCard() {
 }
 
 interface CounterDef {
-  key: "running" | "queued" | "completedToday" | "failedToday";
+  key: "running" | "queued" | "completedToday" | "failedToday" | "noWorkToday";
   activity: keyof Stats["activity"];
   icon: IconName;
   tone: Tone;
@@ -156,6 +156,7 @@ export const COUNTERS: CounterDef[] = [
   { key: "queued", activity: "queued", icon: "clock", tone: "warning" },
   { key: "completedToday", activity: "completed", icon: "check", tone: "success" },
   { key: "failedToday", activity: "failed", icon: "x", tone: "danger", sparkTone: "magenta" },
+  { key: "noWorkToday", activity: "noWork", icon: "circle", tone: "violet" },
 ];
 
 export function Counters() {

@@ -933,18 +933,20 @@ export interface components {
             builtinsDir: string;
             diskUsageBytes?: number;
         };
-        /** @description The execution counters: executions running and queued now, those that completed or failed since midnight, and their activity over the last hours. */
+        /** @description The execution counters: executions running and queued now, those that completed, failed, or found no work since midnight, and their activity over the last hours. An execution that found no work counts in noWorkToday alone, never as completed or failed. */
         Stats: {
             running: number;
             queued: number;
             completedToday: number;
             failedToday: number;
+            noWorkToday: number;
             /** @description Per hour, the last 12 hours, oldest first. */
             activity: {
                 running: number[];
                 queued: number[];
                 completed: number[];
                 failed: number[];
+                noWork: number[];
             };
         };
         /** @description The current month's spend per day, summed when asked for from each attempt's figures in the summaries of the executions, for every task. Days follow the machine's time zone, and an attempt counts on the day it ended: one still running counts on no day yet. */

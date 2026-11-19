@@ -134,6 +134,7 @@ export const enUS = {
     queued: "Queued",
     completedToday: "Completed today",
     failedToday: "Failed today",
+    noWorkToday: "No work today",
   },
   status: {
     scheduled: "Scheduled",
