@@ -58,28 +58,6 @@ func TestChooseAmongInstallations(t *testing.T) {
 	}
 }
 
-// codexHomesAppServer is a branch of fake-codex's case that answers as Codex's app server from the home its CODEX_HOME
-// names: account/read gives the account of the home's account.json, the managed requirements are none, the quota has
-// room left, and the skill list is empty; any other request is an error.
-const codexHomesAppServer = `  --help) echo "Commands: exec app-server login"; exit 0 ;;
-  app-server)
-    while IFS= read -r line; do
-      [[ $line =~ \"id\":([0-9]+) ]] || continue
-      id=${BASH_REMATCH[1]}
-      method=
-      [[ $line =~ \"method\":\"([^\"]+)\" ]] && method=${BASH_REMATCH[1]}
-      case "$method" in
-        initialize) printf '{"id":%s,"result":{"userAgent":"stand-in"}}\n' "$id" ;;
-        account/read) printf '{"id":%s,"result":{"account":%s}}\n' "$id" "$(< "$CODEX_HOME/account.json")" ;;
-        configRequirements/read) printf '{"id":%s,"result":{"requirements":null}}\n' "$id" ;;
-        account/rateLimits/read) printf '{"id":%s,"result":{"rateLimits":{"primary":{"usedPercent":12,"resetsAt":null},"secondary":null,"rateLimitReachedType":null,"spendControlReached":false}}}\n' "$id" ;;
-        skills/list) printf '{"id":%s,"result":{"data":[]}}\n' "$id" ;;
-        *) printf '{"id":%s,"error":{"code":-32601,"message":"the stand-in does not answer %s"}}\n' "$id" "$method" ;;
-      esac
-    done
-    exit 0 ;;
-`
-
 // codexHomeAt makes a signed-in Codex home at dir, whose models cache lists model and whose account is account, the
 // JSON account/read answers.
 func codexHomeAt(t *testing.T, dir, model, account string) string {
@@ -125,8 +103,7 @@ func startedWith(t *testing.T, log string) map[string][]string {
 func TestEachCodexInstallationRunsWithItsOwnHome(t *testing.T) {
 	t.Parallel()
 	log := filepath.Join(t.TempDir(), "codex-homes")
-	codex := standIn(t, "fake-codex", "codex", "HOMES_LOG=\n", "HOMES_LOG='"+log+"'\n",
-		"case \"$1\" in\n", "case \"$1\" in\n"+codexHomesAppServer)
+	codex := standIn(t, "fake-codex", "codex", "HOMES_LOG=\n", "HOMES_LOG='"+log+"'\n")
 	user := resolvedTempDir(t)
 	first := codexHomeAt(t, filepath.Join(user, ".codex"), "model-a", `{"type":"chatgpt","planType":"plus"}`)
 	second := codexHomeAt(t, filepath.Join(resolvedTempDir(t), "codex-b"), "model-b", `{"type":"apiKey"}`)

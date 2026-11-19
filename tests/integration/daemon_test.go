@@ -583,6 +583,10 @@ func TestAPIGuardOnEveryRoute(t *testing.T) {
 		{"POST /tasks/{taskId}/disable", "/tasks/finished/disable", nil},
 		{"POST /schedules/preview", "/schedules/preview",
 			map[string]any{"schedule": map[string]any{"cron": "0 9 * * *", "timezone": "UTC"}, "count": 3}},
+		// Before the cancel, while the execution still runs: no request of it waits, so a write the guard let through
+		// would change nothing, and the guard alone answers.
+		{"POST /executions/{executionId}/approvals/{requestId}", "/executions/" + running + "/approvals/1",
+			map[string]any{"decision": "decline"}},
 		{"POST /executions/{executionId}/cancel", "/executions/" + running + "/cancel", nil},
 		{"PATCH /settings", "/settings", map[string]any{"language": "pt-BR", "trayEnabled": false, "logRetentionDays": 7}},
 		{"POST /settings/token/rotate", "/settings/token/rotate", nil},
@@ -3749,7 +3753,7 @@ func TestKillDuringTheSecondAttempt(t *testing.T) {
 		t.Fatalf("output %v", out)
 	}
 	for i, want := range []struct{ harness, line string }{
-		{"claude-code", `"type":"rate_limit_event"`}, {"codex", `"type":"item.started"`}} {
+		{"claude-code", `"type":"rate_limit_event"`}, {"codex", `"method":"item/started"`}} {
 		t.Run(want.harness, func(t *testing.T) {
 
 			c := captures[i].(map[string]any)

@@ -163,6 +163,8 @@ type runHandle struct {
 	// releaseIndex ends the hold of the index file the terminal save was made under, which writes the index; nil
 	// before that save. Only the execution's own goroutine uses it.
 	releaseIndex func()
+	// run is the execution's run, once it started; guarded by the App's mutex.
+	run *run
 }
 
 // App holds the daemon's use cases and their in-memory state: the tasks, executions, schedule, ledger, harness

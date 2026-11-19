@@ -2607,17 +2607,43 @@ func TestFailoverKeepsThePermissions(t *testing.T) {
 		!slices.Equal(second.AdditionalDirs, first.AdditionalDirs) {
 		t.Errorf("additional directories %q and %q, want %q for both", first.AdditionalDirs, second.AdditionalDirs, want)
 	}
-	info := ports.HarnessInfo{Path: "codex", Features: map[string]bool{"--add-dir": true}}
-	inv, _, err := (&codex.Adapter{Home: t.TempDir()}).Prepare(info, second)
+	info := ports.HarnessInfo{Path: "codex", Features: map[string]bool{"app-server": true}}
+	inv, out, err := (&codex.Adapter{Home: t.TempDir()}).Prepare(info, second)
 	if err != nil {
 		t.Fatalf("codex Prepare(second attempt): %v", err)
 	}
-	args := strings.Join(inv.Args, " ")
-	for _, want := range []string{"--sandbox workspace-write", "--cd " + second.WorkDir, "--add-dir " + resolvedRepo} {
-		if !strings.Contains(args, want) {
-			t.Errorf("codex Prepare(second attempt) args %q, want %q", inv.Args, want)
+	// The app server reads the thread's settings from the session's first request, which the parser writes.
+	in := &lineRecorder{}
+	if err := out.(ports.Conversation).Begin(in); err != nil {
+		t.Fatal(err)
+	}
+	out.Line([]byte(`{"id":1,"result":{}}`))
+	thread := in.String()
+	for _, want := range []string{`"sandbox":"workspace-write"`, `"cwd":"` + second.WorkDir + `"`, `"` + resolvedRepo + `"`} {
+		if !strings.Contains(thread, want) || inv.Dir != second.WorkDir {
+			t.Errorf("codex Prepare(second attempt) sent %s in %s, want %s", thread, inv.Dir, want)
 		}
 	}
+}
+
+// lineRecorder stands in for a harness's stdin, keeping what was written.
+type lineRecorder struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (r *lineRecorder) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.b.Write(p)
+}
+
+func (r *lineRecorder) Close() error { return nil }
+
+func (r *lineRecorder) String() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.b.String()
 }
 
 // harmflow-app#1025: after a quota failover from Codex, Claude Code runs with the permissions, work directory, and

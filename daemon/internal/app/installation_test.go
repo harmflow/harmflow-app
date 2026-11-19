@@ -578,7 +578,13 @@ func TestTwoInstallationsRunAtOnce(t *testing.T) {
 			x.Attempts[0].InstallationHome != home {
 			t.Errorf("execution %s's attempts %+v, want one running on %s at %s", run.req.ExecutionID, x.Attempts, want, home)
 		}
-		inv, _, err := cx.Prepare(run.info, run.req)
+		info := run.info
+		info.Features = maps.Clone(info.Features)
+		if info.Features == nil {
+			info.Features = map[string]bool{}
+		}
+		info.Features["app-server"] = true // every attempt runs on Codex's app server
+		inv, _, err := cx.Prepare(info, run.req)
 		if err != nil {
 			t.Fatalf("codex Prepare(execution %s's attempt) error = %v, want none", run.req.ExecutionID, err)
 		}

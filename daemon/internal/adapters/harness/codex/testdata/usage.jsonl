@@ -1,15 +1,19 @@
-{"type":"thread.started","thread_id":"01a15b1f-0000-7000-8000-000000000000"}
-{"type":"turn.started"}
-{"type":"item.completed","item":{"id":"item_3","type":"agent_message","text":"Created hello.md."}}
-{"type":"item.started","item":{"id":"item_4","type":"command_execution","command":"/bin/zsh -lc 'ls -la'","status":"in_progress","exit_code":null,"aggregated_output":""}}
-{"type":"item.completed","item":{"id":"item_4","type":"command_execution","command":"/bin/zsh -lc 'ls -la'","status":"completed","exit_code":0,"aggregated_output":"total 0\n"}}
-{"type":"item.started","item":{"id":"item_5","type":"file_change","status":"in_progress","changes":[{"path":"/work/hello.md","kind":"add"}]}}
-{"type":"item.completed","item":{"id":"item_5","type":"file_change","status":"completed","changes":[{"path":"/work/hello.md","kind":"add"}]}}
-{"type":"item.started","item":{"id":"item_6","type":"command_execution","command":"/bin/zsh -lc 'ls -la'","status":"in_progress","exit_code":null,"aggregated_output":""}}
-{"type":"item.completed","item":{"id":"item_6","type":"command_execution","command":"/bin/zsh -lc 'ls -la'","status":"completed","exit_code":0,"aggregated_output":"total 0\n"}}
-{"type":"item.started","item":{"id":"item_7","type":"command_execution","command":"/bin/zsh -lc 'ls -la'","status":"in_progress","exit_code":null,"aggregated_output":""}}
-{"type":"item.completed","item":{"id":"item_7","type":"command_execution","command":"/bin/zsh -lc 'ls -la'","status":"completed","exit_code":0,"aggregated_output":"total 0\n"}}
-{"type":"item.started","item":{"id":"item_8","type":"file_change","status":"in_progress","changes":[{"path":"/work/hello.md","kind":"update"}]}}
-{"type":"item.completed","item":{"id":"item_8","type":"file_change","status":"completed","changes":[{"path":"/work/hello.md","kind":"update"}]}}
-{"type":"item.completed","item":{"id":"item_9","type":"agent_message","text":"Created hello.md."}}
-{"type":"turn.completed","usage":{"input_tokens":160035,"cached_input_tokens":135680,"cache_write_input_tokens":0,"output_tokens":1194,"reasoning_output_tokens":244}}
+{"id":1,"result":{"userAgent":"harmflow/0.163.0","codexHome":"/home/.codex","platformFamily":"unix","platformOs":"macos"}}
+{"id": 2, "result": {"thread": {"id": "01a15b1f-0000-7000-8000-000000000000"}, "approvalPolicy": "never", "approvalsReviewer": "user"}}
+{"method": "thread/started", "params": {"thread": {"id": "01a15b1f-0000-7000-8000-000000000000"}}}
+{"id": 3, "result": {"turn": {"id": "turn-1", "status": "inProgress"}}}
+{"method": "turn/started", "params": {"threadId": "01a15b1f-0000-7000-8000-000000000000", "turn": {"id": "turn-1", "status": "inProgress"}}}
+{"method": "item/completed", "params": {"threadId": "01a15b1f-0000-7000-8000-000000000000", "turnId": "turn-1", "item": {"id": "item_3", "type": "agentMessage", "text": "Created hello.md."}}}
+{"method": "item/started", "params": {"threadId": "01a15b1f-0000-7000-8000-000000000000", "turnId": "turn-1", "item": {"id": "item_4", "type": "commandExecution", "command": "/bin/zsh -lc 'ls -la'", "cwd": "/work", "aggregatedOutput": null, "exitCode": null, "status": "inProgress", "commandActions": []}}}
+{"method": "item/completed", "params": {"threadId": "01a15b1f-0000-7000-8000-000000000000", "turnId": "turn-1", "item": {"id": "item_4", "type": "commandExecution", "command": "/bin/zsh -lc 'ls -la'", "cwd": "/work", "aggregatedOutput": "total 0\n", "exitCode": 0, "status": "completed", "commandActions": []}}}
+{"method": "item/started", "params": {"threadId": "01a15b1f-0000-7000-8000-000000000000", "turnId": "turn-1", "item": {"id": "item_5", "type": "fileChange", "changes": [{"path": "/work/hello.md", "kind": {"type": "add"}, "diff": ""}], "status": "inProgress"}}}
+{"method": "item/completed", "params": {"threadId": "01a15b1f-0000-7000-8000-000000000000", "turnId": "turn-1", "item": {"id": "item_5", "type": "fileChange", "changes": [{"path": "/work/hello.md", "kind": {"type": "add"}, "diff": ""}], "status": "completed"}}}
+{"method": "item/started", "params": {"threadId": "01a15b1f-0000-7000-8000-000000000000", "turnId": "turn-1", "item": {"id": "item_6", "type": "commandExecution", "command": "/bin/zsh -lc 'ls -la'", "cwd": "/work", "aggregatedOutput": null, "exitCode": null, "status": "inProgress", "commandActions": []}}}
+{"method": "item/completed", "params": {"threadId": "01a15b1f-0000-7000-8000-000000000000", "turnId": "turn-1", "item": {"id": "item_6", "type": "commandExecution", "command": "/bin/zsh -lc 'ls -la'", "cwd": "/work", "aggregatedOutput": "total 0\n", "exitCode": 0, "status": "completed", "commandActions": []}}}
+{"method": "item/started", "params": {"threadId": "01a15b1f-0000-7000-8000-000000000000", "turnId": "turn-1", "item": {"id": "item_7", "type": "commandExecution", "command": "/bin/zsh -lc 'ls -la'", "cwd": "/work", "aggregatedOutput": null, "exitCode": null, "status": "inProgress", "commandActions": []}}}
+{"method": "item/completed", "params": {"threadId": "01a15b1f-0000-7000-8000-000000000000", "turnId": "turn-1", "item": {"id": "item_7", "type": "commandExecution", "command": "/bin/zsh -lc 'ls -la'", "cwd": "/work", "aggregatedOutput": "total 0\n", "exitCode": 0, "status": "completed", "commandActions": []}}}
+{"method": "item/started", "params": {"threadId": "01a15b1f-0000-7000-8000-000000000000", "turnId": "turn-1", "item": {"id": "item_8", "type": "fileChange", "changes": [{"path": "/work/hello.md", "kind": {"type": "update"}, "diff": ""}], "status": "inProgress"}}}
+{"method": "item/completed", "params": {"threadId": "01a15b1f-0000-7000-8000-000000000000", "turnId": "turn-1", "item": {"id": "item_8", "type": "fileChange", "changes": [{"path": "/work/hello.md", "kind": {"type": "update"}, "diff": ""}], "status": "completed"}}}
+{"method": "item/completed", "params": {"threadId": "01a15b1f-0000-7000-8000-000000000000", "turnId": "turn-1", "item": {"id": "item_9", "type": "agentMessage", "text": "Created hello.md."}}}
+{"method": "thread/tokenUsage/updated", "params": {"threadId": "01a15b1f-0000-7000-8000-000000000000", "turnId": "turn-1", "tokenUsage": {"total": {"inputTokens": 160035, "cachedInputTokens": 135680, "cacheWriteInputTokens": 0, "outputTokens": 1194, "reasoningOutputTokens": 244, "totalTokens": 161229}, "last": {"inputTokens": 160035, "cachedInputTokens": 135680, "cacheWriteInputTokens": 0, "outputTokens": 1194, "reasoningOutputTokens": 244, "totalTokens": 161229}}}}
+{"method": "turn/completed", "params": {"threadId": "01a15b1f-0000-7000-8000-000000000000", "turn": {"id": "turn-1", "status": "completed", "items": []}}}

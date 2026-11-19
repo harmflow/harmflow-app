@@ -3,6 +3,7 @@ import { daemonText } from "../lib/daemonText";
 import { transport } from "./transport";
 import type {
   Accepted,
+  ApprovalDecision,
   ApiErrorBody,
   ApiErrorCode,
   Catalog,
@@ -174,6 +175,8 @@ export const api = {
   },
   execution: (id: string) => call<Execution>("GET", `/executions/${enc(id)}`),
   cancelExecution: (id: string) => call<Accepted>("POST", `/executions/${enc(id)}/cancel`),
+  answerApproval: (id: string, requestId: string, decision: ApprovalDecision) =>
+    call<Accepted>("POST", `/executions/${enc(id)}/approvals/${enc(requestId)}`, { decision }),
   executionEvents: (id: string, after = 0, limit = 5000) =>
     call<{ events: HarmflowEvent[]; logExpired: boolean }>(
       "GET",

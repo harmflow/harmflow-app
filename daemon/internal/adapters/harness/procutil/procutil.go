@@ -45,6 +45,43 @@ type Process struct {
 	// released is closed once the recorder may take the output: at the start, unless StartHeld holds it until Release.
 	released    chan struct{}
 	releaseOnce sync.Once
+	// stdin is the daemon's end of an interactive invocation's stdin; nil for any other.
+	stdin *stdinWriter
+}
+
+// Stdin is the process's stdin, open for writing, for an interactive invocation; nil for any other. It is closed once
+// the process exited.
+func (p *Process) Stdin() io.WriteCloser {
+	if p.stdin == nil {
+		return nil
+	}
+	return p.stdin
+}
+
+// stdinWriter is a stdin that one writer at a time writes whole lines to, and that may be closed more than once.
+type stdinWriter struct {
+	mu     sync.Mutex
+	f      *os.File
+	closed bool
+}
+
+func (w *stdinWriter) Write(b []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed {
+		return 0, os.ErrClosed
+	}
+	return w.f.Write(b)
+}
+
+func (w *stdinWriter) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed {
+		return nil
+	}
+	w.closed = true
+	return w.f.Close()
 }
 
 // Start launches the invocation; onLine receives each stdout line, raw receives stdout and stderr verbatim.
@@ -77,9 +114,18 @@ func launch(inv ports.Invocation, raw io.Writer, onStdout, onStderr func([]byte)
 	// os/exec writes stdin from its own goroutine, which a process left holding the pipe unread would block.
 	cmd.WaitDelay = outputDelay
 	var files []*os.File // the child's ends, closed here once it has them
-	if inv.Stdin != "" {
+	var stdinW *os.File  // the daemon's end of an interactive invocation's stdin
+	switch {
+	case inv.Interactive:
+		stdinR, w, err := os.Pipe()
+		if err != nil {
+			return nil, err
+		}
+		cmd.Stdin, stdinW = stdinR, w
+		files = append(files, stdinR)
+	case inv.Stdin != "":
 		cmd.Stdin = bytes.NewBufferString(inv.Stdin)
-	} else {
+	default:
 		devnull, err := os.Open(os.DevNull)
 		if err != nil {
 			return nil, err
@@ -89,14 +135,18 @@ func launch(inv ports.Invocation, raw io.Writer, onStdout, onStderr func([]byte)
 	}
 	// The daemon's own pipes rather than os/exec's: os/exec closes its pipes in Wait, which could drop output not yet
 	// read, and it waits for their end with no limit.
+	parent := []*os.File{} // the daemon's ends, closed when the start fails
+	if stdinW != nil {
+		parent = append(parent, stdinW)
+	}
 	stdout, stdoutW, err := os.Pipe()
 	if err != nil {
-		closeAll(files)
+		closeAll(append(files, parent...))
 		return nil, err
 	}
 	stderr, stderrW, err := os.Pipe()
 	if err != nil {
-		closeAll(append(files, stdout, stdoutW))
+		closeAll(append(append(files, parent...), stdout, stdoutW))
 		return nil, err
 	}
 	cmd.Stdout, cmd.Stderr = stdoutW, stderrW
@@ -104,12 +154,15 @@ func launch(inv ports.Invocation, raw io.Writer, onStdout, onStderr func([]byte)
 	err = cmd.Start()
 	closeAll(files)
 	if err != nil {
-		closeAll([]*os.File{stdout, stderr})
+		closeAll(append(parent, stdout, stderr))
 		return nil, err
 	}
 	pid := cmd.Process.Pid
 	p := &Process{cmd: cmd, exited: make(chan struct{}), done: make(chan struct{}), stderr: &tail{max: 64 * 1024},
 		tree: Tree{Pid: pid, Group: pid, ExecutionID: inv.ExecutionID}, released: make(chan struct{})}
+	if stdinW != nil {
+		p.stdin = &stdinWriter{f: stdinW}
+	}
 	if !held {
 		p.Release()
 	}
@@ -158,6 +211,9 @@ func launch(inv ports.Invocation, raw io.Writer, onStdout, onStderr func([]byte)
 	}()
 	go func() {
 		_ = cmd.Wait() // how the process ended is read from cmd.ProcessState below
+		if p.stdin != nil {
+			_ = p.stdin.Close() // nothing reads it any more
+		}
 		close(p.exited)
 		select {
 		case <-drained:
