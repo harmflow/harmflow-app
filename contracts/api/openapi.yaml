@@ -2327,6 +2327,25 @@ components:
             cancelRequestedAt: { type: string, format: date-time }
             timeoutAt: { type: string, format: date-time }
             definitionRevision: { type: string }
+            build:
+              type: object
+              description: >-
+                The HarmFlow daemon build that created the execution. Absent from a record written before HarmFlow
+                recorded it, which names no version and no commit.
+              required: [version, dirty]
+              properties:
+                version: { type: string, description: "HarmFlow's version, as GET /health gives it." }
+                commit:
+                  type: string
+                  pattern: "^[0-9a-f]{40}$"
+                  description: >-
+                    The full commit id the build was made from, of which the commit GET /health gives is a prefix.
+                    Absent when the build names none: outside a checkout, or built with no commit stamped.
+                dirty:
+                  type: boolean
+                  description: >-
+                    True when the build came from a tree with uncommitted changes, exactly when GET /health marks its
+                    commit -dirty; false without a commit.
             workspacePath: { type: string }
             executionDir: { type: string }
             attempts: { type: array, items: { $ref: "#/components/schemas/Attempt" } }

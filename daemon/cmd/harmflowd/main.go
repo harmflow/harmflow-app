@@ -18,8 +18,12 @@ import (
 // Version is set at build time; desktop and daemon always ship at the same version.
 var Version = "0.1.0"
 
-// Commit is set at build time by make, which reads it from git also in a git worktree, where go build stamps none.
-var Commit = ""
+// Revision is the full commit make built the daemon from, set at build time: make reads it from git also in a git
+// worktree, where go build stamps none.
+var Revision = ""
+
+// Modified is "true" when make built the daemon from a tree with uncommitted changes; see Revision.
+var Modified = ""
 
 // BuiltAt is the time make built the daemon, in RFC 3339; see buildTime.
 var BuiltAt = ""
@@ -33,8 +37,9 @@ func main() {
 	builtinsFlag := flag.String("builtins", "", "directory holding the built-in agents/, skills/, and templates/")
 	portFlag := flag.Int("port", 0, "port to listen on; 0 picks a free one")
 	flag.Parse()
+	revision, dirty := buildRevision()
 	cfg := harmflowd.Config{Home: *homeFlag, Builtins: *builtinsFlag, Port: *portFlag, Version: Version,
-		Commit: buildCommit(), BuiltAt: buildTime(BuiltAt)}
+		Commit: shortCommit(revision, dirty), Revision: revision, Dirty: dirty, BuiltAt: buildTime(BuiltAt)}
 	if err := harmflowd.Run(cfg); err != nil {
 		fmt.Fprintln(os.Stderr, "harmflowd:", err)
 		os.Exit(exitStatus(err, os.Getenv("XPC_SERVICE_NAME")))
@@ -53,39 +58,48 @@ func exitStatus(err error, service string) int {
 	return 1
 }
 
-// buildCommit is the Commit make set, or else the one go build stamped in the binary; see commitOf.
-func buildCommit() string {
-	if Commit != "" {
-		return Commit
+// buildRevision is the Revision and Modified make set, or else the ones go build stamped in the binary; see
+// revisionOf. The short commit of GET /health and the full one of each execution's record both come from it, so the
+// one is always a prefix of the other.
+func buildRevision() (revision string, dirty bool) {
+	if Revision != "" {
+		return Revision, Modified == "true"
 	}
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
-		return ""
+		return "", false
 	}
-	return commitOf(info.Settings)
+	return revisionOf(info.Settings)
 }
 
-// commitOf is the first 7 characters of vcs.revision, with "-dirty" when vcs.modified says the tree had uncommitted
-// changes, and empty without a revision: outside a checkout, or with -buildvcs=false.
-func commitOf(settings []debug.BuildSetting) string {
-	var revision string
-	var modified bool
+// revisionOf is vcs.revision, and whether vcs.modified says its tree had uncommitted changes; empty and false without
+// a revision: outside a checkout, or with -buildvcs=false.
+func revisionOf(settings []debug.BuildSetting) (revision string, dirty bool) {
 	for _, s := range settings {
 		switch s.Key {
 		case "vcs.revision":
 			revision = s.Value
 		case "vcs.modified":
-			modified = s.Value == "true"
+			dirty = s.Value == "true"
 		}
 	}
 	if revision == "" {
+		return "", false
+	}
+	return revision, dirty
+}
+
+// shortCommit is the commit Settings → About shows: the first 7 characters of revision, with "-dirty" when its tree
+// had uncommitted changes, and empty without a revision.
+func shortCommit(revision string, dirty bool) string {
+	if revision == "" {
 		return ""
 	}
-	revision = revision[:min(len(revision), 7)]
-	if modified {
-		revision += "-dirty"
+	short := revision[:min(len(revision), 7)]
+	if dirty {
+		short += "-dirty"
 	}
-	return revision
+	return short
 }
 
 // buildTime is the time make stamped, and zero when it stamped none or not in RFC 3339. It has no fallback: go build

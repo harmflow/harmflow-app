@@ -2,10 +2,15 @@
 
 SHELL := /bin/bash
 VERSION := 0.1.0
-# The commit a build comes from, "-dirty" with uncommitted changes, and empty outside a checkout. The daemon gets it
-# here because go build stamps none in a git worktree; the interface reads it itself (desktop/ui/vite.config.ts).
+# The full commit a build comes from, whether its tree has uncommitted changes, and both empty outside a checkout. The
+# daemon gets them here because go build stamps none in a git worktree, and makes its short commit from them, so the
+# one Settings → About shows is a prefix of the one each execution's record names; the interface reads its own commit
+# itself (desktop/ui/vite.config.ts).
+REVISION := $(shell git rev-parse --verify --quiet HEAD 2>/dev/null)
+MODIFIED := $(if $(REVISION),$(if $(shell git status --porcelain),true,false))
+# The short commit, "-dirty" with uncommitted changes, as the daemon makes it: the app bundle's stamp below.
 COMMIT := $(shell git rev-parse --verify --quiet HEAD 2>/dev/null | cut -c1-7)
-COMMIT := $(COMMIT)$(if $(COMMIT),$(if $(shell git status --porcelain),-dirty))
+COMMIT := $(COMMIT)$(if $(filter true,$(MODIFIED)),-dirty)
 # The time make runs, in UTC RFC 3339, as the daemon's build time: go build stamps only vcs.time, the commit's time.
 # The interface takes its own when Vite loads its config (desktop/ui/vite.config.ts).
 BUILT_AT := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -15,7 +20,8 @@ SIDECAR := desktop/src-tauri/binaries/harmflowd-$(TRIPLE)
 # The commit of the app bundle, which make update-app reads to skip a build of the commit it pulled. make app deletes it
 # before building and writes it once the build succeeds, so it never vouches for a bundle a failed build left half made.
 APP_STAMP := desktop/src-tauri/target.noindex/release/bundle/macos/HarmFlow.app.commit
-LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuiltAt=$(BUILT_AT)
+LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.Revision=$(REVISION) -X main.Modified=$(MODIFIED) \
+	-X main.BuiltAt=$(BUILT_AT)
 COVERAGE := $(CURDIR)/build/coverage
 # The time limit of a run of the tests module, which test-integration and coverage-daemon both pass to go test, so a
 # local run and CI run under the same one. go test's default of 10 minutes is too short for the integration package on

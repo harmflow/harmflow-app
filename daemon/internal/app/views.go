@@ -180,6 +180,7 @@ type ExecutionView struct {
 	CancelRequestedAt  *time.Time              `json:"cancelRequestedAt,omitempty"`
 	TimeoutAt          *time.Time              `json:"timeoutAt,omitempty"`
 	DefinitionRevision string                  `json:"definitionRevision,omitempty"`
+	Build              *domain.Build           `json:"build,omitempty"`
 	WorkspacePath      string                  `json:"workspacePath,omitempty"`
 	ExecutionDir       string                  `json:"executionDir,omitempty"`
 	Attempts           []domain.Attempt        `json:"attempts"`
@@ -203,7 +204,7 @@ func (a *App) GetExecution(id string) (ExecutionView, error) {
 	return ExecutionView{
 		ExecutionSummary: summarize(c), ScheduledFor: c.ScheduledFor, FollowsExecutionID: c.FollowsExecutionID,
 		RunAgainCount: c.RunAgainCount, CancelRequestedAt: c.CancelRequestedAt,
-		TimeoutAt: c.TimeoutAt, DefinitionRevision: c.DefinitionRevision, WorkspacePath: c.WorkspacePath,
+		TimeoutAt: c.TimeoutAt, DefinitionRevision: c.DefinitionRevision, Build: c.Build, WorkspacePath: c.WorkspacePath,
 		ExecutionDir: c.ExecutionDir, Attempts: c.Attempts, WorkItems: c.WorkItems, Warnings: c.Warnings,
 		ChangedFiles: c.ChangedFiles, Commands: c.Commands, LastOperation: c.LastOperation, LogExpired: c.LogExpired,
 		HarnessSwitches: c.HarnessSwitches, Script: c.Script,

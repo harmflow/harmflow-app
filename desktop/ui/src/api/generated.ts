@@ -1588,6 +1588,15 @@ export interface components {
             /** Format: date-time */
             timeoutAt?: string;
             definitionRevision?: string;
+            /** @description The HarmFlow daemon build that created the execution. Absent from a record written before HarmFlow recorded it, which names no version and no commit. */
+            build?: {
+                /** @description HarmFlow's version, as GET /health gives it. */
+                version: string;
+                /** @description The full commit id the build was made from, of which the commit GET /health gives is a prefix. Absent when the build names none: outside a checkout, or built with no commit stamped. */
+                commit?: string;
+                /** @description True when the build came from a tree with uncommitted changes, exactly when GET /health marks its commit -dirty; false without a commit. */
+                dirty: boolean;
+            };
             workspacePath?: string;
             executionDir?: string;
             attempts: components["schemas"]["Attempt"][];

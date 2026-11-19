@@ -521,6 +521,83 @@ func TestEndedExecutionReadWhenAskedFor(t *testing.T) {
 	}
 }
 
+// Each new execution's record names the daemon build that ran it — its version, its full commit, and whether that
+// commit's tree had uncommitted changes, false included — as it is stored and as the API serves it.
+func TestExecutionRecordsTheBuild(t *testing.T) {
+	const revision = "45a57bb0c3f1d2e4a5b6c7d8e9f0a1b2c3d4e5f6"
+	cases := []struct {
+		name  string
+		dirty bool
+	}{
+		{"clean build", false},
+		{"dirty build", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t, func(e *env) { e.revision, e.dirty = revision, c.dirty })
+			e.create("built", "")
+			e.claude.setScript(func(ports.RunRequest) string { return "echo 'END ok'" })
+			r, err := e.app.RunTask("built")
+			if err != nil {
+				t.Fatal(err)
+			}
+			served := e.wait(r.ExecutionID, domain.StatusCompleted)
+			want := domain.Build{Version: "test", Commit: revision, Dirty: c.dirty}
+			if served.Build == nil || *served.Build != want {
+				t.Errorf("GetExecution(%q).Build = %+v, want %+v", r.ExecutionID, served.Build, want)
+			}
+			data, err := json.Marshal(served)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var body struct {
+				Build map[string]any `json:"build"`
+			}
+			if err := json.Unmarshal(data, &body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Build["version"] != "test" || body.Build["commit"] != revision || body.Build["dirty"] != c.dirty {
+				t.Errorf("json.Marshal(GetExecution(%q)).build = %v, want version test, commit %s, and dirty %v",
+					r.ExecutionID, body.Build, revision, c.dirty)
+			}
+			stored, err := e.records.Load(r.ExecutionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.Build == nil || *stored.Build != want {
+				t.Errorf("Load(%q).Build = %+v, want %+v", r.ExecutionID, stored.Build, want)
+			}
+		})
+	}
+}
+
+// A record written before the build was recorded reads without error and names no version and no commit, as it is
+// held and as the API serves it.
+func TestAnOlderRecordReadsWithNoBuild(t *testing.T) {
+	e := newEnv(t)
+	e.create("older", "")
+	now := e.clock.Now()
+	x := domain.NewExecution(domain.TaskDocument{Metadata: domain.TaskMetadata{ID: "older"}}, domain.TriggerManual, nil,
+		now)
+	x.Status, x.EndedAt = domain.StatusCompleted, &now
+	if err := e.app.d.Executions.Save(x); err != nil {
+		t.Fatal(err)
+	}
+	e = e.restart(t)
+	v, err := e.app.GetExecution(x.ID)
+	if err != nil || v.Build != nil {
+		t.Errorf("GetExecution(%q) of a record written before the build was recorded = build %+v, %v; want none",
+			x.ID, v.Build, err)
+	}
+	data, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"build"`) {
+		t.Errorf(`json.Marshal(GetExecution(%q)) = %s, want no "build" key`, x.ID, data)
+	}
+}
+
 // The redaction pass runs only on a record saved at an older schema, which it saves again at the current one, so
 // each record is redacted once; a record at the current schema was redacted on arrival and is not read at start.
 func TestRedactionPassOnlyForOlderRecords(t *testing.T) {

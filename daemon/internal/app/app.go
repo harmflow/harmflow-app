@@ -88,6 +88,8 @@ type Deps struct {
 	Paths    Paths
 	Version  string
 	Commit   string    // the short commit it was built from, "-dirty" from uncommitted changes; empty without one
+	Revision string    // the full commit Commit is a prefix of; empty without one
+	Dirty    bool      // the tree Revision was built from had uncommitted changes, as Commit's "-dirty" says
 	BuiltAt  time.Time // when it was built; zero without a build time
 	Clock    ports.Clock
 	Wake     ports.WakeMonitor
@@ -519,6 +521,22 @@ func (a *App) Commit() string { return a.d.Commit }
 
 // BuiltAt is when the daemon was built; zero without a build time.
 func (a *App) BuiltAt() time.Time { return a.d.BuiltAt }
+
+// newExecution creates the record of a firing of a task, naming the daemon build that creates it.
+func (a *App) newExecution(task domain.TaskDocument, trigger domain.Trigger, scheduledFor *time.Time,
+	now time.Time) *domain.Execution {
+	x := domain.NewExecution(task, trigger, scheduledFor, now)
+	x.Build = a.build()
+	return x
+}
+
+// build is the daemon build a new execution records; nil when it names neither a version nor a commit.
+func (a *App) build() *domain.Build {
+	if a.d.Version == "" && a.d.Revision == "" {
+		return nil
+	}
+	return &domain.Build{Version: a.d.Version, Commit: a.d.Revision, Dirty: a.d.Revision != "" && a.d.Dirty}
+}
 
 // StartedAt is when New built the use cases, by their clock.
 func (a *App) StartedAt() time.Time { return a.startedAt }
