@@ -2,7 +2,10 @@
 // GitHub, Tauri, or an operating system.
 package domain
 
-import "strings"
+import (
+	"math"
+	"strings"
+)
 
 // APIVersion and KindTask are the apiVersion and kind of every task file.
 const (
@@ -227,8 +230,27 @@ type ExecutionLimits struct {
 	CancelGraceSeconds *int `yaml:"cancelGraceSeconds,omitempty" json:"cancelGraceSeconds,omitempty"`
 	// AllowExtraUsage lets the execution spend usage billed beyond what its harness's plan includes. A script task, which
 	// runs no harness, does not take it.
-	AllowExtraUsage *bool      `yaml:"allowExtraUsage,omitempty" json:"allowExtraUsage,omitempty"`
-	RateLimit       *RateLimit `yaml:"rateLimit,omitempty" json:"rateLimit,omitempty"`
+	AllowExtraUsage *bool `yaml:"allowExtraUsage,omitempty" json:"allowExtraUsage,omitempty"`
+	// MaxAttemptCostUSD caps what each attempt spends, as its estimated cost in US dollars at API prices; nil, the
+	// default, is no cap. Every attempt gets the whole cap. A script task, which runs no harness, does not take it.
+	MaxAttemptCostUSD *float64   `yaml:"maxAttemptCostUsd,omitempty" json:"maxAttemptCostUsd,omitempty"`
+	RateLimit         *RateLimit `yaml:"rateLimit,omitempty" json:"rateLimit,omitempty"`
+}
+
+// The bounds of execution.maxAttemptCostUsd, in US dollars.
+const (
+	MinAttemptCostUSD = 0.01
+	MaxAttemptCostUSD = 1000
+)
+
+// ValidAttemptCost reports whether v is a cap execution.maxAttemptCostUsd takes: within its bounds, with at most two
+// decimals.
+func ValidAttemptCost(v float64) bool {
+	if v < MinAttemptCostUSD || v > MaxAttemptCostUSD {
+		return false
+	}
+	cents := v * 100
+	return math.Abs(cents-math.Round(cents)) < 1e-6
 }
 
 // RateLimit is how an attempt that hit a rate limit is retried on the same harness: up to MaxRetries times, waiting
@@ -473,6 +495,15 @@ func (d TaskDocument) AllowsExtraUsage() bool {
 	return x != nil && x.AllowExtraUsage != nil && *x.AllowExtraUsage
 }
 
+// AttemptCostCap returns the cap on what each attempt spends, in US dollars, and whether the task sets one.
+func (d TaskDocument) AttemptCostCap() (float64, bool) {
+	x := d.Spec.Execution
+	if x == nil || x.MaxAttemptCostUSD == nil {
+		return 0, false
+	}
+	return *x.MaxAttemptCostUSD, true
+}
+
 // Profiles returns the preferred profile followed by the fallback candidates, defaults applied; a script task has none.
 func (d TaskDocument) Profiles() []HarnessProfile {
 	if d.IsScript() {
@@ -643,7 +674,7 @@ func (d TaskDocument) clone() TaskDocument {
 	}
 	if x := s.Execution; x != nil {
 		xc := ExecutionLimits{TimeoutMinutes: clonePtr(x.TimeoutMinutes), CancelGraceSeconds: clonePtr(x.CancelGraceSeconds),
-			AllowExtraUsage: clonePtr(x.AllowExtraUsage)}
+			AllowExtraUsage: clonePtr(x.AllowExtraUsage), MaxAttemptCostUSD: clonePtr(x.MaxAttemptCostUSD)}
 		if x.RateLimit != nil {
 			xc.RateLimit = &RateLimit{
 				MaxRetries:         clonePtr(x.RateLimit.MaxRetries),

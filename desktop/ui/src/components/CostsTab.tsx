@@ -181,6 +181,10 @@ function Summary({ cost, active, onReceipt }: { cost: ExecutionCost; active: boo
                   <td className="num mono">{a.tokens && a.outputKnown ? formatNumber(a.tokens.output, locale) : "—"}</td>
                   <td className="num mono">
                     <strong>{formatUsd(a.cost, locale)}</strong>
+                    {/* The cap as the execution started; the real spend beside it can pass it by one response. */}
+                    {a.attempt.costCapUsd !== undefined ? (
+                      <div className="costs-cap">{t("executions.detail.costs.cap", { cap: formatUsd(a.attempt.costCapUsd, locale) })}</div>
+                    ) : null}
                   </td>
                   <td>
                     <SourceChip a={a} />

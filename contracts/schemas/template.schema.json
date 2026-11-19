@@ -87,7 +87,7 @@
               "harness": false,
               "completion": false,
               "github": false,
-              "execution": { "properties": { "allowExtraUsage": false } }
+              "execution": { "properties": { "allowExtraUsage": false, "maxAttemptCostUsd": false } }
             }
           },
           "else": { "properties": { "script": false } }

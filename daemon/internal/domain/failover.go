@@ -14,6 +14,7 @@ const (
 	ClassHarnessUnavailable ErrorClass = "harness_unavailable"
 	ClassNetwork            ErrorClass = "network"
 	ClassTimeout            ErrorClass = "timeout"
+	ClassBudgetExhausted    ErrorClass = "budget_exhausted"
 	ClassCancelled          ErrorClass = "cancelled"
 	ClassTaskError          ErrorClass = "task_error"
 	ClassUnknown            ErrorClass = "unknown"

@@ -2261,6 +2261,11 @@ li:last-child .tl-item__rail::before {
   color: var(--hf-color-warning);
 }
 
+.costs-cap {
+  color: var(--hf-color-text-muted);
+  font-size: var(--hf-font-size-sm);
+}
+
 .costs-tile__plus {
   margin-left: var(--hf-space-1-5);
   font-size: var(--hf-font-size-md);

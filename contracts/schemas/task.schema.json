@@ -104,7 +104,7 @@
       ]
     },
     "spec": {
-      "description": "Every type but script needs a prompt and a harness; a script task takes neither, nor agents, skills, a workspace, a completion policy, or execution.allowExtraUsage.",
+      "description": "Every type but script needs a prompt and a harness; a script task takes neither, nor agents, skills, a workspace, a completion policy, execution.allowExtraUsage, or execution.maxAttemptCostUsd.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -219,7 +219,8 @@
               "github": false,
               "execution": {
                 "properties": {
-                  "allowExtraUsage": false
+                  "allowExtraUsage": false,
+                  "maxAttemptCostUsd": false
                 }
               }
             }
@@ -553,6 +554,12 @@
           "description": "Whether the execution may spend extra usage, billed beyond what its harness's plan includes. When false, an attempt does not start on a harness whose quota is exhausted, and a Claude Code attempt that turns to extra usage is ended. A script task runs no harness and does not take it.",
           "type": "boolean",
           "default": false
+        },
+        "maxAttemptCostUsd": {
+          "description": "The most each attempt may spend, as its estimated cost in US dollars at API prices, from 0.01 to 1,000 with at most two decimals. Every attempt gets the whole cap, a retry and a harness switch included. An attempt that reaches it ends budget_exhausted and the execution fails, with no failover. Claude Code enforces it; a Codex attempt runs with no cap. No default: no cap. A script task runs no harness and does not take it.",
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 1000
         },
         "rateLimit": {
           "type": "object",
