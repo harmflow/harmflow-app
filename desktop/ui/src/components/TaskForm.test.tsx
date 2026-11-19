@@ -848,11 +848,11 @@ describe("task form extra usage", () => {
   });
 });
 
-// A task that runs a harness shows in its Schedule section, after the missed-run and overlap fields, what an execution
-// does once it ends completed: wait for the schedule, the default, or run again, up to the run-again limit, editable
-// only under Run again. Both are the task schema's own keys, written as they are. A script task shows neither
-// (harmflow-app#1041). What the daemon does with them is app › TestRunAgainStopsAtItsLimit's and
-// TestScriptTaskTakesNoCompletionPolicy's.
+// A task that runs a harness shows beside its other scheduling settings — in the Completion section, after the Schedule
+// and Concurrency sections, as the schema groups its blocks (harmflow-app#553) — what an execution does once it ends
+// completed: wait for the schedule, the default, or run again, up to the run-again limit, editable only under Run
+// again. Both are the task schema's own keys, written as they are. A script task shows neither (harmflow-app#1041).
+// What the daemon does with them is app › TestRunAgainStopsAtItsLimit's and TestScriptTaskTakesNoCompletionPolicy's.
 describe("task form completion policy", () => {
   let current: Doc = {};
 
@@ -881,11 +881,13 @@ describe("task form completion policy", () => {
   };
 
   const spec = () => current.spec as Doc;
-  const section = () => host!.querySelector("#section-schedule")!;
-  const scheduleField = (label: string) =>
-    [...section().querySelectorAll<HTMLElement>("label.field")].find((f) => f.querySelector(".field__label")?.textContent === label);
-  const policy = () => scheduleField("When an execution completes")?.querySelector("select");
-  const limit = () => scheduleField("Run-again limit")?.querySelector("input");
+  const fieldIn = (id: string, label: string) =>
+    [...(host!.querySelector(`#section-${id}`)?.querySelectorAll<HTMLElement>("label.field") ?? [])].find(
+      (f) => f.querySelector(".field__label")?.textContent === label,
+    );
+  const overlap = () => fieldIn("concurrency", "Overlapping firings");
+  const policy = () => fieldIn("completion", "When an execution completes")?.querySelector("select");
+  const limit = () => fieldIn("completion", "Run-again limit")?.querySelector("input");
 
   it.each(["general", "github"] as const)("shows a %s task waiting for the schedule when its document sets nothing, the limit at its default and locked", async (kind) => {
     await openForm(harnessTask(kind));
@@ -895,13 +897,14 @@ describe("task form completion policy", () => {
     expect(limit()!.value).toBe("");
     expect(limit()!.placeholder).toBe("Default: 10");
     expect(limit()!.min).toBe("1");
-    expect(scheduleField("Overlapping firings")!.compareDocumentPosition(policy()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(overlap()!.compareDocumentPosition(policy()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(spec().completion).toBeUndefined();
   });
 
   it("shows a script task neither the policy nor the limit", async () => {
     await openForm(script);
-    expect(scheduleField("Overlapping firings")).toBeDefined();
+    expect(overlap()).toBeDefined();
+    expect(host!.querySelector("#section-completion")).toBeNull();
     expect(policy()).toBeUndefined();
     expect(limit()).toBeUndefined();
     expect(spec().completion).toBeUndefined();
@@ -938,9 +941,9 @@ describe("task form completion policy", () => {
 
   it("marks the limit's field with the daemon's error at its path, as every other field is marked", async () => {
     await openForm(harnessTask("general", { policy: "run_again", runAgainLimit: 0 }), new Set(["/spec/completion/runAgainLimit"]));
-    expect(scheduleField("Run-again limit")!.classList.contains("field--error")).toBe(true);
-    expect(scheduleField("Run-again limit")!.querySelector(".field__error")?.textContent).toBe("Error");
-    expect(scheduleField("When an execution completes")!.classList.contains("field--error")).toBe(false);
+    expect(fieldIn("completion", "Run-again limit")!.classList.contains("field--error")).toBe(true);
+    expect(fieldIn("completion", "Run-again limit")!.querySelector(".field__error")?.textContent).toBe("Error");
+    expect(fieldIn("completion", "When an execution completes")!.classList.contains("field--error")).toBe(false);
   });
 
   it.each([
@@ -950,9 +953,9 @@ describe("task form completion policy", () => {
     await i18n.changeLanguage(language);
     try {
       await openForm(harnessTask("general"));
-      const select = scheduleField(policyLabel)!.querySelector("select")!;
+      const select = fieldIn("completion", policyLabel)!.querySelector("select")!;
       expect([...select.options].map((o) => o.textContent)).toEqual(choices);
-      expect(scheduleField(limitLabel)?.querySelector("input")).toBeTruthy();
+      expect(fieldIn("completion", limitLabel)?.querySelector("input")).toBeTruthy();
     } finally {
       await i18n.changeLanguage("en-US");
     }
@@ -1045,5 +1048,72 @@ describe("task form text fields", () => {
     expect((spec().schedule as Doc).timezone).toBe("Europe/Lisbon");
     await type(input("Time")!, "10:30");
     expect((spec().schedule as Doc).cron).toBe("30 10 * * *");
+  });
+});
+
+// The form's two views (harmflow-app#553): simple shows what a task of its type needs to validate, down to the values,
+// plus its schedule and whether it is enabled; advanced shows every field, one section per block of the schema.
+describe("task form simple and advanced views", () => {
+  async function openView(doc: Doc, view: "simple" | "advanced") {
+    act(() => root?.unmount());
+    host?.remove();
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(<TaskForm doc={doc} onChange={() => {}} mode="edit" harnesses={[]} errorPaths={new Set()} view={view} />));
+    await settle();
+  }
+  const labels = (within: ParentNode = host!) => [...within.querySelectorAll(".field__label, .toggle__label")].map((l) => l.textContent);
+  const sections = () => [...host!.querySelectorAll("section.form-section")].map((s) => s.id.replace("section-", ""));
+  const columns = () => [...host!.querySelectorAll(".row-list__head span")].map((s) => s.textContent).filter(Boolean);
+
+  const withSpec = (spec: Doc): Doc => {
+    const doc = task({});
+    return { ...doc, spec: { ...(doc.spec as Doc), ...spec } };
+  };
+  const codex = withSpec({ harness: { preferred: { provider: "codex", model: "gpt-5", effort: "high", ephemeral: false } } });
+  const github = withSpec({ type: "github", github: { repositories: [{ name: "o/a", localPath: "/a", baseBranch: "dev" }] } });
+  const script: Doc = {
+    apiVersion: "harmflow/v1alpha1",
+    kind: "Task",
+    metadata: { id: "audit", name: "Audit" },
+    spec: { type: "script", script: { command: ["/bin/date"], workingDirectory: "/tmp", environment: { TZ: "UTC" } } },
+  };
+  const profileKeys = ["Model", "Effort", "Ephemeral session"];
+  const scriptKeys = ["Working directory", "Environment variables", "Runs on"];
+
+  it("shows the preferred profile's AI tool alone in simple mode, and its model, effort, and session in advanced mode", async () => {
+    await openView(codex, "simple");
+    expect(labels(host!.querySelector("#section-harness")!)).toEqual(["AI tool"]);
+    await openView(codex, "advanced");
+    for (const label of profileKeys) expect(labels(host!.querySelector("#section-harness")!)).toContain(label);
+  });
+
+  it("shows each repository's name and path in simple mode, and its base branch in advanced mode", async () => {
+    await openView(github, "simple");
+    expect(columns()).toEqual(["Repository (owner/repo)", "Local path"]);
+    await openView(github, "advanced");
+    expect(columns()).toEqual(["Repository (owner/repo)", "Local path", "Base branch"]);
+  });
+
+  it("shows a script's program in simple mode, and its working directory, environment, and systems in advanced mode", async () => {
+    await openView(script, "simple");
+    expect(labels()).toContain("Program and arguments");
+    for (const label of scriptKeys) expect(labels()).not.toContain(label);
+    await openView(script, "advanced");
+    for (const label of scriptKeys) expect(labels()).toContain(label);
+  });
+
+  it("gives the workspace, the overlap policy, and the completion policy their own sections in advanced mode", async () => {
+    await openView(task({}), "advanced");
+    expect(sections()).toEqual(["general", "prompt", "workspace", "harness", "schedule", "concurrency", "completion", "permissions", "execution", "notifications"]);
+    expect(labels(host!.querySelector("#section-workspace")!)).toEqual(["Workspace"]);
+    expect(labels(host!.querySelector("#section-concurrency")!)).toEqual(["Overlapping firings"]);
+    expect(labels(host!.querySelector("#section-prompt")!)).not.toContain("Workspace");
+    const schedule = labels(host!.querySelector("#section-schedule")!);
+    expect(schedule).not.toContain("Overlapping firings");
+    expect(schedule).not.toContain("When an execution completes");
+
+    await openView(task({}), "simple");
+    expect(sections()).toEqual(["general", "prompt", "harness", "schedule"]);
   });
 });
