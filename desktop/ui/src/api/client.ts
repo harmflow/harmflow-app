@@ -33,6 +33,7 @@ import type {
   TaskInput,
   TaskSummary,
   Template,
+  TemplateImportRequest,
   TemplateInput,
   TemplateLanguage,
   Tool,
@@ -130,6 +131,14 @@ export const api = {
   /** Copies a template, built in or the user's, into a new template of the user's. */
   duplicateTemplate: (id: string) => call<Template>("POST", `/templates/${enc(id)}/duplicate`),
   validateTemplate: (id: string, input: TemplateInput) => call<ValidationResult>("POST", `/templates/${enc(id)}/validate`, input),
+  /** Imports a portable template as one of the user's; a dry run checks it as the import would and writes nothing. */
+  importTemplate: (request: TemplateImportRequest) => call<Template>("POST", "/templates/import", request),
+  /** A template of the user's as portable YAML, with no secrets, logs, or state. */
+  exportTemplate: async (id: string): Promise<string> => {
+    const res = await transport.requestText(`/templates/${enc(id)}/export`);
+    if (res.status >= 400 || res.status === 0) throw new ApiError(res.status, res.text);
+    return res.text;
+  },
 
   tasks: () => call<TaskSummary[]>("GET", "/tasks"),
   task: (id: string) => call<Task>("GET", `/tasks/${enc(id)}`),

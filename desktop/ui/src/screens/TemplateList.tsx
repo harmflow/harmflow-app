@@ -1,6 +1,7 @@
 // The Templates view of the Tasks screen: HarmFlow's templates and the user's, in the daemon's order, with their
 // commands — every one carried out by the daemon. A built-in template can be viewed and duplicated, and nothing else;
-// one of the user's is edited, duplicated, and deleted, and a new one starts empty, of a type the catalog lists.
+// one of the user's is edited, duplicated, exported, and deleted. A new one starts empty, of a type the catalog lists,
+// or is imported from a file another machine exported.
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
@@ -17,11 +18,13 @@ import { localized, templateFileName } from "../lib/templates";
 import { actions, useStore } from "../state/store";
 import type { TaskView } from "./taskView";
 import { TasksViewSwitch } from "./TasksViewSwitch";
+import { TemplateImportDialog } from "./TemplateImportDialog";
 
 export function TemplateList({ onView }: { onView: (v: TaskView) => void }) {
   const { t, i18n } = useTranslation();
   const templates = useStore((s) => s.templates) ?? [];
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   const open = (tpl: Template) => onView({ kind: "template", id: tpl.id });
   const nameOf = (tpl: Template) => (tpl.validation.valid ? localized(tpl.name, i18n.language) : templateFileName(tpl.path));
@@ -31,6 +34,16 @@ export function TemplateList({ onView }: { onView: (v: TaskView) => void }) {
       const copy = await api.duplicateTemplate(tpl.id);
       void actions.refreshTemplates();
       onView({ kind: "template", id: copy.id });
+    } catch (err) {
+      toast(errorMessage(err), "danger");
+    }
+  };
+
+  // The export is the template's file with its secrets masked, saved where the user picks, as a task's export is.
+  const exportTemplate = async (tpl: Template) => {
+    try {
+      const yaml = await api.exportTemplate(tpl.id);
+      if (await native.saveTextFile(`${tpl.id}.yaml`, yaml)) toast(t("tasks.templates.exported"), "success");
     } catch (err) {
       toast(errorMessage(err), "danger");
     }
@@ -53,6 +66,9 @@ export function TemplateList({ onView }: { onView: (v: TaskView) => void }) {
       <div className="filters">
         <TasksViewSwitch value="templates" onView={onView} />
         <div className="filters__spacer" />
+        <Button icon="upload" onClick={() => setImporting(true)}>
+          {t("common.import")}
+        </Button>
         <Button variant="primary" icon="plus" onClick={() => setCreating(true)}>
           {t("tasks.templates.newTemplate")}
         </Button>
@@ -97,6 +113,7 @@ export function TemplateList({ onView }: { onView: (v: TaskView) => void }) {
                     <IconButton icon="pencil" label={t("common.edit")} onClick={() => open(tpl)} />
                   )}
                   <IconButton icon="copy" label={t("common.duplicate")} disabled={!tpl.validation.valid} onClick={() => void duplicate(tpl)} />
+                  {builtin ? null : <IconButton icon="download" label={t("common.export")} onClick={() => void exportTemplate(tpl)} />}
                   {builtin ? null : <IconButton icon="trash" label={t("common.delete")} onClick={() => void remove(tpl)} />}
                 </div>
               </article>
@@ -104,6 +121,16 @@ export function TemplateList({ onView }: { onView: (v: TaskView) => void }) {
           })}
         </div>
       )}
+
+      {importing ? (
+        <TemplateImportDialog
+          onClose={() => setImporting(false)}
+          onImported={(tpl) => {
+            setImporting(false);
+            onView({ kind: "template", id: tpl.id });
+          }}
+        />
+      ) : null}
 
       {creating ? (
         <NewTemplateDialog

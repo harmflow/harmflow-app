@@ -26,6 +26,7 @@ export type TemplateLanguage = S["NewTaskRequest"]["language"];
 export type SaveAsTemplateRequest = S["SaveAsTemplateRequest"];
 export type NewTemplateRequest = S["NewTemplateRequest"];
 export type TemplateInput = S["TemplateInput"];
+export type TemplateImportRequest = S["TemplateImportRequest"];
 export type TaskDocument = S["TaskDocument"];
 export type TaskInput = S["TaskInput"];
 export type TaskSummary = S["TaskSummary"];
