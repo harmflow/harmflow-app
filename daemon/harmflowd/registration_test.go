@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -31,8 +33,8 @@ func isolate(t *testing.T) string {
 	return t.TempDir()
 }
 
-// start runs the daemon with registrations on a goroutine, waits until it has published its address, and stops it
-// when the test ends.
+// start runs the daemon with registrations on a goroutine, waits until it has published its address and started, and
+// stops it when the test ends.
 func start(t *testing.T, registrations ...Registration) *running {
 	t.Helper()
 	home := isolate(t)
@@ -66,7 +68,21 @@ func start(t *testing.T, registrations ...Registration) *running {
 	}
 	r.token = strings.TrimSpace(string(token))
 	t.Cleanup(func() { r.stop(t) })
-	return r
+	// The address is published before the use cases have started, and every route but the health answers 503 until
+	// they have.
+	for {
+		status, body := r.request(t, "GET", "/api/v1/health", true)
+		var health struct {
+			Status string `json:"status"`
+		}
+		if status == http.StatusOK && json.Unmarshal([]byte(body), &health) == nil && health.Status == "ok" {
+			return r
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("GET /api/v1/health = %d %s 20 seconds after the start, want status ok", status, body)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 // client asks without keeping a connection open, so no goroutine of it outlives the test.
@@ -225,4 +241,49 @@ func TestARegistrationThatFailsStopsTheStart(t *testing.T) {
 			lock.Close()
 		})
 	}
+}
+
+// A start of the use cases that fails, once the local API already serves, stops the start as a registration's error
+// does: Run returns the error only once the local API has stopped, so nothing answers on its port, no address is
+// published, and the data directory's lock is released.
+func TestAStartThatFailsStopsTheLocalAPI(t *testing.T) {
+	home := isolate(t)
+	if err := os.MkdirAll(filepath.Join(home, "state"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Settings that are no JSON fail the start of the use cases, after the local API has begun to serve.
+	if err := os.WriteFile(filepath.Join(home, "state", "settings.json"), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The port is fixed beforehand, since the runtime file that publishes it is gone once Run returns.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+
+	done := make(chan error, 1)
+	go func() { done <- Run(Config{Home: home, Port: port, Version: "test"}) }()
+	select {
+	case err = <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("Run() did not return within 20 seconds")
+	}
+	if err == nil || !strings.Contains(err.Error(), "state settings") {
+		t.Fatalf("Run() with settings that are no JSON = %v, want the error of loading the settings", err)
+	}
+	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	if conn, err := net.DialTimeout("tcp", address, time.Second); err == nil {
+		conn.Close()
+		t.Errorf("after a failed start, dialing the local API at %s = a connection, want it refused", address)
+	}
+	if _, err := os.Stat(filepath.Join(home, "run", "daemon.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("after a failed start, run/daemon.json: %v, want none", err)
+	}
+	lock, err := acquireLock(filepath.Join(home, "run", "daemon.lock"), syscall.Flock)
+	if err != nil {
+		t.Fatalf("after a failed start, acquireLock() = %v, want the lock free", err)
+	}
+	lock.Close()
 }

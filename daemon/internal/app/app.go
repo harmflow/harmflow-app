@@ -266,6 +266,10 @@ type App struct {
 	// stopBegun is closed when Stop begins, before it takes mu: every running execution cancels itself on it, and the
 	// drain's watcher returns.
 	stopBegun chan struct{}
+	// started is set once Start has loaded the state and recovered the interrupted executions. Until then the local API
+	// answers that the daemon is still starting, which it reads without mu, so it answers at once however long the
+	// start's disk work keeps mu.
+	started atomic.Bool
 }
 
 // New builds the use cases over d, with its defaults filled in, and creates the directories they write to; it loads
@@ -339,10 +343,10 @@ func (noWake) LastWake() time.Time { return time.Time{} }
 
 func (a *App) now() time.Time { return a.d.Clock.Now() }
 
-// Start loads state, recovers interrupted executions, and starts the scheduler, the task-file watcher, and maintenance.
-// It waits for no harness: the task files load without the checks that ask one, and the harnesses are detected, then
-// the task files checked again with them, in the background. The loops run until ctx ends or Stop is called, whichever
-// comes first.
+// Start loads state, recovers interrupted executions, and starts the scheduler, the task-file watcher, and maintenance;
+// Starting reports true until it has. It waits for no harness: the task files load without the checks that ask one,
+// and the harnesses are detected, then the task files checked again with them, in the background. The loops run until
+// ctx ends or Stop is called, whichever comes first.
 func (a *App) Start(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	detectCtx, stopDetection := context.WithCancel(ctx)
@@ -381,8 +385,14 @@ func (a *App) Start(ctx context.Context) error {
 	go a.watchLoop(ctx)
 	go a.maintenanceLoop(ctx)
 	a.startQueued()
+	a.started.Store(true)
 	return nil
 }
+
+// Starting reports whether Start is still under way: loading the state and recovering the interrupted executions, which
+// may take long on a large history when the disk is slow. The daemon publishes its address before it starts, so the
+// local API answers meanwhile that it is still starting. It takes no lock.
+func (a *App) Starting() bool { return !a.started.Load() }
 
 // DefaultStopDetectionWait is how long Stop waits for the harness detection to end, and DefaultStopExecutionsWait how
 // long for the cancelled executions to end, when Deps sets neither.

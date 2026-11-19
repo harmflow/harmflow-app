@@ -45,6 +45,7 @@ type Server struct {
 	stopping chan struct{}
 	listener net.Listener
 	port     int
+	// srv, guarded by mu, is the server Serve runs; nil until Serve has begun.
 	srv      *http.Server
 	handler  http.Handler
 	rejected rejections
@@ -121,14 +122,29 @@ func underAPI(pattern string) bool {
 	return strings.HasPrefix(path, "/api/v1/")
 }
 
-// Serve serves the API on the listener of Listen until Shutdown, which returns nil.
+// Serve serves the API on the listener of Listen until Shutdown, which returns nil. Called after Shutdown has started,
+// it closes the listener and returns nil at once, serving nothing.
 func (s *Server) Serve() error {
 	handler := s.handler
 	if handler == nil {
 		handler = s.Handler()
 	}
-	s.srv = &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
-	err := s.srv.Serve(s.listener)
+	srv := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+	stopping := s.stoppingCh()
+	// The server is set under mu, where Shutdown reads it, so a Shutdown that comes before this point finds no server to
+	// stop and this one sees stopping closed instead.
+	s.mu.Lock()
+	select {
+	case <-stopping:
+		s.mu.Unlock()
+		// The listener serves no one: there is no one to tell that it failed to close.
+		_ = s.listener.Close()
+		return nil
+	default:
+	}
+	s.srv = srv
+	s.mu.Unlock()
+	err := srv.Serve(s.listener)
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
@@ -136,7 +152,8 @@ func (s *Server) Serve() error {
 }
 
 // Shutdown ends the open event streams and stops serving, then records the rejected requests no entry has counted yet.
-// Any other request still running holds it until ctx ends, and it then returns ctx's error.
+// Any other request still running holds it until ctx ends, and it then returns ctx's error. A Serve not yet under way
+// serves nothing once Shutdown has started.
 func (s *Server) Shutdown(ctx context.Context) error {
 	stopping := s.stoppingCh()
 	s.mu.Lock()
@@ -145,10 +162,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	default:
 		close(stopping)
 	}
+	srv := s.srv
 	s.mu.Unlock()
 	var err error
-	if s.srv != nil {
-		err = s.srv.Shutdown(ctx)
+	if srv != nil {
+		err = srv.Shutdown(ctx)
 	}
 	s.flushRejections()
 	return err
@@ -170,7 +188,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	h := func(pattern string, fn func(w http.ResponseWriter, r *http.Request)) { mux.HandleFunc(pattern, fn) }
 
-	h("GET /api/v1/health", s.health)
+	h("GET "+healthPath, s.health)
 	h("POST /api/v1/daemon/stop", s.stop)
 	h("GET /api/v1/diagnostics", s.diagnostics)
 	h("GET /api/v1/stats", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.App.Stats()) })
@@ -279,9 +297,22 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
+		if r.URL.Path != healthPath && s.starting() {
+			writeError(w, 503, "daemon_starting", domain.T("daemon_starting",
+				"the daemon is still starting: it is loading its state and recovering interrupted executions"))
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }
+
+// healthPath is the one route that answers while the daemon is still starting, to say so; every other route answers
+// 503 until then (see guard).
+const healthPath = "/api/v1/health"
+
+// starting reports whether the use cases are still starting; a server over none, as the guard's own tests build, has
+// nothing to start.
+func (s *Server) starting() bool { return s.App != nil && s.App.Starting() }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -342,10 +373,15 @@ func decode(r *http.Request, v any) error {
 	return nil
 }
 
+// health answers the daemon's state. While the daemon is still starting it reads nothing the start holds a lock on, so
+// it answers at once: status starting, with no firing accepted.
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
-	// One read gives both fields, so that no response pairs a drain with firings still accepted.
-	state := s.App.FiringState()
-	body := map[string]any{"status": "ok", "version": s.App.Version(), "apiVersion": "v1",
+	status, state := "starting", app.FiringState{}
+	if !s.App.Starting() {
+		// One read gives both fields, so that no response pairs a drain with firings still accepted.
+		status, state = "ok", s.App.FiringState()
+	}
+	body := map[string]any{"status": status, "version": s.App.Version(), "apiVersion": "v1",
 		"pid": pid(), "startedAt": s.App.StartedAt(), "acceptingFirings": state.Accepting}
 	if commit := s.App.Commit(); commit != "" {
 		body["commit"] = commit

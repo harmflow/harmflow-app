@@ -429,6 +429,10 @@ func TestTheTrayDaemonItemFollowsTheDaemonsState(t *testing.T) {
 		t.Fatalf("no daemon wrote its runtime file on the test's home within %v of Start daemon; its log ends:\n%s",
 			runtimeWait, daemonLogTail(home))
 	}
+	if !awaitStarted(started.base, started.token, runtimeWait) {
+		t.Fatalf("the daemon Start daemon launched still read as starting %v after it wrote its runtime file; its log "+
+			"ends:\n%s", runtimeWait, daemonLogTail(home))
+	}
 	health := started.call("GET", "/health", nil, 200)
 	pid := int(health["pid"].(float64))
 	watchDaemon(t, pid, true)
