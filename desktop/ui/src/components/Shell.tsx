@@ -392,6 +392,13 @@ export function Header({
           </Banner>
         </div>
       ) : null}
+      {connection === "starting" ? (
+        <div className="topbar__banner">
+          <Banner tone="blue" icon="refresh">
+            {t("connection.startingHint")}
+          </Banner>
+        </div>
+      ) : null}
       {tooltip}
     </header>
   );

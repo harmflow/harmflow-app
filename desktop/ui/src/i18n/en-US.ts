@@ -73,10 +73,13 @@ export const enUS = {
     disconnected: "Connection to the daemon lost",
     daemon_stopped: "Daemon not running",
     not_answering: "Not answering",
+    starting: "Daemon starting",
     lastUpdate: "Last update: {{time}}",
     draining_one: "Stopping: the daemon waits for {{count}} running execution, and cancels it at {{time}} if it has not finished.",
     draining_other: "Stopping: the daemon waits for {{count}} running executions, and cancels those left at {{time}}.",
     notAnsweringHint: "The daemon is running but not answering yet. The desktop keeps trying.",
+    startingHint:
+      "The daemon is starting: it is loading its state and recovering interrupted executions. The desktop waits for it.",
     lostHint:
       "The connection to the daemon was lost. Executions keep running in the daemon; the dashboard reconnects and replays the events it missed.",
     versionMismatch:
@@ -275,6 +278,7 @@ export const enUS = {
     task_disabled: "the task is disabled; enable it to run it",
     task_being_deleted: "the task is being deleted",
     daemon_stopping: "the daemon is stopping and accepts no new firing",
+    daemon_starting: "the daemon is still starting: it is loading its state and recovering interrupted executions",
     execution_ended: "the execution already ended ($t(status.{{status}}))",
     executions_running_one: "{{count}} execution is running; confirm to stop the daemon and cancel it",
     executions_running_other: "{{count}} executions are running; confirm to stop the daemon and cancel them",

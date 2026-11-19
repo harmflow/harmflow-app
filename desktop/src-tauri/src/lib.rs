@@ -116,7 +116,8 @@ fn read_tray_settings(app: tauri::AppHandle) {
     });
 }
 
-/// Tray texts in the interface's language: idle, active ({{count}}), open, quit, stop, start, notAnswering, stopTitle,
+/// Tray texts in the interface's language: idle, active ({{count}}), open, quit, stop, start, notAnswering, starting,
+/// stopTitle,
 /// stopConfirm, stopChoiceRunning_one and stopChoiceRunning_other ({{count}}), stopWait_one and stopWait_other,
 /// stopCancelRunning_one and stopCancelRunning_other, stopOk, stopFailedTitle, stopFailedOk, stopUnansweredTitle,
 /// stopUnanswered, stopDoneTitle, stopDone, startFailedTitle, startFailed ({{message}}), cancel; and the app menu's

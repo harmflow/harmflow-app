@@ -1,6 +1,6 @@
 //! The menu-bar tray. Its icon changes only while an execution actually runs — queued work and idleness never change
 //! it — and it lists the running executions and a daemon item that follows the daemon's state: a protected stop while
-//! it runs, a start while it is stopped, and a disabled item while it is alive but not answering.
+//! it runs, a start while it is stopped, and a disabled item while it is alive but not answering, or still starting.
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -23,6 +23,8 @@ pub const STOP: &str = "stop";
 pub const START: &str = "start";
 /// The disabled daemon item while the daemon is not answering, which no action takes.
 pub const NOT_ANSWERING: &str = "not-answering";
+/// The disabled daemon item while the daemon is still starting, which no action takes.
+pub const STARTING: &str = "starting";
 pub const QUIT: &str = "quit";
 pub const EXECUTION_PREFIX: &str = "exec:";
 const ACTIVE_STATUSES: [&str; 5] = ["preparing", "running", "switching_harness", "testing", "publishing"];
@@ -115,9 +117,9 @@ enum Entry {
 
 /// The tray's menu for the running executions, in order: a disabled header with their count, the first `MAX_LISTED`
 /// of them, "Open dashboard", then the daemon item and "Quit interface". The daemon item follows `daemon`: "Stop
-/// daemon…" while it runs, "Start daemon" while it is stopped, and a disabled "Not answering" while it is alive but not
-/// answering. `label` gives a text by its key, or the fallback when the interface has sent none, as `AppState::label`
-/// does.
+/// daemon…" while it runs, "Start daemon" while it is stopped, a disabled "Not answering" while it is alive but not
+/// answering, and a disabled "Daemon starting" while it is still starting. `label` gives a text by its key, or the
+/// fallback when the interface has sent none, as `AppState::label` does.
 fn menu_entries(running: &[ActiveExecution], daemon: DaemonState, label: impl Fn(&str, &str) -> String) -> Vec<Entry> {
     let item = |id: &str, text: String, enabled: bool| Entry::Item { id: id.to_string(), text, enabled };
     let header = if running.is_empty() {
@@ -133,6 +135,7 @@ fn menu_entries(running: &[ActiveExecution], daemon: DaemonState, label: impl Fn
         DaemonState::Running => item(STOP, label("stop", "Stop daemon…"), true),
         DaemonState::Stopped => item(START, label("start", "Start daemon"), true),
         DaemonState::NotAnswering => item(NOT_ANSWERING, label("notAnswering", "Not answering"), false),
+        DaemonState::Starting => item(STARTING, label("starting", "Daemon starting"), false),
     };
     entries.extend([
         Entry::Separator,
@@ -146,7 +149,9 @@ fn menu_entries(running: &[ActiveExecution], daemon: DaemonState, label: impl Fn
 
 /// The state the tray's daemon item shows for the desktop's daemon status, the one the dashboard's banner reads.
 fn daemon_state(status: &DaemonStatus) -> DaemonState {
-    if status.running {
+    if status.running && status.starting {
+        DaemonState::Starting
+    } else if status.running {
         DaemonState::Running
     } else if status.not_answering {
         DaemonState::NotAnswering
@@ -272,11 +277,12 @@ fn running_of(answer: &Value) -> Option<Vec<ActiveExecution>> {
 
 /// The executions the tray keeps for `daemon`, from the daemon's answer to `GET /executions?active=true`, which only a
 /// running daemon is asked for: none while it is stopped, since nothing runs then, and `None`, the list kept as it
-/// was, while it is not answering or when the answer holds no list.
+/// was, while it is not answering or when the answer holds no list. A daemon still starting runs nothing yet, since no
+/// execution starts before its recovery ends: none.
 fn kept_running(daemon: DaemonState, answer: Option<&Value>) -> Option<Vec<ActiveExecution>> {
     match daemon {
         DaemonState::Running => answer.and_then(TrayState::from_answer).map(|shown| shown.running),
-        DaemonState::Stopped => Some(Vec::new()),
+        DaemonState::Stopped | DaemonState::Starting => Some(Vec::new()),
         DaemonState::NotAnswering => None,
     }
 }
@@ -708,14 +714,15 @@ mod tests {
         assert_eq!(daemon_item(DaemonState::Running), (STOP.into(), "Stop daemon…".into(), true));
         assert_eq!(daemon_item(DaemonState::Stopped), (START.into(), "Start daemon".into(), true));
         assert_eq!(daemon_item(DaemonState::NotAnswering), (NOT_ANSWERING.into(), "Not answering".into(), false));
+        assert_eq!(daemon_item(DaemonState::Starting), (STARTING.into(), "Daemon starting".into(), false));
     }
 
     #[test]
     fn each_state_shows_one_daemon_item_and_keeps_the_rest_of_the_menu() {
-        for daemon in [DaemonState::Running, DaemonState::Stopped, DaemonState::NotAnswering] {
+        for daemon in [DaemonState::Running, DaemonState::Stopped, DaemonState::NotAnswering, DaemonState::Starting] {
             let entries = menu_entries(&running(2), daemon, defaults);
             let ids: Vec<&str> = items(&entries).iter().map(|(id, _, _)| *id).collect();
-            let daemon_items = ids.iter().filter(|id| [STOP, START, NOT_ANSWERING].contains(*id)).count();
+            let daemon_items = ids.iter().filter(|id| [STOP, START, NOT_ANSWERING, STARTING].contains(*id)).count();
             assert_eq!(daemon_items, 1, "{daemon:?}");
             assert_eq!(ids[..3], ["header", "exec:exec-1", "exec:exec-2"], "{daemon:?}");
             assert!(ids.contains(&OPEN) && ids.contains(&QUIT), "{daemon:?}");
@@ -729,6 +736,7 @@ mod tests {
         assert_eq!(action(STOP), Some(Action::StopDaemon));
         assert_eq!(action(START), Some(Action::StartDaemon));
         assert_eq!(action(NOT_ANSWERING), None);
+        assert_eq!(action(STARTING), None);
     }
 
     #[test]
@@ -741,7 +749,9 @@ mod tests {
             ..Default::default()
         };
         let stopped = DaemonStatus { error: Some("connection refused".into()), ..Default::default() };
+        let starting = DaemonStatus { running: true, starting: true, pid: Some(4242), ..Default::default() };
         assert_eq!(daemon_state(&running), DaemonState::Running);
+        assert_eq!(daemon_state(&starting), DaemonState::Starting);
         assert_eq!(daemon_state(&not_answering), DaemonState::NotAnswering);
         assert_eq!(daemon_state(&stopped), DaemonState::Stopped);
         assert_eq!(daemon_state(&DaemonStatus::default()), DaemonState::Stopped);
@@ -777,6 +787,12 @@ mod tests {
         // A daemon that runs but does not answer yet is not started again: the item says so.
         let busy = Ok(DaemonStatus { not_answering: true, ..Default::default() });
         assert_eq!(after_start(&busy, defaults), (DaemonState::NotAnswering, None));
+        // A daemon that answers while it still recovers is started: the item says it is starting, and a later status
+        // read moves it to Stop daemon… once the start has ended.
+        let starting = DaemonStatus { running: true, starting: true, ..Default::default() };
+        assert_eq!(after_start(&Ok(starting), defaults), (DaemonState::Starting, None));
+        let started = DaemonStatus { running: true, ..Default::default() };
+        assert_eq!(polled(DaemonState::Starting, &started), Some(DaemonState::Running));
     }
 
     #[test]
@@ -801,6 +817,7 @@ mod tests {
         let label = |key: &str, fallback: &str| match key {
             "start" => "Iniciar o daemon".to_string(),
             "notAnswering" => "Sem resposta".to_string(),
+            "starting" => "Daemon iniciando…".to_string(),
             _ => fallback.to_string(),
         };
         let texts = |daemon| {
@@ -808,6 +825,7 @@ mod tests {
         };
         assert!(texts(DaemonState::Stopped).contains(&"Iniciar o daemon".to_string()));
         assert!(texts(DaemonState::NotAnswering).contains(&"Sem resposta".to_string()));
+        assert!(texts(DaemonState::Starting).contains(&"Daemon iniciando…".to_string()));
     }
 
     #[test]
@@ -819,6 +837,7 @@ mod tests {
         assert_eq!(ids(kept_running(DaemonState::Running, None)), None);
         assert_eq!(ids(kept_running(DaemonState::Stopped, None)), Some(vec![]));
         assert_eq!(ids(kept_running(DaemonState::NotAnswering, None)), None);
+        assert_eq!(ids(kept_running(DaemonState::Starting, None)), Some(vec![]));
     }
 
     fn stop_with(body: Value) -> Option<Request> {

@@ -44,7 +44,7 @@ pub enum Action<'a> {
 }
 
 /// The action of a menu item, by its id. None for the items macOS handles itself (About, Edit, Window…) and for the
-/// tray's header and its not-answering item, which only read.
+/// tray's header and its not-answering and starting items, which only read.
 pub fn action(id: &str) -> Option<Action<'_>> {
     match id {
         SETTINGS => Some(Action::Settings),

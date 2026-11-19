@@ -112,6 +112,11 @@ async function startDaemon(): Promise<RealDaemon> {
   expect(runtime.tokenStore).toBe("file");
   const token = readFileSync(join(home, "run", "token"), "utf8").trim();
   const d: RealDaemon = { home, base: `http://${runtime.address}/api/v1`, token, process: child, output };
+  // The daemon writes its address before it has started, and every route but its health answers 503 until then.
+  for (const deadline = Date.now() + RUNTIME_WAIT_MS; ((await call(d, "GET", "/health")) as { status?: string }).status !== "ok"; ) {
+    if (Date.now() > deadline) throw new Error(`the daemon still reads as starting after ${RUNTIME_WAIT_MS} ms`);
+    await new Promise((r) => setTimeout(r, 20));
+  }
   await call(d, "PUT", "/harnesses/claude-code", { path: join(fakes, "fake-claude") });
   await call(d, "PUT", "/harnesses/codex", { path: join(fakes, "fake-codex") });
   return d;
