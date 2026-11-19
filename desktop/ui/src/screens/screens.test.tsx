@@ -1169,6 +1169,59 @@ describe("the executions screen's cards", () => {
         vi.useRealTimers();
       }
     });
+
+    it("is laid out by the stylesheet: three cards, or two below 1240 px, and a 48 px slice fill it, each card snaps by its start, and a slice is dimmed only while its class is set", () => {
+      // happy-dom applies no stylesheet, so the rules are read as app.css writes them. The snap after a partial scroll,
+      // and Tab bringing a half-hidden card's Cancel into view, are the browser's and only a running app shows them.
+      const css = readFileSync(join(__dirname, "..", "design", "app.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+      const found: { selectors: string[]; media: string | null; body: string }[] = [];
+      const open: string[] = [];
+      for (const [, text, brace] of css.matchAll(/([^{}]*)([{}])/g)) {
+        if (brace === "{") {
+          open.push(text.trim());
+          continue;
+        }
+        const head = open.pop()!;
+        if (!head.startsWith("@")) found.push({ selectors: head.split(",").map((s) => s.trim()), media: open.at(-1) ?? null, body: text });
+      }
+      /** The declarations that apply to selector, at the top level or inside media, the later rule winning. */
+      const declared = (selector: string, media: string | null = null) => {
+        const values = new Map<string, string>();
+        for (const rule of found.filter((r) => r.media === media && r.selectors.includes(selector))) {
+          for (const declaration of rule.body.split(";")) {
+            const colon = declaration.indexOf(":");
+            if (colon > 0) values.set(declaration.slice(0, colon).trim(), declaration.slice(colon + 1).trim());
+          }
+        }
+        return values;
+      };
+
+      // Three columns and their three gaps, the last one before the slice, leave 48 px of the row: whether or not the
+      // cards overflow it, so a fourth that starts resizes none of them.
+      const cards = declared(".exec-cards");
+      expect(cards.get("display")).toBe("grid");
+      expect(cards.get("grid-auto-flow")).toBe("column");
+      expect(cards.get("gap")).toBe("var(--hf-space-4)");
+      expect(cards.get("grid-auto-columns")).toBe("calc((100% - 3 * var(--hf-space-4) - 48px) / 3)");
+      expect(cards.get("overflow-x")).toBe("auto");
+      expect(declared(".exec-cards", "@media (max-width: 1240px)").get("grid-auto-columns")).toBe("calc((100% - 2 * var(--hf-space-4) - 48px) / 2)");
+
+      // The row snaps to a whole card at its left.
+      expect(cards.get("scroll-snap-type")).toBe("x mandatory");
+      expect(declared(".exec-card").get("scroll-snap-align")).toBe("start");
+
+      // Each slice's overlay sits at its edge, hidden until the class that says more cards lie that way is set.
+      const before = declared(".exec-carousel::before");
+      const after = declared(".exec-carousel::after");
+      expect(before.get("left")).toBe("0");
+      expect(after.get("right")).toBe("0");
+      expect(before.get("opacity")).toBe("0");
+      expect(after.get("opacity")).toBe("0");
+      expect(declared(".exec-carousel--more-start::before").get("opacity")).toBe("1");
+      expect(declared(".exec-carousel--more-end::after").get("opacity")).toBe("1");
+      expect(declared(".exec-carousel--more-start::after").has("opacity")).toBe(false);
+      expect(declared(".exec-carousel--more-end::before").has("opacity")).toBe(false);
+    });
   });
 
   describe("its effort beside the model", () => {
