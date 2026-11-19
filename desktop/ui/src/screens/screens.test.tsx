@@ -1004,7 +1004,10 @@ describe("the executions screen's cards", () => {
 
     it("keeps the cards in view where they were as executions start and end, and hides its controls once they fit", async () => {
       // The local API lists the running executions newest first, so one that starts comes before the others. Five run,
-      // the row paged to its end: the third to the fifth show.
+      // the row paged to its end: the third to the fifth show. A card in view is selected before the sixth starts, so
+      // this proves what the row does for the cards in view while a selection is held. With nothing selected, the one
+      // that starts becomes the default and the row scrolls it into view, which "with nothing selected, shows the card
+      // of an execution that starts" proves.
       const STEP = PAGE / 3;
       const [one, two, three, four, five] = runningMany(5);
       const sixth: ExecutionSummary = { ...running, id: "exec-row-new", taskId: "row-new", taskName: "Row new" };
@@ -1014,6 +1017,12 @@ describe("the executions screen's cards", () => {
       // The row lands on each scroll it asks for, within its ends.
       scrollTo.mockImplementation(({ left = 0 }: ScrollToOptions) => {
         element.scrollLeft = Math.min(Math.max(left, 0), element.scrollWidth - element.clientWidth);
+      });
+      // Each card's box from where the row is scrolled, so a selected card reads in view only where it is; the row and
+      // its wrapper keep their own.
+      const box = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+        const i = [...element.children].indexOf(this);
+        return i < 0 ? rect(0, 0) : rect(i * STEP - element.scrollLeft, STEP - 16);
       });
       const intoView = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
 
@@ -1053,11 +1062,19 @@ describe("the executions screen's cards", () => {
         expect(position()).toBe("3–5 de 5");
         expect([...inView().keys()]).toEqual(["Row 3", "Row 4", "Row 5"]);
 
-        // A sixth starts, before the others: the row moves one card along, and the same three show.
+        // The fourth, whole in view, is selected: the row stays where it is.
+        await act(async () => host!.querySelectorAll<HTMLElement>(".exec-card")[3].click());
+        expect(onSelect).toHaveBeenLastCalledWith("exec-row-4");
+        expect(scrollTo).not.toHaveBeenCalled();
+        expect(intoView).not.toHaveBeenCalled();
+
+        // A sixth starts, before the others, while the fourth stays selected: the row moves one card along, and the
+        // same three show.
         await change([sixth, one, two, three, four, five]);
         expect(scrollTo).toHaveBeenCalledTimes(1);
         expect(position()).toBe("4–6 de 6");
         expect([...inView().keys()]).toEqual(["Row 3", "Row 4", "Row 5"]);
+        expect(host!.querySelectorAll(".exec-card")[4].classList.contains("exec-card--selected")).toBe(true);
 
         // The first and the sixth end, both before the cards in view: the row moves back two cards.
         await change([two, three, four, five]);
@@ -1074,6 +1091,7 @@ describe("the executions screen's cards", () => {
         expect(position()).toBeUndefined();
       } finally {
         intoView.mockRestore();
+        box.mockRestore();
       }
     });
 
