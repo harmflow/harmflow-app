@@ -162,6 +162,8 @@ const BUILT_KEYS: Record<string, (written: string[]) => readonly BuiltValue[]> =
   "tasks.fields.parametersOf.${}": () => ["skill", "agent"],
   "tasks.paramTypes.${}": () => contractEnum("ParameterDeclaration", "properties", "type"),
   "tasks.options.${}.${}": () => Object.entries(OPTION_FIELDS).flatMap(([key, path]) => schemaEnum(path).map((v) => [key, v])),
+  "tasks.options.profile.${}": () => schemaEnum(OPTION_FIELDS.profile),
+  "tasks.options.network.${}": () => schemaEnum(OPTION_FIELDS.network),
   "tasks.options.fallbackOn.${}": () => schemaEnum(["spec", "harness", "fallback", "on"]),
   "tasks.options.notifiable.${}": () => NOTIFIABLE_EVENTS,
   "tasks.options.systems.${}": () => schemaEnum(["spec", "script", "systems"]),
