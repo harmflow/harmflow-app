@@ -135,6 +135,7 @@ export const esES: Resources = {
     queued: "En cola",
     completedToday: "Completadas hoy",
     failedToday: "Con error hoy",
+    noWorkToday: "Sin trabajo hoy",
   },
   status: {
     scheduled: "Programada",
