@@ -81,14 +81,16 @@ func (c cli) only(t *testing.T, allowed ...string) map[string]int {
 // attempt, `claude -p /usage`, which runs no turn and makes no model call. claudeSignIn is the sign-in the daemon
 // starts on a Claude Code that says it is signed out: the CLI with no arguments, its interactive session, which a
 // stand-in's log records as an empty line. codexSignIn is the one it starts on a Codex that says so, `codex login`.
+// Codex's probes include its app server, which detection asks for the managed requirements and the account, and a run
+// is the app server too, told to listen on stdio, which a probe never is.
 var (
 	claudeProbes = []string{"--version", "--help", "auth status", claudeQuota}
 	claudeQuota  = "-p /usage"
 	claudeSignIn = ""
-	codexProbes  = []string{"--version", "exec --help", "--help", "login status"}
+	codexProbes  = []string{"--version", "exec --help", "--help", "login status", "app-server"}
 	codexSignIn  = "login"
 	claudeRun    = "-p --output-format"
-	codexRun     = "exec --json"
+	codexRun     = "app-server --listen"
 )
 
 // setHarness sets a harness's path by hand and returns its entry in GET /harnesses once the entry is that path's. The
@@ -164,8 +166,7 @@ func TestDetectionOnlyProbes(t *testing.T) {
 }
 
 // harmflow-app#1050: the Codex half of TestDetectionOnlyProbes for a Codex that says it is signed out. The stand-in is
-// the signed-out Codex of the sign-in tests, behind a wrapper that records each invocation, and its --help names no app
-// server. Detecting it and running a task on it invokes only the probes and the sign-in the daemon starts,
+// the signed-out Codex of the sign-in tests, behind a wrapper that records each invocation. Detecting it and running a task on it invokes only the probes and the sign-in the daemon starts,
 // `codex login` with no other argument, which nobody approves and which ends at the one-second timeout: no installer,
 // no updater, no device-code sign-in, and no sign-in with an API key. The execution fails without starting, and Codex
 // reads not ready.
@@ -520,28 +521,6 @@ func TestInventoryCarriesNoCredential(t *testing.T) {
 	}
 }
 
-// codexAppServer is a branch of fake-codex's case that answers as Codex's app server: each request at once, from the
-// builtins alone, since each process the stand-in starts can take seconds on a loaded host. The managed requirements
-// are none and the quota has room left; the skill list is empty, and any other request is an error. It records each
-// request's method, one line each, in app-server.log beside itself.
-const codexAppServer = `  app-server)
-    while IFS= read -r line; do
-      [[ $line =~ \"id\":([0-9]+) ]] || continue
-      id=${BASH_REMATCH[1]}
-      method=
-      [[ $line =~ \"method\":\"([^\"]+)\" ]] && method=${BASH_REMATCH[1]}
-      echo "$method" >> "${0%/*}/app-server.log"
-      case "$method" in
-        initialize) printf '{"id":%s,"result":{"userAgent":"stand-in"}}\n' "$id" ;;
-        configRequirements/read) printf '{"id":%s,"result":{"requirements":null}}\n' "$id" ;;
-        account/rateLimits/read) printf '{"id":%s,"result":{"rateLimits":{"primary":{"usedPercent":12,"resetsAt":null},"secondary":null,"rateLimitReachedType":null,"spendControlReached":false}}}\n' "$id" ;;
-        skills/list) printf '{"id":%s,"result":{"data":[]}}\n' "$id" ;;
-        *) printf '{"id":%s,"error":{"code":-32601,"message":"the stand-in does not answer %s"}}\n' "$id" "$method" ;;
-      esac
-    done
-    exit 0 ;;
-`
-
 // harmflow-app#746: a Codex whose top-level --help check outlasts the check's limit, while exec --help was read in
 // full, reads ready, at its version, with the diagnostic that says whether it has an app server is unknown, and not as
 // a Codex that lacks one. The daemon then calls the app server: it reads the managed requirements at the check, and the
@@ -552,7 +531,7 @@ func TestTopLevelHelpCheckThatTimesOutLeavesCodexReady(t *testing.T) {
 	t.Parallel()
 	// Made before the daemon, so its folder is removed after the daemon and the app server it started have stopped.
 	codex := standIn(t, "fake-codex", "codex", "#!/bin/bash\n", "#!/bin/bash\n[ \"$*\" = \"--help\" ] && exec sleep 60\n",
-		"case \"$1\" in\n", "case \"$1\" in\n"+codexAppServer)
+		"APP_SERVER_LOG=\n", "APP_SERVER_LOG=\"${0%/*}/app-server.log\"\n")
 	received := filepath.Join(filepath.Dir(codex.path), "app-server.log")
 	methods := func() []string {
 		data, err := os.ReadFile(received)

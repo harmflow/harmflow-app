@@ -67,6 +67,10 @@ type run struct {
 	// ranWith is the harness's saved token the current attempt's session runs with, nil for none, taken before the
 	// harness prepares the session; an attempt that ends signed out rejects only that token.
 	ranWith *tokenRecord
+	// conv is the running attempt's Conversation, for a harness spoken to while it runs; nil otherwise. Guarded by a.mu.
+	conv ports.Conversation
+	// harnessName is the running attempt's harness, as the step names it while no request waits.
+	harnessName string
 	// selected holds every work item the session selected, in order, each with what the ledger held for it before;
 	// guarded by the App's mutex.
 	selected []selection
@@ -162,6 +166,9 @@ func (a *App) execute(x *domain.Execution, h *runHandle) {
 	a.mu.Unlock()
 
 	r := &run{a: a, x: x, h: h, def: def, eff: eff, commandIndex: map[string]int{}}
+	a.mu.Lock()
+	h.run = r
+	a.mu.Unlock()
 	a.mu.Lock()
 	x.DefinitionRevision = rev
 	x.TaskName = def.Metadata.Name
@@ -864,6 +871,14 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 			r.onHarnessEvent(he)
 		}
 	})
+	conv, _ := parser.(ports.Conversation)
+	if err == nil && inv.Interactive && conv != nil {
+		if berr := conv.Begin(proc.Stdin()); berr != nil {
+			proc.Stop(0)
+			<-proc.Done()
+			err = berr
+		}
+	}
 	if err != nil {
 		if raw != nil {
 			r.closeRaw(raw)
@@ -906,6 +921,30 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 			}
 		}
 	}()
+	if conv != nil && inv.Interactive {
+		a.mu.Lock()
+		r.conv, r.harnessName = conv, ad.Name()
+		a.mu.Unlock()
+		// A request still unanswered when the execution reaches its time limit is declined, and the execution says so;
+		// no other end of the attempt answers one, and nothing else does on the owner's behalf.
+		declined := make(chan struct{})
+		go func() {
+			defer close(declined)
+			select {
+			case <-ctx.Done():
+				if errors.Is(ctx.Err(), context.DeadlineExceeded) && !r.cancelRequested() {
+					r.declinePending(conv)
+				}
+			case <-proc.Done():
+			}
+		}()
+		defer func() {
+			<-declined
+			a.mu.Lock()
+			r.conv = nil
+			a.mu.Unlock()
+		}()
+	}
 	grace := time.Duration(*r.eff.Spec.Execution.CancelGraceSeconds) * time.Second
 	proc.Wait(attemptCtx, grace)
 	r.logEnded(proc.Ended())
@@ -1287,6 +1326,20 @@ func (r *run) onHarnessEvent(he ports.HarnessEvent) {
 			domain.EventHarnessOutput, true)
 	case ports.HarnessRateLimit:
 		r.event(domain.Event{Type: domain.EventHarnessOutput, Severity: domain.SeverityWarning, Message: he.Message})
+	case ports.HarnessApprovalRequested:
+		if he.Approval != nil {
+			r.onApprovalRequested(*he.Approval)
+		}
+	case ports.HarnessApprovalWithdrawn:
+		if he.Approval != nil {
+			r.event(domain.Event{Type: domain.EventApprovalWithdrawn, Payload: he.Approval.Payload()}.Says(
+				domain.T("approval_withdrawn", "{{harness}} no longer waits for the approval", "harness", r.harnessLabel())))
+			r.afterApproval()
+		}
+	case ports.HarnessAutoReviewStarted, ports.HarnessAutoReviewCompleted:
+		if he.Review != nil {
+			r.onAutoReview(he.Kind, *he.Review)
+		}
 	case ports.HarnessNetworkWait:
 		r.event(domain.Event{Type: domain.EventHarnessNetworkWaiting, Severity: domain.SeverityWarning,
 			Message: trimTo(he.Message, 2000)})

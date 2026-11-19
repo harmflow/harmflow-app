@@ -7,6 +7,7 @@ import type { Execution, ExecutionSummary } from "../api/types";
 import { isActive } from "../api/types";
 import { eventText } from "../lib/daemonText";
 import { toneClass, typeGlyph } from "../lib/taskType";
+import { pendingApprovals } from "../lib/approvals";
 import { buildTimeline, changedFilesFromEvents } from "../lib/timeline";
 import { actions, useStore } from "../state/store";
 import { CostsTab } from "./CostsTab";
@@ -14,6 +15,7 @@ import { useCancel } from "./ExecutionCard";
 import { HarnessLabel } from "./Shell";
 import { Icon, type IconName } from "./Icon";
 import { Banner, Button, Elapsed, EmptyState, StatusChip, Tabs, cx, type TabDef } from "./ui";
+import { ApprovalRequests } from "./execution/ApprovalRequests";
 import { Attempts } from "./execution/Attempts";
 import { Chat } from "./execution/Chat";
 import { CommandList } from "./execution/CommandList";
@@ -79,6 +81,8 @@ export function ExecutionDetail({
     () => (events ?? []).filter((e) => PROMINENT.has(e.type) && (showRestrictions || e.type !== "policy.unenforced")),
     [events, showRestrictions],
   );
+  // The requests the harness waits on, while the execution runs: once it ended, none waits any more.
+  const approvals = useMemo(() => pendingApprovals(events ?? []), [events]);
   const outputLines = useMemo(() => (events ?? []).filter((e) => e.type === "script.output"), [events]);
   // The chat lists each session message under its attempt, so it counts only those the daemon stamped with one.
   const agentMessages = useMemo(() => (events ?? []).filter((e) => e.type === "harness.message" && e.attempt), [events]);
@@ -186,6 +190,8 @@ export function ExecutionDetail({
           </Button>
         ) : null}
       </header>
+
+      {active ? <ApprovalRequests executionId={exec.id} requests={approvals} /> : null}
 
       {prominent.length ? (
         <div className="detail__alerts">

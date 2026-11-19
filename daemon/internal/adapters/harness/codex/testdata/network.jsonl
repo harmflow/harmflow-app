@@ -1,5 +1,8 @@
-{"type":"thread.started","thread_id":"t-4"}
-{"type":"turn.started"}
-{"type":"error","message":"Reconnecting... waiting for network (Connection failed: error sending request)"}
-{"type":"error","message":"Reconnecting... waiting for network (Connection failed: error sending request)"}
-{"type":"error","message":"Reconnecting... waiting for network (Connection failed: error sending request)"}
+{"id":1,"result":{"userAgent":"harmflow/0.163.0","codexHome":"/home/.codex","platformFamily":"unix","platformOs":"macos"}}
+{"id": 2, "result": {"thread": {"id": "t-4"}, "approvalPolicy": "never", "approvalsReviewer": "user"}}
+{"method": "thread/started", "params": {"thread": {"id": "t-4"}}}
+{"id": 3, "result": {"turn": {"id": "turn-1", "status": "inProgress"}}}
+{"method": "turn/started", "params": {"threadId": "t-4", "turn": {"id": "turn-1", "status": "inProgress"}}}
+{"method": "error", "params": {"threadId": "t-4", "turnId": "turn-1", "willRetry": true, "error": {"message": "Reconnecting... waiting for network (Connection failed: error sending request)"}}}
+{"method": "error", "params": {"threadId": "t-4", "turnId": "turn-1", "willRetry": true, "error": {"message": "Reconnecting... waiting for network (Connection failed: error sending request)"}}}
+{"method": "error", "params": {"threadId": "t-4", "turnId": "turn-1", "willRetry": true, "error": {"message": "Reconnecting... waiting for network (Connection failed: error sending request)"}}}

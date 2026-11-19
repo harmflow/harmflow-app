@@ -55,6 +55,7 @@ export type SettingsPatch = S["SettingsPatch"];
 export type CleanResult = S["CleanResult"];
 export type Notification = S["Notification"];
 export type Accepted = S["Accepted"];
+export type ApprovalDecision = S["ApprovalAnswer"]["decision"];
 export type MessageKey = S["MessageKey"];
 export type MessageParams = S["MessageParams"];
 export type ApiErrorBody = S["Error"];

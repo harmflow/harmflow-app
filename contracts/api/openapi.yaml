@@ -878,6 +878,40 @@ paths:
               schema: { $ref: "#/components/schemas/Execution" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /executions/{executionId}/approvals/{requestId}:
+    parameters:
+      - $ref: "#/components/parameters/ExecutionId"
+      - name: requestId
+        in: path
+        required: true
+        description: The request's identifier, as its approval.requested event's payload.requestId names it.
+        schema: { type: string }
+    post:
+      tags: [executions]
+      operationId: answerApproval
+      summary: Answer an approval request a running execution's harness waits on
+      description: >-
+        Sends exactly the owner's decision to the harness. accept_for_session lasts only for the session of the attempt
+        that asked; HarmFlow stores no approval. The execution's events record the answer and when it was given.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApprovalAnswer" }
+      responses:
+        "202":
+          description: The answer was sent to the harness.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Accepted" }
+        "400":
+          description: The body names no decision HarmFlow offers.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
   /executions/{executionId}/cancel:
     parameters:
       - $ref: "#/components/parameters/ExecutionId"
@@ -1271,7 +1305,6 @@ components:
         - restriction_codex_read_paths
         - restriction_codex_program_lists
         - restriction_codex_read_only
-        - restriction_codex_ephemeral_missing
         - restriction_script_unenforced
         - script_leftovers_ended
         - harness_version_untested
@@ -1290,6 +1323,17 @@ components:
         - step_starting_harness
         - step_switching_harness
         - step_waiting_rate_limit
+        - approval_requested
+        - approval_answered
+        - approval_declined_time_limit
+        - approval_withdrawn
+        - approval_decision_invalid
+        - approval_not_pending
+        - approval_not_sent
+        - auto_review_started
+        - auto_review_completed
+        - step_waiting_approval
+        - step_harness_running
         - step_preparing_program
         - step_running_program
         - attempt_first
@@ -2584,6 +2628,12 @@ components:
               path: { type: string }
               reason: { type: string }
 
+    ApprovalAnswer:
+      type: object
+      additionalProperties: false
+      required: [decision]
+      properties:
+        decision: { type: string, enum: [accept, accept_for_session, decline] }
     Notification:
       type: object
       required: [id, createdAt, eventType, title, body, read, severity]

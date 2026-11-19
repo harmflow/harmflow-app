@@ -1,5 +1,5 @@
-// Package codex is the HarnessRunner adapter of the OpenAI Codex CLI: `codex exec --json`, with the permission
-// profile translated to Codex's own sandbox modes. Codex has no session plugin mechanism, so built-in agents and
+// Package codex is the HarnessRunner adapter of the OpenAI Codex CLI: its app server, with the permission profile
+// translated to Codex's own sandbox modes, and the approvals it asks for relayed to the owner. Codex has no session plugin mechanism, so built-in agents and
 // skills are delivered as files of the execution and named in the session's instructions.
 package codex
 
@@ -603,14 +603,18 @@ func sessionsDir(env []string, home string) string {
 	return filepath.Join(home, "sessions")
 }
 
-// Prepare implements ports.HarnessAdapter: a `codex exec --json` invocation with the model and effort asked for and the
-// permission profile translated to a sandbox, with the restrictions it enforces and those it cannot. Its stdin is the
-// instructions, which name the built-ins as copied into the execution's directory. The session is ephemeral unless the
-// request keeps it; a Codex without --ephemeral keeps every session, which a restriction not enforced says. The
+// Prepare implements ports.HarnessAdapter: a `codex app-server` that the attempt's Conversation speaks to, starting a
+// thread with the model asked for and the permission profile translated to a sandbox, then one turn with the effort
+// asked for and the instructions, which name the built-ins as copied into the execution's directory. It reports the
+// restrictions the sandbox enforces and those it cannot. The thread is ephemeral unless the request keeps it. The
 // installation's home is the process's CODEX_HOME, in place of any the request's environment carries. An installation
 // detection did not give runs with the home in use when the request's environment has no CODEX_HOME, as one
 // ports.SessionEnv gives has none.
 func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.Invocation, ports.OutputParser, error) {
+	if info.Detected && !info.Features["app-server"] && !info.UnknownFeatures["app-server"] && !req.PolicyCheck {
+		return ports.Invocation{}, nil, domain.TextErr("codex_app_server_missing", "Codex {{version}} has no app server",
+			"version", info.Version)
+	}
 	home := a.homeOf(info)
 	switch {
 	case info.Home != "":
@@ -618,42 +622,31 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 	case req.Env != nil && !slices.ContainsFunc(req.Env, func(kv string) bool { return strings.HasPrefix(kv, "CODEX_HOME=") }):
 		req.Env = envWith(req.Env, home)
 	}
-	args := []string{"exec", "--json", "--skip-git-repo-check", "--cd", req.WorkDir}
 	var restrictions []ports.Restriction
-	ephemeral := info.HasFeature("--ephemeral")
-	if ephemeral && !req.KeepSession {
-		args = append(args, "--ephemeral")
-	}
-	if !ephemeral && !req.PolicyCheck {
-		restrictions = append(restrictions, ports.Restriction{Name: "ephemeral", Enforced: false,
-			Text: domain.T("restriction_codex_ephemeral_missing",
-				"Codex {{version}} has no --ephemeral, so it keeps every session and the task's ephemeral setting changes nothing",
-				"version", info.Version)})
-	}
-	if info.HasFeature("--color") {
-		args = append(args, "--color", "never")
-	}
+	// The thread's settings, which a configuration of the user's cannot widen: they are the thread's own parameters, and
+	// its config overrides the keys a user's config.toml would set.
+	thread := map[string]any{"cwd": req.WorkDir, "approvalPolicy": approvalPolicy, "ephemeral": !req.KeepSession}
+	config := map[string]any{}
+	turn := map[string]any{}
 	if req.Model != "" && req.Model != domain.DefaultModel {
-		args = append(args, "--model", req.Model)
+		thread["model"] = req.Model
 	}
 	if req.Effort != "" && req.Effort != domain.DefaultEffort {
-		args = append(args, "-c", fmt.Sprintf("model_reasoning_effort=%q", req.Effort))
+		turn["effort"] = req.Effort
 	}
-	args = append(args, "-c", fmt.Sprintf("approval_policy=%q", approvalPolicy))
 
 	perm := req.Permissions
 	network := perm.Network != domain.NetworkDeny
 	dirs := append([]string{}, req.AdditionalDirs...)
 	switch perm.Profile {
 	case domain.ProfileReadOnly:
-		// The -c override, as for approval_policy, keeps a sandbox_mode of the user's configuration from widening it.
-		args = append(args, "--sandbox", sandboxReadOnly, "-c", fmt.Sprintf("sandbox_mode=%q", sandboxReadOnly))
+		thread["sandbox"] = sandboxReadOnly
 		restrictions = append(restrictions, readOnlyRestriction(info.ManagedRequirements),
 			ports.Restriction{Name: "network", Enforced: true,
 				Text: domain.Text{Message: "Codex's read-only sandbox blocks network access"}})
 	default:
-		args = append(args, "--sandbox", sandboxWorkspaceWrite,
-			"-c", fmt.Sprintf("sandbox_workspace_write.network_access=%t", network))
+		thread["sandbox"] = sandboxWorkspaceWrite
+		config["sandbox_workspace_write.network_access"] = network
 		restrictions = append(restrictions, ports.Restriction{Name: "restrictToWorkspace", Enforced: true,
 			Text: domain.Text{
 				Message: "Codex's workspace-write sandbox confines writes to the workspace and the added directories"}})
@@ -675,7 +668,7 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 					Text: domain.T("restriction_codex_program_lists",
 						"Codex's sandbox does not limit the programs its shell starts; the custom program lists are not enforced")})
 			}
-			// The read paths are never added directories, where the sandbox would let the session write.
+			// The read paths are never writable roots, where the sandbox would let the session write.
 			if len(perm.Custom.ReadablePaths) > 0 {
 				restrictions = append(restrictions, ports.Restriction{Name: "readablePaths", Enforced: false,
 					Text: domain.T("restriction_codex_read_paths",
@@ -687,26 +680,35 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 		dirs = append(dirs, req.ExecutionDir)
 	}
 	seen := map[string]bool{req.WorkDir: true}
+	var roots []string
 	for _, d := range dirs {
-		if d != "" && !seen[d] && info.HasFeature("--add-dir") {
+		if d != "" && !seen[d] {
 			seen[d] = true
-			args = append(args, "--add-dir", d)
+			roots = append(roots, d)
 		}
 	}
-	args = append(args, "-")
+	// The read-only sandbox writes nowhere, so its writable roots stay empty, as `--add-dir` left them.
+	if len(roots) > 0 && perm.Profile != domain.ProfileReadOnly {
+		config["sandbox_workspace_write.writable_roots"] = roots
+	}
+	if len(config) > 0 {
+		thread["config"] = config
+	}
 
 	req, err := deliverBuiltins(req)
 	if err != nil {
 		return ports.Invocation{}, nil, err
 	}
-	inv := ports.Invocation{Path: info.Path, Args: args, Env: req.Env, Dir: req.WorkDir, Stdin: instructions(req),
-		Restrictions: restrictions}
-	p := &parser{model: req.Model, modelSource: domain.ModelFromTask}
-	if !ephemeral || req.KeepSession {
+	turn["input"] = []map[string]any{{"type": "text", "text": instructions(req)}}
+	inv := ports.Invocation{Path: info.Path, Args: []string{"app-server", "--listen", "stdio://"}, Env: req.Env, Dir: req.WorkDir,
+		Interactive: true, Restrictions: restrictions}
+	p := &parser{model: req.Model, modelSource: domain.ModelFromTask, thread: thread, turn: turn,
+		clientVersion: a.ClientVersion}
+	if req.KeepSession {
 		p.sessionDir = sessionsDir(req.Env, home)
 	}
 	if req.Model == "" || req.Model == domain.DefaultModel {
-		// Codex's output never names its model: a task left at the default runs the one its configuration sets.
+		// A task left at the default runs the model its configuration sets, which the thread's start then names.
 		p.model, p.modelSource = configModel(home), domain.ModelFromConfig
 		if p.model == "" {
 			p.modelSource = ""
@@ -812,158 +814,6 @@ func instructions(req ports.RunRequest) string {
 	return b.String()
 }
 
-type parser struct {
-	sessionID   string
-	sessionDir  string // where Codex keeps the session, empty when it runs ephemeral
-	completed   bool
-	failure     string
-	lastText    string
-	model       string // the model that prices the attempt, empty when nothing names it
-	modelSource string
-	reported    bool // a turn reported its usage
-	tokens      domain.Tokens
-	prices      domain.PriceTable // what prices the usage; Prices when it holds none
-	waiting     bool              // the last line Codex printed was a wait for the network
-}
-
-var _ ports.OutputParser = (*parser)(nil)
-
-// turnUsage is a turn's usage. As in OpenAI's API, input_tokens include the tokens read from and written to the cache,
-// so the plain input is what remains; output_tokens include the reasoning tokens, which bill as output. Codex does not
-// say how long its writes live: they are priced at the default, 30-minute lifetime.
-type turnUsage struct {
-	InputTokens           int64 `json:"input_tokens"`
-	CachedInputTokens     int64 `json:"cached_input_tokens"`
-	CacheWriteInputTokens int64 `json:"cache_write_input_tokens"`
-	OutputTokens          int64 `json:"output_tokens"`
-}
-
-type item struct {
-	ID       string `json:"id"`
-	Type     string `json:"type"`
-	Command  string `json:"command"`
-	Output   string `json:"aggregated_output"`
-	ExitCode *int   `json:"exit_code"`
-	Status   string `json:"status"`
-	Text     string `json:"text"`
-	Message  string `json:"message"`
-	Changes  []struct {
-		Path string `json:"path"`
-		Kind string `json:"kind"`
-	} `json:"changes"`
-	Server string `json:"server"`
-	Tool   string `json:"tool"`
-	Query  string `json:"query"`
-}
-
-type line struct {
-	Type     string     `json:"type"`
-	ThreadID string     `json:"thread_id"`
-	Item     *item      `json:"item"`
-	Message  string     `json:"message"`
-	Usage    *turnUsage `json:"usage"`
-	Error    *struct {
-		Message string `json:"message"`
-	} `json:"error"`
-}
-
-func (p *parser) Line(raw []byte) []ports.HarnessEvent {
-	var l line
-	if len(raw) == 0 {
-		return nil
-	}
-	if err := json.Unmarshal(raw, &l); err != nil {
-		p.waiting = false
-		return []ports.HarnessEvent{{Kind: ports.HarnessWarning, Message: classify.Truncate(string(raw), 2000)}}
-	}
-	// Codex repeats the wait every few seconds and never exits while it lasts: only the first line of a stretch is an
-	// event, and any other line ends the stretch.
-	wasWaiting := p.waiting
-	p.waiting = l.Type == "error" && networkWaitRe.MatchString(l.Message)
-	switch l.Type {
-	case "thread.started":
-		p.sessionID = l.ThreadID
-		return []ports.HarnessEvent{{Kind: ports.HarnessStarted, SessionID: l.ThreadID, SessionDir: p.sessionDir}}
-	case "turn.completed":
-		p.completed = true
-		// One turn per `codex exec`: its usage arrives once, at the end of the attempt.
-		if u := l.Usage; u != nil {
-			p.reported = true
-			p.tokens = p.tokens.Add(domain.Tokens{Input: max(0, u.InputTokens-u.CachedInputTokens-u.CacheWriteInputTokens),
-				CacheWriteShort: u.CacheWriteInputTokens, CacheRead: u.CachedInputTokens, Output: u.OutputTokens})
-			return []ports.HarnessEvent{{Kind: ports.HarnessUsage, Usage: p.usage(false)}}
-		}
-	case "turn.failed":
-		if l.Error != nil {
-			p.failure = l.Error.Message
-		} else {
-			p.failure = "the turn failed"
-		}
-	case "error":
-		p.failure = firstNonEmpty(l.Message, p.failure)
-		if p.waiting && !wasWaiting {
-			return []ports.HarnessEvent{{Kind: ports.HarnessNetworkWait, Message: classify.Truncate(l.Message, 2000)}}
-		}
-	case "item.started", "item.updated", "item.completed":
-		if l.Item == nil {
-			return nil
-		}
-		return p.item(l.Type, l.Item)
-	}
-	return nil
-}
-
-func (p *parser) item(kind string, it *item) []ports.HarnessEvent {
-	done := kind == "item.completed"
-	switch it.Type {
-	case "command_execution":
-		if kind == "item.started" {
-			return []ports.HarnessEvent{{Kind: ports.HarnessToolStarted, ToolID: it.ID, Tool: "shell", Command: unwrapShell(it.Command)}}
-		}
-		if done {
-			declined := it.Status == "declined"
-			isErr := !declined && (it.Status == "failed" || (it.ExitCode != nil && *it.ExitCode != 0))
-			return []ports.HarnessEvent{{Kind: ports.HarnessToolDone, ToolID: it.ID, Tool: "shell", ExitCode: it.ExitCode,
-				IsError: isErr, Declined: declined, Output: classify.Truncate(it.Output, 4000)}}
-		}
-	case "file_change":
-		// A change Codex declined, or failed to apply, left the workspace as it was.
-		if done && it.Status != "declined" && it.Status != "failed" {
-			var out []ports.HarnessEvent
-			for _, c := range it.Changes {
-				out = append(out, ports.HarnessEvent{Kind: ports.HarnessFileChanged, Path: c.Path, Message: c.Kind})
-			}
-			return out
-		}
-	case "agent_message":
-		if done && strings.TrimSpace(it.Text) != "" {
-			p.lastText = it.Text
-			return []ports.HarnessEvent{{Kind: ports.HarnessMessage, Message: it.Text}}
-		}
-	case "mcp_tool_call", "web_search":
-		name := firstNonEmpty(it.Tool, it.Type)
-		if kind == "item.started" {
-			return []ports.HarnessEvent{{Kind: ports.HarnessToolStarted, ToolID: it.ID, Tool: name, Message: firstNonEmpty(it.Query, it.Server)}}
-		}
-		if done {
-			return []ports.HarnessEvent{{Kind: ports.HarnessToolDone, ToolID: it.ID, Tool: name, IsError: it.Status == "failed",
-				Declined: it.Status == "declined"}}
-		}
-	case "error":
-		// Codex reports configuration notices as error items; they do not end the turn. One saying its requirements
-		// override the approval policy or the sandbox HarmFlow set is for the user; any other, such as a Windows sandbox
-		// setting on another system, stays a debug line.
-		if done {
-			kind := ports.HarnessWarning
-			if overrideRe.MatchString(it.Message) {
-				kind = ports.HarnessSettingOverridden
-			}
-			return []ports.HarnessEvent{{Kind: kind, Message: classify.Truncate(it.Message, 2000)}}
-		}
-	}
-	return nil
-}
-
 // unwrapShell shows `echo hi` for Codex's `/bin/zsh -lc 'echo hi'`.
 func unwrapShell(cmd string) string {
 	for _, prefix := range []string{"/bin/zsh -lc ", "/bin/bash -lc ", "bash -lc ", "zsh -lc "} {
@@ -1016,6 +866,8 @@ func (p *parser) usage(ended bool) *domain.Usage {
 }
 
 func (p *parser) Finish(exitCode int, stderrTail string, timedOut, cancelled bool) domain.AttemptEnd {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	end := domain.AttemptEnd{ExitCode: exitCode, SessionID: p.sessionID, FinalText: p.lastText, Usage: p.usage(true)}
 	switch {
 	case cancelled:
@@ -1031,7 +883,12 @@ func (p *parser) Finish(exitCode int, stderrTail string, timedOut, cancelled boo
 	case p.completed && p.failure == "" && exitCode == 0:
 		return end
 	}
-	text := strings.TrimSpace(p.failure + "\n" + lastLines(stderrTail, 20))
+	// The app server logs to stderr what its turn does not depend on, such as an MCP server that would not start: the
+	// turn's own error, when it gave one, is the cause, and the log's tail only stands in for none.
+	text := strings.TrimSpace(p.failure)
+	if text == "" {
+		text = lastLines(stderrTail, 20)
+	}
 	// The CLI's own error stays as it is; the daemon's text stands in when it printed none.
 	if text == "" {
 		end.Error = domain.T("harness_exit_code", "{{harness}} exited with code {{code}}", "harness", Name,

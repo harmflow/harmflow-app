@@ -65,6 +65,10 @@ func (a *App) notifyFor(e domain.Event, started *domain.TaskDocument) {
 		a.notifyRunAgainLimit(e)
 		return
 	}
+	if e.Type == domain.EventApprovalRequested {
+		a.notifyApproval(e)
+		return
+	}
 	kind := notifiable(e)
 	if kind == "" || e.TaskID == "" {
 		return
@@ -269,6 +273,8 @@ func englishNotice(kind, task string, p map[string]string) (string, string) {
 		return "Harness unavailable", task + ": " + p["reason"]
 	case domain.EventHarnessNoAlternative:
 		return "No harness available", task + ": " + p["reason"]
+	case domain.EventApprovalRequested:
+		return "Approval needed", task + " waits for your approval: " + p["command"]
 	case domain.EventRunAgainLimitReached:
 		return "Run-again limit reached", task + " ran again " + p["count"] + " times in a row and now waits for its schedule."
 	case domain.EventHarnessSignInStarted:

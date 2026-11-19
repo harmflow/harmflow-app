@@ -223,6 +223,7 @@ func (s *Server) Handler() http.Handler {
 	h("GET /api/v1/executions", s.listExecutions)
 	h("GET /api/v1/executions/{executionId}", s.getExecution)
 	h("POST /api/v1/executions/{executionId}/cancel", s.cancelExecution)
+	h("POST /api/v1/executions/{executionId}/approvals/{requestId}", s.answerApproval)
 	h("GET /api/v1/executions/{executionId}/events", s.executionEvents)
 	h("GET /api/v1/executions/{executionId}/output", s.executionOutput)
 	h("GET /api/v1/events/stream", s.stream)
@@ -737,6 +738,22 @@ func (s *Server) getExecution(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, v)
+}
+
+// answerApproval sends the owner's decision for one approval request of a running execution.
+func (s *Server) answerApproval(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Decision domain.ApprovalDecision `json:"decision"`
+	}
+	if err := decode(r, &body); err != nil {
+		fail(w, err)
+		return
+	}
+	if err := s.App.AnswerApproval(r.PathValue("executionId"), r.PathValue("requestId"), body.Decision); err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, 202, map[string]any{"ok": true, "message": "answer sent"})
 }
 
 func (s *Server) cancelExecution(w http.ResponseWriter, r *http.Request) {

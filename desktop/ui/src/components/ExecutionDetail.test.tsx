@@ -588,7 +588,7 @@ describe("execution detail", () => {
     const notice = readFileSync(fixture, "utf8")
       .split("\n")
       .filter((line) => line.includes("`approval_policy`"))
-      .map((line) => (JSON.parse(line) as { item: { message: string } }).item.message)[0];
+      .map((line) => (JSON.parse(line) as { params: { summary: string } }).params.summary)[0];
     const overridden: Execution = { ...completed, id: "exec-overridden", warnings: [{ code: "other", message: notice }] };
     const banners = () => [...host!.querySelectorAll<HTMLElement>(".detail__body .banner")];
 
