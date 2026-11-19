@@ -512,6 +512,60 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/Invalid" }
 
+  /templates/{templateId}/export:
+    parameters:
+      - $ref: "#/components/parameters/TemplateId"
+    get:
+      tags: [templates]
+      operationId: exportTemplate
+      summary: A template of the user's as portable YAML, with no secrets, logs, or state
+      description: >-
+        The template's file, its definition alone, with its secrets masked as a task's export masks them: no tokens,
+        cookies, passwords, credentials, session data, logs, or operational state. A task created from the template
+        holds no reference to it, so nothing those tasks did travels with it. A built-in template, which every HarmFlow
+        has, is not exported.
+      responses:
+        "200":
+          description: The template's YAML, as a file named after its identifier.
+          content:
+            application/yaml:
+              schema: { type: string }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /templates/import:
+    post:
+      tags: [templates]
+      operationId: importTemplate
+      summary: Import a portable template YAML as a template of the user's
+      description: >-
+        The template takes the identifier its file gives. One that fails the template schema, or whose identifier
+        carries the hf- prefix, which only built-in templates carry, is rejected with the error, and nothing is
+        written. A template of the user's with the same identifier, its file valid or not, is replaced only when
+        overwrite is set; otherwise the import is a conflict, naming the identifier. A dry run makes every check and
+        writes nothing, and answers the template as it would be saved, its document included, so that the import shows
+        what it would run before anything is saved. For a template whose tasks run a harness, needs names each agent
+        and skill it cites that this machine lacks; the template is saved all the same. A saved template is announced
+        as created, or as updated when it replaced one.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TemplateImportRequest" }
+      responses:
+        "200":
+          description: A dry run's answer, the template as it would be saved; nothing was written.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Template" }
+        "201":
+          description: The imported template.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Template" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Invalid" }
+
   /tasks:
     get:
       tags: [tasks]
@@ -1850,6 +1904,20 @@ components:
         yaml: { type: string }
         document: { $ref: "#/components/schemas/TemplateDocument" }
         baseRevision: { type: string }
+
+    TemplateImportRequest:
+      type: object
+      required: [yaml]
+      properties:
+        yaml: { type: string, description: "The template's file, as exported." }
+        overwrite:
+          type: boolean
+          default: false
+          description: Replace the template of the user's that has the same identifier.
+        dryRun:
+          type: boolean
+          default: false
+          description: Check the template as the import would, and write nothing.
 
     NewTemplateRequest:
       type: object

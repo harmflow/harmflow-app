@@ -420,6 +420,77 @@ func TestUserTemplateRoutes(t *testing.T) {
 	}
 }
 
+// A template of the user's moves between machines through the handler the daemon serves: GET .../export answers its
+// YAML as a file named after it (200); POST /api/v1/templates/import with dryRun checks it and writes nothing (200),
+// and without saves it (201); the same identifier again answers 409 with template_exists unless overwrite is set, an
+// hf- identifier answers 422 with template_id_reserved, and an identifier no template has answers 404 on export.
+func TestTemplateImportExportRoutes(t *testing.T) {
+	a := startedApp(t)
+	s := &Server{App: a}
+	s.SetToken(validToken)
+	serve := func(method, path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		var reader io.Reader
+		if body != "" {
+			reader = strings.NewReader(body)
+		}
+		r := httptest.NewRequest(method, path, reader)
+		r.Host = "127.0.0.1:7000"
+		r.Header.Set("Authorization", "Bearer "+validToken)
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		return w
+	}
+	keys := func(w *httptest.ResponseRecorder) map[string]any {
+		t.Helper()
+		var out map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatalf("body %q: %v", w.Body, err)
+		}
+		return out
+	}
+	importing := func(yaml string, overwrite, dryRun bool) string {
+		data, _ := json.Marshal(map[string]any{"yaml": yaml, "overwrite": overwrite, "dryRun": dryRun})
+		return string(data)
+	}
+
+	if w := serve("POST", "/api/v1/templates", `{"id":"triage","name":"Triage","description":"Sorts.","type":"general"}`); w.Code != 201 {
+		t.Fatalf("POST /api/v1/templates = %d %s, want 201", w.Code, w.Body)
+	}
+	w := serve("GET", "/api/v1/templates/triage/export", "")
+	exported := w.Body.String()
+	if w.Code != 200 || w.Header().Get("Content-Type") != "application/yaml" ||
+		w.Header().Get("Content-Disposition") != `attachment; filename="triage.yaml"` || !strings.Contains(exported, "id: triage") {
+		t.Fatalf("GET /api/v1/templates/triage/export = %d %v %q, want its YAML as triage.yaml", w.Code, w.Header(), exported)
+	}
+	if w := serve("GET", "/api/v1/templates/none/export", ""); w.Code != 404 {
+		t.Errorf("GET /api/v1/templates/none/export = %d, want 404", w.Code)
+	}
+	if w := serve("POST", "/api/v1/templates/import", importing(exported, false, false)); w.Code != 409 ||
+		keys(w)["error"].(map[string]any)["messageKey"] != "template_exists" {
+		t.Errorf("POST /api/v1/templates/import of triage again = %d %s, want 409 template_exists", w.Code, w.Body)
+	}
+	renamed := strings.Replace(exported, "id: triage", "id: sorting", 1)
+	if w := serve("POST", "/api/v1/templates/import", importing(renamed, false, true)); w.Code != 200 ||
+		keys(w)["id"] != "sorting" || keys(w)["document"] == nil {
+		t.Errorf("POST /api/v1/templates/import as a dry run = %d %s, want 200 with its document", w.Code, w.Body)
+	}
+	if w := serve("GET", "/api/v1/templates/sorting", ""); w.Code != 404 {
+		t.Errorf("GET /api/v1/templates/sorting after the dry run = %d, want 404", w.Code)
+	}
+	if w := serve("POST", "/api/v1/templates/import", importing(renamed, false, false)); w.Code != 201 || keys(w)["revision"] == "" {
+		t.Errorf("POST /api/v1/templates/import of sorting = %d %s, want 201 with the template", w.Code, w.Body)
+	}
+	if w := serve("POST", "/api/v1/templates/import", importing(exported, true, false)); w.Code != 201 {
+		t.Errorf("POST /api/v1/templates/import of triage, replacing = %d %s, want 201", w.Code, w.Body)
+	}
+	reserved := strings.Replace(exported, "id: triage", "id: hf-triage", 1)
+	if w := serve("POST", "/api/v1/templates/import", importing(reserved, true, false)); w.Code != 422 ||
+		keys(w)["error"].(map[string]any)["messageKey"] != "template_id_reserved" {
+		t.Errorf("POST /api/v1/templates/import of hf-triage = %d %s, want 422 template_id_reserved", w.Code, w.Body)
+	}
+}
+
 // GET /api/v1/system answers the machine's gauges, each under its key, a gauge not read yet left out and one read as
 // 0 kept; GET /api/v1/stats answers the execution counters alone.
 func TestSystemGaugesHaveTheirOwnRoute(t *testing.T) {

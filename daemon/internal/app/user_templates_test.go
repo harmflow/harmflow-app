@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -9,7 +10,10 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
+	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
 // notesTask is a task worth repeating: a prompt copied from an agent, with its origin, a schedule, and a skill.
@@ -704,5 +708,218 @@ func TestCreateEmptyTemplate(t *testing.T) {
 	}
 	if got := templateFiles(t, e); !slices.Equal(got, written) {
 		t.Errorf("the templates directory after the refusals = %v, want %v", got, written)
+	}
+}
+
+// signInTask is a task worth repeating whose prompt and comments hold secrets, and which cites the skill review-notes,
+// which Claude Code's configuration holds on this machine.
+const signInTask = `apiVersion: harmflow/v1alpha1
+kind: Task
+metadata:
+  id: sign-in
+  name: Sign in
+  description: Signs in to staging.
+spec:
+  enabled: true
+  type: general
+  # the old one was password=comment-s3cret
+  prompt: |
+    Sign in with password: hunter2 and keep the session.
+    Send Cookie: sessionid=abc123def456; theme=dark
+  skills: [review-notes]
+  harness:
+    preferred:
+      provider: claude-code
+`
+
+// exportedSignIn saves the sign-in task as the template sign-in-notes, creates a task from it, runs both tasks to
+// completion with output that holds a secret, and exports the template.
+func exportedSignIn(t *testing.T, e *env) (exported string, executions []string) {
+	t.Helper()
+	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: signInTask}); err != nil {
+		t.Fatalf("CreateTask(sign-in) = %v, want the task", err)
+	}
+	saveAsTemplate(t, e, "sign-in", "sign-in-notes", "Sign in")
+	v, err := e.app.CreateTask(t.Context(), TaskInput{Document: mustJSON(t, draft(t, e, "sign-in-notes", "en-US"))})
+	if err != nil {
+		t.Fatalf("CreateTask(the draft of sign-in-notes) = %v, want the task", err)
+	}
+	e.claude.setScript(func(ports.RunRequest) string { return "echo 'signed in, session tok-live-7781'; echo 'END ok'" })
+	for _, id := range []string{"sign-in", v.ID} {
+		res, err := e.app.RunTask(id)
+		if err != nil || res.ExecutionID == "" {
+			t.Fatalf("RunTask(%s) = %+v, %v, want an execution", id, res, err)
+		}
+		e.wait(res.ExecutionID, domain.StatusCompleted)
+		e.idle(id)
+		executions = append(executions, res.ExecutionID)
+	}
+	data, err := e.app.ExportTemplate("sign-in-notes")
+	if err != nil {
+		t.Fatalf("ExportTemplate(sign-in-notes) = %v, want its YAML", err)
+	}
+	return string(data), executions
+}
+
+// Exporting a template of the user's whose tasks have run gives its file's definition alone, as a task's export does:
+// its secrets masked, and none of the runs' executions, logs, output, or the file's revision. The export is a valid
+// template, which imports on another machine. A built-in template, which every HarmFlow has, is not exported, and an
+// identifier no template has is not found.
+func TestExportTemplateHoldsNoSecretsLogsOrState(t *testing.T) {
+	e := newEnv(t, withTemplates(map[string]string{"hf-notes.yaml": notesBuiltin}))
+	exported, executions := exportedSignIn(t, e)
+	tp, _ := e.app.OpenTemplate("sign-in-notes")
+	for _, held := range append([]string{"hunter2", "abc123def456", "theme=dark", "comment-s3cret", "tok-live-7781",
+		"signed in", "END ok", tp.Revision, "enabled", "origin", "Signs in to staging", "revision", "status"}, executions...) {
+		if strings.Contains(exported, held) {
+			t.Errorf("ExportTemplate(sign-in-notes) holds %q:\n%s", held, exported)
+		}
+	}
+	for _, kept := range []string{"kind: TaskTemplate", "id: sign-in-notes", "Sign in with password: [REDACTED] and keep",
+		"Send Cookie: [REDACTED]\n", "# the old one was password=[REDACTED]", "skills: [review-notes]"} {
+		if !strings.Contains(exported, kept) {
+			t.Errorf("ExportTemplate(sign-in-notes) lacks %q:\n%s", kept, exported)
+		}
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(exported), &doc); err != nil {
+		t.Fatalf("ExportTemplate(sign-in-notes) is no YAML: %v", err)
+	}
+	if keys := sortedKeys(doc); !slices.Equal(keys, []string{"apiVersion", "kind", "metadata", "spec"}) {
+		t.Errorf("ExportTemplate(sign-in-notes) keys = %v, want the template's definition alone", keys)
+	}
+	other := newEnv(t)
+	if got, err := other.app.ImportTemplate(t.Context(), TemplateImport{YAML: exported}); err != nil || !got.Validation.Valid {
+		t.Errorf("ImportTemplate(the export) on another machine = %+v, %v, want a valid template", got, err)
+	}
+
+	_, err := e.app.ExportTemplate("hf-notes")
+	appError(t, "ExportTemplate(hf-notes)", err, CodeConflict, "template_read_only")
+	_, err = e.app.ExportTemplate("none")
+	appError(t, "ExportTemplate(none)", err, CodeNotFound, "template_not_found")
+}
+
+// A template exported from a machine where its skill review-notes exists imports on one where it does not, and where
+// a template of the user's has its identifier: the import asks before replacing it, refusing with template_exists and
+// writing nothing until the user chooses to; a dry run checks the same and writes nothing; once confirmed, the
+// template is saved as the export gives it, announced as updated, and its answer names review-notes as missing. A new
+// identifier is saved and announced as created.
+func TestImportTemplateNamesWhatThisMachineLacks(t *testing.T) {
+	exported, _ := exportedSignIn(t, newEnv(t))
+	e := newEnv(t, func(e *env) { e.claude.lacks = map[string]bool{"review-notes": true} },
+		withUserTemplates(map[string]string{"sign-in-notes.yaml": template("sign-in-notes", "  type: general\n  prompt: Mine.\n")}))
+	path := filepath.Join(e.paths.Templates, "sign-in-notes.yaml")
+	before := readFile(t, path)
+	missing := []TemplateCited{{Kind: "skill", Name: "review-notes"}}
+	written := func() int {
+		return len(e.published(domain.EventTemplateCreated)) + len(e.published(domain.EventTemplateUpdated))
+	}
+
+	for _, dryRun := range []bool{false, true} {
+		_, err := e.app.ImportTemplate(t.Context(), TemplateImport{YAML: exported, DryRun: dryRun})
+		if ae := appError(t, "ImportTemplate(sign-in-notes, not replacing)", err, CodeConflict, "template_exists"); ae != nil &&
+			ae.Params["template"] != "sign-in-notes" {
+			t.Errorf("ImportTemplate(sign-in-notes, not replacing) params = %v, want it named", ae.Params)
+		}
+	}
+	preview, err := e.app.ImportTemplate(t.Context(), TemplateImport{YAML: exported, Overwrite: true, DryRun: true})
+	if err != nil || preview.ID != "sign-in-notes" || preview.Type != "general" || preview.YAML != exported ||
+		specOf(t, preview)["prompt"] == nil || preview.Needs == nil || !reflect.DeepEqual(preview.Needs.Missing, missing) {
+		t.Errorf("ImportTemplate(dry run) = %+v, %v, want the template as it would be saved, review-notes missing", preview, err)
+	}
+	if got := readFile(t, path); got != before || written() != 0 {
+		t.Fatalf("the template file after the refusals and the dry run = %q, %d events, want it unchanged", got, written())
+	}
+
+	tp, err := e.app.ImportTemplate(t.Context(), TemplateImport{YAML: exported, Overwrite: true})
+	if err != nil || !tp.Validation.Valid || tp.Source != TemplateUser || tp.Revision == "" || tp.Needs == nil ||
+		!reflect.DeepEqual(tp.Needs.Missing, missing) {
+		t.Fatalf("ImportTemplate(replacing) = %+v, %v, want the template saved, review-notes missing", tp, err)
+	}
+	if got := readFile(t, path); got != exported {
+		t.Errorf("the template file after the import = %q, want the export", got)
+	}
+	if updated := e.published(domain.EventTemplateUpdated); len(updated) != 1 || updated[0].Payload["template"] != "sign-in-notes" {
+		t.Errorf("template.updated events = %+v, want one for sign-in-notes", updated)
+	}
+	if listed, _ := templateByID(e, "sign-in-notes"); !strings.Contains(fmt.Sprint(listed.spec["prompt"]), "[REDACTED]") {
+		t.Errorf("Templates() sign-in-notes prompt = %v, want the imported one", listed.spec["prompt"])
+	}
+
+	renamed := strings.Replace(exported, "id: sign-in-notes", "id: staging-sign-in", 1)
+	if _, err := e.app.ImportTemplate(t.Context(), TemplateImport{YAML: renamed}); err != nil {
+		t.Fatalf("ImportTemplate(staging-sign-in) = %v, want it saved", err)
+	}
+	if created := e.published(domain.EventTemplateCreated); len(created) != 1 || created[0].Payload["template"] != "staging-sign-in" {
+		t.Errorf("template.created events = %+v, want one for staging-sign-in", created)
+	}
+}
+
+// An import that fails the template schema, or whose identifier carries the hf- prefix, a built-in template's or not,
+// is rejected with the error, dry run or not, and nothing is saved: the templates directory and the built-in template
+// stay as they were, and no template is announced. An identifier that is no identifier never names a file.
+func TestImportTemplateRejectsAnInvalidOrReservedOne(t *testing.T) {
+	e := newEditingEnv(t)
+	builtinFile := filepath.Join(e.paths.Builtins, "templates", "hf-notes.yaml")
+	builtin := readFile(t, builtinFile)
+	cases := []struct {
+		name, yaml, key string
+	}{
+		{"a built-in template's identifier", notesBuiltin, "template_id_reserved"},
+		{"an identifier with the hf- prefix", template("hf-mine", "  type: general\n"), "template_id_reserved"},
+		{"a type the task schema does not define", template("mail", "  type: email\n"), "template_type_unknown"},
+		{"an identifier that is no identifier", template("../outside", "  type: general\n"), "schema_pattern"},
+		{"a task's file", taskYAML("mine", ""), ""},
+		{"no YAML", "kind: [unclosed\n", ""},
+		{"nothing", "", ""},
+	}
+	for _, c := range cases {
+		for _, dryRun := range []bool{false, true} {
+			_, err := e.app.ImportTemplate(t.Context(), TemplateImport{YAML: c.yaml, Overwrite: true, DryRun: dryRun})
+			call := fmt.Sprintf("ImportTemplate(%s, dry run %v)", c.name, dryRun)
+			if c.key != "" {
+				appError(t, call, err, CodeValidationFailed, c.key)
+			} else if code, _ := appErrorKey(err); code != CodeValidationFailed {
+				t.Errorf("%s = %v, want %s", call, err, CodeValidationFailed)
+			}
+		}
+	}
+	if got := templateFiles(t, e); len(got) != 0 {
+		t.Errorf("the templates directory after the refusals = %v, want it empty", got)
+	}
+	if got := readFile(t, builtinFile); got != builtin {
+		t.Errorf("the built-in template after the refusals = %q, want it unchanged", got)
+	}
+	if _, err := os.Stat(filepath.Join(e.paths.Home, "outside.yaml")); err == nil {
+		t.Error("ImportTemplate(../outside) wrote outside the templates directory")
+	}
+	if n := len(e.published(domain.EventTemplateCreated)) + len(e.published(domain.EventTemplateUpdated)); n != 0 {
+		t.Errorf("template events after the refusals = %d, want none", n)
+	}
+}
+
+// A dry run of a script template's import gives what the template would run, for the import to show before anything
+// is saved: its interpreter's argument list, its whole inline script, its working directory, its environment
+// variables, and its permission profile. It writes nothing, and a script template needs no harness.
+func TestImportScriptTemplateDryRunGivesItsProgram(t *testing.T) {
+	e := newEnv(t)
+	const source = "set -e\necho \"$NOTES\" >> notes.txt\n"
+	file := template("nightly-notes", "  type: script\n  script:\n    inline:\n      interpreter: [/bin/sh, -e]\n"+
+		"      source: |\n        set -e\n        echo \"$NOTES\" >> notes.txt\n    workingDirectory: ~/notes\n"+
+		"    environment:\n      NOTES: nightly\n  permissions:\n    profile: read_only\n")
+	tp, err := e.app.ImportTemplate(t.Context(), TemplateImport{YAML: file, DryRun: true})
+	if err != nil {
+		t.Fatalf("ImportTemplate(nightly-notes, dry run) = %v, want its preview", err)
+	}
+	spec := specOf(t, tp)
+	script, _ := spec["script"].(map[string]any)
+	inline, _ := script["inline"].(map[string]any)
+	if tp.Type != "script" || !reflect.DeepEqual(inline["interpreter"], []any{"/bin/sh", "-e"}) || inline["source"] != source ||
+		script["workingDirectory"] != "~/notes" || !reflect.DeepEqual(script["environment"], map[string]any{"NOTES": "nightly"}) ||
+		!reflect.DeepEqual(spec["permissions"], map[string]any{"profile": "read_only"}) || tp.Needs != nil {
+		t.Errorf("ImportTemplate(nightly-notes, dry run) = %+v, spec %v, want its program and profile", tp, spec)
+	}
+	if got := templateFiles(t, e); len(got) != 0 {
+		t.Errorf("the templates directory after the dry run = %v, want it empty", got)
 	}
 }

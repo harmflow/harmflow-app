@@ -91,6 +91,9 @@ type fakeHarness struct {
 	// missing, when set, is the path Prepare runs instead of /bin/sh: a file that does not exist, as a CLI removed
 	// after its check, so the attempt cannot start.
 	missing string
+	// lacks names the user's agents and skills this machine's configuration does not hold, of those it holds otherwise:
+	// another machine, where a file exported here is imported.
+	lacks   map[string]bool
 	script  func(req ports.RunRequest) string
 	prompts []string
 	live    int           // attempts prepared to run whose parser has not finished
@@ -238,11 +241,12 @@ func (f *fakeHarness) reads() int {
 func (f *fakeHarness) UserItem(_ context.Context, _ ports.HarnessInfo, kind, name, _ string, _ []string) (ports.ResolvedItem, bool, []ports.DiscoveryError, error) {
 	f.mu.Lock()
 	f.itemLookups++
+	lacked := f.lacks[name]
 	f.mu.Unlock()
 	found := kind == "skill" && name == "user-skill" || kind == "agent" && name == "user-agent" ||
 		kind == "skill" && name == "review-notes" && f.id == domain.HarnessClaudeCode ||
 		kind == "agent" && name == "review-agent" && f.id == domain.HarnessClaudeCode
-	if !found {
+	if !found || lacked {
 		return ports.ResolvedItem{}, false, nil, nil
 	}
 	return ports.ResolvedItem{Name: name, Kind: kind, Path: filepath.Join("/", f.id, kind+"s", name)}, true, nil, nil
