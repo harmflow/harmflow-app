@@ -74,11 +74,16 @@ func (a *App) loadSchedule() {
 		}
 		a.mu.Unlock()
 	}
+	// Every task's next firing is computed first, and the state written once: one synced write of the whole file per
+	// task made a start slow where the disk is.
 	a.mu.Lock()
 	ids := sortedKeys(a.tasks)
-	a.mu.Unlock()
 	for _, id := range ids {
-		a.rescheduleTask(id)
+		a.rescheduleTaskLocked(id)
+	}
+	a.mu.Unlock()
+	if len(ids) > 0 {
+		a.saveSchedule()
 	}
 }
 
@@ -120,9 +125,19 @@ func (a *App) saveSchedule() {
 // so its firings come due and are recorded as skipped.
 func (a *App) rescheduleTask(id string) {
 	a.mu.Lock()
+	if a.tasks[id] == nil {
+		a.mu.Unlock()
+		return
+	}
+	a.rescheduleTaskLocked(id)
+	a.mu.Unlock()
+	a.saveSchedule()
+}
+
+// rescheduleTaskLocked is rescheduleTask's change of the in-memory schedule, which the caller saves; it holds mu.
+func (a *App) rescheduleTaskLocked(id string) {
 	e := a.tasks[id]
 	if e == nil {
-		a.mu.Unlock()
 		return
 	}
 	doc := e.doc
@@ -130,15 +145,11 @@ func (a *App) rescheduleTask(id string) {
 	now := a.now()
 	if doc.Spec.Schedule == nil {
 		delete(a.sched, id)
-		a.mu.Unlock()
-		a.saveSchedule()
 		return
 	}
 	rule, err := domain.ParseSchedule(*doc.Spec.Schedule, a.d.Location)
 	if err != nil {
 		delete(a.sched, id)
-		a.mu.Unlock()
-		a.saveSchedule()
 		return
 	}
 	tz := doc.Spec.Schedule.Timezone
@@ -154,8 +165,6 @@ func (a *App) rescheduleTask(id string) {
 		next := rule.Next(from)
 		s.Rule, s.Timezone, s.NextFireAt = rule.String(), tz, &next
 	}
-	a.mu.Unlock()
-	a.saveSchedule()
 }
 
 func (a *App) schedulerLoop(ctx context.Context) {

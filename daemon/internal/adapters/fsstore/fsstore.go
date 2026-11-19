@@ -377,9 +377,11 @@ func readExecution(path string) (*domain.Execution, error) {
 }
 
 // Summaries implements ports.ExecutionRepository, sorted by execution id. It reads the index, then lists the records:
-// one the index has with the same size and modification time is summarized from the index, and only the others are
-// read and decoded. A file it cannot read or decode, or a record with no id, is left out. When the index was missing,
-// unreadable, or behind the records, it is written again.
+// one the index holds as ended is summarized from the index without reading its file's size or modification time, so
+// the start's cost does not grow with every execution ever recorded; one the index holds as not ended is summarized
+// from the index when its file has the same size and modification time, and only the others are read and decoded. A
+// file it cannot read or decode, or a record with no id, is left out. When the index was missing, unreadable, or
+// behind the records, it is written again.
 func (e *Executions) Summaries() ([]*domain.ExecutionSummary, error) {
 	entries, err := os.ReadDir(e.dir)
 	if err != nil {
@@ -396,11 +398,16 @@ func (e *Executions) Summaries() ([]*domain.ExecutionSummary, error) {
 		if ent.IsDir() || filepath.Ext(name) != ".json" || strings.HasPrefix(name, ".") || name == IndexFile {
 			continue
 		}
+		id := strings.TrimSuffix(name, ".json")
+		if en, ok := old[id]; ok && en.Summary != nil && en.Summary.Status.IsTerminal() {
+			index[id] = en
+			reused++
+			continue
+		}
 		info, err := ent.Info()
 		if err != nil {
 			continue
 		}
-		id := strings.TrimSuffix(name, ".json")
 		if en, ok := old[id]; ok && en.Summary != nil && en.Size == info.Size() && en.ModTime.Equal(info.ModTime()) {
 			index[id] = en
 			reused++
