@@ -11,7 +11,6 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/harmflow/harmflow-app/daemon/internal/adapters/eventlog"
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
@@ -299,7 +298,7 @@ func (a *App) ExportTemplate(id string) ([]byte, error) {
 	a.mu.Lock()
 	content := u.file.Content
 	a.mu.Unlock()
-	return []byte(eventlog.Redact(string(content))), nil
+	return portable(content), nil
 }
 
 // TemplateImport is a portable template to import: its YAML text, whether it replaces the template of the user's that

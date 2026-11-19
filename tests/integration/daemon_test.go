@@ -517,6 +517,12 @@ func TestAPIGuardOnEveryRoute(t *testing.T) {
 	if len(notices) == 0 {
 		t.Fatal("the completed execution left no unread notice to mark read")
 	}
+	d.call("POST", "/templates", map[string]any{"id": "mine", "name": "Mine", "description": "p", "type": "general"}, 201)
+	status, exported := d.request("GET", "/templates/mine/export", nil, nil)
+	if status != 200 {
+		t.Fatalf("GET /templates/mine/export: status %d, want 200: %s", status, exported)
+	}
+	imported := strings.Replace(string(exported), "id: mine", "id: imported", 1)
 	idle := d.call("GET", "/tasks/finished", nil, 200)
 	renamed := strings.Replace(idle["yaml"].(string), "name: Task finished", "name: Renamed", 1)
 
@@ -527,7 +533,11 @@ func TestAPIGuardOnEveryRoute(t *testing.T) {
 		{"POST /harnesses/{harnessId}/sign-in", "/harnesses/claude-code/sign-in", nil},
 		{"PUT /harnesses/{harnessId}/token", "/harnesses/claude-code/token", map[string]any{"token": "sk-ant-oat01-guard"}},
 		{"DELETE /harnesses/{harnessId}/token", "/harnesses/claude-code/token", nil},
+		{"POST /templates", "/templates", map[string]any{"id": "intruder", "name": "Intruder", "description": "p", "type": "general"}},
+		{"POST /templates/import", "/templates/import", map[string]any{"yaml": imported}},
 		{"PUT /templates/{templateId}", "/templates/hf-general", map[string]any{"yaml": "kind: TaskTemplate\n"}},
+		{"POST /templates/{templateId}/duplicate", "/templates/mine/duplicate", nil},
+		{"POST /templates/{templateId}/validate", "/templates/mine/validate", map[string]any{"yaml": imported}},
 		{"DELETE /templates/{templateId}", "/templates/hf-general", nil},
 		{"POST /templates/{templateId}/draft", "/templates/hf-general/draft", map[string]any{"language": "en-US"}},
 		{"POST /tasks", "/tasks", map[string]any{"yaml": task("intruder", "p", "")}},
@@ -562,6 +572,8 @@ func TestAPIGuardOnEveryRoute(t *testing.T) {
 		{"GET /tools", "/tools", nil},
 		{"GET /catalog", "/catalog", nil},
 		{"GET /templates", "/templates", nil},
+		{"GET /templates/{templateId}", "/templates/mine", nil},
+		{"GET /templates/{templateId}/export", "/templates/mine/export", nil},
 		{"GET /tasks", "/tasks", nil},
 		{"GET /tasks/{taskId}", "/tasks/finished", nil},
 		{"GET /tasks/{taskId}/export", "/tasks/finished/export", nil},

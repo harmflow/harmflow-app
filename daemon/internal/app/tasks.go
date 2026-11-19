@@ -555,7 +555,13 @@ func (a *App) ExportTask(id string) ([]byte, error) {
 	a.mu.Lock()
 	content := e.file.Content
 	a.mu.Unlock()
-	return []byte(eventlog.Redact(string(content))), nil
+	return portable(content), nil
+}
+
+// portable is a task or template file as it is exported: its secrets masked, as the event log masks them, and the rest
+// of the file, comments included, as it is.
+func portable(content []byte) []byte {
+	return []byte(eventlog.Redact(string(content)))
 }
 
 // watchLoop detects external edits of task files and of the user's template files.
