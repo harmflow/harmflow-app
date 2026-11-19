@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -1000,4 +1001,48 @@ func waitForSleep(t *testing.T, p *Process) {
 		}
 		return false
 	})
+}
+
+// harmflow-app#465: an interactive invocation keeps the process's stdin open, so what the daemon writes reaches it
+// while it runs; the stdin is closed once the process exited, and a write after that fails rather than blocking.
+func TestInteractiveStdinStaysOpen(t *testing.T) {
+	var mu sync.Mutex
+	var lines []string
+	p, err := Start(ports.Invocation{Path: "/bin/sh", Args: []string{"-c", `echo ready; read -r a; echo "got $a"`},
+		Interactive: true, Stdin: "ignored"}, nil, func(b []byte) {
+		mu.Lock()
+		lines = append(lines, string(b))
+		mu.Unlock()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := p.Stdin()
+	if in == nil {
+		t.Fatal("Stdin() = nil for an interactive invocation")
+	}
+	if _, err := io.WriteString(in, "answer\n"); err != nil {
+		t.Fatal(err)
+	}
+	<-p.Done()
+	mu.Lock()
+	got := slices.Clone(lines)
+	mu.Unlock()
+	if !slices.Equal(got, []string{"ready", "got answer"}) {
+		t.Errorf("lines the process printed = %q, want %q", got, []string{"ready", "got answer"})
+	}
+	if _, err := io.WriteString(in, "late\n"); err == nil {
+		t.Error(`WriteString(stdin, "late\n") after the process exited = nil, want an error`)
+	}
+	if err := in.Close(); err != nil {
+		t.Errorf("a second Close = %v, want nil", err)
+	}
+	q, err := Start(ports.Invocation{Path: "/bin/sh", Args: []string{"-c", "true"}}, nil, func([]byte) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-q.Done()
+	if q.Stdin() != nil {
+		t.Error("Stdin() is open for an invocation that is not interactive")
+	}
 }
