@@ -159,6 +159,10 @@ func startDaemonWith(t *testing.T, home string, o daemonOptions, env ...string) 
 		t.Fatalf("the daemon wrote no runtime file within %v: %s\nit printed:\n%s\nits log ends:\n%s", runtimeWait,
 			endUnstarted(cmd), out.String(), daemonLogTail(home))
 	}
+	if !awaitStarted(d.base, d.token, runtimeWait) {
+		t.Fatalf("the daemon still read as starting %v after it wrote its runtime file: %s\nit printed:\n%s\nits log "+
+			"ends:\n%s", runtimeWait, endUnstarted(cmd), out.String(), daemonLogTail(home))
+	}
 	t.Cleanup(func() { d.stop() })
 	d.useFakeHarnesses()
 	return d
@@ -217,6 +221,32 @@ func awaitRuntime(home string, timeout time.Duration) (base, token string) {
 		}
 	}
 	return "", ""
+}
+
+// awaitStarted waits until the daemon at base, its API's base URL, answers its health with status ok, with token: it
+// writes its runtime file before it has loaded its state and recovered interrupted executions, and every other route
+// answers 503 until then. It reports false when the daemon has not started within the timeout.
+func awaitStarted(base, token string, timeout time.Duration) bool {
+	for deadline := time.Now().Add(timeout); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		req, err := http.NewRequest("GET", base+"/health", nil)
+		if err != nil {
+			return false
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			continue
+		}
+		var health struct {
+			Status string `json:"status"`
+		}
+		decoded := json.NewDecoder(resp.Body).Decode(&health) == nil
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusOK && decoded && health.Status == "ok" {
+			return true
+		}
+	}
+	return false
 }
 
 // fakeHarnesses are the paths of the stand-in CLIs of testdata/, by harness id.
@@ -4573,6 +4603,10 @@ func startDetachedDaemon(t *testing.T, home string) (*daemon, int, func()) {
 	d := &daemon{t: t, home: home}
 	if d.base, d.token = awaitRuntime(home, runtimeWait); d.base == "" {
 		t.Fatalf("the daemon %d wrote no runtime file:\n%s", pid, out.String())
+	}
+	if !awaitStarted(d.base, d.token, runtimeWait) {
+		t.Fatalf("the daemon %d still read as starting %v after it wrote its runtime file:\n%s", pid, runtimeWait,
+			out.String())
 	}
 	d.useFakeHarnesses()
 	return d, pid, endParent

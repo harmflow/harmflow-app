@@ -10,6 +10,11 @@ info:
     Every request, the SSE stream included, carries the per-installation token in `Authorization: Bearer <token>`.
     Requests whose `Host` is not the loopback address, or whose `Origin` is a web page, are rejected.
 
+    The daemon writes the runtime file and answers before it has loaded its state and recovered the executions a
+    previous run left interrupted, which can take long on a large history when the disk is slow. Until then `/health`
+    answers with `status` `starting` and `acceptingFirings` false, and every other route, the SSE stream included,
+    answers `503` at once with the error key `daemon_starting`; no firing and no execution starts meanwhile.
+
     Naming uses plural resources, actions as a POST to a verb sub-resource, camelCase keys, snake_case
     values from closed sets, and `object.action` event types.
 servers:
@@ -39,7 +44,7 @@ paths:
       summary: Daemon state and version
       responses:
         "200":
-          description: The daemon is running.
+          description: The daemon is running, or still starting (`status` `starting`).
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Health" }
@@ -1113,6 +1118,13 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    Starting:
+      description: >-
+        The daemon is still starting: every route but /health answers so, at once, with the code and key
+        daemon_starting, until the daemon has loaded its state and recovered the interrupted executions.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
 
   schemas:
     MessageKey:
@@ -1140,6 +1152,7 @@ components:
         - task_disabled
         - task_being_deleted
         - daemon_stopping
+        - daemon_starting
         - execution_ended
         - executions_running
         - drain_deadline_invalid
@@ -1439,7 +1452,12 @@ components:
       type: object
       required: [status, version, apiVersion, pid, startedAt, acceptingFirings]
       properties:
-        status: { type: string, enum: [ok] }
+        status:
+          type: string
+          enum: [ok, starting]
+          description: >-
+            starting until the daemon has loaded its state and recovered the interrupted executions, with
+            acceptingFirings false, while every other route answers 503; ok from then on.
         version: { type: string }
         commit: { type: string, description: "The commit it was built from, 7 characters, -dirty with uncommitted changes." }
         builtAt: { type: string, format: date-time, description: "When it was built; left out when the build stamped no time." }

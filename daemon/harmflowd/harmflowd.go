@@ -270,21 +270,31 @@ func Run(cfg Config, registrations ...Registration) error {
 	defer stop()
 	system.Start(ctx)
 	defer system.Stop()
-	if err := a.Start(ctx); err != nil {
-		return err
-	}
 	// Taken before the address is published, so a signal sent to a daemon that answers is never the default action of
-	// the runtime, which ends the process with SIGQUIT's goroutine dump.
+	// the runtime, which ends the process with SIGQUIT's goroutine dump. A signal that comes while the use cases start
+	// waits in sig, and stops the daemon once they have.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer signal.Stop(sig)
+	// The address is published before the use cases start, so a start that takes long — a large history on a slow
+	// disk — reads as a daemon still starting, not as no daemon at all: until Start returns, the local API answers its
+	// health as starting and every other route with 503.
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.Serve() }()
 	if err := writeRuntime(paths.RuntimeFile, srv, secrets.Kind(), cfg.Version); err != nil {
+		closeAPI(srv, serveErr, logger)
 		return err
 	}
 	defer os.Remove(paths.RuntimeFile) // a file left behind is replaced at the next start
-	logger.Printf("HarmFlow daemon %s listening on %s (home %s, builtins %s)", cfg.Version, srv.Address(), home, paths.Builtins)
+	logger.Printf("HarmFlow daemon %s listening on %s (home %s, builtins %s); starting", cfg.Version, srv.Address(), home,
+		paths.Builtins)
+	// A start that fails stops the local API, and waits for it, before Run returns the error: Run leaves nothing
+	// running, whoever calls it.
+	if err := a.Start(ctx); err != nil {
+		closeAPI(srv, serveErr, logger)
+		return err
+	}
+	logger.Printf("started")
 
 	if err := awaitStop(a, a.ShutdownRequested, sig, serveErr, logger); err != nil {
 		return err
@@ -297,6 +307,19 @@ func Run(cfg Config, registrations ...Registration) error {
 	}
 	logger.Printf("stopped")
 	return nil
+}
+
+// closeAPI stops the local API of a start that failed, and waits until its Serve, whose result serveErr receives, has
+// returned. The start's error is the one Run returns, so the API's own errors are logged.
+func closeAPI(srv *httpapi.Server, serveErr <-chan error, logger *log.Logger) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		logger.Printf("stopping the local API of a failed start: %v", err)
+	}
+	if err := <-serveErr; err != nil {
+		logger.Printf("serving the local API of a failed start: %v", err)
+	}
 }
 
 // stopper is what awaitStop asks of the use cases.

@@ -14,6 +14,7 @@ This package starts the daemon and is its registration point: command `harmflowd
 
 - A running instance holds the daemon lock before it initializes the application, so a second daemon on the same data directory fails to start. `[harmflowd.go:Run]` `[harmflowd.go:acquireLock]`
 - Registrations run once each, in order, before the local API listens and the use cases start; one that fails stops the start with nothing running. `[harmflowd.go:Run]`
+- A start of the use cases that fails, once the local API serves, stops the local API and waits for it before `Run` returns the error, so nothing is left running there either. `[harmflowd.go:Run]` `[harmflowd.go:closeAPI]`
 - `Handle` adds routes only while the registrations run, behind the same Host, Origin, and token checks as every other route. `[harmflowd.go:Handle]`
 - The local API token is read from its credential store and made only when the store holds none; a store that stays unreadable after the retries stops the start instead of replacing the token. `[token.go:startupToken]` `[token.go:tokenStore]`
 - Runtime connection metadata is written with user-only permissions. `[harmflowd.go:writeRuntime]`
