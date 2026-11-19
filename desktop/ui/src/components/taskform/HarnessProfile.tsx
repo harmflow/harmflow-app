@@ -22,11 +22,13 @@ export function HarnessProfile({
   const { t } = useTranslation();
   const provider = (value.provider as string) ?? (required ? "claude-code" : "");
   const harness = harnesses.find((h) => h.id === provider);
-  // The installations of the chosen harness, one per home; the Model and Effort lists are those of the one chosen, or
-  // of the one in use while none is.
+  // The installations of the chosen harness, one per home, then the custom entries the owner added; the Model and
+  // Effort lists are those of the one chosen, or of the one in use while none is.
   const homes = harness?.homes ?? [];
+  const custom = harness?.customEntries ?? [];
+  const choices = [...homes, ...custom];
   const installation = (value.installation as string) ?? "";
-  const installed = homes.find((h) => h.installationId === installation) ?? harness;
+  const installed = choices.find((h) => h.installationId === installation) ?? harness;
   const model = (value.model as string) ?? "";
   const modelInfo = installed?.models.find((m) => m.id === model);
   const efforts = modelInfo?.efforts?.length ? modelInfo.efforts : installed?.efforts ?? [];
@@ -38,7 +40,7 @@ export function HarnessProfile({
   const ephemeral = value.ephemeral !== false;
 
   return (
-    <div className={cx("grid-profile", homes.length > 0 && "grid-profile--installation", keepsSessions && "grid-profile--session")}>
+    <div className={cx("grid-profile", choices.length > 0 && "grid-profile--installation", keepsSessions && "grid-profile--session")}>
       <Field label={t("tasks.fields.provider")}>
         <Select value={provider} onChange={(e) => onChange(cleanRow({ provider: e.target.value }))}>
           {HARNESS_PROVIDERS.map((p) => {
@@ -52,16 +54,23 @@ export function HarnessProfile({
           })}
         </Select>
       </Field>
-      {homes.length > 0 ? (
+      {choices.length > 0 ? (
         <Field label={t("tasks.fields.installation")}>
           <Select className="mono" value={installation} onChange={(e) => update("installation", e.target.value)}>
-            <option value="">{t("tasks.fields.installationInUse", { installation: harness?.installationId ?? "" })}</option>
+            <option value="">
+              {harness?.installationId ? t("tasks.fields.installationInUse", { installation: harness.installationId }) : t("tasks.fields.installationDefault")}
+            </option>
             {homes.map((h) => (
               <option key={h.installationId} value={h.installationId}>
                 {h.installationId} — {t(`harness.readiness.${h.readiness}`)}
               </option>
             ))}
-            {installation && !homes.some((h) => h.installationId === installation) ? (
+            {custom.map((h) => (
+              <option key={h.installationId} value={h.installationId}>
+                {h.entryName} — {t(`harness.readiness.${h.readiness}`)}
+              </option>
+            ))}
+            {installation && !choices.some((h) => h.installationId === installation) ? (
               <option value={installation}>{t("tasks.fields.installationMissing", { installation })}</option>
             ) : null}
           </Select>

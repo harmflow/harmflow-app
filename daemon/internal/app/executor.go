@@ -788,6 +788,10 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 	at := domain.Attempt{Number: n, Harness: p.Provider, HarnessVersion: info.Version, Installation: info.InstallationID,
 		InstallationHome: info.Home, ConfiguredModel: p.Model, ConfiguredEffort: p.Effort, StartedAt: now,
 		Outcome: domain.AttemptRunning}
+	if info.Custom() {
+		// A custom entry's home is one of its assignments, whose values the record never holds: its name says which.
+		at.InstallationName, at.InstallationHome = info.EntryName, ""
+	}
 	at.SetReason(reason)
 	r.x.Attempts = append(r.x.Attempts, at)
 	r.x.Harness, r.x.Model = p.Provider, ""

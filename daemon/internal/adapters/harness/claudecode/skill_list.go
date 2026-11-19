@@ -56,7 +56,8 @@ func (a *Adapter) installedSkills(ctx context.Context, info ports.HarnessInfo) (
 	if !info.Detected || info.Path == "" {
 		return nil, domain.TextErr("harness_not_detected", "{{harness}} was not detected on this machine", "harness", Name)
 	}
-	key := info.Path
+	// A custom entry's assignments make another installation of the same CLI, with a list of its own.
+	key := strings.Join(append([]string{info.Path}, info.EntryEnv...), "\x00")
 	a.mu.Lock()
 	if items, ok := a.skills[key]; ok {
 		a.mu.Unlock()
@@ -111,7 +112,7 @@ func (a *Adapter) runListing(ctx context.Context, info ports.HarnessInfo, key st
 		slices.Sort(names)
 		for _, n := range slices.Compact(names) {
 			if n != "" {
-				l.items = append(l.items, ports.ResolvedItem{Name: n, Kind: "skill", Path: a.userSkillPath(n)})
+				l.items = append(l.items, ports.ResolvedItem{Name: n, Kind: "skill", Path: a.userSkillPath(info, n)})
 			}
 		}
 	}
@@ -133,11 +134,11 @@ func (a *Adapter) runListing(ctx context.Context, info ports.HarnessInfo, key st
 // userSkillPath is the folder of a skill the list names, when it is the user's own, in the configuration directory's
 // skills folder, so that what its SKILL.md declares can be read; "" for a skill bundled with Claude Code or a plugin's,
 // whose file HarmFlow does not look for.
-func (a *Adapter) userSkillPath(name string) string {
+func (a *Adapter) userSkillPath(info ports.HarnessInfo, name string) string {
 	if strings.ContainsAny(name, `:/\`) || name == "." || name == ".." {
 		return ""
 	}
-	dir := filepath.Join(a.configDir(), "skills", name)
+	dir := filepath.Join(a.configDirOf(info), "skills", name)
 	if st, err := os.Stat(filepath.Join(dir, "SKILL.md")); err != nil || st.IsDir() {
 		return ""
 	}
@@ -156,7 +157,11 @@ func (a *Adapter) listSkills(ctx context.Context, info ports.HarnessInfo) ([]str
 	}
 	init := make(chan []byte, 1) // the first init line, which ends the wait
 	sent := false
-	inv := ports.Invocation{Path: info.Path, Args: args, Env: a.withToken(ports.SessionEnv(a.Env)), Dir: a.Home,
+	env := ports.SessionEnv(a.Env)
+	if len(info.EntryEnv) > 0 {
+		env = ports.WithAssignments(env, info.EntryEnv)
+	}
+	inv := ports.Invocation{Path: info.Path, Args: args, Env: a.withToken(env), Dir: a.Home,
 		Stdin: skillListPrompt}
 	p, err := procutil.StartLines(inv, io.Discard, func(line []byte) {
 		var h streamHead

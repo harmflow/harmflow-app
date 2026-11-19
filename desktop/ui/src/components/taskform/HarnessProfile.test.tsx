@@ -292,3 +292,68 @@ describe("task form installation", () => {
     expect(installation(0)).toBeUndefined();
   });
 });
+
+// harmflow-app#826: a profile also offers the custom entries of the harness it chose, by their names, for the preferred
+// harness and each fallback candidate, and its Model and Effort lists follow the entry chosen. A harness whose only
+// installations are custom entries offers them too.
+describe("task form custom entries", () => {
+  let current: Doc = {};
+  const base = (over: Partial<Harness>): Harness => ({
+    id: "claude-code",
+    name: "Claude Code",
+    detected: true,
+    installations: ["/opt/homebrew/bin/claude"],
+    authentication: "valid",
+    readiness: "ready",
+    models: [{ id: "sonnet" }],
+    efforts: ["default"],
+    lastCheckedAt: "2026-11-08T09:00:00Z",
+    ...over,
+  });
+  const entry = base({ installationId: "custom-1", entryName: "Claude Code 2", entryLine: "CLAUDE_CONFIG_DIR=~/.claude-b claude", pathSource: "custom", models: [{ id: "opus" }], efforts: ["default", "high"], authentication: "invalid", readiness: "not_ready" });
+  const harnesses: Harness[] = [base({ customEntries: [entry] })];
+  const catalog: Catalog = { agents: [], skills: [], taskTypes: [], problems: [] };
+
+  function Form({ doc }: { doc: Doc }) {
+    const [value, setValue] = useState(doc);
+    current = value;
+    return <TaskForm doc={value} onChange={(d) => setValue((current = d))} mode="edit" catalog={catalog} harnesses={harnesses} errorPaths={new Set()} />;
+  }
+
+  const withProfiles = (preferred: Doc, ...candidates: Doc[]): Doc => {
+    const doc = task({});
+    return { ...doc, spec: { ...(doc.spec as Doc), harness: { preferred, ...(candidates.length ? { fallback: { candidates } } : {}) } } };
+  };
+  const harness = () => (current.spec as Doc).harness as { preferred: Doc; fallback?: { candidates: Doc[] } };
+  const profiles = () => [...host!.querySelectorAll("#section-harness .grid-profile")];
+  const fieldOf = (i: number, label: string) =>
+    [...profiles()[i]!.querySelectorAll(".field")].find((f) => f.querySelector(".field__label")?.textContent === label);
+  const installation = (i: number) => fieldOf(i, "Installation")?.querySelector("select");
+  const options = (el: Element | null | undefined) => [...(el?.querySelectorAll("option") ?? [])].map((o) => o.getAttribute("value"));
+  const choose = async (i: number, value: string) => {
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(installation(i), value);
+      installation(i)!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await settle();
+  };
+
+  it("offers the entries by name to the preferred profile and a fallback candidate, the lists following the one chosen", async () => {
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(<Form doc={withProfiles({ provider: "claude-code" }, { provider: "claude-code" })} />));
+    await settle();
+
+    expect(options(installation(0))).toStrictEqual(["", "custom-1"]);
+    expect([...installation(0)!.options].map((o) => o.textContent)).toStrictEqual(["The one in use", "Claude Code 2 — Not ready"]);
+    expect(options(installation(1))).toStrictEqual(["", "custom-1"]);
+    expect(options(profiles()[0]!.querySelector("datalist"))).toStrictEqual(["sonnet"]);
+
+    await choose(0, "custom-1");
+    await choose(1, "custom-1");
+    expect(harness().preferred).toStrictEqual({ provider: "claude-code", installation: "custom-1" });
+    expect(harness().fallback?.candidates).toStrictEqual([{ provider: "claude-code", installation: "custom-1" }]);
+    expect(options(profiles()[0]!.querySelector("datalist"))).toStrictEqual(["opus"]);
+    expect(options(fieldOf(0, "Effort")?.querySelector("select"))).toStrictEqual(["", "default", "high"]);
+  });
+});

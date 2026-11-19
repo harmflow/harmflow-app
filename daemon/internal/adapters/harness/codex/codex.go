@@ -60,6 +60,24 @@ type Adapter struct {
 	listTimeout time.Duration         // a call to the app server; zero is defaultListTimeout
 	helpTimeout time.Duration         // each help check, `exec --help` and the top-level --help; zero is the probe's own limit
 	signInStep  time.Duration         // the wait for `codex login` to reach its browser's step; zero is defaultSignInStep
+	entryHome   string                // the one home of an adapter ProbeEntry made; empty for the daemon's own
+}
+
+// ProbeEntry implements ports.EntryProber: the binary at path read as Detect reads a path set by hand, every probe run
+// with assignments added to Env, as the installation of the CODEX_HOME they set, or of the home in use when they set
+// none. The app servers it starts for the probes end with it.
+func (a *Adapter) ProbeEntry(ctx context.Context, path string, assignments []string) ports.HarnessInfo {
+	home := a.codexHome()
+	if h, ok := ports.AssignmentValue(assignments, "CODEX_HOME"); ok && h != "" {
+		home = filepath.Clean(h)
+	}
+	entry := &Adapter{Home: a.Home, PathEnv: a.PathEnv, Env: ports.WithAssignments(a.Env, assignments),
+		KnownLocations: []string{}, ClientVersion: a.ClientVersion, ProbeTimeout: a.ProbeTimeout,
+		listTimeout: a.listTimeout, helpTimeout: a.helpTimeout, entryHome: home}
+	defer entry.Close()
+	info := entry.Detect(ctx, path)
+	info.Homes, info.Installations, info.EntryEnv = nil, []string{path}, slices.Clone(assignments)
+	return info
 }
 
 var (
@@ -71,6 +89,7 @@ var (
 	_ ports.InstallationLister = (*Adapter)(nil)
 	_ ports.QuotaReader        = (*Adapter)(nil)
 	_ ports.SessionKeeper      = (*Adapter)(nil)
+	_ ports.EntryProber        = (*Adapter)(nil)
 )
 
 // ID implements ports.HarnessAdapter: the harness's identifier.
@@ -79,8 +98,12 @@ func (a *Adapter) ID() string { return ID }
 // Name implements ports.HarnessAdapter: the harness's display name.
 func (a *Adapter) Name() string { return Name }
 
-// codexHome is the home of the installation in use: the one the daemon's CODEX_HOME names, or `.codex` under Home.
+// codexHome is the home of the installation in use: the one the daemon's CODEX_HOME names, or `.codex` under Home. An
+// adapter ProbeEntry made for a custom entry has the entry's home alone.
 func (a *Adapter) codexHome() string {
+	if a.entryHome != "" {
+		return a.entryHome
+	}
 	if d := os.Getenv("CODEX_HOME"); d != "" {
 		return d
 	}
@@ -91,6 +114,9 @@ func (a *Adapter) codexHome() string {
 // when it is another. `.codex` is left out only while it is no folder and CODEX_HOME names another home, so a Mac whose
 // one home is elsewhere lists no empty one.
 func (a *Adapter) homes() []string {
+	if a.entryHome != "" {
+		return []string{a.entryHome}
+	}
 	def := filepath.Join(a.Home, ".codex")
 	env := os.Getenv("CODEX_HOME")
 	if env == "" || sameDir(env, def) {
@@ -609,16 +635,20 @@ func sessionsDir(env []string, home string) string {
 // request keeps it; a Codex without --ephemeral keeps every session, which a restriction not enforced says. The
 // installation's home is the process's CODEX_HOME, in place of any the request's environment carries. An installation
 // detection did not give runs with the home in use when the request's environment has no CODEX_HOME, as one
-// ports.SessionEnv gives has none.
+// ports.SessionEnv gives has none. A custom entry's assignments are added to the process's environment, and its
+// command line's arguments come before exec.
 func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.Invocation, ports.OutputParser, error) {
 	home := a.homeOf(info)
+	if len(info.EntryEnv) > 0 {
+		req.Env = ports.WithAssignments(req.Env, info.EntryEnv)
+	}
 	switch {
 	case info.Home != "":
 		req.Env = envWith(req.Env, info.Home)
 	case req.Env != nil && !slices.ContainsFunc(req.Env, func(kv string) bool { return strings.HasPrefix(kv, "CODEX_HOME=") }):
 		req.Env = envWith(req.Env, home)
 	}
-	args := []string{"exec", "--json", "--skip-git-repo-check", "--cd", req.WorkDir}
+	args := append(slices.Clone(info.EntryArgs), "exec", "--json", "--skip-git-repo-check", "--cd", req.WorkDir)
 	var restrictions []ports.Restriction
 	ephemeral := info.HasFeature("--ephemeral")
 	if ephemeral && !req.KeepSession {

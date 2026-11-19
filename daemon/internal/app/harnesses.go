@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -111,6 +112,7 @@ func (a *App) detect(ctx context.Context, id string) ports.HarnessInfo {
 		info = ad.Detect(ctx, manual)
 	}
 	info = a.withHomeSkills(ctx, ad, info)
+	info.CustomEntries = a.probeCustomEntries(ctx, ad)
 	info.LastCheckedAt = a.now()
 	// Taken only once Detect returns, so a slow check never holds up Stop; see announceMu.
 	a.announceMu.RLock()
@@ -234,6 +236,24 @@ func (a *App) SetHarnessPath(ctx context.Context, id string, path *string) (port
 		a.log.Printf("saving the harness paths set by hand; they hold until the daemon stops: %v", err)
 	}
 	return a.detect(ctx, id), nil
+}
+
+// lookExecutable is the executable a custom entry's command line names: name itself when it is an absolute path to an
+// executable file, otherwise the first executable file of that name on the daemon's PATH; "" when there is none.
+func lookExecutable(name string) string {
+	if strings.HasPrefix(name, "/") {
+		if procutil.Executable(name) {
+			return name
+		}
+		return ""
+	}
+	if strings.Contains(name, "/") {
+		return ""
+	}
+	if found := procutil.LookPath(name, os.Getenv("PATH"), []string{}); len(found) > 0 {
+		return found[0]
+	}
+	return ""
 }
 
 // Tools reports git and gh, which the built-in GitHub skills use.
