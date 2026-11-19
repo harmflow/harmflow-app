@@ -1941,10 +1941,10 @@ describe("zoom", () => {
 
     afterEach(() => document.documentElement.removeAttribute("data-typeface"));
 
-    it("holds Zoom and Font alone, and no Font size control", async () => {
+    it("holds Zoom, Font, and the metric cards, and no Font size control", async () => {
       await launch();
       await openAppearance();
-      expect([...appearance().querySelectorAll(".panel__title")].map((h) => h.textContent)).toEqual(["Zoom", "Font"]);
+      expect([...appearance().querySelectorAll(".panel__title")].map((h) => h.textContent)).toEqual(["Zoom", "Font", "Metric cards"]);
       expect([...appearance().querySelectorAll("select")].map((s) => s.id)).toEqual(["settings-zoom", "settings-typeface"]);
       expect([...appearance().querySelectorAll(".setting-row__label")].map((l) => l.textContent)).toEqual(["Zoom", "Font"]);
       expect(appearance().textContent).not.toMatch(/font size/i);
@@ -1998,8 +1998,8 @@ describe("zoom", () => {
       expect(control().value).toBe("125");
       expect(typeface().value).toBe("system");
       expect(document.documentElement.getAttribute("data-typeface")).toBe("system");
-      // Nothing to press in the section: its two selects are all it holds.
-      expect([...appearance().querySelectorAll("button, input, textarea")]).toEqual([]);
+      // Nothing to press for Zoom and Font: their two selects are all they hold. The metric cards' list is apart.
+      expect([...appearance().querySelectorAll("button, input, textarea")].filter((el) => !el.closest(".metric-cards"))).toEqual([]);
 
       // ⌘0 is the zoom's Actual Size, never the font's.
       expect(await press(undefined, actualSize)).toBe(true);
@@ -2015,7 +2015,7 @@ describe("zoom", () => {
       expect(typeface().value).toBe("harmflow");
       expect(document.documentElement.getAttribute("data-typeface")).toBeNull();
       expect(daemon.sent.filter((r) => r.method === "PATCH" && r.path === "/settings").map((r) => r.body)).toEqual([{ typeface: "harmflow" }]);
-      expect([...appearance().querySelectorAll("button, input, textarea")]).toEqual([]);
+      expect([...appearance().querySelectorAll("button, input, textarea")].filter((el) => !el.closest(".metric-cards"))).toEqual([]);
     });
   });
 });

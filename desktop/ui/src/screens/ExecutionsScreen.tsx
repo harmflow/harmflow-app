@@ -40,7 +40,7 @@ export function ExecutionsScreen({
   return (
     <div className={asideHidden ? "screen" : "screen screen--with-aside"}>
       <div className="screen__main">
-        <Counters />
+        <Counters screen="executions" />
         {running.length === 0 ? (
           <>
             <SectionTitle>{t("executions.activeTitle", { count: 0 })}</SectionTitle>

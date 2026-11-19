@@ -1,9 +1,11 @@
 // The right column of the executions screen: the queue, the recent history, and a quiet signature card.
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Stats, WorkItem } from "../api/types";
 import type { Tone } from "../design/theme";
 import { formatRelative } from "../lib/format";
 import { useNow } from "../lib/hooks";
+import { resolveCards, storedMetricCards, type CardScreen, type MetricCards } from "../lib/metricCards";
 import { useStore } from "../state/store";
 import { Icon, type IconName } from "./Icon";
 import { Button, Chip, EmptyState, ListRow, ListRows, Panel, Sparkline, StatusMark, cx } from "./ui";
@@ -159,12 +161,25 @@ export const COUNTERS: CounterDef[] = [
   { key: "noWorkToday", activity: "noWork", icon: "circle", tone: "violet" },
 ];
 
-export function Counters() {
+/** The counters' keys, in their default order: the order a screen shows them in with nothing chosen in Settings. */
+export const COUNTER_KEYS = COUNTERS.map((c) => c.key);
+
+/** The cards `screen` shows, in its order, as chosen in Settings › Appearance; every card, in order, with no choice. */
+export function shownCounters(screen: CardScreen, kept: MetricCards = storedMetricCards()): CounterDef[] {
+  return resolveCards(kept[screen], COUNTER_KEYS)
+    .filter((c) => c.shown)
+    .map((c) => COUNTERS.find((d) => d.key === c.key)!);
+}
+
+/** A screen's row of counters; a screen whose every card is hidden shows no row at all. */
+export function Counters({ screen }: { screen: CardScreen }) {
   const { t, i18n } = useTranslation();
   const stats = useStore((s) => s.stats);
+  const [cards] = useState(() => shownCounters(screen));
+  if (cards.length === 0) return null;
   return (
     <div className="counters">
-      {COUNTERS.map((c) => (
+      {cards.map((c) => (
         <div key={c.key} className={cx("counter", `counter--${c.tone}`)}>
           <span className="counter__icon">
             <Icon name={c.icon} size={22} />

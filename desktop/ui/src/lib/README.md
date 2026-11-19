@@ -7,6 +7,7 @@ This package holds deterministic presentation, task-editing, scheduling, timelin
 ## Interface
 
 - Task-document and task-layout transformations are exported by `taskForm` and `taskLayout`. `[taskForm.ts:getIn]` `[taskForm.ts:setIn]` `[taskForm.ts:slugify]` `[taskLayout.ts:parseLayout]` `[taskLayout.ts:moveTask]`
+- Each screen's metric-card choice is read, held to the app's cards, and reordered by `metricCards`. `[metricCards.ts:parseMetricCards]` `[metricCards.ts:resolveCards]` `[metricCards.ts:moveCard]`
 - Cost, schedule, timeline, schema, translation, formatting, shortcut, and zoom helpers expose the presentation domain. `[costs.ts:executionCost]` `[schedule.ts:cronOf]` `[timeline.ts:buildTimeline]` `[schema.ts:schemaAt]` `[daemonText.ts:daemonText]` `[format.ts:formatDateTime]` `[shortcuts.ts:SHORTCUTS]` `[zoom.ts:zoomed]`
 - React timing and draft-state helpers are exported from `hooks.ts`. `[hooks.ts:useNow]` `[hooks.ts:useDebounced]` `[hooks.ts:useDraft]`
 
@@ -18,7 +19,7 @@ This package holds deterministic presentation, task-editing, scheduling, timelin
 
 ## Side Effects
 
-- Layout, zoom, spend-view, and spend-split helpers read or write browser storage; React helpers schedule intervals and timeouts. `[taskLayout.ts:storedLayout]` `[taskLayout.ts:storeLayout]` `[zoom.ts:storedZoom]` `[zoom.ts:storeZoom]` `[spend.ts:keptSpendView]` `[spend.ts:keepSpendView]` `[spend.ts:keptSpendSplit]` `[spend.ts:keepSpendSplit]` `[hooks.ts:useNow]` `[hooks.ts:useDebounced]`
+- Layout, zoom, spend-view, spend-split, and metric-card helpers read or write browser storage; React helpers schedule intervals and timeouts. `[taskLayout.ts:storedLayout]` `[taskLayout.ts:storeLayout]` `[zoom.ts:storedZoom]` `[zoom.ts:storeZoom]` `[spend.ts:keptSpendView]` `[spend.ts:keepSpendView]` `[spend.ts:keptSpendSplit]` `[spend.ts:keepSpendSplit]` `[metricCards.ts:storedMetricCards]` `[metricCards.ts:storeMetricCards]` `[hooks.ts:useNow]` `[hooks.ts:useDebounced]`
 
 ## Verification
 
