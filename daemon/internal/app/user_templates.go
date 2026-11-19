@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/harmflow/harmflow-app/daemon/internal/adapters/eventlog"
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
@@ -283,6 +285,81 @@ func (a *App) DuplicateTemplate(id string) (Template, error) {
 // edit both as a document and as YAML, so that the template's form and its YAML editor each show the other's.
 func (a *App) ValidateTemplate(id string, in TemplateInput) *ValidationResult {
 	return a.templateEdit(id, in).Validation
+}
+
+// ExportTemplate returns a template of the user's as portable YAML: its file's definition alone, with its secrets
+// masked as a task's export masks them. A template holds no state, logs, or credentials of its own, and a task created
+// from it holds no reference to it, so nothing its tasks did travels with it. A built-in template, which every HarmFlow
+// has, is not exported.
+func (a *App) ExportTemplate(id string) ([]byte, error) {
+	u, err := a.userTemplate(id)
+	if err != nil {
+		return nil, err
+	}
+	a.mu.Lock()
+	content := u.file.Content
+	a.mu.Unlock()
+	return []byte(eventlog.Redact(string(content))), nil
+}
+
+// TemplateImport is a portable template to import: its YAML text, whether it replaces the template of the user's that
+// has its identifier, and whether the import only checks it, writing nothing.
+type TemplateImport struct {
+	YAML      string `json:"yaml"`
+	Overwrite bool   `json:"overwrite"`
+	DryRun    bool   `json:"dryRun"`
+}
+
+// ImportTemplate saves a portable template as a template of the user's, under the identifier its file gives, once it
+// is valid: one that fails the template schema, or whose identifier carries the hf- prefix, is rejected, and nothing is
+// written. A template of the user's with the same identifier, its file valid or not, is replaced only when in says to;
+// otherwise the import is a conflict. A dry run makes every check and writes nothing, so that the import can show what
+// the template would run before it is saved. The answer names, for a template whose tasks run a harness, each agent and
+// skill it cites that this machine lacks; the template is saved all the same.
+func (a *App) ImportTemplate(ctx context.Context, in TemplateImport) (Template, error) {
+	if a.d.Templates == nil {
+		return Template{}, errors.New("this daemon keeps no templates of the user's")
+	}
+	content := []byte(in.YAML)
+	// The identifier is the file's own, checked by the template schema before it names any file.
+	var head struct {
+		Metadata struct {
+			ID any `yaml:"id"`
+		} `yaml:"metadata"`
+	}
+	_ = yaml.Unmarshal(content, &head) // a file that is no YAML fails validation below
+	id, _ := head.Metadata.ID.(string)
+	t := a.loadTemplate(&Template{ID: id, Source: TemplateUser}, content, nil)
+	if !t.Validation.Valid {
+		return Template{}, a.invalidError(t.Validation)
+	}
+	a.mu.Lock()
+	_, exists := a.userTemplates[id]
+	a.mu.Unlock()
+	if _, err := a.d.Templates.Get(id); (exists || err == nil) && !in.Overwrite {
+		return Template{}, newError(CodeConflict,
+			domain.T("template_exists", "a template with the identifier {{template}} already exists", "template", id))
+	}
+	var needs *TemplateNeeds
+	if t.Type != domain.TypeScriptTask {
+		needs = a.templateNeeds(ctx, t)
+	}
+	if in.DryRun {
+		out := opened(*t, "")
+		out.Needs = needs
+		return out, nil
+	}
+	f, err := a.d.Templates.Save(id, content, "")
+	if err != nil {
+		return Template{}, err
+	}
+	eventType := domain.EventTemplateCreated
+	if exists {
+		eventType = domain.EventTemplateUpdated
+	}
+	out := a.afterTemplateWrite(t, f, eventType)
+	out.Needs = needs
+	return out, nil
 }
 
 // userTemplate is the user's template id. A built-in template's identifier, or one with the hf- prefix that none has,

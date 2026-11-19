@@ -384,6 +384,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/templates/{templateId}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                templateId: components["parameters"]["TemplateId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * A template of the user's as portable YAML, with no secrets, logs, or state
+         * @description The template's file, its definition alone, with its secrets masked as a task's export masks them: no tokens, cookies, passwords, credentials, session data, logs, or operational state. A task created from the template holds no reference to it, so nothing those tasks did travels with it. A built-in template, which every HarmFlow has, is not exported.
+         */
+        get: operations["exportTemplate"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/templates/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import a portable template YAML as a template of the user's
+         * @description The template takes the identifier its file gives. One that fails the template schema, or whose identifier carries the hf- prefix, which only built-in templates carry, is rejected with the error, and nothing is written. A template of the user's with the same identifier, its file valid or not, is replaced only when overwrite is set; otherwise the import is a conflict, naming the identifier. A dry run makes every check and writes nothing, and answers the template as it would be saved, its document included, so that the import shows what it would run before anything is saved. For a template whose tasks run a harness, needs names each agent and skill it cites that this machine lacks; the template is saved all the same. A saved template is announced as created, or as updated when it replaced one.
+         */
+        post: operations["importTemplate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tasks": {
         parameters: {
             query?: never;
@@ -1201,6 +1243,20 @@ export interface components {
             yaml?: string;
             document?: components["schemas"]["TemplateDocument"];
             baseRevision?: string;
+        };
+        TemplateImportRequest: {
+            /** @description The template's file, as exported. */
+            yaml: string;
+            /**
+             * @description Replace the template of the user's that has the same identifier.
+             * @default false
+             */
+            overwrite: boolean;
+            /**
+             * @description Check the template as the import would, and write nothing.
+             * @default false
+             */
+            dryRun: boolean;
         };
         NewTemplateRequest: {
             /** @description The template's identifier, which becomes its file's name. */
@@ -2418,6 +2474,65 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
+            422: components["responses"]["Invalid"];
+        };
+    };
+    exportTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                templateId: components["parameters"]["TemplateId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The template's YAML, as a file named after its identifier. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/yaml": string;
+                };
+            };
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    importTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TemplateImportRequest"];
+            };
+        };
+        responses: {
+            /** @description A dry run's answer, the template as it would be saved; nothing was written. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Template"];
+                };
+            };
+            /** @description The imported template. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Template"];
+                };
+            };
+            409: components["responses"]["Conflict"];
             422: components["responses"]["Invalid"];
         };
     };

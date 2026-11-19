@@ -202,6 +202,8 @@ func (s *Server) Handler() http.Handler {
 	h("POST /api/v1/templates/{templateId}/duplicate", s.duplicateTemplate)
 	h("POST /api/v1/templates/{templateId}/validate", s.validateTemplate)
 	h("POST /api/v1/templates/{templateId}/draft", s.draftTask)
+	h("GET /api/v1/templates/{templateId}/export", s.exportTemplate)
+	h("POST /api/v1/templates/import", s.importTemplate)
 
 	h("GET /api/v1/tasks", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.App.ListTasks()) })
 	h("POST /api/v1/tasks", s.createTask)
@@ -526,6 +528,37 @@ func (s *Server) validateTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, s.App.ValidateTemplate(r.PathValue("templateId"), in))
+}
+
+// importTemplate saves a portable template as one of the user's, 201, or, for a dry run, answers it as it would be
+// saved and writes nothing, 200.
+func (s *Server) importTemplate(w http.ResponseWriter, r *http.Request) {
+	var in app.TemplateImport
+	if err := decode(r, &in); err != nil {
+		fail(w, err)
+		return
+	}
+	v, err := s.App.ImportTemplate(r.Context(), in)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	status := 201
+	if in.DryRun {
+		status = 200
+	}
+	writeJSON(w, status, v)
+}
+
+func (s *Server) exportTemplate(w http.ResponseWriter, r *http.Request) {
+	data, err := s.App.ExportTemplate(r.PathValue("templateId"))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/yaml")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.yaml"`, r.PathValue("templateId")))
+	_, _ = w.Write(data) // the status is sent; a client gone mid-body has no one left to be told
 }
 
 func (s *Server) draftTask(w http.ResponseWriter, r *http.Request) {
