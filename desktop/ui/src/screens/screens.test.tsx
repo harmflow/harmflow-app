@@ -831,7 +831,8 @@ describe("the executions screen's cards", () => {
 
     /**
      * Renders n running cards, gives the row its sizes and the scroll position, and lets it measure on a scroll. The
-     * row's width follows its cards, so a card starting or ending widens or narrows it as the layout would.
+     * row's width follows its cards, so a card starting or ending widens or narrows it as the layout would, and its
+     * scroll position stays within its ends: a row that narrows has it clamped to its new end, as a browser does.
      */
     async function showRow(n: number, scrollLeft = 0) {
       for (const e of runningMany(n)) daemon.answers.set(`/executions/${e.id}/events`, { events: [], logExpired: false });
@@ -841,7 +842,13 @@ describe("the executions screen's cards", () => {
       const step = PAGE / 3;
       Object.defineProperty(element, "clientWidth", { configurable: true, value: 1000 });
       Object.defineProperty(element, "scrollWidth", { configurable: true, get: () => Math.max(1000, element.children.length * step - 16 + 48) });
-      Object.defineProperty(element, "scrollLeft", { configurable: true, writable: true, value: scrollLeft });
+      const clamp = (left: number) => Math.min(Math.max(left, 0), element.scrollWidth - element.clientWidth);
+      let left = scrollLeft;
+      Object.defineProperty(element, "scrollLeft", {
+        configurable: true,
+        get: () => (left = clamp(left)),
+        set: (value: number) => void (left = clamp(value)),
+      });
       vi.spyOn(element, "getBoundingClientRect").mockReturnValue(rect(0, 1000));
       vi.spyOn(wrapper(), "getBoundingClientRect").mockReturnValue(rect(0, 1000));
       const scrollTo = vi.fn();
@@ -1067,6 +1074,78 @@ describe("the executions screen's cards", () => {
         expect(position()).toBeUndefined();
       } finally {
         intoView.mockRestore();
+      }
+    });
+
+    it("at its end, keeps the cards in view and the selection where they were when two cards before them end", async () => {
+      // Six run, the row paged to its end so the fourth to the sixth show, and the fifth selected. The first two end:
+      // the row narrows, and its scroll position is clamped to the new end before the row scrolls back by them.
+      const STEP = PAGE / 3;
+      const six = runningMany(6);
+      const scrollTo = await showRow(6, 6 * STEP + 32 - 1000);
+      const element = row();
+      scrollTo.mockImplementation(({ left = 0 }: ScrollToOptions) => {
+        element.scrollLeft = left;
+      });
+      const intoView = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
+      const names = () => [...host!.querySelectorAll(".exec-card__title")].map((title) => title.getAttribute("title"));
+      /** Where a card sits from the row's left edge, by its task's name. */
+      const place = (name: string) => names().indexOf(name) * STEP - element.scrollLeft;
+      try {
+        expect(position()).toBe("4–6 de 6");
+        await act(async () => host!.querySelectorAll<HTMLElement>(".exec-card")[4].click());
+        expect(onSelect).toHaveBeenLastCalledWith("exec-row-5");
+        const before = ["Row 4", "Row 5", "Row 6"].map(place);
+
+        daemon.answers.set("/executions", six.slice(2));
+        await act(async () => {
+          await actions.refreshExecutions();
+        });
+        await settle();
+
+        expect(names()).toEqual(["Row 3", "Row 4", "Row 5", "Row 6"]);
+        expect(scrollTo).toHaveBeenCalledTimes(1);
+        expect(scrollTo).toHaveBeenCalledWith({ left: expect.closeTo(4 * STEP + 32 - 1000) });
+        expect(element.scrollLeft).toBeCloseTo(element.scrollWidth - element.clientWidth);
+        ["Row 4", "Row 5", "Row 6"].forEach((name, i) => expect(place(name), name).toBeCloseTo(before[i]));
+        expect(position()).toBe("2–4 de 4");
+        expect(host!.querySelectorAll(".exec-card")[2].classList.contains("exec-card--selected")).toBe(true);
+        expect(intoView).not.toHaveBeenCalled();
+      } finally {
+        intoView.mockRestore();
+      }
+    });
+
+    it("with nothing selected, shows the card of an execution that starts, which becomes the default", async () => {
+      // Five run, nothing selected, the row at its end. A newer one starts, listed first: it becomes the default, its
+      // card is the selected one, and the row scrolls it into view.
+      const STEP = PAGE / 3;
+      const sixth: ExecutionSummary = { ...running, id: "exec-row-new", taskId: "row-new", taskName: "Row new" };
+      daemon.answers.set(`/executions/${sixth.id}/events`, { events: [], logExpired: false });
+      await showRow(5, 5 * STEP + 32 - 1000);
+      const element = row();
+      // Each card's box from where the row is scrolled; the row and its wrapper keep their own.
+      const box = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+        const i = [...element.children].indexOf(this);
+        return i < 0 ? rect(0, 0) : rect(i * STEP - element.scrollLeft, STEP - 16);
+      });
+      const intoView = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
+      try {
+        expect(position()).toBe("3–5 de 5");
+        daemon.answers.set("/executions", [sixth, ...runningMany(5)]);
+        await act(async () => {
+          await actions.refreshExecutions();
+        });
+        await settle();
+
+        const cards = [...host!.querySelectorAll<HTMLElement>(".exec-card")];
+        expect(cards[0].querySelector(".exec-card__title")!.getAttribute("title")).toBe("Row new");
+        expect(cards[0].classList.contains("exec-card--selected")).toBe(true);
+        expect(intoView).toHaveBeenCalledTimes(1);
+        expect(intoView.mock.contexts[0]).toBe(cards[0]);
+      } finally {
+        intoView.mockRestore();
+        box.mockRestore();
       }
     });
 

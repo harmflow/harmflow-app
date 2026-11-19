@@ -139,16 +139,16 @@ function RunningCards({
   const [view, setView] = useState<RowView>({ overflows: false, first: 0, last: running.length, atStart: true, atEnd: true });
   const key = running.map((e) => e.id).join(",");
   const ids = useMemo(() => (key ? key.split(",") : []), [key]);
-  // The cards' order as the row lays them out, and the ones in view when it last measured: a card starting or ending
-  // keeps those in view.
+  // The cards' order as the row lays them out, and the ones in view when it last measured with its scroll position
+  // then: a card starting or ending keeps those in view.
   const order = useRef<string[]>([]);
-  const shown = useRef<{ ids: string[]; order: string[] }>({ ids: [], order: [] });
+  const shown = useRef<{ ids: string[]; order: string[]; left: number }>({ ids: [], order: [], left: 0 });
 
   const measure = useCallback(() => {
     const element = row.current;
     if (!element) return;
     const next = viewOf(element);
-    shown.current = { ids: order.current.slice(next.first, next.last), order: order.current };
+    shown.current = { ids: order.current.slice(next.first, next.last), order: order.current, left: element.scrollLeft };
     setView((prev) => (sameView(prev, next) ? prev : next));
   }, []);
 
@@ -166,8 +166,10 @@ function RunningCards({
     };
   }, [measure]);
 
-  // A card starting or ending moves the cards after it: scroll by as many cards, so the ones in view stay where they
-  // were. Then measure, since the row's width did not change and no resize says so.
+  // A card starting or ending moves the cards after it: scroll by as many cards from where the row last measured, so
+  // the ones in view stay where they were. Not from scrollLeft now: a row that narrowed at its end has its scrollLeft
+  // clamped by the browser already, and scrolling back from there would move the cards a second time. Then measure,
+  // since the row's width did not change and no resize says so.
   useLayoutEffect(() => {
     const element = row.current;
     if (!element) return;
@@ -176,13 +178,14 @@ function RunningCards({
     const kept = before.ids.find((id) => ids.includes(id));
     if (kept !== undefined) {
       const moved = ids.indexOf(kept) - before.order.indexOf(kept);
-      if (moved !== 0) element.scrollTo({ left: element.scrollLeft + moved * geometry(element).step });
+      if (moved !== 0) element.scrollTo({ left: before.left + moved * geometry(element).step });
     }
     measure();
   }, [ids, measure]);
 
   // A selection made outside the row — the queue, the history, the default — shows its card whole. A click on a whole
-  // card leaves the row where it is.
+  // card leaves the row where it is. With nothing selected the default is the first running execution, so one that
+  // starts, listed first, becomes the default and its card shows: a card starting or ending moves the row only so.
   useEffect(() => {
     const element = row.current;
     const index = selectedId === null ? -1 : ids.indexOf(selectedId);
@@ -191,7 +194,7 @@ function RunningCards({
     const box = element.getBoundingClientRect();
     const rect = card.getBoundingClientRect();
     if (rect.left < box.left - 1 || rect.right > box.right + 1) card.scrollIntoView({ block: "nearest", inline: "nearest", behavior: behavior() });
-  }, [selectedId]); // only a change of selection moves the row, not a card starting or ending
+  }, [selectedId]); // only a change of selection moves the row, the default's included
 
   const page = (direction: 1 | -1) => {
     const element = row.current;
