@@ -1254,6 +1254,8 @@ components:
         - harness_session_not_kept
         - session_kept_note
         - extra_usage_unenforced
+        - cost_cap_unenforced
+        - attempt_cost_cap_invalid
         - path_variable_unterminated
         - path_variable_undefined
         - path_not_absolute
@@ -1337,6 +1339,8 @@ components:
         - cancelled_before_start
         - execution_cancelled
         - execution_timed_out
+        - execution_budget_exhausted
+        - attempt_budget_exhausted
         - execution_status
         - daemon_stopped_execution
         - execution_dir_failed
@@ -2112,7 +2116,7 @@ components:
         configuredEffort: { type: string, description: "The effort the task asked for, default when it set none. Never the one used." }
         startedAt: { type: string, format: date-time }
         endedAt: { type: string, format: date-time }
-        outcome: { type: string, enum: [running, succeeded, failed, quota_exhausted, rate_limited, harness_unavailable, network_failed, timed_out, cancelled, interrupted] }
+        outcome: { type: string, enum: [running, succeeded, failed, quota_exhausted, rate_limited, harness_unavailable, network_failed, timed_out, budget_exhausted, cancelled, interrupted] }
         exitCode: { type: integer }
         sessionId: { type: string }
         errorMessage: { type: string, description: "Why the attempt ended: the daemon's text in en-US, or the harness's own error, which has no errorKey." }
@@ -2122,6 +2126,11 @@ components:
         reasonKey: { $ref: "#/components/schemas/MessageKey" }
         reasonParams: { $ref: "#/components/schemas/MessageParams" }
         usage: { $ref: "#/components/schemas/AttemptUsage" }
+        costCapUsd:
+          type: number
+          description: >-
+            The cost cap the attempt ran with, in US dollars: the task's execution.maxAttemptCostUsd as the execution
+            started. Absent when the task set none, or when the attempt's harness cannot stop a session by its cost.
         prompt:
           type: string
           description: >-

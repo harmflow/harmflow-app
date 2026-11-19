@@ -88,6 +88,7 @@ const (
 	AttemptHarnessUnavailable AttemptOutcome = "harness_unavailable"
 	AttemptNetworkFailed      AttemptOutcome = "network_failed"
 	AttemptTimedOut           AttemptOutcome = "timed_out"
+	AttemptBudgetExhausted    AttemptOutcome = "budget_exhausted"
 	AttemptCancelled          AttemptOutcome = "cancelled"
 	AttemptInterrupted        AttemptOutcome = "interrupted"
 )
@@ -119,6 +120,9 @@ type Attempt struct {
 	ReasonParams     map[string]string `json:"reasonParams,omitempty"`
 	// Usage is what the harness reported of its token use, as it runs and when it ends; absent when it reported none.
 	Usage *Usage `json:"usage,omitempty"`
+	// CostCapUSD is the cap the attempt ran with, the task's execution.maxAttemptCostUsd as the execution started;
+	// absent when the task set none, or when the attempt's harness cannot enforce it.
+	CostCapUSD *float64 `json:"costCapUsd,omitempty"`
 	// Prompt and SessionContext are what the attempt sent the harness, redacted like the raw output, since the task can
 	// be edited afterwards and the context is composed per attempt; older records have neither.
 	Prompt         string `json:"prompt,omitempty"`

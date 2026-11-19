@@ -84,6 +84,7 @@ var (
 	_ ports.HarnessIdentifier      = (*Adapter)(nil)
 	_ ports.QuotaReader            = (*Adapter)(nil)
 	_ ports.ExtraUsageReporter     = (*Adapter)(nil)
+	_ ports.CostCapper             = (*Adapter)(nil)
 	_ ports.InstallationLister     = (*Adapter)(nil)
 	_ ports.UnverifiedItemsAllower = (*Adapter)(nil)
 	_ ports.ItemReloader           = (*Adapter)(nil)
@@ -124,6 +125,13 @@ func (a *Adapter) env() []string { return ports.WithoutCodexHome(a.Env) }
 // ReportsExtraUsage implements ports.ExtraUsageReporter: every rate-limit report of the stream says whether the session
 // is using extra usage.
 func (a *Adapter) ReportsExtraUsage() bool { return true }
+
+// CapsCost implements ports.CostCapper: the CLI's --max-budget-usd stops the session once its cost reaches the cap,
+// which it can pass by one response, and ends it with the result subtype budgetExceeded names.
+func (a *Adapter) CapsCost() bool { return true }
+
+// budgetExceeded is the result subtype of a session that --max-budget-usd stopped.
+const budgetExceeded = "error_max_budget_usd"
 
 // ID implements ports.HarnessAdapter: the harness's identifier.
 func (a *Adapter) ID() string { return ID }
@@ -368,6 +376,9 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 	}
 	if req.Effort != "" && req.Effort != domain.DefaultEffort {
 		args = append(args, "--effort", req.Effort)
+	}
+	if req.MaxCostUSD > 0 {
+		args = append(args, "--max-budget-usd", strconv.FormatFloat(req.MaxCostUSD, 'f', 2, 64))
 	}
 	if req.Context != "" {
 		args = append(args, "--append-system-prompt", req.Context)
@@ -1428,6 +1439,11 @@ func (p *parser) Finish(exitCode int, stderrTail string, timedOut, cancelled boo
 		if p.result.Result != "" {
 			end.FinalText = p.result.Result
 		}
+		return end
+	}
+	if p.result != nil && p.result.Subtype == budgetExceeded {
+		end.Class, end.Error = domain.ClassBudgetExhausted, domain.T("attempt_budget_exhausted",
+			"the attempt reached the task's cost cap")
 		return end
 	}
 	text := strings.TrimSpace(stderrTail)
