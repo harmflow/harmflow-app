@@ -331,8 +331,8 @@ func TestExecutionIndexRebuiltWhenMissing(t *testing.T) {
 	}
 }
 
-// An index behind the records — a record added, changed, or removed by a save it did not see — is caught up from
-// the records themselves, found by their size and modification time.
+// An index behind the records — a record added, removed, or changed while the index held it as not ended, by a save it
+// did not see — is caught up from the records themselves, found by their size and modification time.
 func TestExecutionIndexCatchesUpWithTheRecords(t *testing.T) {
 	dir := t.TempDir()
 	repo, err := NewExecutions(dir)
@@ -340,7 +340,8 @@ func TestExecutionIndexCatchesUpWithTheRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	a, b := endedExecution("one", domain.StatusCompleted, now), endedExecution("two", domain.StatusCompleted, now)
+	a, b := endedExecution("one", domain.StatusCompleted, now), endedExecution("two", domain.StatusRunning, now)
+	b.EndedAt = nil
 	for _, x := range []*domain.Execution{a, b} {
 		if err := repo.Save(x); err != nil {
 			t.Fatal(err)
@@ -381,6 +382,50 @@ func TestExecutionIndexCatchesUpWithTheRecords(t *testing.T) {
 	}
 	if !slices.Equal(indexed, want) {
 		t.Errorf("the index holds %v, want %v", indexed, want)
+	}
+}
+
+// The start's cost does not grow with every execution ever recorded: a summary the index holds for an execution that
+// ended is trusted, its record file read for nothing, not even its size and time, while a record the index does not
+// hold, or holds as not ended, is still read.
+func TestExecutionIndexTrustsEndedExecutions(t *testing.T) {
+	dir := t.TempDir()
+	repo, err := NewExecutions(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	ended, open := endedExecution("ended", domain.StatusCompleted, now), endedExecution("open", domain.StatusRunning, now)
+	open.EndedAt = nil
+	for _, x := range []*domain.Execution{ended, open} {
+		if err := repo.Save(x); err != nil {
+			t.Fatal(err)
+		}
+	}
+	summaryIDs(t, repo) // writes the index
+
+	// The ended record's file no longer reads, with another size and time: trusted, the index's summary stands. The
+	// record the index holds as running ended meanwhile, and one the index does not hold was added: both are read.
+	if err := os.WriteFile(filepath.Join(dir, ended.ID+".json"), []byte("{not json, and of another size"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	later := now.Add(time.Hour)
+	if err := os.Chtimes(filepath.Join(dir, ended.ID+".json"), later, later); err != nil {
+		t.Fatal(err)
+	}
+	behind, _ := NewExecutions(dir)
+	open.Status = domain.StatusFailed
+	added := endedExecution("added", domain.StatusNoWork, now)
+	for _, x := range []*domain.Execution{open, added} {
+		if err := behind.Save(x); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []string{ended.ID + " completed", open.ID + " failed", added.ID + " no_work"}
+	slices.Sort(want)
+	fresh, _ := NewExecutions(dir)
+	if got := summaryIDs(t, fresh); !slices.Equal(got, want) {
+		t.Errorf("Summaries() = %v, want %v: the ended record from the index, the others from their files", got, want)
 	}
 }
 
