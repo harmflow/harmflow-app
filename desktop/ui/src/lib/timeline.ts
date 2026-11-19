@@ -135,6 +135,15 @@ function styleOf(e: HarmflowEvent): Style {
     case "harness.network_waiting":
     case "harness.version_untested":
       return { tone: "warning", icon: "alert" };
+    case "approval.requested":
+      return { tone: "warning", icon: "shield" };
+    case "approval.answered":
+      return { tone: payloadOf(e).decision === "decline" ? "neutral" : "success", icon: "shield" };
+    case "approval.withdrawn":
+      return { tone: "neutral", icon: "shield" };
+    case "approval.auto_review_started":
+    case "approval.auto_review_completed":
+      return { tone: "violet", icon: "shield" };
     case "script.started":
       return { tone: "cyan", icon: "terminal" };
     case "script.exited":

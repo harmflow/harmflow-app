@@ -1571,6 +1571,30 @@ body:has([aria-modal="true"]) .tooltip {
   color: var(--hf-color-text-muted);
 }
 
+.approval {
+  display: flex;
+  flex-direction: column;
+  gap: var(--hf-space-2);
+}
+
+.approval__fields {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--hf-space-1) var(--hf-space-3);
+  margin: 0;
+}
+
+.approval__fields dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.approval__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--hf-space-2);
+}
+
 .detail__alerts {
   display: flex;
   flex-direction: column;
