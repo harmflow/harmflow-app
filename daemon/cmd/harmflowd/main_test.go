@@ -103,38 +103,65 @@ func TestHarmflowdOnATakenDataDirectory(t *testing.T) {
 	}
 }
 
-// The commit go build stamps tells builds of the same version apart in Settings → About.
-func TestCommitOf(t *testing.T) {
+// The commit go build stamps tells builds of the same version apart: in full in each execution's record, and short in
+// Settings → About, whose commit is a prefix of the full one and marks -dirty exactly when the record's boolean is
+// true.
+func TestRevisionOf(t *testing.T) {
 	const revision = "45a57bb0c3f1d2e4a5b6c7d8e9f0a1b2c3d4e5f6"
 	cases := []struct {
-		name     string
-		settings []debug.BuildSetting
-		want     string
+		name      string
+		settings  []debug.BuildSetting
+		revision  string
+		dirty     bool
+		wantShort string
 	}{
 		{"clean checkout", []debug.BuildSetting{{Key: "vcs", Value: "git"}, {Key: "vcs.revision", Value: revision},
-			{Key: "vcs.modified", Value: "false"}}, "45a57bb"},
+			{Key: "vcs.modified", Value: "false"}}, revision, false, "45a57bb"},
 		{"uncommitted changes", []debug.BuildSetting{{Key: "vcs.modified", Value: "true"},
-			{Key: "vcs.revision", Value: revision}}, "45a57bb-dirty"},
-		{"no VCS stamp", []debug.BuildSetting{{Key: "-trimpath", Value: "true"}, {Key: "GOOS", Value: "darwin"}}, ""},
-		{"modified without a revision", []debug.BuildSetting{{Key: "vcs.modified", Value: "true"}}, ""},
-		{"short revision", []debug.BuildSetting{{Key: "vcs.revision", Value: "45a5"}}, "45a5"},
+			{Key: "vcs.revision", Value: revision}}, revision, true, "45a57bb-dirty"},
+		{"no VCS stamp", []debug.BuildSetting{{Key: "-trimpath", Value: "true"}, {Key: "GOOS", Value: "darwin"}}, "",
+			false, ""},
+		{"modified without a revision", []debug.BuildSetting{{Key: "vcs.modified", Value: "true"}}, "", false, ""},
+		{"short revision", []debug.BuildSetting{{Key: "vcs.revision", Value: "45a5"}}, "45a5", false, "45a5"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-
-			if got := commitOf(c.settings); got != c.want {
-				t.Errorf("commitOf(%v) = %q, want %q", c.settings, got, c.want)
+			gotRevision, gotDirty := revisionOf(c.settings)
+			if gotRevision != c.revision || gotDirty != c.dirty {
+				t.Errorf("revisionOf(%v) = %q, %v, want %q, %v", c.settings, gotRevision, gotDirty, c.revision, c.dirty)
+			}
+			short := shortCommit(gotRevision, gotDirty)
+			if short != c.wantShort {
+				t.Errorf("shortCommit(%q, %v) = %q, want %q", gotRevision, gotDirty, short, c.wantShort)
+			}
+			if !strings.HasPrefix(gotRevision, strings.TrimSuffix(short, "-dirty")) ||
+				strings.HasSuffix(short, "-dirty") != gotDirty {
+				t.Errorf("shortCommit(%q, %v) = %q, not the revision's prefix with -dirty exactly when dirty",
+					gotRevision, gotDirty, short)
 			}
 		})
 	}
 }
 
-// The commit make sets wins: go build stamps none in a git worktree.
-func TestBuildCommitPrefersMake(t *testing.T) {
-	defer func(saved string) { Commit = saved }(Commit)
-	Commit = "45a57bb-dirty"
-	if got := buildCommit(); got != "45a57bb-dirty" {
-		t.Errorf("got %q", got)
+// The revision make sets wins: go build stamps none in a git worktree.
+func TestBuildRevisionPrefersMake(t *testing.T) {
+	defer func(revision, modified string) { Revision, Modified = revision, modified }(Revision, Modified)
+	cases := []struct {
+		name      string
+		modified  string
+		wantDirty bool
+	}{
+		{"uncommitted changes", "true", true},
+		{"clean checkout", "false", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			Revision, Modified = "45a57bb0c3f1d2e4a5b6c7d8e9f0a1b2c3d4e5f6", c.modified
+			if revision, dirty := buildRevision(); revision != Revision || dirty != c.wantDirty {
+				t.Errorf("buildRevision() with Modified %q = %q, %v, want %q, %v", c.modified, revision, dirty, Revision,
+					c.wantDirty)
+			}
+		})
 	}
 }
 

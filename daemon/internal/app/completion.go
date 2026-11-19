@@ -59,7 +59,7 @@ func (a *App) runAgainAfter(x *domain.Execution) {
 		a.saveSchedule()
 		return
 	}
-	next := domain.NewExecution(doc, domain.TriggerRunAgain, nil, now)
+	next := a.newExecution(doc, domain.TriggerRunAgain, nil, now)
 	next.FollowsExecutionID, next.RunAgainCount = x.ID, count
 	a.addExecutionLocked(next)
 	r.Outcome, r.ExecutionID = "started", next.ID

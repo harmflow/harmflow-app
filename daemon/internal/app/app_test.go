@@ -603,6 +603,10 @@ type env struct {
 	// sets them; the defaults otherwise.
 	stopDetectionWait  time.Duration
 	stopExecutionsWait time.Duration
+	// revision and dirty are the daemon build's full commit and its uncommitted changes, when a test sets them; the build
+	// names no commit otherwise.
+	revision string
+	dirty    bool
 }
 
 // newEnv starts an App on fake harnesses; configure sets up the env, its fakes included, before the App starts.
@@ -658,7 +662,8 @@ func (e *env) start(t *testing.T, configure ...func(*env)) {
 	if loc == nil {
 		loc = time.UTC
 	}
-	a, err := New(Deps{Paths: e.paths, Version: "test", Clock: e.clock, Wake: e.wake, Location: loc, Tasks: tasks,
+	a, err := New(Deps{Paths: e.paths, Version: "test", Revision: e.revision, Dirty: e.dirty, Clock: e.clock,
+		Wake: e.wake, Location: loc, Tasks: tasks,
 		Templates: templates, State: e.state, Executions: e.records, Events: e.events, Validator: v, Harnesses: harnesses,
 		Service: e.service, Workspace: &workspace.Reader{}, TickInterval: time.Hour, TimeoutUnit: e.timeoutUnit,
 		SignInTimeout: e.signInTimeout, HarnessTokens: e.harnessTokens, Identify: e.identify,

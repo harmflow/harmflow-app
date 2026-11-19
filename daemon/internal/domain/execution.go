@@ -288,6 +288,7 @@ type Execution struct {
 	CancelRequestedAt  *time.Time        `json:"cancelRequestedAt,omitempty"`
 	TimeoutAt          *time.Time        `json:"timeoutAt,omitempty"`
 	DefinitionRevision string            `json:"definitionRevision,omitempty"`
+	Build              *Build            `json:"build,omitempty"` // the daemon's that created it; nil in an older record
 	WorkspacePath      string            `json:"workspacePath,omitempty"`
 	ExecutionDir       string            `json:"executionDir,omitempty"`
 	Harness            string            `json:"harness"`
@@ -322,6 +323,14 @@ type Execution struct {
 	// revision counts the changes made to the record in memory, so a periodic save can skip a record it already wrote.
 	// It is never saved.
 	revision uint64
+}
+
+// Build is a HarmFlow daemon build: its version, the full commit it was made from, and whether that commit's tree had
+// uncommitted changes. Commit is empty when the build names none, and Dirty is then false.
+type Build struct {
+	Version string `json:"version"`
+	Commit  string `json:"commit,omitempty"`
+	Dirty   bool   `json:"dirty"`
 }
 
 // ScriptRun is the program of a script execution as it ran, redacted like the raw output, so a later edit of the task

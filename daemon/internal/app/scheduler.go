@@ -453,7 +453,7 @@ func (a *App) fire(taskID string, trigger domain.Trigger, scheduledFor *time.Tim
 				domain.T("firing_coalesced", "a firing already waits; this one coalesced into it")))
 			return FiringResult{Outcome: "coalesced", ExecutionID: waiting.ID, policy: policy}, nil
 		}
-		x := domain.NewExecution(doc, trigger, scheduledFor, now)
+		x := a.newExecution(doc, trigger, scheduledFor, now)
 		a.addExecutionLocked(x)
 		status := x.Status
 		a.mu.Unlock()
@@ -464,7 +464,7 @@ func (a *App) fire(taskID string, trigger domain.Trigger, scheduledFor *time.Tim
 			domain.T("firing_queued", "the task is running; this firing waits for it")))
 		return FiringResult{Outcome: "queued", ExecutionID: x.ID, policy: policy}, nil
 	}
-	x := domain.NewExecution(doc, trigger, scheduledFor, now)
+	x := a.newExecution(doc, trigger, scheduledFor, now)
 	a.addExecutionLocked(x)
 	h := a.claimLocked(taskID)
 	status := x.Status

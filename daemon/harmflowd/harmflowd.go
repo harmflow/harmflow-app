@@ -54,6 +54,11 @@ type Config struct {
 	Version string
 	// Commit is the short commit the daemon was built from; empty when it is not known.
 	Commit string
+	// Revision is the full commit the daemon was built from, of which Commit is a prefix; empty when it is not known.
+	// Each new execution's record names it.
+	Revision string
+	// Dirty is true when the tree Revision was built from had uncommitted changes, as Commit's "-dirty" says.
+	Dirty bool
 	// BuiltAt is when the daemon was built; zero when it is not known.
 	BuiltAt time.Time
 }
@@ -229,7 +234,8 @@ func Run(cfg Config, registrations ...Registration) error {
 	system := sysinfo.New(paths.Home)
 	prober := &tools.Prober{Home: userHome, PathEnv: pathEnv, Env: harnessEnv}
 	a, err := app.New(app.Deps{
-		Paths: paths, Version: cfg.Version, Commit: cfg.Commit, BuiltAt: cfg.BuiltAt, Wake: wake.NewMonitor(),
+		Paths: paths, Version: cfg.Version, Commit: cfg.Commit, Revision: cfg.Revision, Dirty: cfg.Dirty,
+		BuiltAt: cfg.BuiltAt, Wake: wake.NewMonitor(),
 		Tasks: tasks, Templates: templates, State: state, Executions: execs, Events: events, Validator: validator,
 		Harnesses: []ports.HarnessAdapter{
 			&claudecode.Adapter{Home: userHome, PathEnv: pathEnv, Env: harnessEnv,
