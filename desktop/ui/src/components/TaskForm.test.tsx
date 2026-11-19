@@ -104,6 +104,84 @@ describe("task form type", () => {
   });
 });
 
+// The template mode of the form: the template's own name, identifier, and description in place of the task's, every
+// other field a task of the type takes, and no field a template never sets. The daemon's validation of what it writes
+// is app › TestInvalidTemplateEditKeepsThePreviousVersion's.
+describe("task form in template mode", () => {
+  const named = (text: string) => ({ "pt-BR": text, "en-US": text, "es-ES": text });
+  const templateDoc: Doc = {
+    apiVersion: "harmflow/v1alpha1",
+    kind: "TaskTemplate",
+    metadata: { id: "notes-copy", name: { "pt-BR": "Notas (cópia)", "en-US": "Notes (copy)", "es-ES": "Notas (copia)" }, description: named("Sums up.") },
+    spec: { type: "general", selectedAgent: "hf-reviewer" },
+  };
+  const labels = () => [...host!.querySelectorAll(".field__label")].map((l) => l.textContent);
+  let changed: Doc[] = [];
+
+  async function openTemplate(doc: Doc) {
+    changed = [];
+    const catalog = { agents: [{ name: "hf-reviewer", kind: "agent", source: "builtin", harnesses: ["claude-code"] }], skills: [], taskTypes: [] } as unknown as Catalog;
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    function Form() {
+      const [current, setCurrent] = useState(doc);
+      return (
+        <TaskForm
+          doc={current}
+          mode="template"
+          catalog={catalog}
+          onChange={(next) => {
+            changed.push(next);
+            setCurrent(next);
+          }}
+          harnesses={[]}
+          errorPaths={new Set()}
+        />
+      );
+    }
+    await act(async () => root!.render(<Form />));
+    await settle();
+  }
+  const input = (label: string) =>
+    [...host!.querySelectorAll<HTMLElement>(".field")].find((f) => f.querySelector(".field__label")?.textContent === label)!.querySelector<HTMLInputElement>("input, textarea, select")!;
+  async function typeInto(el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, value: string) {
+    const proto = el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(el, value);
+      el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }));
+    });
+  }
+
+  it("offers the template's name, identifier, and description, and none of the task's own or its enabled state", async () => {
+    await openTemplate(templateDoc);
+    expect(labels()).toEqual(expect.arrayContaining(["Template name", "Template ID", "What it is for", "Task type", "Prompt", "Selected agent"]));
+    expect(labels()).not.toContain("Name");
+    expect(labels()).not.toContain("Identifier");
+    expect(labels()).not.toContain("Description");
+    expect([...host!.querySelectorAll(".toggle__label")].map((l) => l.textContent)).not.toContain("Enabled");
+    expect(input("Template name").value).toBe("Notes (copy)");
+    expect(input("Template ID").disabled).toBe(true);
+    expect(input("Selected agent").value).toBe("hf-reviewer");
+    // No control that copies an agent's text, which would write an origin a template never holds.
+    expect(labels()).not.toContain("Agent");
+  });
+
+  it("writes the template's name and description in every language, and leaves its identifier as it is", async () => {
+    await openTemplate(templateDoc);
+    await typeInto(input("Template name"), "Weekly notes");
+    await typeInto(input("What it is for"), "Sums up the week.");
+    const last = changed.at(-1)!;
+    expect(last.metadata).toEqual({ id: "notes-copy", name: named("Weekly notes"), description: named("Sums up the week.") });
+  });
+
+  it("lets a value a task requires stay empty: clearing the selected agent removes it, and the prompt stays unset", async () => {
+    await openTemplate(templateDoc);
+    await typeInto(input("Selected agent"), "");
+    expect((changed.at(-1)!.spec as Record<string, unknown>).selectedAgent).toBeUndefined();
+    expect((changed.at(-1)!.spec as Record<string, unknown>).prompt).toBeUndefined();
+  });
+});
+
 // The task form on the Tasks screen, reached as the user reaches it: each control by the label it shows, filled through
 // the control itself. The "task form document" tests of a GitHub task and of a script task share these.
 

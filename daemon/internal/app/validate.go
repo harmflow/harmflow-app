@@ -140,6 +140,46 @@ func (a *App) validateTemplate(content []byte, readErr error) (*ValidationResult
 	return r, doc
 }
 
+// templateEdit validates in as the file of the user's template id: against template.schema.json, and for its
+// identifier, which is the file's name and never carries the hf- prefix. Its validation carries the edit as a document
+// and as YAML; a document that is no template is still shown as YAML.
+func (a *App) templateEdit(id string, in TemplateInput) *Template {
+	var content []byte
+	switch {
+	case strings.TrimSpace(in.YAML) != "":
+		content = []byte(in.YAML)
+	case len(in.Document) > 0 && string(in.Document) != "null":
+		var plain any
+		if err := json.Unmarshal(in.Document, &plain); err != nil {
+			return invalidTemplate(id, domain.T("document_not_json", "the document is not valid JSON: {{detail}}", "detail", err.Error()))
+		}
+		out, err := encodeYAML(plain)
+		if err != nil {
+			return invalidTemplate(id, domain.TextOf(err))
+		}
+		content = out
+	default:
+		return invalidTemplate(id, domain.T("template_input_missing", "send the template as yaml or as document"))
+	}
+	t := a.loadTemplate(&Template{ID: id, Source: TemplateUser}, content, nil)
+	t.Validation.YAML, t.Validation.Document = string(content), yamlValue(content)
+	return t
+}
+
+// invalidTemplate is a template edit that could not be read, with the one error that says why.
+func invalidTemplate(id string, text domain.Text) *Template {
+	r := &ValidationResult{Errors: []schema.Issue{{Code: "syntax", Text: text}}, Warnings: []schema.Issue{}}
+	return &Template{ID: id, Source: TemplateUser, Validation: r}
+}
+
+// yamlValue is the value content decodes to, as the schema reads it; nil when it is no YAML.
+func yamlValue(content []byte) any {
+	if v, _, issues := schema.ParseYAML(content); len(issues) == 0 {
+		return v
+	}
+	return nil
+}
+
 func (r *ValidationResult) addError(path string, text domain.Text) {
 	is := schema.Issue{Path: path, Text: text, Code: "semantic"}
 	is.Line, is.Column = schema.LocatePointer(r.node, path)
@@ -570,16 +610,7 @@ func extraUsageUnenforced(harness string) domain.Text {
 }
 
 func marshalYAML(doc domain.TaskDocument) ([]byte, error) {
-	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
-	enc.SetIndent(2)
-	if err := enc.Encode(doc); err != nil {
-		return nil, err
-	}
-	if err := enc.Close(); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
+	return encodeYAML(doc)
 }
 
 // setYAMLField sets spec.<key> in the YAML text, keeping its comments and layout elsewhere.
@@ -617,10 +648,15 @@ func setYAMLField(content []byte, section, key string, value any) ([]byte, error
 }
 
 func encodeNode(n *yaml.Node) ([]byte, error) {
+	return encodeYAML(n)
+}
+
+// encodeYAML writes v as the daemon writes every task and template file: indented by two spaces.
+func encodeYAML(v any) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
-	if err := enc.Encode(n); err != nil {
+	if err := enc.Encode(v); err != nil {
 		return nil, err
 	}
 	if err := enc.Close(); err != nil {

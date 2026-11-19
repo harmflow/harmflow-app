@@ -18,6 +18,7 @@ import type {
   HarnessId,
   Health,
   NewTask,
+  NewTemplateRequest,
   Notification,
   Queue,
   SaveAsTemplateRequest,
@@ -32,6 +33,7 @@ import type {
   TaskInput,
   TaskSummary,
   Template,
+  TemplateInput,
   TemplateLanguage,
   Tool,
   ValidationResult,
@@ -119,6 +121,15 @@ export const api = {
   /** The document of a new task from a template, named in language; the daemon writes nothing. */
   draftTask: (template: string, language: TemplateLanguage) =>
     call<NewTask>("POST", `/templates/${enc(template)}/draft`, { language }),
+  /** A template with its document, its file's text, and, for one of the user's, the revision an update starts from. */
+  template: (id: string) => call<Template>("GET", `/templates/${enc(id)}`),
+  /** Creates an empty template of the user's of a task type, named and described as the user writes it. */
+  createTemplate: (template: NewTemplateRequest) => call<Template>("POST", "/templates", template),
+  updateTemplate: (id: string, input: TemplateInput) => call<Template>("PUT", `/templates/${enc(id)}`, input),
+  deleteTemplate: (id: string) => call<void>("DELETE", `/templates/${enc(id)}`),
+  /** Copies a template, built in or the user's, into a new template of the user's. */
+  duplicateTemplate: (id: string) => call<Template>("POST", `/templates/${enc(id)}/duplicate`),
+  validateTemplate: (id: string, input: TemplateInput) => call<ValidationResult>("POST", `/templates/${enc(id)}/validate`, input),
 
   tasks: () => call<TaskSummary[]>("GET", "/tasks"),
   task: (id: string) => call<Task>("GET", `/tasks/${enc(id)}`),

@@ -354,33 +354,130 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/Template" }
+    post:
+      tags: [templates]
+      operationId: createTemplate
+      summary: Create an empty template of the user's, of a task type
+      description: >-
+        The template holds its identifier, its name and description, written as they are in every language, and the
+        task type, which is one of the catalog's task types, and sets no other field: the values a task of that type
+        requires stay unset, for the template's editor to fill or leave to the task editor. An identifier with the hf-
+        prefix, which only built-in templates carry, or one a template of the user's already has, is refused, naming
+        the identifier, and nothing is written.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NewTemplateRequest" }
+      responses:
+        "201":
+          description: The new template.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Template" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Invalid" }
 
   /templates/{templateId}:
     parameters:
       - $ref: "#/components/parameters/TemplateId"
+    get:
+      tags: [templates]
+      operationId: getTemplate
+      summary: Get a template with its document and its file's text
+      description: >-
+        A built-in template or one of the user's, with the document its file decodes to and the file's text; one of the
+        user's also carries its file's revision, which an update starts from.
+      responses:
+        "200":
+          description: The template.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Template" }
+        "404": { $ref: "#/components/responses/NotFound" }
     put:
       tags: [templates]
       operationId: updateTemplate
-      summary: Change a template
+      summary: Change a template of the user's
       description: >-
-        Built-in templates are read-only: an identifier with the hf- prefix, a built-in template's or one no template
-        has yet, is refused, and nothing is written.
+        The edit, its YAML text or its document, is validated as the template's form and its YAML editor validate it,
+        and written only when valid: an invalid one leaves the file as it was. Its identifier stays its file's name.
+        baseRevision must be the revision the edit started from; a file changed meanwhile is a conflict, never a silent
+        overwrite. Built-in templates are read-only: an identifier with the hf- prefix, a built-in template's or one no
+        template has yet, is refused, and nothing is written. No task created from the template changes.
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: "#/components/schemas/TemplateInput" }
       responses:
+        "200":
+          description: The template, as it was written.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Template" }
+        "400":
+          description: The edit names no revision it started from.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Invalid" }
     delete:
       tags: [templates]
       operationId: deleteTemplate
-      summary: Delete a template
-      description: Built-in templates are read-only, so a built-in template's identifier is refused.
+      summary: Delete a template of the user's
+      description: >-
+        Its file is removed, and no task created from it changes. Built-in templates are read-only, so a built-in
+        template's identifier is refused.
       responses:
+        "204":
+          description: The template was deleted.
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+
+  /templates/{templateId}/duplicate:
+    parameters:
+      - $ref: "#/components/parameters/TemplateId"
+    post:
+      tags: [templates]
+      operationId: duplicateTemplate
+      summary: Duplicate a template, built in or the user's, into a new template of the user's
+      description: >-
+        The copy holds the template's type and fields, and its name in each language with " (copy)" after it. Its
+        identifier is the template's without the hf- prefix and with -copy after it, or -copy-2, -copy-3, and so on,
+        the first no template has. A template whose file fails validation is refused.
+      responses:
+        "201":
+          description: The copy.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Template" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Invalid" }
+
+  /templates/{templateId}/validate:
+    parameters:
+      - $ref: "#/components/parameters/TemplateId"
+    post:
+      tags: [templates]
+      operationId: validateTemplate
+      summary: Validate an edit of a template, writing nothing
+      description: >-
+        The validation an update applies, for the template's form and its YAML editor alike, with the document as YAML
+        and the YAML as a document, so that either view shows the other.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TemplateInput" }
+      responses:
+        "200":
+          description: The result, valid or not.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ValidationResult" }
 
   /templates/{templateId}/draft:
     parameters:
@@ -1011,6 +1108,9 @@ components:
         - template_invalid
         - template_language_invalid
         - template_exists
+        - template_base_revision_required
+        - template_changed_on_disk
+        - template_input_missing
         # Task syntax
         - yaml_syntax
         - document_empty
@@ -1702,6 +1802,11 @@ components:
         selectedAgent: { type: string, description: The agent the tasks created from it select. }
         needs: { $ref: "#/components/schemas/TemplateNeeds" }
         validation: { $ref: "#/components/schemas/ValidationResult" }
+        revision: { type: string, description: "The revision of a user template's file, which an update starts from." }
+        document:
+          description: The document the template's file decodes to; only when a single template is read or written.
+          $ref: "#/components/schemas/TemplateDocument"
+        yaml: { type: string, description: "The text of the template's file; only when a single template is read or written." }
 
     TemplateNeeds:
       description: >-
@@ -1739,11 +1844,21 @@ components:
       additionalProperties: true
 
     TemplateInput:
-      description: Either the YAML text or the document of a template.
+      description: Either the YAML text or the document of a template, and the revision an update started from.
       type: object
       properties:
         yaml: { type: string }
         document: { $ref: "#/components/schemas/TemplateDocument" }
+        baseRevision: { type: string }
+
+    NewTemplateRequest:
+      type: object
+      required: [id, name, description, type]
+      properties:
+        id: { type: string, description: "The template's identifier, which becomes its file's name." }
+        name: { type: string, description: "The template's name, as the user writes it." }
+        description: { type: string, description: "What the template is for, as the user writes it." }
+        type: { type: string, description: "The task type of the tasks created from it, one of the catalog's." }
 
     SaveAsTemplateRequest:
       type: object

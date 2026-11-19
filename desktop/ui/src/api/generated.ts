@@ -277,7 +277,11 @@ export interface paths {
          */
         get: operations["listTemplates"];
         put?: never;
-        post?: never;
+        /**
+         * Create an empty template of the user's, of a task type
+         * @description The template holds its identifier, its name and description, written as they are in every language, and the task type, which is one of the catalog's task types, and sets no other field: the values a task of that type requires stay unset, for the template's editor to fill or leave to the task editor. An identifier with the hf- prefix, which only built-in templates carry, or one a template of the user's already has, is refused, naming the identifier, and nothing is written.
+         */
+        post: operations["createTemplate"];
         delete?: never;
         options?: never;
         head?: never;
@@ -293,18 +297,66 @@ export interface paths {
             };
             cookie?: never;
         };
-        get?: never;
         /**
-         * Change a template
-         * @description Built-in templates are read-only: an identifier with the hf- prefix, a built-in template's or one no template has yet, is refused, and nothing is written.
+         * Get a template with its document and its file's text
+         * @description A built-in template or one of the user's, with the document its file decodes to and the file's text; one of the user's also carries its file's revision, which an update starts from.
+         */
+        get: operations["getTemplate"];
+        /**
+         * Change a template of the user's
+         * @description The edit, its YAML text or its document, is validated as the template's form and its YAML editor validate it, and written only when valid: an invalid one leaves the file as it was. Its identifier stays its file's name. baseRevision must be the revision the edit started from; a file changed meanwhile is a conflict, never a silent overwrite. Built-in templates are read-only: an identifier with the hf- prefix, a built-in template's or one no template has yet, is refused, and nothing is written. No task created from the template changes.
          */
         put: operations["updateTemplate"];
         post?: never;
         /**
-         * Delete a template
-         * @description Built-in templates are read-only, so a built-in template's identifier is refused.
+         * Delete a template of the user's
+         * @description Its file is removed, and no task created from it changes. Built-in templates are read-only, so a built-in template's identifier is refused.
          */
         delete: operations["deleteTemplate"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/templates/{templateId}/duplicate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                templateId: components["parameters"]["TemplateId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Duplicate a template, built in or the user's, into a new template of the user's
+         * @description The copy holds the template's type and fields, and its name in each language with " (copy)" after it. Its identifier is the template's without the hf- prefix and with -copy after it, or -copy-2, -copy-3, and so on, the first no template has. A template whose file fails validation is refused.
+         */
+        post: operations["duplicateTemplate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/templates/{templateId}/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                templateId: components["parameters"]["TemplateId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate an edit of a template, writing nothing
+         * @description The validation an update applies, for the template's form and its YAML editor alike, with the document as YAML and the YAML as a document, so that either view shows the other.
+         */
+        post: operations["validateTemplate"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -772,7 +824,7 @@ export interface components {
          * @description Names a text the daemon writes for the user. The desktop shows it in the interface's language, filling it with its params; the message beside it is the same text in en-US, shown for a key the desktop does not know. The agent's text, tool output, and a tool's own error get no key and stay as they are. A text is a message with messageKey and params, or a field such as errorMessage with errorKey and errorParams.
          * @enum {string}
          */
-        MessageKey: "host_forbidden" | "origin_forbidden" | "token_required" | "route_not_found" | "body_not_json" | "task_not_found" | "execution_not_found" | "harness_not_found" | "task_exists" | "task_file_exists" | "base_revision_required" | "task_changed_on_disk" | "task_invalid" | "task_disabled" | "task_being_deleted" | "daemon_stopping" | "execution_ended" | "executions_running" | "drain_deadline_invalid" | "harness_path_not_absolute" | "harness_path_not_executable" | "settings_language_invalid" | "settings_typeface_invalid" | "settings_notification_level_invalid" | "settings_log_retention_invalid" | "settings_path_variable_invalid" | "settings_allowed_folder_invalid" | "settings_change_breaks_task" | "settings_quota_harness_unknown" | "settings_quota_share_invalid" | "settings_quota_interval_invalid" | "settings_system_prompt_too_long" | "harness_not_identified" | "template_not_found" | "template_read_only" | "template_invalid" | "template_language_invalid" | "template_exists" | "yaml_syntax" | "document_empty" | "document_not_json" | "document_not_representable" | "task_input_missing" | "schema_type" | "schema_const" | "schema_enum" | "schema_required" | "schema_additional_properties" | "schema_pattern" | "schema_min_length" | "schema_max_length" | "schema_minimum" | "schema_maximum" | "schema_min_items" | "schema_unique_items" | "schema_not" | "schema_false" | "id_immutable" | "type_immutable" | "id_file_mismatch" | "task_file_invalid" | "task_file_error" | "template_id_not_builtin" | "template_id_reserved" | "template_file_invalid" | "template_type_unknown" | "schedule_missing" | "schedule_empty" | "schedule_cron_and_interval" | "timezone_unknown" | "interval_invalid" | "interval_unit_invalid" | "cron_seconds" | "cron_field_count" | "cron_step_invalid" | "cron_value_invalid" | "cron_value_out_of_range" | "harness_unknown" | "claude_model_unknown" | "claude_effort_unsupported" | "claude_effort_invalid" | "codex_model_unknown" | "codex_effort_invalid" | "codex_profile_unchecked" | "harness_not_detected" | "harness_not_ready" | "harness_installation_missing" | "harness_installation_signed_out" | "agent_missing" | "skill_missing" | "parameter_required" | "parameter_wrong_type" | "parameter_schema_mismatch" | "parameter_schema_invalid" | "parameter_schema_missing" | "parameter_type_unknown" | "parameter_undeclared" | "parameters_unverified" | "skill_list_unreadable" | "skill_list_unverified" | "codex_app_server_missing" | "codex_app_server_start_failed" | "codex_app_server_exited" | "codex_app_server_timed_out" | "codex_app_server_error" | "claude_skill_list_unrecognized" | "claude_skill_list_timed_out" | "fallback_repeats_preferred" | "harness_session_not_kept" | "session_kept_note" | "extra_usage_unenforced" | "path_variable_unterminated" | "path_variable_undefined" | "path_not_absolute" | "path_forbidden_home" | "path_forbidden_place" | "path_outside_allowed_area" | "script_program_relative" | "script_working_directory_relative" | "local_path_missing" | "script_system_not_declared" | "script_program_not_found" | "script_working_directory_missing" | "script_imported_disabled" | "restriction_claude_shell_workspace" | "restriction_claude_shell_network" | "restriction_claude_sandbox_write_rules" | "restriction_claude_sandbox_network_rules" | "restriction_claude_sandbox_network" | "restriction_claude_allow_rules" | "restriction_claude_edit_rules" | "restriction_claude_shell_reads" | "restriction_claude_read_tools" | "restriction_claude_read_rules" | "restriction_claude_shell_programs" | "restriction_claude_program_children" | "restriction_codex_tool_lists" | "restriction_codex_read_paths" | "restriction_codex_program_lists" | "restriction_codex_read_only" | "restriction_codex_ephemeral_missing" | "restriction_script_unenforced" | "script_leftovers_ended" | "harness_version_untested" | "harness_version_unknown" | "quota_unread" | "repository_unprotected" | "report_not_json" | "report_schema_invalid" | "report_not_decodable" | "work_item_key_invalid" | "pull_request_not_opened" | "pull_requests_not_opened" | "step_checking_harness" | "step_preparing_workspace" | "step_starting_harness" | "step_switching_harness" | "step_waiting_rate_limit" | "step_preparing_program" | "step_running_program" | "attempt_first" | "attempt_rate_limit_retry" | "attempt_failover" | "daemon_started" | "daemon_signal" | "daemon_stop_requested" | "daemon_drained" | "drain_deadline_passed" | "local_api_stopped" | "task_delete_pending" | "task_checked" | "task_changed_externally" | "task_changed_externally_invalid" | "task_removed_externally" | "task_was_disabled" | "task_was_deleted" | "task_file_removed" | "task_gone" | "template_changed_externally" | "template_changed_externally_invalid" | "template_removed_externally" | "firing_queued" | "firing_coalesced" | "firing_skipped" | "firings_missed_catch_up" | "firings_missed_skipped" | "run_again_limit_reached" | "cancel_requested" | "cancelled_before_start" | "execution_cancelled" | "execution_timed_out" | "execution_status" | "daemon_stopped_execution" | "execution_dir_failed" | "workspace_create_failed" | "repository_path_missing" | "context_write_failed" | "harness_started" | "harness_session" | "harness_session_kept" | "harness_exited" | "harness_exit_code" | "harness_start_failed" | "harness_ended_with_error" | "harness_unavailable" | "harness_unavailable_readiness" | "harness_rate_limited" | "harness_quota_exhausted" | "quota_exhausted" | "quota_exhausted_until" | "quota_share_reached" | "quota_share_reached_until" | "extra_usage_stopped" | "harness_switched" | "no_alternative_harness" | "no_alternative_harness_detail" | "skill_delivery_failed" | "agent_delivery_failed" | "tool_succeeded" | "tool_failed" | "tool_declined" | "tests_failed" | "script_started" | "script_exit_code" | "script_signaled" | "script_start_failed" | "script_write_failed" | "process_ended" | "process_left_ended" | "process_interrupted_ended" | "task_path_refused" | "detection_running" | "harness_manual_path_invalid" | "claude_not_found" | "codex_not_found" | "git_not_found" | "gh_not_found" | "command_failed" | "harness_feature_missing" | "harness_help_timed_out" | "codex_app_server_help_timed_out" | "harness_version_below_minimum" | "claude_not_signed_in" | "quota_report_unrecognized" | "not_signed_in" | "authentication_unverified" | "codex_requirements_disallow" | "codex_plan_unknown" | "codex_account_unnamed" | "harness_sign_in_unsupported" | "harness_sign_in_not_completed" | "harness_sign_in_started" | "harness_sign_in_completed" | "harness_sign_in_timed_out" | "harness_sign_in_unknown_screen" | "harness_sign_in_unconfirmed" | "harness_sign_in_start_failed" | "harness_sign_in_ended" | "harness_token_unsupported" | "harness_token_store_unavailable" | "harness_token_empty" | "harness_token_invalid" | "harness_token_store_failed" | "harness_token_remove_failed" | "harness_token_rejected" | "harness_token_expiring";
+        MessageKey: "host_forbidden" | "origin_forbidden" | "token_required" | "route_not_found" | "body_not_json" | "task_not_found" | "execution_not_found" | "harness_not_found" | "task_exists" | "task_file_exists" | "base_revision_required" | "task_changed_on_disk" | "task_invalid" | "task_disabled" | "task_being_deleted" | "daemon_stopping" | "execution_ended" | "executions_running" | "drain_deadline_invalid" | "harness_path_not_absolute" | "harness_path_not_executable" | "settings_language_invalid" | "settings_typeface_invalid" | "settings_notification_level_invalid" | "settings_log_retention_invalid" | "settings_path_variable_invalid" | "settings_allowed_folder_invalid" | "settings_change_breaks_task" | "settings_quota_harness_unknown" | "settings_quota_share_invalid" | "settings_quota_interval_invalid" | "settings_system_prompt_too_long" | "harness_not_identified" | "template_not_found" | "template_read_only" | "template_invalid" | "template_language_invalid" | "template_exists" | "template_base_revision_required" | "template_changed_on_disk" | "template_input_missing" | "yaml_syntax" | "document_empty" | "document_not_json" | "document_not_representable" | "task_input_missing" | "schema_type" | "schema_const" | "schema_enum" | "schema_required" | "schema_additional_properties" | "schema_pattern" | "schema_min_length" | "schema_max_length" | "schema_minimum" | "schema_maximum" | "schema_min_items" | "schema_unique_items" | "schema_not" | "schema_false" | "id_immutable" | "type_immutable" | "id_file_mismatch" | "task_file_invalid" | "task_file_error" | "template_id_not_builtin" | "template_id_reserved" | "template_file_invalid" | "template_type_unknown" | "schedule_missing" | "schedule_empty" | "schedule_cron_and_interval" | "timezone_unknown" | "interval_invalid" | "interval_unit_invalid" | "cron_seconds" | "cron_field_count" | "cron_step_invalid" | "cron_value_invalid" | "cron_value_out_of_range" | "harness_unknown" | "claude_model_unknown" | "claude_effort_unsupported" | "claude_effort_invalid" | "codex_model_unknown" | "codex_effort_invalid" | "codex_profile_unchecked" | "harness_not_detected" | "harness_not_ready" | "harness_installation_missing" | "harness_installation_signed_out" | "agent_missing" | "skill_missing" | "parameter_required" | "parameter_wrong_type" | "parameter_schema_mismatch" | "parameter_schema_invalid" | "parameter_schema_missing" | "parameter_type_unknown" | "parameter_undeclared" | "parameters_unverified" | "skill_list_unreadable" | "skill_list_unverified" | "codex_app_server_missing" | "codex_app_server_start_failed" | "codex_app_server_exited" | "codex_app_server_timed_out" | "codex_app_server_error" | "claude_skill_list_unrecognized" | "claude_skill_list_timed_out" | "fallback_repeats_preferred" | "harness_session_not_kept" | "session_kept_note" | "extra_usage_unenforced" | "path_variable_unterminated" | "path_variable_undefined" | "path_not_absolute" | "path_forbidden_home" | "path_forbidden_place" | "path_outside_allowed_area" | "script_program_relative" | "script_working_directory_relative" | "local_path_missing" | "script_system_not_declared" | "script_program_not_found" | "script_working_directory_missing" | "script_imported_disabled" | "restriction_claude_shell_workspace" | "restriction_claude_shell_network" | "restriction_claude_sandbox_write_rules" | "restriction_claude_sandbox_network_rules" | "restriction_claude_sandbox_network" | "restriction_claude_allow_rules" | "restriction_claude_edit_rules" | "restriction_claude_shell_reads" | "restriction_claude_read_tools" | "restriction_claude_read_rules" | "restriction_claude_shell_programs" | "restriction_claude_program_children" | "restriction_codex_tool_lists" | "restriction_codex_read_paths" | "restriction_codex_program_lists" | "restriction_codex_read_only" | "restriction_codex_ephemeral_missing" | "restriction_script_unenforced" | "script_leftovers_ended" | "harness_version_untested" | "harness_version_unknown" | "quota_unread" | "repository_unprotected" | "report_not_json" | "report_schema_invalid" | "report_not_decodable" | "work_item_key_invalid" | "pull_request_not_opened" | "pull_requests_not_opened" | "step_checking_harness" | "step_preparing_workspace" | "step_starting_harness" | "step_switching_harness" | "step_waiting_rate_limit" | "step_preparing_program" | "step_running_program" | "attempt_first" | "attempt_rate_limit_retry" | "attempt_failover" | "daemon_started" | "daemon_signal" | "daemon_stop_requested" | "daemon_drained" | "drain_deadline_passed" | "local_api_stopped" | "task_delete_pending" | "task_checked" | "task_changed_externally" | "task_changed_externally_invalid" | "task_removed_externally" | "task_was_disabled" | "task_was_deleted" | "task_file_removed" | "task_gone" | "template_changed_externally" | "template_changed_externally_invalid" | "template_removed_externally" | "firing_queued" | "firing_coalesced" | "firing_skipped" | "firings_missed_catch_up" | "firings_missed_skipped" | "run_again_limit_reached" | "cancel_requested" | "cancelled_before_start" | "execution_cancelled" | "execution_timed_out" | "execution_status" | "daemon_stopped_execution" | "execution_dir_failed" | "workspace_create_failed" | "repository_path_missing" | "context_write_failed" | "harness_started" | "harness_session" | "harness_session_kept" | "harness_exited" | "harness_exit_code" | "harness_start_failed" | "harness_ended_with_error" | "harness_unavailable" | "harness_unavailable_readiness" | "harness_rate_limited" | "harness_quota_exhausted" | "quota_exhausted" | "quota_exhausted_until" | "quota_share_reached" | "quota_share_reached_until" | "extra_usage_stopped" | "harness_switched" | "no_alternative_harness" | "no_alternative_harness_detail" | "skill_delivery_failed" | "agent_delivery_failed" | "tool_succeeded" | "tool_failed" | "tool_declined" | "tests_failed" | "script_started" | "script_exit_code" | "script_signaled" | "script_start_failed" | "script_write_failed" | "process_ended" | "process_left_ended" | "process_interrupted_ended" | "task_path_refused" | "detection_running" | "harness_manual_path_invalid" | "claude_not_found" | "codex_not_found" | "git_not_found" | "gh_not_found" | "command_failed" | "harness_feature_missing" | "harness_help_timed_out" | "codex_app_server_help_timed_out" | "harness_version_below_minimum" | "claude_not_signed_in" | "quota_report_unrecognized" | "not_signed_in" | "authentication_unverified" | "codex_requirements_disallow" | "codex_plan_unknown" | "codex_account_unnamed" | "harness_sign_in_unsupported" | "harness_sign_in_not_completed" | "harness_sign_in_started" | "harness_sign_in_completed" | "harness_sign_in_timed_out" | "harness_sign_in_unknown_screen" | "harness_sign_in_unconfirmed" | "harness_sign_in_start_failed" | "harness_sign_in_ended" | "harness_token_unsupported" | "harness_token_store_unavailable" | "harness_token_empty" | "harness_token_invalid" | "harness_token_store_failed" | "harness_token_remove_failed" | "harness_token_rejected" | "harness_token_expiring";
         /** @description Values the desktop interpolates into the translated text of a messageKey; a count param picks its plural form. A param that quotes another text the daemon wrote has a param named after it with Key appended, its key, and params prefixed with its name and a dot, its params, so it is translated in place too. */
         MessageParams: {
             [key: string]: string;
@@ -1115,6 +1167,12 @@ export interface components {
             selectedAgent?: string;
             needs?: components["schemas"]["TemplateNeeds"];
             validation: components["schemas"]["ValidationResult"];
+            /** @description The revision of a user template's file, which an update starts from. */
+            revision?: string;
+            /** @description The document the template's file decodes to; only when a single template is read or written. */
+            document?: components["schemas"]["TemplateDocument"];
+            /** @description The text of the template's file; only when a single template is read or written. */
+            yaml?: string;
         };
         /** @description What a valid template needs of this machine, read each time the templates are listed; a script template, which runs no harness, has none. A template that needs what this machine lacks is still offered, and a task created from it is validated as any task. */
         TemplateNeeds: {
@@ -1138,10 +1196,21 @@ export interface components {
         TemplateDocument: {
             [key: string]: unknown;
         };
-        /** @description Either the YAML text or the document of a template. */
+        /** @description Either the YAML text or the document of a template, and the revision an update started from. */
         TemplateInput: {
             yaml?: string;
             document?: components["schemas"]["TemplateDocument"];
+            baseRevision?: string;
+        };
+        NewTemplateRequest: {
+            /** @description The template's identifier, which becomes its file's name. */
+            id: string;
+            /** @description The template's name, as the user writes it. */
+            name: string;
+            /** @description What the template is for, as the user writes it. */
+            description: string;
+            /** @description The task type of the tasks created from it, one of the catalog's. */
+            type: string;
         };
         SaveAsTemplateRequest: {
             /** @description The template's identifier, which becomes its file's name. */
@@ -2156,6 +2225,55 @@ export interface operations {
             };
         };
     };
+    createTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewTemplateRequest"];
+            };
+        };
+        responses: {
+            /** @description The new template. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Template"];
+                };
+            };
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Invalid"];
+        };
+    };
+    getTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                templateId: components["parameters"]["TemplateId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The template. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Template"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
     updateTemplate: {
         parameters: {
             query?: never;
@@ -2171,8 +2289,27 @@ export interface operations {
             };
         };
         responses: {
+            /** @description The template, as it was written. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Template"];
+                };
+            };
+            /** @description The edit names no revision it started from. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Invalid"];
         };
     };
     deleteTemplate: {
@@ -2186,8 +2323,65 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description The template was deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+        };
+    };
+    duplicateTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                templateId: components["parameters"]["TemplateId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The copy. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Template"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Invalid"];
+        };
+    };
+    validateTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                templateId: components["parameters"]["TemplateId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TemplateInput"];
+            };
+        };
+        responses: {
+            /** @description The result, valid or not. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationResult"];
+                };
+            };
         };
     };
     draftTaskFromTemplate: {

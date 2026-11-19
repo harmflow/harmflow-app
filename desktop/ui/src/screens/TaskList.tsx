@@ -44,6 +44,7 @@ import { GroupName } from "./GroupName";
 import { ImportDialog } from "./ImportDialog";
 import { MoveMenu, type MenuChoice } from "./MoveMenu";
 import type { TaskView } from "./taskView";
+import { TasksViewSwitch } from "./TasksViewSwitch";
 
 type Filter = "all" | "enabled" | "disabled" | "warnings";
 
@@ -402,6 +403,7 @@ export function TaskList({ onView, onOpenExecution }: { onView: (v: TaskView) =>
   return (
     <div className="screen">
       <div className="filters">
+        <TasksViewSwitch value="list" onView={onView} />
         <TextInput className="filters__search" placeholder={t("tasks.searchPlaceholder")} value={search} onChange={(e) => setSearch(e.target.value)} aria-label={t("common.search")} />
         <Select value={filter} onChange={(e) => setFilter(e.target.value as Filter)}>
           <option value="all">{t("tasks.filterAll")}</option>

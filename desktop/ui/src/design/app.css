@@ -3306,6 +3306,14 @@ button.list-row--error:hover {
   min-width: 0;
 }
 
+/* The form's fieldset only disables its controls, for a template that is shown read-only; it draws nothing. */
+.editor__fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
 .editor__main--yaml {
   min-height: 560px;
 }

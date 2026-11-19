@@ -1,10 +1,14 @@
 // The visual form of a task: the fields common to every task, then the parameters of its type. Each field writes into
-// the task document; a cleared field is removed so its default applies.
+// the task document; a cleared field is removed so its default applies. In template mode it is the form of a template:
+// the template's own name, identifier, and description in place of the task's, no enabled state, the agent its tasks
+// select in place of a copied agent, and every value a task requires left free to stay empty.
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import type { Catalog, CatalogEntry, Harness } from "../api/types";
+import type { Catalog, CatalogEntry, Harness, LocalizedText } from "../api/types";
+import { LANGUAGES } from "../i18n";
 import { NOTIFIABLE_EVENTS, schemaDefault, schemaEnum } from "../lib/schema";
 import { getIn, setIn, slugify, type Doc, type Path } from "../lib/taskForm";
+import { localized } from "../lib/templates";
 import { Icon, type IconName } from "./Icon";
 import { AgentOrigin } from "./taskform/AgentOrigin";
 import { CompletionFields } from "./taskform/CompletionFields";
@@ -18,14 +22,14 @@ import { NamePicker } from "./taskform/NamePicker";
 import { RepositoryList } from "./taskform/RepositoryList";
 import { ScheduleFields } from "./taskform/ScheduleFields";
 import { ScriptFields } from "./taskform/ScriptFields";
-import { Checkbox, Field, FieldGroup, TextArea, TextInput, Toggle } from "./ui";
+import { Checkbox, Field, FieldGroup, Select, TextArea, TextInput, Toggle } from "./ui";
 
 export { OPTION_FIELDS } from "./taskform/formModel";
 
 export interface TaskFormProps {
   doc: Doc;
   onChange: (doc: Doc) => void;
-  mode: "create" | "edit";
+  mode: "create" | "edit" | "template";
   catalog?: Catalog;
   harnesses: Harness[];
   errorPaths: Set<string>;
@@ -66,7 +70,8 @@ function installationSkills(entries: CatalogEntry[], harnesses: Harness[], profi
 
 export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }: TaskFormProps) {
   const { t, i18n } = useTranslation();
-  const [idTouched, setIdTouched] = useState(mode === "edit");
+  const [idTouched, setIdTouched] = useState(mode !== "create");
+  const isTemplate = mode === "template";
 
   const get = <T,>(path: Path) => getIn<T>(doc, path);
   const set = (path: Path, value: unknown) => onChange(setIn(doc, path, value));
@@ -85,6 +90,11 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
   const isScript = type === "script";
   const declared = isScript ? [] : declaredGroups(doc, catalog);
 
+  /** A template's name or description is one text, which the form writes in every language. */
+  const everyLanguage = (text: string) => (text ? Object.fromEntries(LANGUAGES.map((lang) => [lang, text])) : undefined);
+  const inLanguage = (path: Path) => localized(get<LocalizedText>(path), i18n.language);
+  const selectedAgent = get<string>(["spec", "selectedAgent"]) ?? "";
+
   const setName = (name: string) => {
     let next = setIn(doc, ["metadata", "name"], name);
     if (!idTouched && mode === "create") next = setIn(next, ["metadata", "id"], slugify(name));
@@ -94,6 +104,25 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
   return (
     <div className="task-form">
       <Section id="general" title={t("tasks.sections.general")} icon="file">
+        {isTemplate ? (
+          <>
+            <div className="grid-2">
+              <Field label={t("tasks.templates.name")} error={err(["metadata", "name"])}>
+                <TextInput value={inLanguage(["metadata", "name"])} onChange={(e) => set(["metadata", "name"], everyLanguage(e.target.value))} />
+              </Field>
+              <Field label={t("tasks.templates.id")} error={err(["metadata", "id"])}>
+                <TextInput mono value={get<string>(["metadata", "id"]) ?? ""} disabled />
+              </Field>
+            </div>
+            <Field label={t("tasks.templates.description")} error={err(["metadata", "description"])}>
+              <TextArea rows={2} value={inLanguage(["metadata", "description"])} onChange={(e) => set(["metadata", "description"], everyLanguage(e.target.value))} />
+            </Field>
+            <Field label={t("tasks.fields.type")} error={err(["spec", "type"])}>
+              <TextInput value={t(`tasks.types.${type}` as never, { defaultValue: type }) as string} disabled />
+            </Field>
+          </>
+        ) : (
+          <>
         <div className="grid-2">
           <Field label={t("tasks.fields.name")} error={err(["metadata", "name"])}>
             <TextInput value={get<string>(["metadata", "name"]) ?? ""} onChange={(e) => setName(e.target.value)} />
@@ -126,6 +155,8 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
             />
           </div>
         </div>
+          </>
+        )}
       </Section>
 
       {isScript ? (
@@ -136,7 +167,21 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
 
       {isScript ? null : (
       <Section id="prompt" title={t("tasks.sections.prompt")} icon="message">
-        <AgentOrigin doc={doc} onChange={onChange} catalog={catalog} />
+        {isTemplate ? (
+          <Field label={t("tasks.fields.selectedAgent")} hint={t("tasks.fields.selectedAgentHint")} error={err(["spec", "selectedAgent"])}>
+            <Select value={selectedAgent} onChange={(e) => set(["spec", "selectedAgent"], e.target.value)}>
+              <option value="">{t("tasks.agent.none")}</option>
+              {selectedAgent && !catalog?.agents.some((a) => a.name === selectedAgent) ? <option value={selectedAgent}>{selectedAgent}</option> : null}
+              {(catalog?.agents ?? []).map((a) => (
+                <option key={a.name} value={a.name}>
+                  {a.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        ) : (
+          <AgentOrigin doc={doc} onChange={onChange} catalog={catalog} />
+        )}
         <Field label={t("tasks.fields.prompt")} hint={t("tasks.fields.promptHint")} error={err(["spec", "prompt"])}>
           <TextArea className="mono input--prompt" rows={8} value={get<string>(["spec", "prompt"]) ?? ""} onChange={(e) => set(["spec", "prompt"], e.target.value)} />
         </Field>
@@ -190,7 +235,7 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
           value={get<Item>(["spec", "harness", "preferred"]) ?? {}}
           onChange={(v) => set(["spec", "harness", "preferred"], v)}
           harnesses={harnesses}
-          required
+          required={!isTemplate}
         />
         <h4 className="subhead">{t("tasks.fields.fallbackCandidates")}</h4>
         <FallbackList

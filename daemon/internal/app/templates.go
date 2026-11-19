@@ -34,7 +34,14 @@ type Template struct {
 	Needs         *TemplateNeeds    `json:"needs,omitempty"`
 	Validation    *ValidationResult `json:"validation"`
 
-	spec map[string]any // the fields a new task starts with, the selected agent left out; nil when invalid
+	// Revision, Document, and YAML are given only when one template is opened or written: its file's revision, which
+	// an update of a template of the user's starts from, the document its file decodes to, and its file's text.
+	Revision string `json:"revision,omitempty"`
+	Document any    `json:"document,omitempty"`
+	YAML     string `json:"yaml,omitempty"`
+
+	spec    map[string]any // the fields a new task starts with, the selected agent left out; nil when invalid
+	content []byte         // the file's text as the daemon last read or wrote it
 }
 
 // TemplateNeeds is what a template needs of this machine, read each time the templates are listed: the harness its
@@ -83,7 +90,7 @@ func (a *App) readTemplate(f ports.TemplateFile) *Template {
 // and carries the hf- prefix when, and only when, the template is built in.
 func (a *App) loadTemplate(t *Template, content []byte, readErr error) *Template {
 	r, doc := a.validateTemplate(content, readErr)
-	t.Validation = r
+	t.Validation, t.content = r, content
 	metadata, _ := doc["metadata"].(map[string]any)
 	spec, _ := doc["spec"].(map[string]any)
 	for i, is := range r.Errors {
@@ -214,27 +221,6 @@ func (a *App) builtinTemplate(id string) *Template {
 		}
 	}
 	return nil
-}
-
-// UpdateTemplate changes a template. Built-in templates are read-only, and changing a template of the user's is not
-// offered here, so it always refuses: an identifier a built-in template has, or one with the hf- prefix that none has
-// yet, is a conflict, and any other is not found.
-func (a *App) UpdateTemplate(id string) error {
-	return a.refuseTemplateWrite(id)
-}
-
-// DeleteTemplate deletes a template; it refuses as UpdateTemplate does.
-func (a *App) DeleteTemplate(id string) error {
-	return a.refuseTemplateWrite(id)
-}
-
-func (a *App) refuseTemplateWrite(id string) error {
-	if a.builtinTemplate(id) == nil && !strings.HasPrefix(id, BuiltinPrefix) {
-		return newError(CodeNotFound, domain.T("template_not_found", "no template {{template}}", "template", id))
-	}
-	return newError(CodeConflict, domain.T("template_read_only",
-		"{{template}} is the identifier of a built-in template: built-in templates ship with HarmFlow, which never writes one",
-		"template", id))
 }
 
 // DraftTask builds the document of a new task from a template, and writes nothing. The task is named after the

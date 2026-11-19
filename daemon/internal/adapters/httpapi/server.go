@@ -195,8 +195,12 @@ func (s *Server) Handler() http.Handler {
 	})
 
 	h("GET /api/v1/templates", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.App.Templates(r.Context())) })
+	h("POST /api/v1/templates", s.createTemplate)
+	h("GET /api/v1/templates/{templateId}", s.openTemplate)
 	h("PUT /api/v1/templates/{templateId}", s.updateTemplate)
 	h("DELETE /api/v1/templates/{templateId}", s.deleteTemplate)
+	h("POST /api/v1/templates/{templateId}/duplicate", s.duplicateTemplate)
+	h("POST /api/v1/templates/{templateId}/validate", s.validateTemplate)
 	h("POST /api/v1/templates/{templateId}/draft", s.draftTask)
 
 	h("GET /api/v1/tasks", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.App.ListTasks()) })
@@ -461,13 +465,67 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, v)
 }
 
-// updateTemplate reads no body: no template can be changed yet, as UpdateTemplate says.
+func (s *Server) createTemplate(w http.ResponseWriter, r *http.Request) {
+	var in app.NewTemplateInput
+	if err := decode(r, &in); err != nil {
+		fail(w, err)
+		return
+	}
+	v, err := s.App.CreateTemplate(in)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, 201, v)
+}
+
+func (s *Server) openTemplate(w http.ResponseWriter, r *http.Request) {
+	v, err := s.App.OpenTemplate(r.PathValue("templateId"))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, 200, v)
+}
+
 func (s *Server) updateTemplate(w http.ResponseWriter, r *http.Request) {
-	fail(w, s.App.UpdateTemplate(r.PathValue("templateId")))
+	var in app.TemplateInput
+	if err := decode(r, &in); err != nil {
+		fail(w, err)
+		return
+	}
+	v, err := s.App.UpdateTemplate(r.PathValue("templateId"), in)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, 200, v)
 }
 
 func (s *Server) deleteTemplate(w http.ResponseWriter, r *http.Request) {
-	fail(w, s.App.DeleteTemplate(r.PathValue("templateId")))
+	if err := s.App.DeleteTemplate(r.PathValue("templateId")); err != nil {
+		fail(w, err)
+		return
+	}
+	w.WriteHeader(204)
+}
+
+func (s *Server) duplicateTemplate(w http.ResponseWriter, r *http.Request) {
+	v, err := s.App.DuplicateTemplate(r.PathValue("templateId"))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, 201, v)
+}
+
+func (s *Server) validateTemplate(w http.ResponseWriter, r *http.Request) {
+	var in app.TemplateInput
+	if err := decode(r, &in); err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, 200, s.App.ValidateTemplate(r.PathValue("templateId"), in))
 }
 
 func (s *Server) draftTask(w http.ResponseWriter, r *http.Request) {
