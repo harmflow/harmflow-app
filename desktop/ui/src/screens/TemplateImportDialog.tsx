@@ -16,7 +16,7 @@ import { actions } from "../state/store";
 import { ScriptImportPreview } from "./ImportDialog";
 
 export function TemplateImportDialog({ onClose, onImported }: { onClose: () => void; onImported: (tpl: Template) => void }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [yaml, setYaml] = useState("");
   const [overwrite, setOverwrite] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
@@ -35,7 +35,7 @@ export function TemplateImportDialog({ onClose, onImported }: { onClose: () => v
         return;
       }
       const tpl = await api.importTemplate({ yaml, overwrite, dryRun: false });
-      toast(t("tasks.templates.imported", { name: localized(tpl.name, "en-US") }), "success");
+      toast(t("tasks.templates.imported", { name: localized(tpl.name, i18n.language) }), "success");
       for (const m of tpl.needs?.missing ?? []) {
         toast(t(m.kind === "agent" ? "tasks.templates.missingAgent" : "tasks.templates.missingSkill", { name: m.name }), "warning", 6000);
       }

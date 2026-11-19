@@ -336,7 +336,10 @@ func (a *App) ImportTemplate(ctx context.Context, in TemplateImport) (Template, 
 	a.mu.Lock()
 	_, exists := a.userTemplates[id]
 	a.mu.Unlock()
-	if _, err := a.d.Templates.Get(id); (exists || err == nil) && !in.Overwrite {
+	if _, err := a.d.Templates.Get(id); err == nil {
+		exists = true // a file the watcher has not read yet is replaced all the same
+	}
+	if exists && !in.Overwrite {
 		return Template{}, newError(CodeConflict,
 			domain.T("template_exists", "a template with the identifier {{template}} already exists", "template", id))
 	}
