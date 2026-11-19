@@ -4,7 +4,18 @@ import { schemaDefault } from "../../lib/schema";
 import { RowListEditor } from "../RowListEditor";
 import { cleanRow, type Item } from "./formModel";
 
-export function RepositoryList({ rows, onChange, errorPaths }: { rows: Item[]; onChange: (rows: Item[] | undefined) => void; errorPaths: Set<string> }) {
+/** `baseBranch` false leaves each row's base branch out, as simple mode does: a new row then takes the default. */
+export function RepositoryList({
+  rows,
+  onChange,
+  errorPaths,
+  baseBranch = true,
+}: {
+  rows: Item[];
+  onChange: (rows: Item[] | undefined) => void;
+  errorPaths: Set<string>;
+  baseBranch?: boolean;
+}) {
   const { t } = useTranslation();
   const base = "/spec/github/repositories";
   const cell = (key: string) => ({
@@ -15,7 +26,7 @@ export function RepositoryList({ rows, onChange, errorPaths }: { rows: Item[]; o
     <RowListEditor<Item>
       rows={rows}
       onChange={onChange}
-      empty={() => ({ name: "", localPath: "", baseBranch: "main" })}
+      empty={() => (baseBranch ? { name: "", localPath: "", baseBranch: "main" } : { name: "", localPath: "" })}
       header
       columns={[
         {
@@ -34,13 +45,17 @@ export function RepositoryList({ rows, onChange, errorPaths }: { rows: Item[]; o
           error: (_, i) => errorPaths.has(`${base}/${i}/localPath`),
           ...cell("localPath"),
         },
-        {
-          label: t("tasks.fields.baseBranch"),
-          placeholder: String(schemaDefault(["spec", "github", "repositories", 0, "baseBranch"]) ?? "main"),
-          width: "130px",
-          mono: true,
-          ...cell("baseBranch"),
-        },
+        ...(baseBranch
+          ? [
+              {
+                label: t("tasks.fields.baseBranch"),
+                placeholder: String(schemaDefault(["spec", "github", "repositories", 0, "baseBranch"]) ?? "main"),
+                width: "130px",
+                mono: true,
+                ...cell("baseBranch"),
+              },
+            ]
+          : []),
       ]}
       addLabel={t("tasks.fields.addRepository")}
       removeLabel={t("common.remove")}

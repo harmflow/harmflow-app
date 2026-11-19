@@ -146,7 +146,6 @@ export function ScheduleFields({
       ) : null}
       <div className="grid-2">
         <EnumField label={t("tasks.fields.missedRun")} optionKey="missedRun" doc={doc} set={set} defLabel={defLabel} />
-        <EnumField label={t("tasks.fields.overlap")} optionKey="overlap" doc={doc} set={set} defLabel={defLabel} />
       </div>
       <div className="preview">
         <span className="preview__label">{t("tasks.fields.preview")}</span>
