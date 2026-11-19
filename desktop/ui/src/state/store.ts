@@ -273,8 +273,9 @@ export const actions = {
   },
 
   // A daemon that does not answer is told apart from one that is gone: the shell reads a timed-out check against a
-  // live pid as not answering, and anything else that fails as stopped. Once the daemon answers again, the connection
-  // returns to the state the event stream reported last.
+  // live pid as not answering, and anything else that fails as stopped. A daemon whose health reads starting is still
+  // loading its state, every other route answering 503 meanwhile. Once the daemon answers again, or has started, the
+  // connection returns to the state the event stream reported last.
   refreshHealth() {
     return tracked("health", async () => {
       try {
@@ -282,7 +283,11 @@ export const actions = {
         setState((s) => ({
           health,
           daemonRunning: true,
-          ...(s.connection === "not_answering" ? { connection: streamConnection } : {}),
+          ...(health.status === "starting"
+            ? { connection: "starting" as const }
+            : s.connection === "not_answering" || s.connection === "starting"
+              ? { connection: streamConnection }
+              : {}),
         }));
       } catch {
         if (native.available) {
@@ -533,12 +538,10 @@ export function startSync() {
     onEvent: handleEvent,
     onConnection: (connection) => {
       streamConnection = connection;
-      // A daemon that does not answer stays shown so while its stream only waits or reconnects, never as reconnecting:
-      // only its answer or its stop replaces that state.
-      const shown =
-        state.connection === "not_answering" && connection !== "connected" && connection !== "daemon_stopped"
-          ? "not_answering"
-          : connection;
+      // A daemon that does not answer, or is still starting, stays shown so while its stream only waits or reconnects,
+      // never as reconnecting: only its answer, its start, or its stop replaces that state.
+      const held = state.connection === "not_answering" || state.connection === "starting";
+      const shown = held && connection !== "connected" && connection !== "daemon_stopped" ? state.connection : connection;
       // A lost connection may have missed a check's announcement, or the daemon stopped and ended the detection.
       setState(connection === "connected" ? { connection } : { connection: shown, redetecting: null });
       if (connection === "connected") {

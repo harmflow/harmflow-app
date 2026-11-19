@@ -73,11 +73,14 @@ export const ptBR: Resources = {
     disconnected: "Conexão com o daemon perdida",
     daemon_stopped: "Daemon parado",
     not_answering: "Sem resposta",
+    starting: "Daemon iniciando",
     lastUpdate: "Última atualização: {{time}}",
     draining_one: "Parando: o daemon aguarda {{count}} execução em andamento e a cancela às {{time}} se ela não tiver terminado.",
     draining_other: "Parando: o daemon aguarda {{count}} execuções em andamento e cancela as restantes às {{time}}.",
     notAnsweringHint:
       "O daemon está em execução, mas ainda não responde. O aplicativo de desktop continua tentando.",
+    startingHint:
+      "O daemon está iniciando: está carregando seu estado e recuperando as execuções interrompidas. O aplicativo de desktop aguarda por ele.",
     lostHint:
       "A conexão com o daemon caiu. As execuções continuam no daemon; o painel reconecta e reproduz os eventos que perdeu.",
     versionMismatch:
@@ -275,6 +278,7 @@ export const ptBR: Resources = {
     task_disabled: "a tarefa está desativada; ative-a para executá-la",
     task_being_deleted: "a tarefa está sendo excluída",
     daemon_stopping: "o daemon está parando e não aceita novos disparos",
+    daemon_starting: "o daemon ainda está iniciando: está carregando seu estado e recuperando as execuções interrompidas",
     execution_ended: "a execução já terminou ($t(status.{{status}}))",
     executions_running_one: "{{count}} execução está em andamento; confirme para parar o daemon e cancelá-la",
     executions_running_other: "{{count}} execuções estão em andamento; confirme para parar o daemon e cancelá-las",

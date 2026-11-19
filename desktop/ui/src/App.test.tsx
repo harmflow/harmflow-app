@@ -1051,18 +1051,23 @@ describe("settings from the app menu", () => {
     }
   });
 
-  it("sends the shell the daemon item's start, its not-answering text, and a failed start's message, in each language", async () => {
+  it("sends the shell the daemon item's start, its not-answering and starting texts, and a failed start's message, in each language", async () => {
     const labels = vi.spyOn(native, "setTrayLabels");
     try {
       await launch();
-      for (const [language, start, notAnswering, startFailed] of [
-        ["en-US", "Start daemon", "Not answering", "The daemon did not start: {{message}}"],
-        ["pt-BR", "Iniciar o daemon", "Sem resposta", "O daemon não iniciou: {{message}}"],
-        ["es-ES", "Iniciar el daemon", "Sin respuesta", "El daemon no se inició: {{message}}"],
+      for (const [language, start, notAnswering, starting, startFailed] of [
+        ["en-US", "Start daemon", "Not answering", "Daemon starting", "The daemon did not start: {{message}}"],
+        ["pt-BR", "Iniciar o daemon", "Sem resposta", "Daemon iniciando", "O daemon não iniciou: {{message}}"],
+        ["es-ES", "Iniciar el daemon", "Sin respuesta", "Daemon iniciándose", "El daemon no se inició: {{message}}"],
       ]) {
         await act(async () => void i18n.changeLanguage(language));
         const sent = labels.mock.lastCall?.[0];
-        expect([sent?.start, sent?.notAnswering, sent?.startFailed]).toEqual([start, notAnswering, startFailed]);
+        expect([sent?.start, sent?.notAnswering, sent?.starting, sent?.startFailed]).toEqual([
+          start,
+          notAnswering,
+          starting,
+          startFailed,
+        ]);
         expect(sent?.startFailedTitle).toBe(i18n.t("daemonDown.title"));
       }
     } finally {

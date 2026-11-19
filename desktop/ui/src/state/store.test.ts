@@ -318,6 +318,44 @@ describe("a daemon whose health check fails", () => {
   });
 });
 
+// harmflow-app#1091: a daemon whose health reads starting is still loading its state and recovering interrupted
+// executions, its other routes answering 503 meanwhile; the store shows a state of its own until it has started.
+describe("a daemon still starting", () => {
+  const health = (status: "ok" | "starting") =>
+    daemon.answers.set("/health", { status, version: "0.1.0", apiVersion: "v1", pid: 4242, acceptingFirings: status === "ok" });
+
+  beforeEach(() => patchStateForTests({ connection: "connecting", daemonRunning: false }));
+  afterEach(() => daemon.answers.clear());
+
+  it("reads as starting, running, and stays so while its stream reconnects", async () => {
+    startSync();
+    health("starting");
+    await actions.refreshHealth();
+    expect(getState().connection).toBe("starting");
+    expect(getState().daemonRunning).toBe(true);
+
+    daemon.stream!.onConnection("reconnecting");
+    daemon.stream!.onConnection("disconnected");
+    expect(getState().connection).toBe("starting");
+  });
+
+  it("returns to the stream's state once its health reads ok, and ends when the stream connects", async () => {
+    startSync();
+    health("starting");
+    await actions.refreshHealth();
+    daemon.stream!.onConnection("reconnecting");
+
+    health("ok");
+    await actions.refreshHealth();
+    expect(getState().connection).toBe("reconnecting");
+
+    health("starting");
+    await actions.refreshHealth();
+    daemon.stream!.onConnection("connected");
+    expect(getState().connection).toBe("connected");
+  });
+});
+
 // harmflow-app#908: against a daemon too busy to answer, a periodic refresh skips its tick while the previous refresh of
 // its kind still waits, so the requests do not pile up; once that one ends, the next tick refreshes again.
 describe("a periodic refresh", () => {

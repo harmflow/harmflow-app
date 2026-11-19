@@ -640,6 +640,12 @@ mod tests {
             let token = std::fs::read_to_string(home.join("run").join("token")).unwrap().trim().to_string();
             let http = reqwest::Client::builder().no_proxy().build().unwrap();
             let daemon = RealDaemon { home, base: format!("http://{address}/api/v1"), token, process, http };
+            // The daemon writes its address before it has started, and every route but its health answers 503 until
+            // then.
+            while daemon.call(reqwest::Method::GET, "/health", None).await.get("status").and_then(Value::as_str) != Some("ok") {
+                assert!(tokio::time::Instant::now() < deadline, "harmflowd still read as starting after 20 seconds");
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
             let fake = repo_root.join("tests").join("integration").join("testdata").join("fake-claude");
             daemon.call(reqwest::Method::PUT, "/harnesses/claude-code", Some(serde_json::json!({ "path": fake }))).await;
             daemon

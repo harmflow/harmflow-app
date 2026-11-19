@@ -22,6 +22,9 @@ pub enum DaemonState {
     Stopped,
     /// Alive but not answering: the state the dashboard shows as *Not answering*.
     NotAnswering,
+    /// Answering, but still loading its state and recovering interrupted executions: the state the dashboard shows as
+    /// *Starting*.
+    Starting,
 }
 
 pub struct AppState {

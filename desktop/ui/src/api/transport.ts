@@ -5,7 +5,8 @@
 import eventSchema from "../../../../contracts/schemas/event.schema.json";
 import type { HarmflowEvent } from "./types";
 
-// not_answering is the store's, never the stream's: the daemon runs, but its health check timed out (#908).
+// not_answering and starting are the store's, never the stream's: the daemon runs, but its health check timed out
+// (#908), or reads that it is still starting, its other routes, the stream's included, answering 503 meanwhile (#1091).
 export const CONNECTION_STATES = [
   "connecting",
   "connected",
@@ -13,6 +14,7 @@ export const CONNECTION_STATES = [
   "disconnected",
   "daemon_stopped",
   "not_answering",
+  "starting",
 ] as const;
 export type ConnectionState = (typeof CONNECTION_STATES)[number];
 

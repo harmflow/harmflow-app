@@ -73,11 +73,14 @@ export const esES: Resources = {
     disconnected: "Se perdió la conexión con el daemon",
     daemon_stopped: "Daemon detenido",
     not_answering: "Sin respuesta",
+    starting: "Daemon iniciándose",
     lastUpdate: "Última actualización: {{time}}",
     draining_one: "Deteniéndose: el daemon espera {{count}} ejecución en curso y la cancela a las {{time}} si no ha terminado.",
     draining_other: "Deteniéndose: el daemon espera {{count}} ejecuciones en curso y cancela las restantes a las {{time}}.",
     notAnsweringHint:
       "El daemon está en ejecución, pero aún no responde. La aplicación de escritorio sigue intentándolo.",
+    startingHint:
+      "El daemon se está iniciando: está cargando su estado y recuperando las ejecuciones interrumpidas. La aplicación de escritorio lo espera.",
     lostHint:
       "Se perdió la conexión con el daemon. Las ejecuciones siguen en el daemon; el panel se reconecta y reproduce los eventos que perdió.",
     versionMismatch:
@@ -275,6 +278,7 @@ export const esES: Resources = {
     task_disabled: "la tarea está desactivada; actívala para ejecutarla",
     task_being_deleted: "la tarea se está eliminando",
     daemon_stopping: "el daemon se está deteniendo y no acepta nuevos disparos",
+    daemon_starting: "el daemon aún se está iniciando: está cargando su estado y recuperando las ejecuciones interrumpidas",
     execution_ended: "la ejecución ya terminó ($t(status.{{status}}))",
     executions_running_one: "{{count}} ejecución está en curso; confirma para detener el daemon y cancelarla",
     executions_running_other: "{{count}} ejecuciones están en curso; confirma para detener el daemon y cancelarlas",
