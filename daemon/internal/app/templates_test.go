@@ -178,7 +178,8 @@ func TestInvalidTemplateIsListed(t *testing.T) {
 }
 
 // Built-in templates are read-only: changing or deleting one, or writing a template under an identifier with the hf-
-// prefix that none has yet, is refused, and any other identifier names no template.
+// prefix that none has yet, is refused, even with a valid edit from the revision it was opened at, and any other
+// identifier names no template.
 func TestBuiltinTemplatesAreReadOnly(t *testing.T) {
 	e := newEnv(t, withTemplates(map[string]string{
 		"hf-notes.yaml": template("hf-notes", "  type: general\n"),
@@ -186,10 +187,13 @@ func TestBuiltinTemplatesAreReadOnly(t *testing.T) {
 	}))
 	before := e.app.Templates(t.Context())
 	for _, id := range []string{"hf-notes", "hf-new", "notes"} {
-		appError(t, "UpdateTemplate("+id+")", e.app.UpdateTemplate(id), CodeConflict, "template_read_only")
+		in := TemplateInput{YAML: template(id, "  type: general\n  prompt: Changed.\n"), BaseRevision: "any"}
+		_, err := e.app.UpdateTemplate(id, in)
+		appError(t, "UpdateTemplate("+id+")", err, CodeConflict, "template_read_only")
 		appError(t, "DeleteTemplate("+id+")", e.app.DeleteTemplate(id), CodeConflict, "template_read_only")
 	}
-	appError(t, "UpdateTemplate(mine)", e.app.UpdateTemplate("mine"), CodeNotFound, "template_not_found")
+	_, err := e.app.UpdateTemplate("mine", TemplateInput{YAML: template("mine", "  type: general\n"), BaseRevision: "any"})
+	appError(t, "UpdateTemplate(mine)", err, CodeNotFound, "template_not_found")
 	appError(t, "DeleteTemplate(mine)", e.app.DeleteTemplate("mine"), CodeNotFound, "template_not_found")
 	data, err := os.ReadFile(filepath.Join(e.paths.Builtins, "templates", "hf-notes.yaml"))
 	if err != nil || string(data) != template("hf-notes", "  type: general\n") {

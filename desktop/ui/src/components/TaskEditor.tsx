@@ -1,14 +1,16 @@
 // Creating and editing a task through the form or the YAML editor. Both are views of one definition, validated by the
-// one schema the daemon applies; the daemon is the only writer.
+// one schema the daemon applies; the daemon is the only writer. In template mode the same editor edits a template of
+// the user's, validated by the template schema, or shows a built-in template, which is read-only.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ApiError, api } from "../api/client";
 import { native } from "../api/native";
-import type { Catalog, Task, TaskInput, ValidationResult } from "../api/types";
+import type { Catalog, LocalizedText, Task, TaskInput, Template, ValidationResult } from "../api/types";
 import { daemonText } from "../lib/daemonText";
 import { useDebounced } from "../lib/hooks";
 import { matches, shortcutText } from "../lib/shortcuts";
 import { addedFolders, type Doc } from "../lib/taskForm";
+import { localized } from "../lib/templates";
 import { actions, getState, useStore } from "../state/store";
 import { Icon } from "./Icon";
 import { tipBelow, useTooltip } from "./Shell";
@@ -23,13 +25,16 @@ type EditorTab = "form" | "yaml";
 export type LeaveCheck = () => Promise<boolean>;
 
 export interface TaskEditorProps {
-  mode: "create" | "edit";
+  mode: "create" | "edit" | "template";
   /** For edit: the task as loaded. */
   task?: Task;
   /** For create: the template document. */
   initial?: Doc;
+  /** For template: the template as opened, with its document, text, and, for one of the user's, its revision. */
+  template?: Template;
   onClose: () => void;
-  onSaved: (task: Task) => void;
+  /** A task was saved; template mode calls nothing. */
+  onSaved?: (task: Task) => void;
   /** Receives the question to ask before leaving while the editor holds unsaved changes, and null once it holds none. */
   onLeaveCheck?: (check: LeaveCheck | null) => void;
 }
@@ -50,8 +55,11 @@ function sameValue(a: unknown, b: unknown): boolean {
   return ka.length === keys(b).length && ka.every((k) => sameValue((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
 }
 
-export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck }: TaskEditorProps) {
-  const { t } = useTranslation();
+export function TaskEditor({ mode, task, initial, template, onClose, onSaved, onLeaveCheck }: TaskEditorProps) {
+  const { t, i18n } = useTranslation();
+  // A built-in template ships with HarmFlow and is read-only: it is shown, never saved.
+  const readOnly = mode === "template" && template?.source === "builtin";
+  const opened = task ?? template;
   const catalog = useStore((s) => s.catalog);
   const harnesses = useStore((s) => s.harnesses);
   const externalChange = useStore((s) => (task ? s.externalChanges[task.id] : undefined));
@@ -59,14 +67,14 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
   const [answeredEvent, setAnsweredEvent] = useState(externalChange ?? 0);
 
   const [tab, setTab] = useState<EditorTab>("form");
-  const [doc, setDoc] = useState<Doc>(() => (task?.document as Doc) ?? initial ?? {});
-  const [yaml, setYaml] = useState<string>(() => task?.yaml ?? (initial ? fallbackYaml(initial) : ""));
+  const [doc, setDoc] = useState<Doc>(() => (opened?.document as Doc) ?? initial ?? {});
+  const [yaml, setYaml] = useState<string>(() => opened?.yaml ?? (initial ? fallbackYaml(initial) : ""));
   // The file's text as the editor was loaded or last saved with it, and the document of that moment. The daemon's
   // serialization of a document keeps no comment and no key order, so the YAML tab shows this text while the form's
   // document is still that one, by value.
-  const stored = useRef<{ doc: Doc; yaml: string } | null>(task ? { doc: task.document as Doc, yaml: task.yaml } : null);
-  const [baseRevision, setBaseRevision] = useState(task?.revision);
-  const [validation, setValidation] = useState<ValidationResult | null>(task?.validation ?? null);
+  const stored = useRef<{ doc: Doc; yaml: string } | null>(opened?.document ? { doc: opened.document as Doc, yaml: opened.yaml ?? "" } : null);
+  const [baseRevision, setBaseRevision] = useState(opened?.revision);
+  const [validation, setValidation] = useState<ValidationResult | null>(opened?.validation ?? null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState(false);
@@ -99,6 +107,8 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
   }, [workspace, taskId, added]);
 
   const input = (): TaskInput => (tab === "form" ? { document: doc, baseRevision } : { yaml, baseRevision });
+  // The daemon validates a template against the template schema, and a task against the task schema.
+  const validate = (edit: TaskInput) => (mode === "template" ? api.validateTemplate(template!.id, edit) : api.validateTask(edit));
 
   // Every way out of an editor with unsaved changes asks first, except Save and the editor's own Discard; one with
   // none closes at once. The shell owns the ways out, so it holds the question while there is one.
@@ -113,8 +123,7 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
   useEffect(() => {
     if (!dirty) return;
     let cancelled = false;
-    api
-      .validateTask(tab === "form" ? { document: doc } : { yaml })
+    validate(tab === "form" ? { document: doc } : { yaml })
       .then((res) => !cancelled && setValidation(res))
       .catch(() => undefined);
     return () => {
@@ -129,11 +138,11 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
       if (next === "yaml" && stored.current && sameValue(doc, stored.current.doc)) {
         setYaml(stored.current.yaml);
       } else if (next === "yaml") {
-        const res = await api.validateTask({ document: doc });
+        const res = await validate({ document: doc });
         setYaml(res.yaml ?? fallbackYaml(doc));
         setValidation(res);
       } else {
-        const res = await api.validateTask({ yaml });
+        const res = await validate({ yaml });
         setValidation(res);
         if (!res.document) {
           toast(t("tasks.editor.convertFailed"), "warning");
@@ -147,29 +156,43 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
     }
   };
 
+  /** Puts in the editor what the daemon wrote: its document, text, revision, and validation. */
+  const loaded = (saved: { revision?: string; document?: unknown; yaml?: string; validation?: ValidationResult }) => {
+    setBaseRevision(saved.revision);
+    setDoc(saved.document as Doc);
+    setYaml(saved.yaml ?? "");
+    stored.current = { doc: saved.document as Doc, yaml: saved.yaml ?? "" };
+    setValidation(saved.validation ?? null);
+  };
+
   const save = async () => {
-    if (inFlight.current) return;
+    if (inFlight.current || readOnly) return;
     inFlight.current = true;
     setSaving(true);
     setConflict(false);
     try {
+      if (mode === "template") {
+        loaded(await api.updateTemplate(template!.id, input()));
+        toast(t("tasks.editor.saved"), "success");
+        setDirty(false);
+        void actions.refreshTemplates();
+        return;
+      }
       const saved = mode === "create" ? await api.createTask(input()) : await api.updateTask(task!.id, input());
       toast(t("tasks.editor.saved"), "success");
       setDirty(false);
-      setBaseRevision(saved.revision);
-      setDoc(saved.document as Doc);
-      setYaml(saved.yaml);
-      stored.current = { doc: saved.document as Doc, yaml: saved.yaml };
-      setValidation(saved.validation ?? null);
+      loaded(saved);
       setAnsweredEvent((seen) => getState().externalChanges[saved.id] ?? seen);
       void actions.refreshTasks();
-      onSaved(saved);
+      onSaved?.(saved);
     } catch (err) {
       if (err instanceof ApiError) {
-        if (err.status === 409 && mode === "edit") setConflict(true);
+        // A file changed since the editor read it is a conflict to reload; any other 409 is a refusal to show.
+        const changedOnDisk = err.status === 409 && (mode === "edit" || (mode === "template" && err.currentRevision !== undefined));
+        if (changedOnDisk) setConflict(true);
         if (err.validation) setValidation(err.validation);
         if (err.status !== 422 && err.status !== 409) toast(err.message, "danger");
-        if (err.status === 409 && mode === "create") toast(err.message, "danger");
+        if (err.status === 409 && !changedOnDisk) toast(err.message, "danger");
       } else {
         toast((err as Error).message, "danger");
       }
@@ -196,13 +219,8 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
   }, []);
 
   const reloadFromDisk = async () => {
-    if (!task) return;
-    const fresh = await api.task(task.id);
-    setDoc(fresh.document as Doc);
-    setYaml(fresh.yaml);
-    stored.current = { doc: fresh.document as Doc, yaml: fresh.yaml };
-    setBaseRevision(fresh.revision);
-    setValidation(fresh.validation ?? null);
+    if (!task && !template) return;
+    loaded(template ? await api.template(template.id) : await api.task(task!.id));
     setDirty(false);
     setConflict(false);
     answerExternal();
@@ -212,13 +230,20 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
   const warnings = validation?.warnings ?? [];
   const errorPaths = useMemo(() => new Set(errors.map((e) => e.path ?? "").filter(Boolean)), [errors]);
   const errorLines = useMemo(() => errors.map((e) => e.line).filter((l): l is number => typeof l === "number"), [errors]);
-  const name = (doc.metadata as { name?: string } | undefined)?.name ?? task?.name ?? "";
+  const metadataName = (doc.metadata as { name?: unknown } | undefined)?.name;
+  // A template's name is a text in each language; the editor names it in the interface's.
+  const name =
+    mode === "template"
+      ? localized(metadataName as LocalizedText | undefined, i18n.language)
+      : ((metadataName as string | undefined) ?? task?.name ?? "");
+  const title =
+    mode === "create" ? t("tasks.editor.newTitle") : mode === "edit" ? t("tasks.editor.editTitle", { name }) : readOnly ? name : t("tasks.templates.editTitle", { name });
 
   return (
     <div className="editor">
       <header className="editor__header">
         <div>
-          <h2 className="editor__title">{mode === "create" ? t("tasks.editor.newTitle") : t("tasks.editor.editTitle", { name })}</h2>
+          <h2 className="editor__title">{title}</h2>
           {dirty ? <span className="editor__dirty">{t("tasks.editor.unsaved")}</span> : null}
         </div>
         <div className="editor__actions">
@@ -236,20 +261,27 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
           <Button variant="ghost" onClick={onClose}>
             {dirty ? t("tasks.editor.discard") : t("common.close")}
           </Button>
-          <Button
-            variant="primary"
-            icon="check"
-            disabled={saving}
-            aria-keyshortcuts="Meta+S"
-            onClick={() => void save()}
-            {...tipped(t("common.save"), shortcutText("save"))}
-          >
-            {saving ? t("common.saving") : t("common.save")}
-          </Button>
+          {readOnly ? null : (
+            <Button
+              variant="primary"
+              icon="check"
+              disabled={saving}
+              aria-keyshortcuts="Meta+S"
+              onClick={() => void save()}
+              {...tipped(t("common.save"), shortcutText("save"))}
+            >
+              {saving ? t("common.saving") : t("common.save")}
+            </Button>
+          )}
         </div>
         {tooltip}
       </header>
 
+      {readOnly ? (
+        <Banner tone="blue" icon="shield">
+          {t("tasks.templates.readOnlyNote")}
+        </Banner>
+      ) : null}
       {task?.running ? (
         <Banner tone="blue" icon="clock">
           {t("tasks.editor.runningNote")}
@@ -304,17 +336,20 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
       <div className="editor__body">
         <div className={cx("editor__main", tab === "yaml" && "editor__main--yaml")}>
           {tab === "form" ? (
-            <TaskForm
-              doc={doc}
-              mode={mode}
-              catalog={workspaceCatalog ?? catalog}
-              harnesses={harnesses}
-              errorPaths={errorPaths}
-              onChange={(next) => {
-                setDoc(next);
-                setDirty(true);
-              }}
-            />
+            // A disabled fieldset disables every control of the form at once, for a template that is only shown.
+            <fieldset className="editor__fieldset" disabled={readOnly}>
+              <TaskForm
+                doc={doc}
+                mode={mode}
+                catalog={workspaceCatalog ?? catalog}
+                harnesses={harnesses}
+                errorPaths={errorPaths}
+                onChange={(next) => {
+                  setDoc(next);
+                  setDirty(true);
+                }}
+              />
+            </fieldset>
           ) : (
             <>
               <p className="hint-line">
@@ -322,6 +357,7 @@ export function TaskEditor({ mode, task, initial, onClose, onSaved, onLeaveCheck
               </p>
               <YamlEditor
                 value={yaml}
+                readOnly={readOnly}
                 errorLineNumbers={errorLines}
                 onChange={(v) => {
                   setYaml(v);

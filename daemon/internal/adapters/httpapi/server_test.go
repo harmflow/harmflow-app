@@ -356,6 +356,70 @@ func TestSaveAsTemplateRoute(t *testing.T) {
 	}
 }
 
+// The routes of a template of the user's, through the handler the daemon serves: POST /api/v1/templates creates an
+// empty one of a type (201), GET reads it with its document, text, and revision, POST .../validate checks an edit and
+// writes nothing, PUT writes an edit from its revision (200; 400 with none), POST .../duplicate copies it (201), and
+// DELETE removes it (204), after which GET answers 404.
+func TestUserTemplateRoutes(t *testing.T) {
+	a := startedApp(t)
+	s := &Server{App: a}
+	s.SetToken(validToken)
+	serve := func(method, path, body string) (int, map[string]any) {
+		t.Helper()
+		var reader io.Reader
+		if body != "" {
+			reader = strings.NewReader(body)
+		}
+		r := httptest.NewRequest(method, path, reader)
+		r.Host = "127.0.0.1:7000"
+		r.Header.Set("Authorization", "Bearer "+validToken)
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		var keys map[string]any
+		if w.Body.Len() > 0 {
+			if err := json.Unmarshal(w.Body.Bytes(), &keys); err != nil {
+				t.Fatalf("%s %s: body %q: %v", method, path, w.Body, err)
+			}
+		}
+		return w.Code, keys
+	}
+
+	code, created := serve("POST", "/api/v1/templates", `{"id":"triage","name":"Triage","description":"Sorts.","type":"general"}`)
+	if code != 201 || created["id"] != "triage" || created["type"] != "general" || created["revision"] == "" {
+		t.Fatalf("POST /api/v1/templates = %d %v, want 201 with the template", code, created)
+	}
+	code, got := serve("GET", "/api/v1/templates/triage", "")
+	if code != 200 || got["revision"] != created["revision"] || !strings.Contains(got["yaml"].(string), "type: general") ||
+		got["document"] == nil {
+		t.Fatalf("GET /api/v1/templates/triage = %d %v, want its document, text, and revision", code, got)
+	}
+	edited := strings.Replace(got["yaml"].(string), "type: general", "type: general\n  prompt: Sort the issues.", 1)
+	input := func(revision any) string {
+		data, _ := json.Marshal(map[string]any{"yaml": edited, "baseRevision": revision})
+		return string(data)
+	}
+	if code, r := serve("POST", "/api/v1/templates/triage/validate", input(nil)); code != 200 || r["valid"] != true || r["document"] == nil {
+		t.Errorf("POST /api/v1/templates/triage/validate = %d %v, want 200, valid, with its document", code, r)
+	}
+	if code, r := serve("PUT", "/api/v1/templates/triage", input(nil)); code != 400 ||
+		r["error"].(map[string]any)["messageKey"] != "template_base_revision_required" {
+		t.Errorf("PUT /api/v1/templates/triage with no revision = %d %v, want 400", code, r)
+	}
+	code, updated := serve("PUT", "/api/v1/templates/triage", input(got["revision"]))
+	if code != 200 || updated["yaml"] != edited || updated["revision"] == got["revision"] {
+		t.Errorf("PUT /api/v1/templates/triage = %d %v, want 200 with the edit at a new revision", code, updated)
+	}
+	if code, cp := serve("POST", "/api/v1/templates/triage/duplicate", ""); code != 201 || cp["id"] != "triage-copy" {
+		t.Errorf("POST /api/v1/templates/triage/duplicate = %d %v, want 201 with triage-copy", code, cp)
+	}
+	if code, _ := serve("DELETE", "/api/v1/templates/triage", ""); code != 204 {
+		t.Errorf("DELETE /api/v1/templates/triage = %d, want 204", code)
+	}
+	if code, _ := serve("GET", "/api/v1/templates/triage", ""); code != 404 {
+		t.Errorf("GET /api/v1/templates/triage after DELETE = %d, want 404", code)
+	}
+}
+
 // GET /api/v1/system answers the machine's gauges, each under its key, a gauge not read yet left out and one read as
 // 0 kept; GET /api/v1/stats answers the execution counters alone.
 func TestSystemGaugesHaveTheirOwnRoute(t *testing.T) {

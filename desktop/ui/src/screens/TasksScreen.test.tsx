@@ -17,7 +17,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { native } from "../api/native";
 import type { StreamHandlers } from "../api/transport";
-import type { HarmflowEvent, Task, TaskSummary } from "../api/types";
+import type { HarmflowEvent, Task, TaskSummary, Template } from "../api/types";
 import { Toasts } from "../components/toast";
 import i18n from "../i18n";
 import { patchStateForTests, startSync } from "../state/store";
@@ -965,5 +965,183 @@ describe("the Tasks screen after the task's file changes outside HarmFlow", () =
       req("PUT", "/tasks/standup", { document: documentOf("Standup summary", "Write the standup digest."), baseRevision: "r2" }),
     ]);
     expect(toasts()).toEqual([{ tone: "success", text: "Saved." }]);
+  });
+});
+
+// The Templates view on the Tasks screen, switched with the task list (harmflow-app#180): built-in templates offer View
+// and Duplicate, the user's Edit, Duplicate, and Delete. A copy opens in the task editor's template mode, which saves
+// to the template's own route from the revision it opened, and Delete asks first. What the daemon writes is
+// app › TestDuplicateBuiltinThenEditAndDelete's; its refusal for a built-in one is app › TestBuiltinTemplatesAreReadOnly's.
+describe("the Tasks screen's Templates view", () => {
+  const valid = { valid: true, errors: [], warnings: [] };
+  const named = (text: string) => ({ "pt-BR": text, "en-US": text, "es-ES": text });
+  const builtin: Template = {
+    id: "hf-notes",
+    source: "builtin",
+    path: "/b/hf-notes.yaml",
+    type: "general",
+    name: named("Meeting notes"),
+    description: named("Sums up the meeting."),
+    validation: valid,
+  };
+  const documentOf = (prompt: string) => ({
+    apiVersion: "harmflow/v1alpha1",
+    kind: "TaskTemplate",
+    metadata: { id: "notes-copy", name: named("Meeting notes (copy)"), description: named("Sums up the meeting.") },
+    spec: { type: "general", prompt },
+  });
+  const yamlOf = (prompt: string) =>
+    [
+      "apiVersion: harmflow/v1alpha1",
+      "kind: TaskTemplate",
+      "metadata:",
+      "  id: notes-copy",
+      "  name:",
+      "    pt-BR: Meeting notes (copy)",
+      "    en-US: Meeting notes (copy)",
+      "    es-ES: Meeting notes (copy)",
+      "  description:",
+      "    pt-BR: Sums up the meeting.",
+      "    en-US: Sums up the meeting.",
+      "    es-ES: Sums up the meeting.",
+      "spec:",
+      "  type: general",
+      `  prompt: ${prompt}`,
+      "",
+    ].join("\n");
+  const summary: Template = { ...builtin, id: "notes-copy", source: "user", path: "/t/notes-copy.yaml", name: named("Meeting notes (copy)") };
+  /** The copy as the daemon answers it when it is opened or written: its document, text, and revision. */
+  const opened = (revision: string, prompt: string): Template => ({ ...summary, revision, document: documentOf(prompt), yaml: yamlOf(prompt) });
+
+  /** The screen as the app shows it: the view a command asks for is the one shown next. */
+  function Screen() {
+    const [view, setView] = useState<TaskView>({ kind: "list" });
+    return <TasksScreen view={view} onView={setView} onOpenExecution={() => {}} />;
+  }
+  async function show(templates: Template[]) {
+    patchStateForTests({ tasks: [standup], tasksLoaded: true, templates });
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () =>
+      root!.render(
+        <>
+          <Screen />
+          <Toasts />
+        </>,
+      ),
+    );
+  }
+  afterEach(() => patchStateForTests({ templates: undefined }));
+
+  const switchTo = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((b) => b.textContent === label)!;
+  const templateRow = (id: string) => [...host!.querySelectorAll<HTMLElement>("article.template-row")].find((r) => r.dataset.template === id);
+  const actionsOf = (id: string) => [...templateRow(id)!.querySelectorAll<HTMLButtonElement>(".template-row__actions button")].map((b) => b.getAttribute("aria-label"));
+  const action = (id: string, label: string) =>
+    [...templateRow(id)!.querySelectorAll<HTMLButtonElement>(".template-row__actions button")].find((b) => b.getAttribute("aria-label") === label)!;
+  const field = (label: string) =>
+    [...host!.querySelectorAll<HTMLElement>(".field")].find((f) => f.querySelector(".field__label")?.textContent === label)!;
+  const editorButton = (label: string) =>
+    [...host!.querySelectorAll<HTMLButtonElement>(".editor__actions button")].find((b) => b.textContent === label);
+  const writes = () => daemon.requests.filter((r) => r.method !== "GET" && r.path.startsWith("/templates"));
+
+  it("lists HarmFlow's and the user's templates, switched with the task list, a built-in one with View and Duplicate only", async () => {
+    await show([builtin, summary]);
+    expect(row("standup")).toBeDefined();
+    await click(switchTo("Templates"));
+    expect(row("standup")).toBeUndefined();
+    expect(actionsOf("hf-notes")).toEqual(["View", "Duplicate"]);
+    expect(actionsOf("notes-copy")).toEqual(["Edit", "Duplicate", "Delete"]);
+    expect(templateRow("notes-copy")!.textContent).toContain("Yours");
+    await click(switchTo("Tasks"));
+    expect(row("standup")).toBeDefined();
+    expect(templateRow("hf-notes")).toBeUndefined();
+  });
+
+  it("duplicates a built-in template, edits the copy in its form and saves it on its revision, then deletes it once confirmed", async () => {
+    answer("POST", "/templates/hf-notes/duplicate", opened("r1", "Sum up the meeting."), 201);
+    answer("GET", "/templates", [builtin, summary]);
+    answer("GET", "/templates/notes-copy", opened("r1", "Sum up the meeting."));
+    await show([builtin]);
+    await click(switchTo("Templates"));
+
+    await click(action("hf-notes", "Duplicate"));
+    expect(writes()).toEqual([req("POST", "/templates/hf-notes/duplicate")]);
+    expect(daemon.requests.filter((r) => r.path === "/templates/notes-copy")).toEqual([req("GET", "/templates/notes-copy")]);
+    expect(host!.querySelector(".editor__title")?.textContent).toBe("Edit template Meeting notes (copy)");
+    expect(field("Template ID").querySelector("input")!.value).toBe("notes-copy");
+
+    answer("PUT", "/templates/notes-copy", opened("r2", "Sum up the standup."));
+    const prompt = field("Prompt").querySelector("textarea")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(prompt, "Sum up the standup.");
+      prompt.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await click(editorButton("Save")!);
+    expect(writes().slice(1)).toEqual([req("PUT", "/templates/notes-copy", { document: documentOf("Sum up the standup."), baseRevision: "r1" })]);
+    expect(toasts()).toEqual([{ tone: "success", text: "Saved." }]);
+
+    await click(editorButton("Close")!);
+    expect(templateRow("notes-copy")).toBeDefined();
+    answer("DELETE", "/templates/notes-copy", null, 204);
+    answer("GET", "/templates", [builtin]);
+    const confirm = vi.spyOn(native, "confirm").mockResolvedValue(true);
+    await click(action("notes-copy", "Delete"));
+    expect(confirm.mock.calls).toEqual([
+      ["The template's YAML file is removed. Tasks created from it stay as they are.", "Delete Meeting notes (copy)?", "Delete", "Cancel"],
+    ]);
+    expect(writes().slice(2)).toEqual([req("DELETE", "/templates/notes-copy")]);
+    expect(templateRow("notes-copy")).toBeUndefined();
+    expect(toasts().at(-1)).toEqual({ tone: "success", text: "Template deleted." });
+  });
+
+  it("deletes nothing when the confirmation is declined", async () => {
+    const confirm = vi.spyOn(native, "confirm").mockResolvedValue(false);
+    await show([builtin, summary]);
+    await click(switchTo("Templates"));
+    await click(action("notes-copy", "Delete"));
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(writes()).toEqual([]);
+  });
+
+  it("opens a built-in template to view, with its form disabled and no Save, and ⌘S sends nothing", async () => {
+    const document = { ...documentOf("Sum up the meeting."), metadata: { id: "hf-notes", name: named("Meeting notes"), description: named("Sums up the meeting.") } };
+    answer("GET", "/templates/hf-notes", { ...builtin, document, yaml: yamlOf("Sum up the meeting.") });
+    await show([builtin]);
+    await click(switchTo("Templates"));
+    await click(action("hf-notes", "View"));
+    expect(host!.querySelector(".editor__title")?.textContent).toBe("Meeting notes");
+    expect(editorButton("Save")).toBeUndefined();
+    expect(field("Prompt").querySelector("textarea")!.closest("fieldset")!.disabled).toBe(true);
+    await act(async () => void window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", metaKey: true })));
+    await settle();
+    expect(writes()).toEqual([]);
+  });
+
+  it("creates an empty template of a type the catalog lists, and opens its editor", async () => {
+    patchStateForTests({ catalog: { agents: [], skills: [], taskTypes: [{ id: "general", parametersKey: null }, { id: "github", parametersKey: "github" }] } as never });
+    answer("POST", "/templates", { ...opened("r1", ""), id: "triage", type: "github" }, 201);
+    answer("GET", "/templates", [builtin]);
+    answer("GET", "/templates/triage", { ...opened("r1", ""), id: "triage", type: "github" });
+    await show([builtin]);
+    await click(switchTo("Templates"));
+    await click([...host!.querySelectorAll<HTMLButtonElement>(".filters button")].find((b) => b.textContent === "New template")!);
+    const dialog = host!.querySelector<HTMLElement>(".modal")!;
+    const enter = async (el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, value: string) => {
+      const proto = el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(el, value);
+        el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }));
+      });
+    };
+    const type = dialog.querySelector("select")!;
+    expect([...type.options].map((o) => o.value)).toEqual(["general", "github"]);
+    await enter(type, "github");
+    const [name, id] = [...dialog.querySelectorAll<HTMLInputElement>("input")];
+    await enter(name, "Triage");
+    expect(id.value).toBe("triage");
+    await enter(dialog.querySelector("textarea")!, "Sorts the issues.");
+    await click([...dialog.querySelectorAll<HTMLButtonElement>(".modal__footer button")].find((b) => b.textContent === "Create template")!);
+    expect(writes()).toEqual([req("POST", "/templates", { id: "triage", name: "Triage", description: "Sorts the issues.", type: "github" })]);
+    expect(daemon.requests.filter((r) => r.path === "/templates/triage")).toEqual([req("GET", "/templates/triage")]);
   });
 });
