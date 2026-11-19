@@ -13,9 +13,10 @@ import (
 // recordingStandIn writes a wrapper, named for the CLI it stands for, around one of the stand-ins in testdata. Before
 // the stand-in runs, each execution's arguments are recorded NUL-separated in $HARMFLOW_EXECUTION_DIR/args, its
 // environment as NUL-separated NAME=VALUE entries in env, the CLAUDE_CONFIG_DIR it runs with in claude-config-dir, and
-// its stdin, read to its end, in stdin, which the stand-in then reads in turn. The read builtin stands in for cat, and
-// compgen for env, as in the stand-ins. The probes run with no execution directory and record nothing, and neither
-// does Claude Code's skill list, a -p session with no permission mode, which every execution sets.
+// its stdin, read to its end, in stdin, which the stand-in then reads in turn. Codex's app server is spoken to while it
+// runs, so its stdin is copied to stdin as the stand-in reads it, never read to its end first. The read builtin stands
+// in for cat, and compgen for env, as in the stand-ins. The probes run with no execution directory and record nothing,
+// and neither does Claude Code's skill list, a -p session with no permission mode, which every execution sets.
 func recordingStandIn(t *testing.T, fake, name string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
@@ -26,6 +27,7 @@ func recordingStandIn(t *testing.T, fake, name string) string {
 		`printf '%s\0' "$@" > "$HARMFLOW_EXECUTION_DIR/args"` + "\n" +
 		`for v in $(compgen -e); do printf '%s=%s\0' "$v" "${!v}"; done > "$HARMFLOW_EXECUTION_DIR/env"` + "\n" +
 		`printf '%s' "$CLAUDE_CONFIG_DIR" > "$HARMFLOW_EXECUTION_DIR/claude-config-dir"` + "\n" +
+		`if [ "$1" = app-server ]; then tee "$HARMFLOW_EXECUTION_DIR/stdin" | ` + stand + ` "$@"; exit; fi` + "\n" +
 		`IFS= read -r -d '' input` + "\n" +
 		`printf '%s' "$input" > "$HARMFLOW_EXECUTION_DIR/stdin"` + "\n" +
 		`exec ` + stand + ` "$@" < "$HARMFLOW_EXECUTION_DIR/stdin"` + "\n"
@@ -53,14 +55,41 @@ func recordedEnv(t *testing.T, x map[string]any) map[string]string {
 }
 
 // recorded is what the recording stand-in recorded in an execution under the name: args, env, claude-config-dir, or
-// stdin.
+// stdin. The stdin of Codex's app server is the protocol's lines, of which the session's input is the text of its
+// turn/start, as the harness reads it.
 func recorded(t *testing.T, x map[string]any, name string) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(x["executionDir"].(string), name))
 	if err != nil {
 		t.Fatalf("the stand-in recorded no %s: %v", name, err)
 	}
+	if name == "stdin" {
+		if turn, ok := recordedRequest(data, "turn/start"); ok {
+			var params struct {
+				Input []struct {
+					Text string `json:"text"`
+				} `json:"input"`
+			}
+			if json.Unmarshal(turn, &params) == nil && len(params.Input) > 0 {
+				return params.Input[0].Text
+			}
+		}
+	}
 	return string(data)
+}
+
+// recordedRequest is the params of the request of the method the app server's recorded stdin holds.
+func recordedRequest(stdin []byte, method string) (json.RawMessage, bool) {
+	for _, line := range bytes.Split(stdin, []byte("\n")) {
+		var m struct {
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		if json.Unmarshal(line, &m) == nil && m.Method == method {
+			return m.Params, true
+		}
+	}
+	return nil, false
 }
 
 // passedPair reports whether args hold flag immediately followed by value.
@@ -113,23 +142,30 @@ func checkClaudeFlags(t *testing.T, what string, args []string, model, effort st
 	}
 }
 
-// checkCodexFlags fails the test unless args pass --model and model_reasoning_effort with the given values, or, for
-// an empty one, pass neither the flag nor the setting.
-func checkCodexFlags(t *testing.T, what string, args []string, model, effort string) {
+// checkCodexRequests fails the test unless the thread Codex's app server started names the model, and its turn the
+// effort, or, for an empty one, names none: the requests the recording stand-in copied from its stdin.
+func checkCodexRequests(t *testing.T, what string, x map[string]any, model, effort string) {
 	t.Helper()
-	switch {
-	case model == "" && slices.Contains(args, "--model"):
-		t.Errorf("%s: --model was passed: %q", what, args)
-	case model != "" && !passedPair(args, "--model", model):
-		t.Errorf("%s: no --model %s in %q", what, model, args)
+	data, err := os.ReadFile(filepath.Join(x["executionDir"].(string), "stdin"))
+	if err != nil {
+		t.Fatalf("%s: the stand-in recorded no stdin: %v", what, err)
 	}
-	setting := `model_reasoning_effort="` + effort + `"`
-	anyEffort := func(a string) bool { return strings.HasPrefix(a, "model_reasoning_effort=") }
-	switch {
-	case effort == "" && slices.ContainsFunc(args, anyEffort):
-		t.Errorf("%s: a reasoning effort was passed: %q", what, args)
-	case effort != "" && !passedPair(args, "-c", setting):
-		t.Errorf("%s: no -c %s in %q", what, setting, args)
+	var thread struct {
+		Model *string `json:"model"`
+	}
+	var turn struct {
+		Effort *string `json:"effort"`
+	}
+	rawThread, okThread := recordedRequest(data, "thread/start")
+	rawTurn, okTurn := recordedRequest(data, "turn/start")
+	if !okThread || !okTurn || json.Unmarshal(rawThread, &thread) != nil || json.Unmarshal(rawTurn, &turn) != nil {
+		t.Fatalf("%s: the app server received no thread/start and turn/start: %s", what, data)
+	}
+	if (model == "") != (thread.Model == nil) || (thread.Model != nil && *thread.Model != model) {
+		t.Errorf("%s: thread/start model %v, want %q", what, thread.Model, model)
+	}
+	if (effort == "") != (turn.Effort == nil) || (turn.Effort != nil && *turn.Effort != effort) {
+		t.Errorf("%s: turn/start effort %v, want %q", what, turn.Effort, effort)
 	}
 }
 
@@ -204,18 +240,20 @@ func TestChangedProfileIsValidatedAndAppliedNextRun(t *testing.T) {
 		refused     []refusal
 		// The supported change, and what the next execution passes for it.
 		profile, model, effort string
-		check                  func(*testing.T, string, []string, string, string)
+		check                  func(*testing.T, string, map[string]any, string, string)
 	}{
 		{harness: "codex", id: "codex-pick", refused: []refusal{
 			{"      model: no-such-model\n", "codex_model_unknown"},
 			{"      model: gpt-test\n      effort: medium\n", "codex_effort_invalid"},
 		}, profile: "      model: gpt-test\n      effort: high\n", model: "gpt-test", effort: "high",
-			check: checkCodexFlags},
+			check: checkCodexRequests},
 		{harness: "claude-code", id: "claude-pick", refused: []refusal{
 			{"      effort: ultra\n", "claude_effort_invalid"},
 			{"      model: gpt-5\n", "claude_model_unknown"},
 		}, profile: "      model: opus\n      effort: low\n", model: "opus", effort: "low",
-			check: checkClaudeFlags},
+			check: func(t *testing.T, what string, x map[string]any, model, effort string) {
+				checkClaudeFlags(t, what, recordedArgs(t, x), model, effort)
+			}},
 	}
 	for _, c := range cases {
 		t.Run(c.id, func(t *testing.T) {
@@ -223,7 +261,7 @@ func TestChangedProfileIsValidatedAndAppliedNextRun(t *testing.T) {
 
 			created := d.call("POST", "/tasks", map[string]any{"yaml": profileTask(c.id, c.harness, "")}, 201)
 			x := d.completedRun(c.id)
-			c.check(t, c.id+" before the change", recordedArgs(t, x), "", "")
+			c.check(t, c.id+" before the change", x, "", "")
 			checkConfigured(t, c.id+" before the change", firstAttempt(t, x), "default", "default")
 
 			file := filepath.Join(home, "tasks", c.id+".yaml")
@@ -246,7 +284,7 @@ func TestChangedProfileIsValidatedAndAppliedNextRun(t *testing.T) {
 			d.call("PUT", "/tasks/"+c.id,
 				map[string]any{"yaml": profileTask(c.id, c.harness, c.profile), "baseRevision": created["revision"]}, 200)
 			x = d.completedRun(c.id)
-			c.check(t, c.id+" after the change", recordedArgs(t, x), c.model, c.effort)
+			c.check(t, c.id+" after the change", x, c.model, c.effort)
 			checkConfigured(t, c.id+" after the change", firstAttempt(t, x), c.model, c.effort)
 		})
 	}

@@ -862,3 +862,41 @@ func TestShutdownWaitsForARequestUntilItsDeadline(t *testing.T) {
 		t.Errorf("Serve() = %v, want nil", err)
 	}
 }
+
+// harmflow-app#465: POST /api/v1/executions/{id}/approvals/{requestId} takes only a decision HarmFlow offers, answers
+// 404 for an execution it does not know, and 409 when no such request waits: a script task's program asks none.
+func TestAnswerApprovalRoute(t *testing.T) {
+	a := startedApp(t)
+	if _, err := a.CreateTask(t.Context(), app.TaskInput{YAML: busyTask}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	res, err := a.RunTask("busy")
+	if err != nil {
+		t.Fatalf("RunTask(%q): %v", "busy", err)
+	}
+	s := &Server{App: a}
+	s.SetToken(validToken)
+	for _, c := range []struct {
+		name, execution, body string
+		want                  int
+	}{
+		{"a decision HarmFlow does not offer", res.ExecutionID, `{"decision":"cancel"}`, 400},
+		{"no decision", res.ExecutionID, `{}`, 400},
+		{"a body that is not JSON", res.ExecutionID, `decline`, 400},
+		{"an unknown execution", "exec-none", `{"decision":"accept"}`, 404},
+		{"no request waits", res.ExecutionID, `{"decision":"accept"}`, 409},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			path := "/api/v1/executions/" + c.execution + "/approvals/7"
+			r := httptest.NewRequest("POST", path, strings.NewReader(c.body))
+			r.Host = "127.0.0.1:7000"
+			r.Header.Set("Authorization", "Bearer "+validToken)
+			r.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			s.Handler().ServeHTTP(w, r)
+			if w.Code != c.want {
+				t.Errorf("POST %s %s: status %d (%s), want %d", path, c.body, w.Code, w.Body.String(), c.want)
+			}
+		})
+	}
+}
