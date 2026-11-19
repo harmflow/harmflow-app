@@ -34,6 +34,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      # The archive is kept in the Actions cache, keyed on the pinned version and checksum, so a short outage of the
+      # release host does not fail the scan. The script checks the checksum after a restore as after a download.
+      - id: gitleaks-key
+        run: .github/scripts/install-gitleaks.sh --cache-key
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.gitleaks-key.outputs.path }}
+          key: ${{ steps.gitleaks-key.outputs.key }}
       - run: .github/scripts/install-gitleaks.sh
       - name: Scan the whole history
         run: gitleaks git --config .gitleaks.toml --redact --no-banner
