@@ -4047,6 +4047,48 @@ button.list-row--error:hover {
   grid-template-columns: minmax(0, 1fr);
 }
 
+/* Settings › Appearance: each screen's metric cards, a checkbox and Move up / Move down per card */
+.metric-cards {
+  margin-top: var(--hf-space-4);
+}
+
+.metric-cards__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--hf-space-3);
+}
+
+.metric-cards__title {
+  margin: 0;
+  font-size: var(--hf-font-size-sm);
+  font-weight: var(--hf-font-weight-semibold);
+}
+
+.metric-cards__list {
+  margin: var(--hf-space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.metric-cards__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--hf-space-3);
+  padding: var(--hf-space-2) 0;
+  border-top: 1px solid var(--hf-color-border);
+}
+
+.metric-cards__moves {
+  display: inline-flex;
+  gap: var(--hf-space-1);
+}
+
+.metric-cards__up svg {
+  transform: rotate(180deg);
+}
+
 /* A setting: label and hint on the left, control on the right; the control wraps under the label when both don't fit */
 .setting-row {
   display: flex;

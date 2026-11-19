@@ -1,5 +1,5 @@
 // Settings, divided into sections: a list of them on the left, and the open one beside it. Interface: the language, the
-// menu bar, the zoom and the typeface, notifications, and the keyboard shortcuts. Execution: the AI tools, the general system prompt, and the command-line tools, and the paths a task may use. This
+// menu bar, the zoom, the typeface, and each screen's metric cards, notifications, and the keyboard shortcuts. Execution: the AI tools, the general system prompt, and the command-line tools, and the paths a task may use. This
 // computer: the daemon, storage, and local API security. About stands alone at the foot of the list.
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";

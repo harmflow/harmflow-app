@@ -1715,7 +1715,7 @@ describe("settings sections", () => {
         "Mostrar o widget GitHub",
       ],
     ],
-    ["appearance", ["Zoom", "Fonte"], ["O mesmo nível de ⌘+, ⌘− e ⌘0", "HarmFlow", "Sistema"]],
+    ["appearance", ["Zoom", "Fonte", "Cards de métricas"], ["O mesmo nível de ⌘+, ⌘− e ⌘0", "HarmFlow", "Sistema", "Restaurar padrão"]],
     ["notifications", ["Avisos"], ["Nível de notificação"]],
     [
       "shortcuts",
@@ -1749,7 +1749,8 @@ describe("settings sections", () => {
     await render(<SettingsScreen section="appearance" zoom={110} onZoom={(level) => set.push(level)} />);
     const section = host!.querySelector(".settings__section")!;
     expect([...section.querySelectorAll("select")].map((s) => s.id)).toEqual(["settings-zoom", "settings-typeface"]);
-    expect([...section.querySelectorAll("button, input, textarea")]).toEqual([]);
+    // Zoom and Font have no reset action; the only buttons and inputs are the metric cards' list's.
+    expect([...section.querySelectorAll("button, input, textarea")].filter((el) => !el.closest(".metric-cards"))).toEqual([]);
 
     const zoom = section.querySelector<HTMLSelectElement>("#settings-zoom")!;
     expect([...zoom.options].map((o) => o.textContent)).toEqual(["80%", "90%", "100%", "110%", "125%", "150%"]);
