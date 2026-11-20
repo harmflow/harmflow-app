@@ -26,7 +26,7 @@ func startWithGeminiSignedIn(t *testing.T) *daemon {
 	return startDaemon(t, home)
 }
 
-// FS-004 AC-026 and AC-027, FS-008 AC-057: a task on gemini-cli runs to completion on the stand-in, unattended in its
+// A task on gemini-cli runs to completion on the stand-in, unattended in its
 // workspace, and its log holds the stream's events as the event types the other harnesses produce.
 func TestGeminiCLITaskRunsToCompletion(t *testing.T) {
 	t.Parallel()
@@ -63,7 +63,7 @@ func TestGeminiCLITaskRunsToCompletion(t *testing.T) {
 	}
 }
 
-// FS-004 AC-026: with no sign-in in its own store, the Gemini CLI reads not ready, an API key in the environment
+// With no sign-in in its own store, the Gemini CLI reads not ready, an API key in the environment
 // notwithstanding.
 func TestGeminiCLISignedOutDespiteAnAPIKey(t *testing.T) {
 	t.Parallel()
@@ -80,7 +80,7 @@ func TestGeminiCLISignedOutDespiteAnAPIKey(t *testing.T) {
 	t.Fatal("the harness list has no gemini-cli")
 }
 
-// FS-005 AC-018: the Gemini CLI's failures are classified as the others' are; quota and a sign-in fail over to Claude
+// The Gemini CLI's failures are classified as the others' are; quota and a sign-in fail over to Claude
 // Code, a network failure does not, and a task whose Claude Code runs out of quota fails over to the Gemini CLI.
 func TestGeminiCLIFailover(t *testing.T) {
 	t.Parallel()

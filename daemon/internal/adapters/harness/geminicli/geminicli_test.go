@@ -52,7 +52,7 @@ func signIn(t *testing.T, home string) {
 	}
 }
 
-// FS-004 AC-026: absent, signed out despite an API key in the environment, and ready by the CLI's own sign-in.
+// Absent, signed out despite an API key in the environment, and ready by the CLI's own sign-in.
 func TestDetectReadyByItsOwnSignInAlone(t *testing.T) {
 	ctx := context.Background()
 	empty := tempDir(t)
@@ -95,7 +95,7 @@ func TestDetectReadsTheSignInUnderGeminiCLIHome(t *testing.T) {
 	}
 }
 
-// FS-009 FR-014, D-397: a file is the Gemini CLI when it is named gemini and its --version output is a version number.
+// A file is the Gemini CLI when it is named gemini and its --version output is a version number.
 func TestIdentifyByNameAndVersionShape(t *testing.T) {
 	ctx := context.Background()
 	a := &Adapter{Home: tempDir(t)}
@@ -136,7 +136,7 @@ func TestValidateProfile(t *testing.T) {
 
 func boolp(b bool) *bool { return &b }
 
-// FS-004 AC-027 and FS-009 AC-015: the run is non-interactive, with stream-json, the model, the prompt on stdin, the
+// The run is non-interactive, with stream-json, the model, the prompt on stdin, the
 // extra folders included, no API key, and each setting the CLI cannot enforce reported as not enforced.
 func TestPrepare(t *testing.T) {
 	a := &Adapter{}
@@ -200,7 +200,7 @@ const stream = `{"type":"init","session_id":"s-1","model":"gemini-2.5-pro"}
 {"type":"message","role":"assistant","content":"Done.","delta":true}
 {"type":"result","status":"success","stats":{"total_tokens":10}}`
 
-// FS-008 AC-057: the stream's lines become the event kinds the other harnesses produce.
+// The stream's lines become the event kinds the other harnesses produce.
 func TestParserNormalizesTheStream(t *testing.T) {
 	a := &Adapter{}
 	_, p, _ := a.Prepare(ports.HarnessInfo{}, ports.RunRequest{})
@@ -227,7 +227,7 @@ func TestParserNormalizesTheStream(t *testing.T) {
 	}
 }
 
-// FS-005 AC-018: each failure class, from the CLI's own texts and its exit code.
+// Each failure class, from the CLI's own texts and its exit code.
 func TestFinishClassifiesFailures(t *testing.T) {
 	cases := []struct {
 		name      string

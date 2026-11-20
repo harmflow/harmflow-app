@@ -30,8 +30,8 @@ const (
 	binary = "gemini"
 	// homeVariable moves the folder that holds the CLI's own .gemini folder, its settings and its sign-in.
 	homeVariable = "GEMINI_CLI_HOME"
-	// credentialsFile is the file, in the CLI's own .gemini folder, where its own Google sign-in is kept. Only its presence
-	// is checked: the daemon never reads it.
+	// credentialsFile is the file, in the CLI's own .gemini folder, where its own Google sign-in is kept. Only its
+	// presence is checked: the daemon never reads it.
 	credentialsFile = "oauth_creds.json"
 )
 
@@ -202,7 +202,7 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 			"the {{harness}} {{command}} check timed out, so the flags it has are unknown; the first attempt proves them",
 			"harness", Name, "command", "--help"))
 	}
-	// No release has been tested yet (D-255): every version runs, with the untested warning.
+	// No release has been tested against the real CLI yet: every version runs, with the untested warning.
 	info.VersionSupport = "untested_newer"
 	if info.Version == "" {
 		info.VersionSupport = "unknown"
