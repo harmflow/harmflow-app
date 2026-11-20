@@ -216,20 +216,24 @@ exec 3<&0
 "$REAL" "$@" <&3 >"$OUT" &
 PID=$!
 exec 3<&-
+# The session writes its selection as JSON, with or without spaces around the colon.
+SELECTION='"type"[[:space:]]*:[[:space:]]*"work_item\.selected"'
 SELECTED=0
 while IFS= read -r LINE; do
   printf '%%s\n' "$LINE"
-  if grep -qF '"type":"work_item.selected"' "$PROGRESS" 2>/dev/null; then
+  if grep -qE "$SELECTION" "$PROGRESS" 2>/dev/null; then
     SELECTED=1
     break
   fi
 done <"$OUT"
 if [ "$SELECTED" = 0 ]; then
   wait "$PID"
-  exit $?
+  STATUS=$?
+  rm -f "$OUT"
+  exit "$STATUS"
 fi
 for _ in $(seq 1200); do
-  grep -qF '"type":"work_item.selected"' "$LOG" 2>/dev/null && break
+  grep -qE "$SELECTION" "$LOG" 2>/dev/null && break
   sleep 0.05
 done
 kill -TERM "$PID" 2>/dev/null
