@@ -159,6 +159,26 @@ func TestParseQuota(t *testing.T) {
 	}
 }
 
+// harmflow-app#1121: with no rate-limit event, the result's text alone makes an exhausted quota of the spending cap
+// Claude Code 2.0.0 prints, and of the 5-hour limit, as 2.1.312 and later name the plan's five-hour window.
+func TestParseQuotaTextWithNoRateLimitEvent(t *testing.T) {
+	for _, file := range []string{"spending-cap.jsonl", "five-hour-limit.jsonl"} {
+		t.Run(file, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join("testdata", file))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(data), "rate_limit_event") {
+				t.Fatalf("the fixture %s holds a rate_limit_event", file)
+			}
+			p, _ := replay(t, file)
+			if end := p.Finish(1, "", false, false); end.Class != domain.ClassQuotaExhausted {
+				t.Errorf("Finish(1, \"\", false, false).Class = %s (%s), want quota_exhausted", end.Class, end.Error.Message)
+			}
+		})
+	}
+}
+
 // harmflow-app#973: a member whose usage an admin disabled, as Claude Code 2.1.309 reported it, is rejected with no
 // plan window; the CLI's quota text makes it an exhausted quota, not a rate limit to wait out on the same harness.
 func TestParseAdminDisabledUsage(t *testing.T) {
@@ -270,6 +290,8 @@ func TestFinishClassifiesTheCLIsOwnTexts(t *testing.T) {
 		{"Usage limit reached · limit resets 3pm", domain.ClassQuotaExhausted},
 		{"You've hit your weekly limit · resets Oct 27", domain.ClassQuotaExhausted},
 		{"You’ve hit your monthly spend limit.", domain.ClassQuotaExhausted},
+		{"You've hit your 5-hour limit · resets 3pm", domain.ClassQuotaExhausted},
+		{"Spending cap reached resets Dec 1", domain.ClassQuotaExhausted},
 		{"Session limit reached ∙ resets 7pm", domain.ClassQuotaExhausted},
 		{"Opus weekly limit reached ∙ resets Oct 27 at 10am", domain.ClassQuotaExhausted},
 		{"You're out of extra usage · resets 9pm", domain.ClassQuotaExhausted},
@@ -280,6 +302,7 @@ func TestFinishClassifiesTheCLIsOwnTexts(t *testing.T) {
 		{"the test fixture's disk quota helper failed: 3 tests failed", domain.ClassTaskError},
 		{"retry limit reached while waiting for CI", domain.ClassTaskError},
 		{"FAIL TestSessionLimit: the session limit was not enforced", domain.ClassTaskError},
+		{"FAIL TestSpendingCap: the spending cap was not enforced", domain.ClassTaskError},
 		{"gh: You are not logged into any GitHub hosts. Run gh auth login", domain.ClassTaskError},
 	}
 	for _, c := range cases {
