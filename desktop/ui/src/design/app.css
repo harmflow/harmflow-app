@@ -1262,6 +1262,11 @@ body:has([aria-modal="true"]) .tooltip {
   color: var(--hf-color-codex);
 }
 
+.harness--gemini-cli .harness-mark,
+.harness-row__mark.harness--gemini-cli {
+  color: var(--hf-color-gemini);
+}
+
 .harness__model {
   padding: 0 var(--hf-space-1-5);
   border-radius: var(--hf-radius-sm);

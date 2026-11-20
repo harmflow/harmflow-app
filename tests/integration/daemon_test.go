@@ -144,7 +144,8 @@ func startDaemonWith(t *testing.T, home string, o daemonOptions, env ...string) 
 	setStandInsBeforeStart(t, home)
 	cmd := exec.Command(binary, "--home", home, "--builtins", builtins)
 	// Codex's configuration is the test's own, never the user's.
-	cmd.Env = daemonEnv(append(append([]string{"CODEX_HOME=" + filepath.Join(home, "codex")}, store...), env...))
+	cmd.Env = daemonEnv(append(append([]string{"CODEX_HOME=" + filepath.Join(home, "codex"),
+		"GEMINI_CLI_HOME=" + filepath.Join(home, "gemini")}, store...), env...))
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := cmd.Start(); err != nil {
@@ -252,7 +253,8 @@ func awaitStarted(base, token string, timeout time.Duration) bool {
 // fakeHarnesses are the paths of the stand-in CLIs of testdata/, by harness id.
 func fakeHarnesses() map[string]string {
 	fakes := filepath.Join(repoRoot(), "tests", "integration", "testdata")
-	return map[string]string{"claude-code": filepath.Join(fakes, "fake-claude"), "codex": filepath.Join(fakes, "fake-codex")}
+	return map[string]string{"claude-code": filepath.Join(fakes, "fake-claude"), "codex": filepath.Join(fakes, "fake-codex"),
+		"gemini-cli": filepath.Join(fakes, "fake-gemini", "gemini")}
 }
 
 // setStandInsBeforeStart sets the stand-ins' paths by hand in the home's state/harnesses.json, where the daemon keeps
@@ -283,6 +285,7 @@ func (d *daemon) useFakeHarnesses() {
 	fakes := fakeHarnesses()
 	d.call("PUT", "/harnesses/claude-code", map[string]any{"path": fakes["claude-code"]}, 200)
 	d.call("PUT", "/harnesses/codex", map[string]any{"path": fakes["codex"]}, 200)
+	d.call("PUT", "/harnesses/gemini-cli", map[string]any{"path": fakes["gemini-cli"]}, 200)
 }
 
 func (d *daemon) stop() {

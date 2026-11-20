@@ -1,0 +1,50 @@
+#!/bin/bash
+# A stand-in for the Gemini CLI that speaks its stream-json format. It is named gemini, as the daemon identifies the CLI
+# by its executable's name and a version-shaped --version output. The task's prompt picks the scenario, by a variable of
+# its own so that a task can fail over between it and another stand-in: GEMINI=ok (default),
+# GEMINI=quota, GEMINI=ratelimit, GEMINI=signedout (exits 41, the CLI's authentication
+# error), GEMINI=network, or GEMINI=error (a task error). It writes the arguments it was started with,
+# one per line, to gemini-args in its working directory.
+case "$1" in
+  --version) echo "0.18.0"; exit 0 ;;
+  --help) cat <<'HELP'
+Usage: gemini [options] [query..]
+  -m, --model  -p, --prompt  -o, --output-format  --approval-mode  --include-directories
+HELP
+    exit 0 ;;
+esac
+printf '%s\n' "$@" > gemini-args
+prompt=$(cat)
+scenario=ok
+case "$prompt" in
+  *GEMINI=quota*) scenario=quota ;;
+  *GEMINI=ratelimit*) scenario=ratelimit ;;
+  *GEMINI=signedout*) scenario=signedout ;;
+  *GEMINI=network*) scenario=network ;;
+  *GEMINI=error*) scenario=error ;;
+esac
+echo '{"type":"init","timestamp":"2026-11-19T00:00:00Z","session_id":"gemini-session-1","model":"gemini-2.5-pro"}'
+case "$scenario" in
+  quota)
+    echo '{"type":"result","status":"error","error":{"type":"api","message":"Quota exceeded for quota metric Gemini requests per day"}}'
+    exit 1 ;;
+  ratelimit)
+    echo "429 Too Many Requests" >&2
+    exit 1 ;;
+  signedout)
+    echo "Error authenticating: login required" >&2
+    exit 41 ;;
+  network)
+    echo "fetch failed: getaddrinfo ENOTFOUND generativelanguage.googleapis.com" >&2
+    exit 1 ;;
+  error)
+    echo '{"type":"message","role":"assistant","content":"The tests failed.","delta":true}'
+    echo '{"type":"result","status":"error","error":{"type":"task","message":"the tests failed"}}'
+    exit 1 ;;
+esac
+echo '{"type":"message","role":"assistant","content":"Working on it.","delta":true}'
+echo '{"type":"tool_use","tool_name":"run_shell_command","tool_id":"tool-1","parameters":{"command":"ls"}}'
+echo '{"type":"tool_result","tool_id":"tool-1","status":"success","output":"README.md"}'
+echo '{"type":"message","role":"assistant","content":"Done.","delta":true}'
+echo '{"type":"result","status":"success","stats":{"total_tokens":42}}'
+exit 0

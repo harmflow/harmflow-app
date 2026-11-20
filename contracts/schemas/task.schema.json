@@ -365,7 +365,8 @@
       "type": "string",
       "enum": [
         "claude-code",
-        "codex"
+        "codex",
+        "gemini-cli"
       ]
     },
     "harnessProfile": {
