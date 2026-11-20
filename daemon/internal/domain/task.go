@@ -28,10 +28,11 @@ const (
 	SystemWindows = "windows"
 )
 
-// Harness providers of the MVP.
+// Harness providers: the MVP's two, and the Gemini CLI, which counts for no MVP claim.
 const (
 	HarnessClaudeCode = "claude-code"
 	HarnessCodex      = "codex"
+	HarnessGeminiCLI  = "gemini-cli"
 )
 
 // DefaultModel and DefaultEffort leave the harness's own default in place.

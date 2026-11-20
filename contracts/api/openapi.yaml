@@ -1095,7 +1095,7 @@ components:
       name: harnessId
       in: path
       required: true
-      schema: { type: string, enum: [claude-code, codex] }
+      schema: { type: string, enum: [claude-code, codex, gemini-cli] }
 
   responses:
     Unauthorized:
@@ -1226,6 +1226,8 @@ components:
         - claude_effort_invalid
         - codex_model_unknown
         - codex_effort_invalid
+        - gemini_model_unknown
+        - gemini_effort_unsupported
         - codex_profile_unchecked
         - harness_not_detected
         - harness_not_ready
@@ -1287,6 +1289,7 @@ components:
         - restriction_codex_program_lists
         - restriction_codex_read_only
         - restriction_codex_ephemeral_missing
+        - restriction_gemini_unenforced
         - restriction_script_unenforced
         - script_leftovers_ended
         - harness_version_untested
@@ -1386,6 +1389,7 @@ components:
         - harness_manual_path_invalid
         - claude_not_found
         - codex_not_found
+        - gemini_not_found
         - git_not_found
         - gh_not_found
         - command_failed
@@ -1394,6 +1398,7 @@ components:
         - codex_app_server_help_timed_out
         - harness_version_below_minimum
         - claude_not_signed_in
+        - gemini_not_signed_in
         - quota_report_unrecognized
         - not_signed_in
         - authentication_unverified
@@ -1615,7 +1620,7 @@ components:
       type: object
       required: [id, name, detected, readiness, authentication, models, efforts, lastCheckedAt, installations]
       properties:
-        id: { type: string, enum: [claude-code, codex] }
+        id: { type: string, enum: [claude-code, codex, gemini-cli] }
         name: { type: string }
         detected: { type: boolean }
         path: { type: string, description: The resolved absolute path. }
@@ -1899,7 +1904,7 @@ components:
           description: >-
             The harness its tasks run on, the provider of its preferred profile; claude-code when it names none.
           type: string
-          enum: [claude-code, codex]
+          enum: [claude-code, codex, gemini-cli]
         harnessReady: { type: boolean, description: Whether that harness is ready. }
         missing:
           description: >-

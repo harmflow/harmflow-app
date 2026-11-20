@@ -25,6 +25,7 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/fsstore"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/claudecode"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/codex"
+	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/geminicli"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/httpapi"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/launchd"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/schema"
@@ -241,6 +242,7 @@ func Run(cfg Config, registrations ...Registration) error {
 			&claudecode.Adapter{Home: userHome, PathEnv: pathEnv, Env: harnessEnv,
 				GitHubToken: claudecode.GHAuthToken(pathEnv, harnessEnv)},
 			&codex.Adapter{Home: userHome, PathEnv: pathEnv, Env: harnessEnv, ClientVersion: cfg.Version},
+			&geminicli.Adapter{Home: userHome, PathEnv: pathEnv, Env: harnessEnv},
 		},
 		Service:    service,
 		System:     system,

@@ -363,6 +363,8 @@ export const ptBR: Resources = {
       'o Claude Code {{version}} não aceita o esforço "{{effort}}"; ele aceita {{efforts}}',
     codex_model_unknown: 'o Codex {{version}} não oferece o modelo "{{model}}"; ele oferece {{models}}',
     codex_effort_invalid: 'o modelo do Codex "{{model}}" não aceita o esforço "{{effort}}"; ele aceita {{efforts}}',
+    gemini_model_unknown: 'o Gemini CLI não oferece o modelo "{{model}}"; use default ou um nome de modelo gemini-* completo',
+    gemini_effort_unsupported: "o Gemini CLI não tem ajuste de esforço; deixe o esforço como default",
     codex_profile_unchecked:
       "a lista de modelos do Codex não pôde ser lida, então o modelo e o esforço não foram verificados",
     harness_not_detected: "{{harness}} não foi detectado nesta máquina",
@@ -451,6 +453,7 @@ export const ptBR: Resources = {
       "os requisitos gerenciados do Codex não permitem o sandbox somente leitura com as aprovações desligadas, ou não puderam ser lidos, então o Codex pode aprovar uma alteração em um arquivo do workspace; a sessão pode alterar arquivos do seu workspace",
     restriction_codex_ephemeral_missing:
       "o Codex {{version}} não tem --ephemeral, então mantém todas as sessões e a opção ephemeral da tarefa não muda nada",
+    restriction_gemini_unenforced: "o Gemini CLI não aplica {{setting}}; ele é executado com um aviso",
     harness_version_untested: "{{harness}} {{version}} é mais novo que as versões com que o HarmFlow foi testado",
     harness_version_unknown: "{{harness}} não informou um número de versão, então o HarmFlow não sabe se foi testado com ela",
     quota_unread: "não foi possível ler a cota do {{harness}}, então a tentativa começou sem essa verificação: {{detail}}",
@@ -559,6 +562,7 @@ export const ptBR: Resources = {
     harness_manual_path_invalid: "o caminho definido manualmente não existe ou não é um arquivo",
     claude_not_found: "claude não foi encontrado no PATH nem nos locais de instalação habituais",
     codex_not_found: "codex não foi encontrado no PATH, no Codex.app nem nos locais de instalação habituais",
+    gemini_not_found: "gemini não foi encontrado no PATH nem nos locais de instalação habituais",
     git_not_found: "o git não foi encontrado",
     gh_not_found: "a CLI do GitHub (gh) não foi encontrada; o tipo de tarefa GitHub precisa dela",
     command_failed: "{{command}} falhou: {{detail}}",
@@ -569,6 +573,7 @@ export const ptBR: Resources = {
       "a verificação de --help do {{harness}} esgotou o tempo, então não se sabe se ele tem um app server; a primeira chamada ao app server o comprova",
     harness_version_below_minimum: "o {{harness}} {{version}} é anterior à {{minimum}}, a linha de versões mais antiga que o HarmFlow suporta",
     claude_not_signed_in: "o Claude Code não está conectado; execute `claude` em um terminal e entre na conta",
+    gemini_not_signed_in: "o Gemini CLI não está conectado; execute `gemini` em um terminal e entre com o Google",
     quota_report_unrecognized: "o relatório de uso do {{harness}} não traz nenhuma janela do plano que o HarmFlow consiga ler",
     not_signed_in: "{{name}} não está conectado; execute `{{command}}` em um terminal",
     authentication_unverified: "não foi possível verificar a autenticação",
@@ -998,7 +1003,7 @@ export const ptBR: Resources = {
     },
   },
   harness: {
-    names: { "claude-code": "Claude Code", codex: "Codex" },
+    names: { "claude-code": "Claude Code", codex: "Codex", "gemini-cli": "Gemini CLI" },
     scriptLabel: "Programa",
     effort: "Esforço: {{value}}",
     configuredModel: "Modelo configurado: {{value}}. O harness não informou o modelo que usou.",
