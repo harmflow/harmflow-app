@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","session_id":"33333333-3333-3333-3333-333333333333","model":"claude-sonnet-4-5"}
+{"type":"result","subtype":"success","is_error":true,"result":"Session limit reached ∙ resets 3pm","session_id":"33333333-3333-3333-3333-333333333333"}

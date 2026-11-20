@@ -10,6 +10,8 @@ This directory groups CLI-specific harness adapters and shared process helpers.
 - [claudecode](./claudecode/README.md) — Claude Code CLI adapter.
 - [codex](./codex/README.md) — Codex CLI and app-server adapter.
 - [procutil](./procutil/README.md) — process, terminal, executable, and process-tree helpers.
+- [quota-endings.md](./quota-endings.md) — what each supported Claude Code and Codex release prints when its quota runs
+  out, and how each adapter classifies it.
 
 ## Invariants
 
