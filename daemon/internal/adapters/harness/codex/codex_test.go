@@ -316,10 +316,51 @@ func TestFinishRedactsBeforeTheTail(t *testing.T) {
 	}
 }
 
+// A usage limit is an exhausted quota, and so are a workspace out of credits, a spend cap reached, and "Quota
+// exceeded", as Codex 0.163.0 and 0.171.0 end a turn on them: each fails over to the alternative harness.
 func TestParseQuota(t *testing.T) {
-	p, _ := replay(t, "quota.jsonl")
-	if end := p.Finish(1, "", false, false); end.Class != domain.ClassQuotaExhausted {
-		t.Errorf("got %s: %s", end.Class, end.Error.Message)
+	for _, file := range []string{
+		"quota.jsonl",
+		"quota-workspace-owner-credits.jsonl",
+		"quota-workspace-member-credits.jsonl",
+		"quota-workspace-owner-spend-cap.jsonl",
+		"quota-workspace-member-spend-cap.jsonl",
+		"quota-exceeded.jsonl",
+	} {
+		t.Run(file, func(t *testing.T) {
+			p, _ := replay(t, file)
+			if end := p.Finish(1, "", false, false); end.Class != domain.ClassQuotaExhausted {
+				t.Errorf("Finish(1, \"\", false, false).Class = %s (%s), want quota_exhausted", end.Class,
+					end.Error.Message)
+			}
+		})
+	}
+}
+
+// The quota's texts take no text of another class: a rate limit, a sign-in, or a network failure keeps its own, and
+// the system's disk quota exceeded, or a task's failure that names credits or a spend cap, stays a task error.
+func TestParseQuotaKeepsOtherClasses(t *testing.T) {
+	cases := []struct {
+		text string
+		want domain.ErrorClass
+	}{
+		{"exceeded retry limit, last status: 429 Too Many Requests", domain.ClassRateLimited},
+		{"Rate limit reached for requests. Please try again later.", domain.ClassRateLimited},
+		{"Not logged in", domain.ClassHarnessUnavailable},
+		{"no Codex credentials were found. Run codex login or provide an API key through a supported auth env var.",
+			domain.ClassHarnessUnavailable},
+		{"stream disconnected before completion: error sending request", domain.ClassNetwork},
+		{"tests failed: the credits screen shows no spend total", domain.ClassTaskError},
+		{"failed to write session file: Disk quota exceeded (os error 122)", domain.ClassTaskError},
+		{"failed to write session file: Disc quota exceeded (os error 69)", domain.ClassTaskError},
+		{"tests failed: want the out of credits banner when the spend cap is reached", domain.ClassTaskError},
+	}
+	for _, c := range cases {
+		t.Run(c.text, func(t *testing.T) {
+			if end := (&parser{}).Finish(1, c.text, false, false); end.Class != c.want {
+				t.Errorf("Finish(1, %q, false, false).Class = %s, want %s", c.text, end.Class, c.want)
+			}
+		})
 	}
 }
 
