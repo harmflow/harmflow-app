@@ -523,9 +523,15 @@ func TestSystemGaugesHaveTheirOwnRoute(t *testing.T) {
 	if _, ok := stats["system"]; ok {
 		t.Errorf("GET /api/v1/stats = %v, want no system field", stats)
 	}
-	for _, k := range []string{"running", "queued", "completedToday", "failedToday", "activity"} {
+	for _, k := range []string{"running", "queued", "completedToday", "failedToday", "noWorkToday", "activity"} {
 		if _, ok := stats[k]; !ok {
 			t.Errorf("GET /api/v1/stats = %v, want %s", stats, k)
+		}
+	}
+	activity, _ := stats["activity"].(map[string]any)
+	for _, k := range []string{"running", "queued", "completed", "failed", "noWork"} {
+		if _, ok := activity[k]; !ok {
+			t.Errorf("GET /api/v1/stats activity = %v, want %s", activity, k)
 		}
 	}
 	select {

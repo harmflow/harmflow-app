@@ -31,7 +31,7 @@ another platform's build, macOS, which a static reading needs no Mac for.
 | [`coverage-summary.sh`](/.github/scripts/coverage-summary.sh) | `coverage.yml` | Prints one part's coverage reading as Markdown, beside the floors that hold it, and writes the part's HTML report into `build/coverage` |
 | [`dead-code.sh`](/.github/scripts/dead-code.sh) | `make dead-code` in `dead-code.yml` | Prints the daemon's dead code as Markdown, from `deadcode` and `staticcheck`'s U1000 check at the versions the `Makefile` pins. A function is listed when every platform that builds its file finds it dead |
 | [`go-toolchain.sh`](/.github/scripts/go-toolchain.sh) | `make check-go-toolchain` in `security.yml`, and `make go-toolchain` | `check` fails when a newer patch of the Go minor exists or Go no longer supports the minor; `update` raises the toolchain line of `daemon/go.mod` and `tests/go.mod` to that patch |
-| [`install-gitleaks.sh`](/.github/scripts/install-gitleaks.sh) | `ci.yml` and `security.yml` | Installs a pinned gitleaks release on a Linux runner, checked against its SHA-256 before it runs |
+| [`install-gitleaks.sh`](/.github/scripts/install-gitleaks.sh) | `ci.yml` and `security.yml` | Installs a pinned gitleaks release on a Linux runner, checked against its SHA-256 before it runs. The archive is kept in the Actions cache, keyed on the version and the checksum (`--cache-key` gives the key and the folder), and checked again after a restore; on a cache miss, the download retries for up to ten minutes with a growing delay |
 | [`stress.sh`](/.github/scripts/stress.sh) | `stress.yml` | Starts and stops the CPU load, runs each suite beside it, and prints the run's summary from what it wrote to `build/stress` |
 
 ## Dependabot

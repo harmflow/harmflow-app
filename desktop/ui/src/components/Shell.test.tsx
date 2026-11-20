@@ -275,7 +275,8 @@ describe("stopping the daemon from the More actions menu", () => {
     queued: 0,
     completedToday: 0,
     failedToday: 0,
-    activity: { running: [], queued: [], completed: [], failed: [] },
+    noWorkToday: 0,
+    activity: { running: [], queued: [], completed: [], failed: [], noWork: [] },
   });
 
   afterEach(() => patchStateForTests({ stats: undefined }));
@@ -483,7 +484,7 @@ describe("the sidebar's gauges", () => {
 
   it("shows the counters' running badge from /stats, which brings no gauges", async () => {
     daemon.answers.set("GET /system", { status: 200, body: {} });
-    patchStateForTests({ stats: { running: 3, queued: 0, completedToday: 0, failedToday: 0, activity: { running: [], queued: [], completed: [], failed: [] } } });
+    patchStateForTests({ stats: { running: 3, queued: 0, completedToday: 0, failedToday: 0, noWorkToday: 0, activity: { running: [], queued: [], completed: [], failed: [], noWork: [] } } });
     await showSidebar(false);
     expect(host!.querySelector(".nav__badge")?.textContent).toBe("3");
     expect(texts()).toEqual(["—", "—", "—"]);

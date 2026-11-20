@@ -49,7 +49,7 @@ export function OverviewScreen({
 
   return (
     <div className="screen">
-      <Counters />
+      <Counters screen="overview" />
       <SpendBand />
       <div className="overview-grid">
         <Panel title={t("overview.daemon")} icon="power">

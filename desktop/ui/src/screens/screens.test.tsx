@@ -15,7 +15,7 @@ import { HarnessInventory } from "../components/Harnesses";
 import { Icon } from "../components/Icon";
 import { ValidationPanel } from "../components/TaskEditor";
 import { TaskForm } from "../components/TaskForm";
-import i18n from "../i18n";
+import i18n, { resources } from "../i18n";
 import { formatBytes, formatDateTime } from "../lib/format";
 import { SHORTCUT_GROUPS, shortcutsByGroup } from "../lib/shortcuts";
 import { slugify, type Doc } from "../lib/taskForm";
@@ -188,7 +188,8 @@ beforeAll(async () => {
       queued: 1,
       completedToday: 12,
       failedToday: 1,
-      activity: { running: [1, 2, 3], queued: [0, 1], completed: [3, 4], failed: [0, 1] },
+      noWorkToday: 2,
+      activity: { running: [1, 2, 3], queued: [0, 1], completed: [3, 4], failed: [0, 1], noWork: [1, 1] },
     },
     system: { cpuPercent: 12, memoryUsedBytes: 2.1e9, memoryTotalBytes: 16e9, diskUsedBytes: 48e9, diskTotalBytes: 500e9 },
     queue: {
@@ -226,6 +227,39 @@ describe("screens", () => {
     expect(html).not.toContain("Completed issue");
     expect(html).not.toContain("Closed issue");
     expect(html).not.toContain("Issue past its limits");
+  });
+
+  it("shows the No work card after Failed today, with today's count, on the Overview and the Executions screen", () => {
+    const screens = [
+      renderToString(<OverviewScreen onOpenExecution={() => {}} onNewTask={() => {}} onOpenTask={() => {}} />),
+      renderToString(<ExecutionsScreen selectedId={null} onSelect={() => {}} onGoToTasks={() => {}} onSeeHistory={() => {}} />),
+    ];
+    for (const html of screens) {
+      const host = document.createElement("div");
+      host.innerHTML = html;
+      const cards = [...host.querySelectorAll(".counters .counter")];
+      expect(cards.map((c) => c.querySelector(".counter__label")!.textContent)).toEqual([
+        i18n.t("counters.running"),
+        i18n.t("counters.queued"),
+        i18n.t("counters.completedToday"),
+        i18n.t("counters.failedToday"),
+        i18n.t("counters.noWorkToday"),
+      ]);
+      const noWork = cards[4];
+      expect(noWork.querySelector(".counter__value")!.textContent).toBe("2");
+      expect(noWork.className).toBe("counter counter--violet");
+      // Its tone is one no other card uses.
+      expect(cards.slice(0, 4).filter((c) => c.classList.contains("counter--violet"))).toHaveLength(0);
+    }
+  });
+
+  it("names the No work card in every language the app ships", () => {
+    const labels = Object.entries(resources).map(([lang, bundle]) => [lang, bundle.translation.counters.noWorkToday]);
+    expect(labels).toEqual([
+      ["en-US", "No work today"],
+      ["pt-BR", "Sem trabalho hoje"],
+      ["es-ES", "Sin trabajo hoy"],
+    ]);
   });
 
   it("renders the other screens", () => {
@@ -565,7 +599,7 @@ describe("the Overview's spend band", () => {
     expect(spend.parentElement).toBe(screen);
     const counters = spend.previousElementSibling!;
     expect(counters.className).toBe("counters");
-    expect(counters.querySelectorAll(".counter")).toHaveLength(4);
+    expect(counters.querySelectorAll(".counter")).toHaveLength(5);
     expect(counters.previousElementSibling).toBeNull();
     // Ahead of the panels' grid, and not inside it.
     const grid = spend.nextElementSibling!;
@@ -1715,7 +1749,7 @@ describe("settings sections", () => {
         "Mostrar o widget GitHub",
       ],
     ],
-    ["appearance", ["Zoom", "Fonte"], ["O mesmo nível de ⌘+, ⌘− e ⌘0", "HarmFlow", "Sistema"]],
+    ["appearance", ["Zoom", "Fonte", "Cards de métricas"], ["O mesmo nível de ⌘+, ⌘− e ⌘0", "HarmFlow", "Sistema", "Restaurar padrão"]],
     ["notifications", ["Avisos"], ["Nível de notificação"]],
     [
       "shortcuts",
@@ -1749,7 +1783,8 @@ describe("settings sections", () => {
     await render(<SettingsScreen section="appearance" zoom={110} onZoom={(level) => set.push(level)} />);
     const section = host!.querySelector(".settings__section")!;
     expect([...section.querySelectorAll("select")].map((s) => s.id)).toEqual(["settings-zoom", "settings-typeface"]);
-    expect([...section.querySelectorAll("button, input, textarea")]).toEqual([]);
+    // Zoom and Font have no reset action; the only buttons and inputs are the metric cards' list's.
+    expect([...section.querySelectorAll("button, input, textarea")].filter((el) => !el.closest(".metric-cards"))).toEqual([]);
 
     const zoom = section.querySelector<HTMLSelectElement>("#settings-zoom")!;
     expect([...zoom.options].map((o) => o.textContent)).toEqual(["80%", "90%", "100%", "110%", "125%", "150%"]);
