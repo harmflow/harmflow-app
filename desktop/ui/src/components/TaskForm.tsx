@@ -6,6 +6,7 @@ import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { Catalog, CatalogEntry, Harness, LocalizedText } from "../api/types";
 import { LANGUAGES } from "../i18n";
+import { shownInSimple, simpleParameters, type EditorMode } from "../lib/editorMode";
 import { NOTIFIABLE_EVENTS, schemaDefault, schemaEnum } from "../lib/schema";
 import { getIn, setIn, slugify, type Doc, type Path } from "../lib/taskForm";
 import { localized } from "../lib/templates";
@@ -33,6 +34,8 @@ export interface TaskFormProps {
   catalog?: Catalog;
   harnesses: Harness[];
   errorPaths: Set<string>;
+  /** Simple shows only the fields the task's type needs to validate, its schedule, and whether it is enabled. */
+  view?: EditorMode;
 }
 
 /** The lists of a custom permission profile, in the form's order. */
@@ -70,7 +73,7 @@ function installationSkills(entries: CatalogEntry[], harnesses: Harness[], profi
   return offered.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }: TaskFormProps) {
+export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths, view = "advanced" }: TaskFormProps) {
   const { t, i18n } = useTranslation();
   const [idTouched, setIdTouched] = useState(mode !== "create");
   const isTemplate = mode === "template";
@@ -90,7 +93,16 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
   const isGithub = type === "github";
   // A script task runs a program instead of a harness session: no prompt, agents, skills, or harness.
   const isScript = type === "script";
-  const declared = isScript ? [] : declaredGroups(doc, catalog);
+  const allDeclared = isScript ? [] : declaredGroups(doc, catalog);
+  const simple = view === "simple";
+  /** Whether the form shows the field at a path: every field in advanced mode, and in simple mode the ones it keeps. */
+  const show = (...path: string[]) => !simple || shownInSimple(type, path);
+  const keptParameters = simpleParameters(allDeclared);
+  const declared = simple
+    ? allDeclared
+        .map((g) => ({ ...g, declared: g.declared.filter((d) => keptParameters.has(`${g.key}/${g.name}/${d.name}`)) }))
+        .filter((g) => g.declared.length > 0)
+    : allDeclared;
 
   /** A template's name or description is one text, which the form writes in every language. */
   const everyLanguage = (text: string) => (text ? Object.fromEntries(LANGUAGES.map((lang) => [lang, text])) : undefined);
@@ -141,9 +153,11 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
             />
           </Field>
         </div>
-        <Field label={t("tasks.fields.description")}>
-          <TextArea rows={2} value={get<string>(["metadata", "description"]) ?? ""} onChange={(e) => set(["metadata", "description"], e.target.value)} />
-        </Field>
+        {show("metadata", "description") ? (
+          <Field label={t("tasks.fields.description")}>
+            <TextArea rows={2} value={get<string>(["metadata", "description"]) ?? ""} onChange={(e) => set(["metadata", "description"], e.target.value)} />
+          </Field>
+        ) : null}
         <div className="grid-2">
           {/* The type is chosen in the template picker and fixed from then on. */}
           <Field label={t("tasks.fields.type")} error={err(["spec", "type"])}>
@@ -163,7 +177,7 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
 
       {isScript ? (
         <Section id="script" title={t("tasks.sections.script")} icon="terminal">
-          <ScriptFields doc={doc} onChange={onChange} set={set} err={err} />
+          <ScriptFields doc={doc} onChange={onChange} set={set} err={err} show={(key) => show("spec", "script", key)} />
         </Section>
       ) : null}
 
@@ -181,12 +195,13 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
               ))}
             </Select>
           </Field>
-        ) : (
+        ) : show("spec", "origin") ? (
           <AgentOrigin doc={doc} onChange={onChange} catalog={catalog} />
-        )}
+        ) : null}
         <Field label={t("tasks.fields.prompt")} hint={t("tasks.fields.promptHint")} error={err(["spec", "prompt"])}>
           <TextArea className="mono input--prompt" rows={8} value={get<string>(["spec", "prompt"]) ?? ""} onChange={(e) => set(["spec", "prompt"], e.target.value)} />
         </Field>
+        {show("spec", "agents") ? (
         <div className="grid-2">
           <NamePicker
             label={t("tasks.fields.agents")}
@@ -201,10 +216,16 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
             onChange={(v) => set(["spec", "skills"], v)}
           />
         </div>
-        <Field label={t("tasks.fields.workspacePath")} hint={t("tasks.fields.workspaceHint")}>
-          <TextInput mono value={get<string>(["spec", "workspace", "path"]) ?? ""} onChange={(e) => set(["spec", "workspace", "path"], e.target.value)} />
-        </Field>
+        ) : null}
       </Section>
+      )}
+
+      {isScript || !show("spec", "workspace") ? null : (
+        <Section id="workspace" title={t("tasks.sections.workspace")} icon="folder">
+          <Field label={t("tasks.fields.workspacePath")} hint={t("tasks.fields.workspaceHint")}>
+            <TextInput mono value={get<string>(["spec", "workspace", "path"]) ?? ""} onChange={(e) => set(["spec", "workspace", "path"], e.target.value)} />
+          </Field>
+        </Section>
       )}
 
       {isGithub ? (
@@ -214,7 +235,10 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
             rows={get<Item[]>(["spec", "github", "repositories"]) ?? []}
             onChange={(rows) => set(["spec", "github", "repositories"], rows)}
             errorPaths={errorPaths}
+            baseBranch={show("spec", "github", "repositories", "baseBranch")}
           />
+          {show("spec", "github", "queue") ? (
+            <>
           <p className="hint-line">
             <Icon name="sparkle" size={13} /> {t("tasks.fields.workSelectionHint")}
           </p>
@@ -227,6 +251,8 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
             <IntField path={["spec", "github", "queue", "maxFailedRetries"]} label={t("tasks.fields.maxFailedRetries")} doc={doc} set={set} />
             <IntField path={["spec", "github", "delivery", "testRepairAttempts"]} label={t("tasks.fields.testRepairAttempts")} doc={doc} set={set} />
           </div>
+            </>
+          ) : null}
         </Section>
       ) : null}
 
@@ -238,7 +264,10 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
           onChange={(v) => set(["spec", "harness", "preferred"], v)}
           harnesses={harnesses}
           required={!isTemplate}
+          show={(key) => show("spec", "harness", "preferred", key)}
         />
+        {show("spec", "harness", "fallback") ? (
+          <>
         <h4 className="subhead">{t("tasks.fields.fallbackCandidates")}</h4>
         <FallbackList
           rows={get<Item[]>(["spec", "harness", "fallback", "candidates"]) ?? []}
@@ -264,15 +293,31 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
           </FieldGroup>
           <IntField path={["spec", "harness", "fallback", "maxSwitches"]} label={t("tasks.fields.maxSwitches")} doc={doc} set={set} />
         </div>
+          </>
+        ) : null}
       </Section>
       )}
 
       <Section id="schedule" title={t("tasks.sections.schedule")} icon="clock">
         <ScheduleFields doc={doc} onChange={onChange} set={set} defLabel={defLabel} locale={i18n.language} errorPaths={errorPaths} />
-        {/* A script task has no completion policy: it runs a program, not a harness. */}
-        {isScript ? null : <CompletionFields doc={doc} set={set} err={err} />}
       </Section>
 
+      {show("spec", "concurrency") ? (
+        <Section id="concurrency" title={t("tasks.sections.concurrency")} icon="copy">
+          <div className="grid-2">
+            <EnumField label={t("tasks.fields.overlap")} optionKey="overlap" doc={doc} set={set} defLabel={defLabel} />
+          </div>
+        </Section>
+      ) : null}
+
+      {/* A script task has no completion policy: it runs a program, not a harness. */}
+      {isScript || !show("spec", "completion") ? null : (
+        <Section id="completion" title={t("tasks.sections.completion")} icon="refresh">
+          <CompletionFields doc={doc} set={set} err={err} />
+        </Section>
+      )}
+
+      {show("spec", "permissions") ? (
       <Section id="permissions" title={t("tasks.sections.permissions")} icon="shield">
         {isScript ? (
           <p className="hint-line">
@@ -300,7 +345,9 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
           </div>
         ) : null}
       </Section>
+      ) : null}
 
+      {show("spec", "execution") ? (
       <Section id="execution" title={t("tasks.sections.execution")} icon="clock">
         <div className="grid-3">
           <IntField path={["spec", "execution", "timeoutMinutes"]} label={t("tasks.fields.timeoutMinutes")} doc={doc} set={set} />
@@ -335,7 +382,9 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
           )}
         </div>
       </Section>
+      ) : null}
 
+      {show("spec", "notifications") ? (
       <Section id="notifications" title={t("tasks.sections.notifications")} icon="bell">
         <Toggle
           checked={get<boolean>(["spec", "notifications", "native", "enabled"]) ?? (def(["spec", "notifications", "native", "enabled"]) as boolean) ?? true}
@@ -360,6 +409,7 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
           })}
         </FieldGroup>
       </Section>
+      ) : null}
 
       {declared.length > 0 ? (
         <Section id="parameters" title={t("tasks.sections.parameters")} icon="layers">

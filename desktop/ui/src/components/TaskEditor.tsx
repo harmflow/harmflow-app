@@ -7,6 +7,7 @@ import { ApiError, api } from "../api/client";
 import { native } from "../api/native";
 import type { Catalog, LocalizedText, Task, TaskInput, Template, ValidationResult } from "../api/types";
 import { daemonText } from "../lib/daemonText";
+import { EDITOR_MODES, hiddenFieldCount, keepEditorMode, keptEditorMode, simpleParameters, type EditorMode } from "../lib/editorMode";
 import { useDebounced } from "../lib/hooks";
 import { matches, shortcutText } from "../lib/shortcuts";
 import { addedFolders, type Doc } from "../lib/taskForm";
@@ -16,7 +17,8 @@ import { Icon } from "./Icon";
 import { tipBelow, useTooltip } from "./Shell";
 import { TaskForm } from "./TaskForm";
 import { toast } from "./toast";
-import { Banner, Button, Chip, Tabs, cx } from "./ui";
+import { declaredGroups } from "./taskform/DeclaredParameters";
+import { Banner, Button, Chip, SegmentedControl, Tabs, cx } from "./ui";
 import { YamlEditor } from "./YamlEditor";
 
 type EditorTab = "form" | "yaml";
@@ -67,6 +69,13 @@ export function TaskEditor({ mode, task, initial, template, onClose, onSaved, on
   const [answeredEvent, setAnsweredEvent] = useState(externalChange ?? 0);
 
   const [tab, setTab] = useState<EditorTab>("form");
+  // The Form tab's mode is the user's, the same for every task: the editor opens in the last one chosen. A template's
+  // form has no modes.
+  const [formMode, setFormMode] = useState<EditorMode>(() => (mode === "template" ? "advanced" : keptEditorMode()));
+  const chooseFormMode = (next: EditorMode) => {
+    setFormMode(next);
+    keepEditorMode(next);
+  };
   const [doc, setDoc] = useState<Doc>(() => (opened?.document as Doc) ?? initial ?? {});
   const [yaml, setYaml] = useState<string>(() => opened?.yaml ?? (initial ? fallbackYaml(initial) : ""));
   // The file's text as the editor was loaded or last saved with it, and the document of that moment. The daemon's
@@ -226,6 +235,9 @@ export function TaskEditor({ mode, task, initial, template, onClose, onSaved, on
     answerExternal();
   };
 
+  const type = (doc.spec as { type?: unknown } | undefined)?.type;
+  const hiddenCount =
+    formMode === "simple" ? hiddenFieldCount(doc, simpleParameters(type === "script" ? [] : declaredGroups(doc, workspaceCatalog ?? catalog))) : 0;
   const errors = validation?.errors ?? [];
   const warnings = validation?.warnings ?? [];
   const errorPaths = useMemo(() => new Set(errors.map((e) => e.path ?? "").filter(Boolean)), [errors]);
@@ -338,7 +350,26 @@ export function TaskEditor({ mode, task, initial, template, onClose, onSaved, on
           {tab === "form" ? (
             // A disabled fieldset disables every control of the form at once, for a template that is only shown.
             <fieldset className="editor__fieldset" disabled={readOnly}>
+              {mode === "template" ? null : (
+                <div className="editor__modes">
+                  <SegmentedControl
+                    aria-label={t("tasks.editor.formMode")}
+                    value={formMode}
+                    options={EDITOR_MODES.map((m) => ({ value: m, label: m === "simple" ? t("tasks.editor.simpleMode") : t("tasks.editor.advancedMode") }))}
+                    onChange={chooseFormMode}
+                  />
+                </div>
+              )}
+              {formMode === "simple" && hiddenCount > 0 ? (
+                <p className="hint-line">
+                  <Icon name="layers" size={13} /> {t("tasks.editor.hiddenFields", { count: hiddenCount })}{" "}
+                  <Button size="sm" variant="ghost" onClick={() => chooseFormMode("advanced")}>
+                    {t("tasks.editor.showAdvanced")}
+                  </Button>
+                </p>
+              ) : null}
               <TaskForm
+                view={formMode}
                 doc={doc}
                 mode={mode}
                 catalog={workspaceCatalog ?? catalog}

@@ -12,12 +12,15 @@ export function HarnessProfile({
   harnesses,
   required,
   onRemove,
+  show = () => true,
 }: {
   value: Item;
   onChange: (v: Item | undefined) => void;
   harnesses: Harness[];
   required?: boolean;
   onRemove?: () => void;
+  /** Which keys of the profile the form shows, every one by default; the provider always shows. */
+  show?: (key: string) => boolean;
 }) {
   const { t } = useTranslation();
   const provider = (value.provider as string) ?? (required ? "claude-code" : "");
@@ -36,11 +39,12 @@ export function HarnessProfile({
   // An identifier holds only letters, digits, - and _, so a home's path becomes those.
   const modelListId = `models-${provider}-${installation.replace(/[^A-Za-z0-9_-]/g, "_")}`;
   // Only Codex can keep its session. On, the default, removes the key, so the YAML writes it only when it is off.
-  const keepsSessions = provider === "codex";
+  const keepsSessions = provider === "codex" && show("ephemeral");
   const ephemeral = value.ephemeral !== false;
+  const choosesInstallation = choices.length > 0 && show("installation");
 
   return (
-    <div className={cx("grid-profile", choices.length > 0 && "grid-profile--installation", keepsSessions && "grid-profile--session")}>
+    <div className={cx("grid-profile", choosesInstallation && "grid-profile--installation", keepsSessions && "grid-profile--session")}>
       <Field label={t("tasks.fields.provider")}>
         <Select value={provider} onChange={(e) => onChange(cleanRow({ provider: e.target.value }))}>
           {HARNESS_PROVIDERS.map((p) => {
@@ -54,7 +58,7 @@ export function HarnessProfile({
           })}
         </Select>
       </Field>
-      {choices.length > 0 ? (
+      {choosesInstallation ? (
         <Field label={t("tasks.fields.installation")}>
           <Select className="mono" value={installation} onChange={(e) => update("installation", e.target.value)}>
             <option value="">
@@ -76,31 +80,35 @@ export function HarnessProfile({
           </Select>
         </Field>
       ) : null}
-      <Field label={t("tasks.fields.model")}>
-        <TextInput
-          mono
-          list={modelListId}
-          value={model}
-          placeholder={t("tasks.fields.harnessDefault")}
-          onChange={(e) => update("model", e.target.value)}
-        />
-        <datalist id={modelListId}>
-          {(installed?.models ?? []).map((m) => (
-            <option key={m.id} value={m.id} />
-          ))}
-        </datalist>
-      </Field>
-      <Field label={t("tasks.fields.effort")}>
-        <Select value={(value.effort as string) ?? ""} onChange={(e) => update("effort", e.target.value)}>
-          <option value="">{t("tasks.fields.harnessDefault")}</option>
-          {efforts.map((ef) => (
-            <option key={ef} value={ef}>
-              {ef}
-            </option>
-          ))}
-          {value.effort && !efforts.includes(value.effort as string) ? <option value={value.effort as string}>{value.effort as string}</option> : null}
-        </Select>
-      </Field>
+      {show("model") ? (
+        <Field label={t("tasks.fields.model")}>
+          <TextInput
+            mono
+            list={modelListId}
+            value={model}
+            placeholder={t("tasks.fields.harnessDefault")}
+            onChange={(e) => update("model", e.target.value)}
+          />
+          <datalist id={modelListId}>
+            {(installed?.models ?? []).map((m) => (
+              <option key={m.id} value={m.id} />
+            ))}
+          </datalist>
+        </Field>
+      ) : null}
+      {show("effort") ? (
+        <Field label={t("tasks.fields.effort")}>
+          <Select value={(value.effort as string) ?? ""} onChange={(e) => update("effort", e.target.value)}>
+            <option value="">{t("tasks.fields.harnessDefault")}</option>
+            {efforts.map((ef) => (
+              <option key={ef} value={ef}>
+                {ef}
+              </option>
+            ))}
+            {value.effort && !efforts.includes(value.effort as string) ? <option value={value.effort as string}>{value.effort as string}</option> : null}
+          </Select>
+        </Field>
+      ) : null}
       {keepsSessions ? (
         <div className="field field--toggle">
           <Toggle
