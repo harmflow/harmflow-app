@@ -31,7 +31,9 @@ follows it.
 ## Procedure
 
 1. Write `{"type":"step.started","phase":"preparing","message":"Reading the task context"}` to `progress.jsonl`.
-2. Check that `gh auth status` and `git --version` succeed. If they fail, write the report with outcome `failed`
+2. Check that `gh api user` and `git --version` succeed. `gh api user` reads the account this session uses, the
+   token in `GH_TOKEN` included; `gh auth status` is not the check, since it fails on any other login `gh` keeps,
+   such as one saved in a keyring the session cannot read. If either fails, write the report with outcome `failed`
    and stop.
 3. Remove the worktrees of the work items that ended, with §3 of the skill **hf-github-worktree**. Every execution
    does this before it builds the queue, also one that then finds no eligible work.
