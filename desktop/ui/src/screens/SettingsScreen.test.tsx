@@ -22,12 +22,14 @@ import { api } from "../api/client";
 import { native, type DaemonStatus } from "../api/native";
 import type { StreamHandlers } from "../api/transport";
 import type { Diagnostics, Harness, Health, Settings, SettingsPatch, Stats, Tool } from "../api/types";
+import { COUNTER_KEYS } from "../components/Aside";
 import type { LeaveCheck } from "../components/TaskEditor";
 import { Toasts } from "../components/toast";
 import i18n from "../i18n";
 import { enUS } from "../i18n/en-US";
 import { actions, patchStateForTests, startSync } from "../state/store";
 import { OverviewScreen } from "./OverviewScreen";
+import { ExecutionsScreen } from "./ExecutionsScreen";
 import { SECTION_GROUPS, SettingsScreen, type SettingsSection } from "./SettingsScreen";
 
 // The daemon as the client sees it: the settings and the health it serves, every request it received with its body,
@@ -828,7 +830,8 @@ describe("the Daemon section's Stop daemon control", () => {
     queued: 0,
     completedToday: 0,
     failedToday: 0,
-    activity: { running: [], queued: [], completed: [], failed: [] },
+    noWorkToday: 0,
+    activity: { running: [], queued: [], completed: [], failed: [], noWork: [] },
   });
   const stopButton = () => [...host!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Stop daemon")!;
 
@@ -1083,5 +1086,111 @@ describe("starting the daemon by hand, with its running and autostart states sho
     await streamSays("daemon_stopped");
     expect(overview()).toEqual({ running: enUS.overview.notRunning, autostart: enUS.overview.autostartOn });
     expect(settingsRunning()).toBe(enUS.overview.notRunning);
+  });
+});
+
+describe("the Appearance section's metric cards", () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
+
+  const label = (key: string) => i18n.t(`counters.${key}` as "counters.running");
+  const list = (screen: "overview" | "executions") =>
+    host!.querySelector(`[aria-labelledby="metric-cards-${screen}"]`)!;
+  const row = (screen: "overview" | "executions", key: string) =>
+    list(screen).querySelector<HTMLElement>(`[data-card="${key}"]`)!;
+  const order = (screen: "overview" | "executions") =>
+    [...list(screen).querySelectorAll<HTMLElement>("[data-card]")].map((r) => [r.dataset.card, r.querySelector("input")!.checked]);
+  const click = async (el: Element) => {
+    await act(async () => (el as HTMLElement).click());
+  };
+  const restoreButton = (screen: "overview" | "executions") =>
+    [...list(screen).querySelectorAll("button")].find((b) => text(b) === i18n.t("settings.metricCards.restore"))!;
+
+  /** The two screens as the app opens them after Settings, each reading the kept choice when it mounts. */
+  async function openScreens() {
+    act(() => root?.unmount());
+    host?.remove();
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () =>
+      root!.render(
+        <>
+          <div className="as-overview">
+            <OverviewScreen onOpenExecution={() => {}} onNewTask={() => {}} onOpenTask={() => {}} />
+          </div>
+          <div className="as-executions">
+            <ExecutionsScreen selectedId={null} onSelect={() => {}} onGoToTasks={() => {}} onSeeHistory={() => {}} />
+          </div>
+        </>,
+      ),
+    );
+    await settle();
+  }
+  const shown = (screen: "overview" | "executions") =>
+    [...host!.querySelectorAll(`.as-${screen} .counters .counter__label`)].map((l) => text(l));
+  // The expected lists come from the app's cards, never a copy of today's: a card a later version adds joins them.
+  const others = (...keys: string[]) => COUNTER_KEYS.filter((key) => !keys.includes(key));
+
+  it("lists each screen's cards on its own, every one shown in the default order, with nothing kept", async () => {
+    await open("appearance");
+    expect(text(host!.querySelector("#metric-cards-overview"))).toBe(i18n.t("nav.overview"));
+    expect(text(host!.querySelector("#metric-cards-executions"))).toBe(i18n.t("nav.executions"));
+    const all = COUNTER_KEYS.map((key) => [key, true]);
+    expect(order("overview")).toEqual(all);
+    expect(order("executions")).toEqual(all);
+    expect(restoreButton("overview").disabled).toBe(true);
+
+    await openScreens();
+    const labels = COUNTER_KEYS.map(label);
+    expect(shown("overview")).toEqual(labels);
+    expect(shown("executions")).toEqual(labels);
+  });
+
+  it("shows on each screen, after a restart, the cards chosen and their order, and no row where every card is hidden", async () => {
+    await open("appearance");
+    await click(row("overview", "queued").querySelector("input")!);
+    for (let at = COUNTER_KEYS.indexOf("failedToday"); at > 0; at--) {
+      await click(row("overview", "failedToday").querySelector(".metric-cards__up")!);
+    }
+    for (const key of COUNTER_KEYS) {
+      await click(row("executions", key).querySelector("input")!);
+    }
+    const rest = others("failedToday");
+    expect(order("overview")).toEqual([["failedToday", true], ...rest.map((key) => [key, key !== "queued"])]);
+    expect(row("overview", "failedToday").querySelector<HTMLButtonElement>(".metric-cards__up")!.disabled).toBe(true);
+    expect(row("overview", rest[rest.length - 1]).querySelector<HTMLButtonElement>(".metric-cards__down")!.disabled).toBe(true);
+
+    // A restart reads the choice back from the desktop's storage.
+    await openScreens();
+    expect(shown("overview")).toEqual(["failedToday", ...others("failedToday", "queued")].map(label));
+    expect(host!.querySelector(".as-executions .counters")).toBeNull();
+    expect(host!.querySelector(".as-executions .screen__main")).not.toBeNull();
+  });
+
+  it("restores a screen's default cards and order, leaving the other screen's choice", async () => {
+    await open("appearance");
+    await click(row("overview", "running").querySelector("input")!);
+    await click(row("overview", "failedToday").querySelector(".metric-cards__up")!);
+    await click(row("executions", "queued").querySelector("input")!);
+    expect(restoreButton("overview").disabled).toBe(false);
+    await click(restoreButton("overview"));
+    expect(order("overview")).toEqual(COUNTER_KEYS.map((key) => [key, true]));
+    expect(restoreButton("overview").disabled).toBe(true);
+
+    await openScreens();
+    expect(shown("overview")).toEqual(COUNTER_KEYS.map(label));
+    expect(shown("executions")).toEqual(others("queued").map(label));
+  });
+
+  it("shows a card a later version adds after the kept ones, without losing the kept choice", async () => {
+    localStorage.setItem(
+      "harmflow.metricCards",
+      JSON.stringify({ overview: [{ key: "failedToday", shown: true }, { key: "running", shown: false }, { key: "retired", shown: true }] }),
+    );
+    await open("appearance");
+    const joined = others("failedToday", "running");
+    expect(order("overview")).toEqual([["failedToday", true], ["running", false], ...joined.map((key) => [key, true])]);
+    await openScreens();
+    expect(shown("overview")).toEqual(["failedToday", ...joined].map(label));
   });
 });

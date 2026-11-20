@@ -88,6 +88,8 @@ type Deps struct {
 	Paths    Paths
 	Version  string
 	Commit   string    // the short commit it was built from, "-dirty" from uncommitted changes; empty without one
+	Revision string    // the full commit Commit is a prefix of; empty without one
+	Dirty    bool      // the tree Revision was built from had uncommitted changes, as Commit's "-dirty" says
 	BuiltAt  time.Time // when it was built; zero without a build time
 	Clock    ports.Clock
 	Wake     ports.WakeMonitor
@@ -268,6 +270,10 @@ type App struct {
 	// stopBegun is closed when Stop begins, before it takes mu: every running execution cancels itself on it, and the
 	// drain's watcher returns.
 	stopBegun chan struct{}
+	// started is set once Start has loaded the state and recovered the interrupted executions. Until then the local API
+	// answers that the daemon is still starting, which it reads without mu, so it answers at once however long the
+	// start's disk work keeps mu.
+	started atomic.Bool
 }
 
 // New builds the use cases over d, with its defaults filled in, and creates the directories they write to; it loads
@@ -341,10 +347,10 @@ func (noWake) LastWake() time.Time { return time.Time{} }
 
 func (a *App) now() time.Time { return a.d.Clock.Now() }
 
-// Start loads state, recovers interrupted executions, and starts the scheduler, the task-file watcher, and maintenance.
-// It waits for no harness: the task files load without the checks that ask one, and the harnesses are detected, then
-// the task files checked again with them, in the background. The loops run until ctx ends or Stop is called, whichever
-// comes first.
+// Start loads state, recovers interrupted executions, and starts the scheduler, the task-file watcher, and maintenance;
+// Starting reports true until it has. It waits for no harness: the task files load without the checks that ask one,
+// and the harnesses are detected, then the task files checked again with them, in the background. The loops run until
+// ctx ends or Stop is called, whichever comes first.
 func (a *App) Start(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	detectCtx, stopDetection := context.WithCancel(ctx)
@@ -383,8 +389,14 @@ func (a *App) Start(ctx context.Context) error {
 	go a.watchLoop(ctx)
 	go a.maintenanceLoop(ctx)
 	a.startQueued()
+	a.started.Store(true)
 	return nil
 }
+
+// Starting reports whether Start is still under way: loading the state and recovering the interrupted executions, which
+// may take long on a large history when the disk is slow. The daemon publishes its address before it starts, so the
+// local API answers meanwhile that it is still starting. It takes no lock.
+func (a *App) Starting() bool { return !a.started.Load() }
 
 // DefaultStopDetectionWait is how long Stop waits for the harness detection to end, and DefaultStopExecutionsWait how
 // long for the cancelled executions to end, when Deps sets neither.
@@ -511,6 +523,22 @@ func (a *App) Commit() string { return a.d.Commit }
 
 // BuiltAt is when the daemon was built; zero without a build time.
 func (a *App) BuiltAt() time.Time { return a.d.BuiltAt }
+
+// newExecution creates the record of a firing of a task, naming the daemon build that creates it.
+func (a *App) newExecution(task domain.TaskDocument, trigger domain.Trigger, scheduledFor *time.Time,
+	now time.Time) *domain.Execution {
+	x := domain.NewExecution(task, trigger, scheduledFor, now)
+	x.Build = a.build()
+	return x
+}
+
+// build is the daemon build a new execution records; nil when it names neither a version nor a commit.
+func (a *App) build() *domain.Build {
+	if a.d.Version == "" && a.d.Revision == "" {
+		return nil
+	}
+	return &domain.Build{Version: a.d.Version, Commit: a.d.Revision, Dirty: a.d.Revision != "" && a.d.Dirty}
+}
 
 // StartedAt is when New built the use cases, by their clock.
 func (a *App) StartedAt() time.Time { return a.startedAt }

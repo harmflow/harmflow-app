@@ -209,6 +209,10 @@ func launchdDaemon(t *testing.T, home string, pid int) *daemon {
 		t.Fatalf("the daemon launchd started, pid %d, wrote no runtime file within %v\nits log ends:\n%s", pid,
 			runtimeWait, daemonLogTail(home))
 	}
+	if !awaitStarted(base, token, runtimeWait) {
+		t.Fatalf("the daemon launchd started, pid %d, still read as starting %v after it wrote its runtime file\nits "+
+			"log ends:\n%s", pid, runtimeWait, daemonLogTail(home))
+	}
 	started := &daemon{t: t, home: home, base: base, token: token}
 	if got, _ := started.call("GET", "/health", nil, 200)["pid"].(float64); int(got) != pid {
 		t.Fatalf("GET /health of the daemon launchd started names the pid %v, want %d, launchd's own", got, pid)

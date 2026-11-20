@@ -250,9 +250,24 @@ export async function startDaemon(prepare?: (home: string) => Record<string, str
   expect(runtime.tokenStore).toBe("file");
   const token = readFileSync(join(home, "run", "token"), "utf8").trim();
   const d: RealDaemon = { home, base: `http://${runtime.address}/api/v1`, token, process: child, output };
+  await untilStarted(d);
   await call(d, "PUT", "/harnesses/claude-code", { path: join(fakes, "fake-claude") });
   await call(d, "PUT", "/harnesses/codex", { path: join(fakes, "fake-codex") });
   return d;
+}
+
+/**
+ * Waits until the daemon's health reads ok: it writes its address before it has loaded its state and recovered
+ * interrupted executions, and every other route answers 503 until then.
+ */
+export async function untilStarted(d: RealDaemon): Promise<void> {
+  const deadline = Date.now() + RUNTIME_WAIT_MS;
+  for (;;) {
+    const health = (await call(d, "GET", "/health")) as { status?: string } | null;
+    if (health?.status === "ok") return;
+    if (Date.now() > deadline) throw new Error(`the daemon starts: still ${health?.status} after ${RUNTIME_WAIT_MS} ms`);
+    await new Promise((r) => setTimeout(r, 20));
+  }
 }
 
 async function stopDaemon(d: RealDaemon) {

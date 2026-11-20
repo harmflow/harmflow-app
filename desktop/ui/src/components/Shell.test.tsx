@@ -106,6 +106,31 @@ describe("the topbar's state of a daemon that does not answer", () => {
   });
 });
 
+// harmflow-app#1091: a daemon whose health reads starting is still loading its state and recovering interrupted
+// executions: the topbar says so, and that the desktop waits for it, rather than show the connection as lost.
+describe("the topbar's state of a daemon still starting", () => {
+  it("names it in the status pill and says, in a banner, that the daemon is starting and the desktop waits", async () => {
+    patchStateForTests({ connection: "starting", appCommit: "" });
+    await show();
+
+    const pill = host!.querySelector('[role="status"]');
+    expect(pill?.className).toContain("conn-pill--starting");
+    expect(pill?.textContent).toBe("Daemon starting");
+    expect(text()).toContain(
+      "The daemon is starting: it is loading its state and recovering interrupted executions. The desktop waits for it.",
+    );
+    expect(text()).not.toContain("The connection to the daemon was lost");
+    expect(text()).not.toContain("not answering yet");
+  });
+
+  it("shows no starting banner once the daemon has started", async () => {
+    patchStateForTests({ connection: "connected", appCommit: "" });
+    await show();
+
+    expect(text()).not.toContain("The daemon is starting");
+  });
+});
+
 describe("the banner for a daemon built from another commit", () => {
   it("names the window's commit and the daemon's when they differ", async () => {
     await show();
@@ -250,7 +275,8 @@ describe("stopping the daemon from the More actions menu", () => {
     queued: 0,
     completedToday: 0,
     failedToday: 0,
-    activity: { running: [], queued: [], completed: [], failed: [] },
+    noWorkToday: 0,
+    activity: { running: [], queued: [], completed: [], failed: [], noWork: [] },
   });
 
   afterEach(() => patchStateForTests({ stats: undefined }));
@@ -458,7 +484,7 @@ describe("the sidebar's gauges", () => {
 
   it("shows the counters' running badge from /stats, which brings no gauges", async () => {
     daemon.answers.set("GET /system", { status: 200, body: {} });
-    patchStateForTests({ stats: { running: 3, queued: 0, completedToday: 0, failedToday: 0, activity: { running: [], queued: [], completed: [], failed: [] } } });
+    patchStateForTests({ stats: { running: 3, queued: 0, completedToday: 0, failedToday: 0, noWorkToday: 0, activity: { running: [], queued: [], completed: [], failed: [], noWork: [] } } });
     await showSidebar(false);
     expect(host!.querySelector(".nav__badge")?.textContent).toBe("3");
     expect(texts()).toEqual(["—", "—", "—"]);

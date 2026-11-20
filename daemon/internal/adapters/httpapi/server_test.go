@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -522,9 +523,15 @@ func TestSystemGaugesHaveTheirOwnRoute(t *testing.T) {
 	if _, ok := stats["system"]; ok {
 		t.Errorf("GET /api/v1/stats = %v, want no system field", stats)
 	}
-	for _, k := range []string{"running", "queued", "completedToday", "failedToday", "activity"} {
+	for _, k := range []string{"running", "queued", "completedToday", "failedToday", "noWorkToday", "activity"} {
 		if _, ok := stats[k]; !ok {
 			t.Errorf("GET /api/v1/stats = %v, want %s", stats, k)
+		}
+	}
+	activity, _ := stats["activity"].(map[string]any)
+	for _, k := range []string{"running", "queued", "completed", "failed", "noWork"} {
+		if _, ok := activity[k]; !ok {
+			t.Errorf("GET /api/v1/stats activity = %v, want %s", activity, k)
 		}
 	}
 	select {
@@ -822,6 +829,33 @@ func TestShutdownEndsAnOpenEventStream(t *testing.T) {
 	}
 	if err := <-serveErr; err != nil {
 		t.Errorf("Serve() = %v, want nil", err)
+	}
+}
+
+// A Shutdown that comes before Serve has begun, as when the daemon's start fails at once, leaves Serve nothing to
+// serve: Serve returns nil at once and closes the listener, so nothing answers on the port.
+func TestShutdownBeforeServeServesNothing(t *testing.T) {
+	s := &Server{App: startedApp(t)}
+	s.SetToken(validToken)
+	if err := s.Listen(0); err != nil {
+		t.Fatalf("Listen(0) = %v, want nil", err)
+	}
+	if err := s.Shutdown(context.Background()); err != nil {
+		t.Errorf("Shutdown() before Serve = %v, want nil", err)
+	}
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- s.Serve() }()
+	select {
+	case err := <-serveErr:
+		if err != nil {
+			t.Errorf("Serve() after Shutdown = %v, want nil", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Serve() after Shutdown has not returned after 5 s, want it to return at once")
+	}
+	if conn, err := net.DialTimeout("tcp", s.Address(), time.Second); err == nil {
+		conn.Close()
+		t.Errorf("dialing %s after Shutdown and Serve = a connection, want it refused", s.Address())
 	}
 }
 

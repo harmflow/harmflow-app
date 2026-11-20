@@ -10,6 +10,11 @@ info:
     Every request, the SSE stream included, carries the per-installation token in `Authorization: Bearer <token>`.
     Requests whose `Host` is not the loopback address, or whose `Origin` is a web page, are rejected.
 
+    The daemon writes the runtime file and answers before it has loaded its state and recovered the executions a
+    previous run left interrupted, which can take long on a large history when the disk is slow. Until then `/health`
+    answers with `status` `starting` and `acceptingFirings` false, and every other route, the SSE stream included,
+    answers `503` at once with the error key `daemon_starting`; no firing and no execution starts meanwhile.
+
     Naming uses plural resources, actions as a POST to a verb sub-resource, camelCase keys, snake_case
     values from closed sets, and `object.action` event types.
 servers:
@@ -39,7 +44,7 @@ paths:
       summary: Daemon state and version
       responses:
         "200":
-          description: The daemon is running.
+          description: The daemon is running, or still starting (`status` `starting`).
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Health" }
@@ -1147,6 +1152,13 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    Starting:
+      description: >-
+        The daemon is still starting: every route but /health answers so, at once, with the code and key
+        daemon_starting, until the daemon has loaded its state and recovered the interrupted executions.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
 
   schemas:
     MessageKey:
@@ -1174,6 +1186,7 @@ components:
         - task_disabled
         - task_being_deleted
         - daemon_stopping
+        - daemon_starting
         - execution_ended
         - executions_running
         - drain_deadline_invalid
@@ -1275,6 +1288,8 @@ components:
         - harness_session_not_kept
         - session_kept_note
         - extra_usage_unenforced
+        - cost_cap_unenforced
+        - attempt_cost_cap_invalid
         - path_variable_unterminated
         - path_variable_undefined
         - path_not_absolute
@@ -1368,6 +1383,8 @@ components:
         - cancelled_before_start
         - execution_cancelled
         - execution_timed_out
+        - execution_budget_exhausted
+        - attempt_budget_exhausted
         - execution_status
         - daemon_stopped_execution
         - execution_dir_failed
@@ -1483,7 +1500,12 @@ components:
       type: object
       required: [status, version, apiVersion, pid, startedAt, acceptingFirings]
       properties:
-        status: { type: string, enum: [ok] }
+        status:
+          type: string
+          enum: [ok, starting]
+          description: >-
+            starting until the daemon has loaded its state and recovered the interrupted executions, with
+            acceptingFirings false, while every other route answers 503; ok from then on.
         version: { type: string }
         commit: { type: string, description: "The commit it was built from, 7 characters, -dirty with uncommitted changes." }
         builtAt: { type: string, format: date-time, description: "When it was built; left out when the build stamped no time." }
@@ -1518,24 +1540,27 @@ components:
 
     Stats:
       description: >-
-        The execution counters: executions running and queued now, those that completed or failed since midnight, and
-        their activity over the last hours.
+        The execution counters: executions running and queued now, those that completed, failed, or found no work since
+        midnight, and their activity over the last hours. An execution that found no work counts in noWorkToday alone,
+        never as completed or failed.
       type: object
-      required: [running, queued, completedToday, failedToday, activity]
+      required: [running, queued, completedToday, failedToday, noWorkToday, activity]
       properties:
         running: { type: integer }
         queued: { type: integer }
         completedToday: { type: integer }
         failedToday: { type: integer }
+        noWorkToday: { type: integer }
         activity:
           description: Per hour, the last 12 hours, oldest first.
           type: object
-          required: [running, queued, completed, failed]
+          required: [running, queued, completed, failed, noWork]
           properties:
             running: { type: array, items: { type: integer } }
             queued: { type: array, items: { type: integer } }
             completed: { type: array, items: { type: integer } }
             failed: { type: array, items: { type: integer } }
+            noWork: { type: array, items: { type: integer } }
 
     Spend:
       description: >-
@@ -2135,7 +2160,7 @@ components:
         configuredEffort: { type: string, description: "The effort the task asked for, default when it set none. Never the one used." }
         startedAt: { type: string, format: date-time }
         endedAt: { type: string, format: date-time }
-        outcome: { type: string, enum: [running, succeeded, failed, quota_exhausted, rate_limited, harness_unavailable, network_failed, timed_out, cancelled, interrupted] }
+        outcome: { type: string, enum: [running, succeeded, failed, quota_exhausted, rate_limited, harness_unavailable, network_failed, timed_out, budget_exhausted, cancelled, interrupted] }
         exitCode: { type: integer }
         sessionId: { type: string }
         errorMessage: { type: string, description: "Why the attempt ended: the daemon's text in en-US, or the harness's own error, which has no errorKey." }
@@ -2145,6 +2170,11 @@ components:
         reasonKey: { $ref: "#/components/schemas/MessageKey" }
         reasonParams: { $ref: "#/components/schemas/MessageParams" }
         usage: { $ref: "#/components/schemas/AttemptUsage" }
+        costCapUsd:
+          type: number
+          description: >-
+            The cost cap the attempt ran with, in US dollars: the task's execution.maxAttemptCostUsd as the execution
+            started. Absent when the task set none, or when the attempt's harness cannot stop a session by its cost.
         prompt:
           type: string
           description: >-
@@ -2353,6 +2383,25 @@ components:
             cancelRequestedAt: { type: string, format: date-time }
             timeoutAt: { type: string, format: date-time }
             definitionRevision: { type: string }
+            build:
+              type: object
+              description: >-
+                The HarmFlow daemon build that created the execution. Absent from a record written before HarmFlow
+                recorded it, which names no version and no commit.
+              required: [version, dirty]
+              properties:
+                version: { type: string, description: "HarmFlow's version, as GET /health gives it." }
+                commit:
+                  type: string
+                  pattern: "^[0-9a-f]{40}$"
+                  description: >-
+                    The full commit id the build was made from, of which the commit GET /health gives is a prefix.
+                    Absent when the build names none: outside a checkout, or built with no commit stamped.
+                dirty:
+                  type: boolean
+                  description: >-
+                    True when the build came from a tree with uncommitted changes, exactly when GET /health marks its
+                    commit -dirty; false without a commit.
             workspacePath: { type: string }
             executionDir: { type: string }
             attempts: { type: array, items: { $ref: "#/components/schemas/Attempt" } }

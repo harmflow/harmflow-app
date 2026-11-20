@@ -88,6 +88,7 @@ const (
 	AttemptHarnessUnavailable AttemptOutcome = "harness_unavailable"
 	AttemptNetworkFailed      AttemptOutcome = "network_failed"
 	AttemptTimedOut           AttemptOutcome = "timed_out"
+	AttemptBudgetExhausted    AttemptOutcome = "budget_exhausted"
 	AttemptCancelled          AttemptOutcome = "cancelled"
 	AttemptInterrupted        AttemptOutcome = "interrupted"
 )
@@ -119,6 +120,9 @@ type Attempt struct {
 	ReasonParams     map[string]string `json:"reasonParams,omitempty"`
 	// Usage is what the harness reported of its token use, as it runs and when it ends; absent when it reported none.
 	Usage *Usage `json:"usage,omitempty"`
+	// CostCapUSD is the cap the attempt ran with, the task's execution.maxAttemptCostUsd as the execution started;
+	// absent when the task set none, or when the attempt's harness cannot enforce it.
+	CostCapUSD *float64 `json:"costCapUsd,omitempty"`
 	// Prompt and SessionContext are what the attempt sent the harness, redacted like the raw output, since the task can
 	// be edited afterwards and the context is composed per attempt; older records have neither.
 	Prompt         string `json:"prompt,omitempty"`
@@ -288,6 +292,7 @@ type Execution struct {
 	CancelRequestedAt  *time.Time        `json:"cancelRequestedAt,omitempty"`
 	TimeoutAt          *time.Time        `json:"timeoutAt,omitempty"`
 	DefinitionRevision string            `json:"definitionRevision,omitempty"`
+	Build              *Build            `json:"build,omitempty"` // the daemon's that created it; nil in an older record
 	WorkspacePath      string            `json:"workspacePath,omitempty"`
 	ExecutionDir       string            `json:"executionDir,omitempty"`
 	Harness            string            `json:"harness"`
@@ -322,6 +327,14 @@ type Execution struct {
 	// revision counts the changes made to the record in memory, so a periodic save can skip a record it already wrote.
 	// It is never saved.
 	revision uint64
+}
+
+// Build is a HarmFlow daemon build: its version, the full commit it was made from, and whether that commit's tree had
+// uncommitted changes. Commit is empty when the build names none, and Dirty is then false.
+type Build struct {
+	Version string `json:"version"`
+	Commit  string `json:"commit,omitempty"`
+	Dirty   bool   `json:"dirty"`
 }
 
 // ScriptRun is the program of a script execution as it ran, redacted like the raw output, so a later edit of the task

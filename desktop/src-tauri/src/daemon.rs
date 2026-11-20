@@ -93,6 +93,10 @@ pub struct DaemonStatus {
     /// pid of the runtime file is alive. A busy or throttled daemon, not a stopped one (#908).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub not_answering: bool,
+    /// The daemon answers, but its health reads `starting`: it is still loading its state and recovering interrupted
+    /// executions, and every other route answers 503 until it has.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub starting: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub address: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -116,6 +120,7 @@ fn status_from_health(body: &Value, address: Option<String>) -> DaemonStatus {
     DaemonStatus {
         running: true,
         not_answering: false,
+        starting: body.get("status").and_then(Value::as_str) == Some("starting"),
         address,
         pid: body.get("pid").and_then(Value::as_u64).map(|p| p as u32),
         version: get("version"),
@@ -833,6 +838,25 @@ mod tests {
         assert_eq!(gone, Ok(()));
         assert_eq!(answering, Err("the daemon answers and is not stopping".to_string()));
         assert!(outlived.is_err_and(|e| e.contains("did not exit")), "a pid that outlives the wait reads as stopped");
+    }
+
+    /// harmflow-app#1091: a daemon whose health reads `starting` runs, and is still starting: the status says so, and a
+    /// daemon whose health reads `ok` is not starting.
+    #[tokio::test]
+    async fn a_starting_health_reads_as_running_and_starting() {
+        const STARTING: &str = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 46\r\nConnection: close\r\n\r\n{\"status\":\"starting\",\"acceptingFirings\":false}";
+        let daemon = StandIn::start(&[STARTING, HEALTHY]);
+        let home = runtime_home("starting", &daemon.address, std::process::id(), "first");
+        let client = DaemonClient::with(Some(home.clone()), Duration::from_secs(5));
+
+        let starting = client.status().await;
+        let started = client.status().await;
+        std::fs::remove_dir_all(&home).ok();
+
+        assert!(starting.running && starting.starting, "status {starting:?}, want running and starting");
+        assert_eq!(serde_json::to_value(&starting).unwrap()["starting"], true);
+        assert!(started.running && !started.starting, "status {started:?}, want running and started");
+        assert!(serde_json::to_value(&started).unwrap().get("starting").is_none(), "a started status sends starting");
     }
 
     /// harmflow-app#908: a timeout whose runtime file names a pid that is gone reads as a stopped daemon, as before.

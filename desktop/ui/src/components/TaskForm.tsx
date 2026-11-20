@@ -22,7 +22,7 @@ import { NamePicker } from "./taskform/NamePicker";
 import { RepositoryList } from "./taskform/RepositoryList";
 import { ScheduleFields } from "./taskform/ScheduleFields";
 import { ScriptFields } from "./taskform/ScriptFields";
-import { Checkbox, Field, FieldGroup, Select, TextArea, TextInput, Toggle } from "./ui";
+import { Checkbox, Field, FieldGroup, NumberInput, Select, TextArea, TextInput, Toggle } from "./ui";
 
 export { OPTION_FIELDS } from "./taskform/formModel";
 
@@ -302,6 +302,18 @@ export function TaskForm({ doc, onChange, mode, catalog, harnesses, errorPaths }
       <Section id="execution" title={t("tasks.sections.execution")} icon="clock">
         <div className="grid-3">
           <IntField path={["spec", "execution", "timeoutMinutes"]} label={t("tasks.fields.timeoutMinutes")} doc={doc} set={set} />
+          {isScript ? null : (
+            // No default: an empty field removes the key, which is no cap.
+            <Field label={t("tasks.fields.maxAttemptCostUsd")} hint={t("tasks.fields.maxAttemptCostUsdHint")}>
+              <NumberInput
+                value={get<number>(["spec", "execution", "maxAttemptCostUsd"])}
+                onValue={(v) => set(["spec", "execution", "maxAttemptCostUsd"], v)}
+                min={0.01}
+                max={1000}
+                step={0.01}
+              />
+            </Field>
+          )}
           <IntField path={["spec", "execution", "cancelGraceSeconds"]} label={t("tasks.fields.cancelGraceSeconds")} doc={doc} set={set} />
           {isScript ? null : (
             <>

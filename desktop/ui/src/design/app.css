@@ -555,7 +555,8 @@ body:has([aria-modal="true"]) .tooltip {
 
 .conn-pill--connecting,
 .conn-pill--reconnecting,
-.conn-pill--not_answering {
+.conn-pill--not_answering,
+.conn-pill--starting {
   color: var(--hf-color-warning);
   border-color: rgba(var(--hf-rgb-warning), 0.3);
 }
@@ -987,12 +988,14 @@ body:has([aria-modal="true"]) .tooltip {
 
 .counters {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
   gap: var(--hf-space-4);
 }
 
 @media (max-width: 1100px) {
   .counters {
+    grid-auto-flow: row;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -1042,6 +1045,12 @@ body:has([aria-modal="true"]) .tooltip {
   color: var(--hf-color-danger);
   background: var(--hf-color-danger-soft);
   border-color: var(--hf-color-danger-border);
+}
+
+.counter--violet .counter__icon {
+  color: var(--hf-color-violet);
+  background: var(--hf-color-violet-soft);
+  border-color: rgba(var(--hf-rgb-violet), 0.45);
 }
 
 .counter__text {
@@ -2282,6 +2291,11 @@ li:last-child .tl-item__rail::before {
 .costs-tile__plus,
 .costs-flag {
   color: var(--hf-color-warning);
+}
+
+.costs-cap {
+  color: var(--hf-color-text-muted);
+  font-size: var(--hf-font-size-sm);
 }
 
 .costs-tile__plus {
@@ -4068,6 +4082,48 @@ button.list-row--error:hover {
 /* The section is 760px at most: one card per row reads better than two */
 .settings .inventory-grid {
   grid-template-columns: minmax(0, 1fr);
+}
+
+/* Settings › Appearance: each screen's metric cards, a checkbox and Move up / Move down per card */
+.metric-cards {
+  margin-top: var(--hf-space-4);
+}
+
+.metric-cards__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--hf-space-3);
+}
+
+.metric-cards__title {
+  margin: 0;
+  font-size: var(--hf-font-size-sm);
+  font-weight: var(--hf-font-weight-semibold);
+}
+
+.metric-cards__list {
+  margin: var(--hf-space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.metric-cards__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--hf-space-3);
+  padding: var(--hf-space-2) 0;
+  border-top: 1px solid var(--hf-color-border);
+}
+
+.metric-cards__moves {
+  display: inline-flex;
+  gap: var(--hf-space-1);
+}
+
+.metric-cards__up svg {
+  transform: rotate(180deg);
 }
 
 /* A setting: label and hint on the left, control on the right; the control wraps under the label when both don't fit */

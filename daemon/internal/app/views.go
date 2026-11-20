@@ -180,6 +180,7 @@ type ExecutionView struct {
 	CancelRequestedAt  *time.Time              `json:"cancelRequestedAt,omitempty"`
 	TimeoutAt          *time.Time              `json:"timeoutAt,omitempty"`
 	DefinitionRevision string                  `json:"definitionRevision,omitempty"`
+	Build              *domain.Build           `json:"build,omitempty"`
 	WorkspacePath      string                  `json:"workspacePath,omitempty"`
 	ExecutionDir       string                  `json:"executionDir,omitempty"`
 	Attempts           []domain.Attempt        `json:"attempts"`
@@ -203,7 +204,7 @@ func (a *App) GetExecution(id string) (ExecutionView, error) {
 	return ExecutionView{
 		ExecutionSummary: summarize(c), ScheduledFor: c.ScheduledFor, FollowsExecutionID: c.FollowsExecutionID,
 		RunAgainCount: c.RunAgainCount, CancelRequestedAt: c.CancelRequestedAt,
-		TimeoutAt: c.TimeoutAt, DefinitionRevision: c.DefinitionRevision, WorkspacePath: c.WorkspacePath,
+		TimeoutAt: c.TimeoutAt, DefinitionRevision: c.DefinitionRevision, Build: c.Build, WorkspacePath: c.WorkspacePath,
 		ExecutionDir: c.ExecutionDir, Attempts: c.Attempts, WorkItems: c.WorkItems, Warnings: c.Warnings,
 		ChangedFiles: c.ChangedFiles, Commands: c.Commands, LastOperation: c.LastOperation, LogExpired: c.LogExpired,
 		HarnessSwitches: c.HarnessSwitches, Script: c.Script,
@@ -254,21 +255,23 @@ func (a *App) ExecutionOutput(id string, limit int64) (ExecutionOutput, error) {
 }
 
 // Activity counts executions per hour, oldest hour first: those started in it, those started in it after waiting more
-// than 5 seconds, and those that ended in it completed or failed.
+// than 5 seconds, and those that ended in it completed, failed, or with no work.
 type Activity struct {
 	Running   []int `json:"running"`
 	Queued    []int `json:"queued"`
 	Completed []int `json:"completed"`
 	Failed    []int `json:"failed"`
+	NoWork    []int `json:"noWork"`
 }
 
-// Stats is the execution counters: executions running and queued now, those that completed or failed since midnight,
-// and their activity over the last hours.
+// Stats is the execution counters: executions running and queued now, those that completed, failed, or found no work
+// since midnight, and their activity over the last hours. An execution that found no work counts in NoWorkToday alone.
 type Stats struct {
 	Running        int      `json:"running"`
 	Queued         int      `json:"queued"`
 	CompletedToday int      `json:"completedToday"`
 	FailedToday    int      `json:"failedToday"`
+	NoWorkToday    int      `json:"noWorkToday"`
 	Activity       Activity `json:"activity"`
 }
 
@@ -289,12 +292,14 @@ func (a *App) Stats() Stats {
 		return i
 	}
 	s := Stats{Activity: Activity{Running: make([]int, hours), Queued: make([]int, hours), Completed: make([]int, hours),
-		Failed: make([]int, hours)}}
+		Failed: make([]int, hours), NoWork: make([]int, hours)}}
 	count := func(status domain.ExecutionStatus, created time.Time, started, ended *time.Time) {
 		if ended != nil && !ended.Before(midnight) {
 			switch status {
-			case domain.StatusCompleted, domain.StatusNoWork:
+			case domain.StatusCompleted:
 				s.CompletedToday++
+			case domain.StatusNoWork:
+				s.NoWorkToday++
 			case domain.StatusFailed, domain.StatusInterrupted:
 				s.FailedToday++
 			}
@@ -307,8 +312,10 @@ func (a *App) Stats() Stats {
 		}
 		if i := bucket(ended); i >= 0 {
 			switch status {
-			case domain.StatusCompleted, domain.StatusNoWork:
+			case domain.StatusCompleted:
 				s.Activity.Completed[i]++
+			case domain.StatusNoWork:
+				s.Activity.NoWork[i]++
 			case domain.StatusFailed, domain.StatusInterrupted:
 				s.Activity.Failed[i]++
 			}
