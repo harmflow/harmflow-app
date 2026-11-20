@@ -331,6 +331,9 @@ type RunRequest struct {
 	Permissions    domain.Permissions
 	ExecutionDir   string
 	Env            []string
+	// MaxCostUSD is the most the attempt may spend, in US dollars, which a CostCapper passes to its harness; zero is no
+	// cap.
+	MaxCostUSD float64
 	// PolicyCheck marks a request that validation makes only to learn the restrictions: no attempt starts. WorkDir and
 	// AdditionalDirs are the task's, resolved as an execution resolves them, though they may not exist yet; a folder that
 	// does not resolve is left out, and WorkDir is then empty.
@@ -543,6 +546,12 @@ type QuotaReader interface {
 // event, so the attempt can be ended then. Any other harness can be checked only before its attempt starts.
 type ExtraUsageReporter interface {
 	ReportsExtraUsage() bool
+}
+
+// CostCapper is a HarnessAdapter whose harness stops an attempt at RunRequest.MaxCostUSD, ending it as
+// domain.ClassBudgetExhausted. Any other harness runs its attempts with no cap.
+type CostCapper interface {
+	CapsCost() bool
 }
 
 // SystemInfo reads the gauges of the sidebar.

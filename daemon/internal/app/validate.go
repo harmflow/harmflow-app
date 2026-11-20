@@ -210,6 +210,11 @@ func (a *App) semanticChecks(ctx context.Context, r *ValidationResult, doc domai
 			r.addError(path, domain.TextOf(err))
 		}
 	}
+	capUSD, capped := doc.AttemptCostCap()
+	if capped && !domain.ValidAttemptCost(capUSD) {
+		r.addError("/spec/execution/maxAttemptCostUsd", domain.T("attempt_cost_cap_invalid",
+			"the cost cap is an amount in US dollars from 0.01 to 1,000, with at most two decimals"))
+	}
 	profiles := doc.Profiles()
 	for i, p := range profiles {
 		path := "/spec/harness/preferred"
@@ -244,6 +249,9 @@ func (a *App) semanticChecks(ctx context.Context, r *ValidationResult, doc domai
 		}
 		if !doc.AllowsExtraUsage() && !reportsExtraUsage(ad) {
 			r.addWarning(path+"/provider", domain.WarningPolicyUnenforced, extraUsageUnenforced(ad.Name()))
+		}
+		if capped && !capsCost(ad) {
+			r.addWarning(path+"/provider", domain.WarningPolicyUnenforced, costCapUnenforced(ad.Name()))
 		}
 		if !asks {
 			continue
@@ -586,6 +594,18 @@ func (a *App) policyWarnings(ctx context.Context, doc domain.TaskDocument) []dom
 func reportsExtraUsage(ad ports.HarnessAdapter) bool {
 	r, ok := ad.(ports.ExtraUsageReporter)
 	return ok && r.ReportsExtraUsage()
+}
+
+// capsCost reports whether the harness stops an attempt at the task's cost cap.
+func capsCost(ad ports.HarnessAdapter) bool {
+	c, ok := ad.(ports.CostCapper)
+	return ok && c.CapsCost()
+}
+
+// costCapUnenforced says a harness that cannot stop a session by its cost runs its attempts with no cap.
+func costCapUnenforced(harness string) domain.Text {
+	return domain.T("cost_cap_unenforced",
+		"{{harness}} cannot stop a session by its cost, so its attempts run with no cost cap", "harness", harness)
 }
 
 // keepsSessions reports whether the harness can keep a session for the owner, as a profile with ephemeral false asks.

@@ -244,7 +244,7 @@ describe("execution lists", () => {
   });
 
   it("reads the counters from /stats and never the gauges, which /system alone answers", async () => {
-    const stats = { running: 1, queued: 0, completedToday: 0, failedToday: 0, activity: { running: [], queued: [], completed: [], failed: [] } };
+    const stats = { running: 1, queued: 0, completedToday: 0, failedToday: 0, noWorkToday: 0, activity: { running: [], queued: [], completed: [], failed: [], noWork: [] } };
     daemon.answers.set("/stats", stats);
     daemon.requests.length = 0;
 

@@ -598,6 +598,12 @@ func (r *run) attempts(ctx context.Context, start func(harness string) error) (d
 			if end.Class == domain.ClassTimeout || timedOut {
 				return domain.StatusFailed, domain.T("execution_timed_out", "the execution timeout elapsed")
 			}
+			// The cap ends the execution, as the timeout does: no retry and no failover spend past it.
+			if end.Class == domain.ClassBudgetExhausted {
+				capUSD, _ := r.def.AttemptCostCap()
+				return domain.StatusFailed, domain.T("execution_budget_exhausted",
+					"an attempt reached the task's cost cap of USD {{cap}}", "cap", strconv.FormatFloat(capUSD, 'f', 2, 64))
+			}
 			if end.SignedOut {
 				// The saved token the attempt ran with, which the harness rejected, is dropped, and a check on the harness's
 				// own sign-in decides whether its sign-in starts; a token saved while the attempt ran stays in use. Either way
@@ -792,6 +798,13 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 		// A custom entry's home is one of its assignments, whose values the record never holds: its name says which.
 		at.InstallationName, at.InstallationHome = info.EntryName, ""
 	}
+	// Every attempt gets the whole cap, as the task set it when the execution started; a harness that cannot stop an
+	// attempt by cost runs it with none.
+	capUSD, capped := r.def.AttemptCostCap()
+	capped = capped && capsCost(ad)
+	if capped {
+		at.CostCapUSD = &capUSD
+	}
 	at.SetReason(reason)
 	r.x.Attempts = append(r.x.Attempts, at)
 	r.x.Harness, r.x.Model = p.Provider, ""
@@ -810,6 +823,9 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 		Context: sessionContext(general, r.harmflowContext(n, prev)), Agents: agents, Skills: skills, Model: p.Model, Effort: p.Effort,
 		KeepSession: p.KeepsSession(), WorkDir: r.work, AdditionalDirs: r.extra, Permissions: r.permissions(), ExecutionDir: r.dir,
 		Env: r.env(),
+	}
+	if capped {
+		req.MaxCostUSD = capUSD
 	}
 	// Recorded before Prepare, so a running attempt, and one whose harness never started, shows its input.
 	a.mu.Lock()
@@ -837,6 +853,10 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 	if !r.def.AllowsExtraUsage() && !reportsExtraUsage(ad) {
 		r.warn(domain.Warning{Code: domain.WarningPolicyUnenforced, Subject: "allowExtraUsage",
 			Text: extraUsageUnenforced(ad.Name())}, domain.EventPolicyUnenforced, true)
+	}
+	if _, set := r.def.AttemptCostCap(); set && !capsCost(ad) {
+		r.warn(domain.Warning{Code: domain.WarningPolicyUnenforced, Subject: "maxAttemptCostUsd",
+			Text: costCapUnenforced(ad.Name())}, domain.EventPolicyUnenforced, true)
 	}
 	switch info.VersionSupport {
 	case "untested_newer":
@@ -1015,6 +1035,8 @@ func attemptOutcome(c domain.ErrorClass) domain.AttemptOutcome {
 		return domain.AttemptNetworkFailed
 	case domain.ClassTimeout:
 		return domain.AttemptTimedOut
+	case domain.ClassBudgetExhausted:
+		return domain.AttemptBudgetExhausted
 	case domain.ClassCancelled:
 		return domain.AttemptCancelled
 	default:

@@ -78,7 +78,8 @@ func (w *fakeWake) woke(at time.Time) {
 }
 
 // fakeHarness runs /bin/sh with a script the test chooses. The script prints the outcome on its last line:
-// "END ok", "END quota", "END rate", "END network", "END unavailable" (signed out), or "END error"; "STARTED <model>
+// "END ok", "END quota", "END rate", "END network", "END unavailable" (signed out), "END budget" (the cost cap), or
+// "END error"; "STARTED <model>
 // <effort>" reports what the session runs with, and "WINDOW <percent>" a plan window used that much. Its user
 // configuration holds the skill user-skill and the agent user-agent, each at a path of its own harness, and the skill
 // review-notes and the agent review-agent for Claude Code only.
@@ -210,6 +211,9 @@ func (f *fakeHarness) ValidateProfile(ports.HarnessInfo, string, string) error {
 // ReportsExtraUsage says what the real adapter of the same harness says: only Claude Code reports extra usage as
 // it runs.
 func (f *fakeHarness) ReportsExtraUsage() bool { return f.id == domain.HarnessClaudeCode }
+
+// CapsCost says what the real adapter of the same harness says: only Claude Code stops a session at a cost cap.
+func (f *fakeHarness) CapsCost() bool { return f.id == domain.HarnessClaudeCode }
 
 // KeepsSessions says what the real adapter of the same harness says: only Codex can keep a session.
 func (f *fakeHarness) KeepsSessions() bool { return f.id == domain.HarnessCodex }
@@ -461,6 +465,10 @@ func (p *fakeParser) Finish(exit int, _ string, timedOut, cancelled bool) domain
 	case "unavailable":
 		return domain.AttemptEnd{Class: domain.ClassHarnessUnavailable, Error: domain.Text{Message: "Not logged in"},
 			SignedOut: true}
+	case "budget":
+		// The cost cap stopped the session, as Claude Code's --max-budget-usd ends it.
+		return domain.AttemptEnd{Class: domain.ClassBudgetExhausted, Error: domain.T("attempt_budget_exhausted",
+			"the attempt reached the task's cost cap"), Usage: p.usage(domain.UsageReported)}
 	}
 	return domain.AttemptEnd{Class: domain.ClassTaskError, Error: domain.Text{Message: fmt.Sprintf("exit %d", exit)}}
 }
