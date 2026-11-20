@@ -475,6 +475,8 @@ export const esES: Resources = {
     step_waiting_rate_limit: "Esperando al límite de frecuencia",
     step_waiting_approval: "Esperando la aprobación del responsable",
     step_harness_running: "{{harness}} en ejecución",
+    codex_approval_policy_overridden:
+      "Codex se ejecuta con approval_policy {{policy}}, que sus requisitos fijan en lugar de {{wanted}}: un comando fuera del sandbox espera la aprobación del responsable",
     approval_requested: "{{harness}} pide aprobación: {{what}}",
     approval_answered: "El responsable respondió {{decision}}",
     approval_declined_time_limit: "Rechazada: la solicitud seguía sin respuesta cuando la ejecución alcanzó su tiempo límite",
@@ -755,7 +757,6 @@ export const esES: Resources = {
       accept_for_session: "Aceptar en esta sesión",
       decline: "Rechazar",
       sessionHint: "Aceptar en la sesión vale solo para la sesión de este intento; un reintento, un cambio de herramienta y la próxima ejecución vuelven a preguntar.",
-      sent: "Respuesta enviada",
     },
     activeTitle: "Ejecuciones activas ({{count}})",
     empty: "No hay nada en ejecución ahora.",

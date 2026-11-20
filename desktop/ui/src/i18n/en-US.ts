@@ -465,6 +465,8 @@ export const enUS = {
     step_waiting_rate_limit: "Waiting for the rate limit",
     step_waiting_approval: "Waiting for the owner's approval",
     step_harness_running: "{{harness}} is running",
+    codex_approval_policy_overridden:
+      "Codex runs with approval_policy {{policy}}, which its requirements set in place of {{wanted}}: a command outside the sandbox waits for the owner's approval",
     approval_requested: "{{harness}} asks for approval: {{what}}",
     approval_answered: "The owner answered {{decision}}",
     approval_declined_time_limit: "Declined: the request was still unanswered when the execution reached its time limit",
@@ -730,7 +732,6 @@ export const enUS = {
       accept_for_session: "Accept for this session",
       decline: "Decline",
       sessionHint: "Accepting for the session lasts only for this attempt's session; a retry, a failover, and the next execution ask again.",
-      sent: "Answer sent",
     },
     activeTitle: "Active executions ({{count}})",
     empty: "Nothing is running right now.",

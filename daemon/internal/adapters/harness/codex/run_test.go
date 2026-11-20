@@ -186,8 +186,8 @@ func TestApprovalWithdrawnAndOtherRequests(t *testing.T) {
 	}
 }
 
-// harmflow-app#465: Codex's automatic review of an approval is recorded, its start and its outcome, and HarmFlow answers
-// nothing for it.
+// harmflow-app#465: Codex's automatic review of an approval is recorded, its start and its outcome, and HarmFlow
+// answers nothing for it.
 func TestAutoReviewIsRecorded(t *testing.T) {
 	p, in := started(t)
 	before := len(in.lines)

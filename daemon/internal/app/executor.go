@@ -1343,9 +1343,12 @@ func (r *run) onHarnessEvent(he ports.HarnessEvent) {
 		r.event(domain.Event{Type: domain.EventHarnessOutput, Severity: domain.SeverityDebug, Message: trimTo(he.Message, 2000)})
 	case ports.HarnessSettingOverridden:
 		// The attempt goes on: only a command that needs what the setting allowed is affected, and the warning tells the
-		// user where to look. The text is the harness's own, so it carries no key.
-		r.warn(domain.Warning{Code: domain.WarningOther, Text: domain.Text{Message: trimTo(he.Message, 2000)}},
-			domain.EventHarnessOutput, true)
+		// user where to look. The harness's own text carries no key; the adapter's own words carry theirs.
+		text := domain.Text{Message: trimTo(he.Message, 2000)}
+		if he.Text != nil {
+			text = *he.Text
+		}
+		r.warn(domain.Warning{Code: domain.WarningOther, Text: text}, domain.EventHarnessOutput, true)
 	case ports.HarnessRateLimit:
 		r.event(domain.Event{Type: domain.EventHarnessOutput, Severity: domain.SeverityWarning, Message: he.Message})
 	case ports.HarnessApprovalRequested:

@@ -1003,8 +1003,8 @@ func waitForSleep(t *testing.T, p *Process) {
 	})
 }
 
-// harmflow-app#465: an interactive invocation keeps the process's stdin open, so what the daemon writes reaches it while
-// it runs; the stdin is closed once the process exited, and a write after that fails rather than blocking.
+// harmflow-app#465: an interactive invocation keeps the process's stdin open, so what the daemon writes reaches it
+// while it runs; the stdin is closed once the process exited, and a write after that fails rather than blocking.
 func TestInteractiveStdinStaysOpen(t *testing.T) {
 	var mu sync.Mutex
 	var lines []string

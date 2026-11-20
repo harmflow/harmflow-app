@@ -3,7 +3,6 @@ package codex
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -268,8 +267,10 @@ func (p *parser) answer(m rpcIn) []ports.HarnessEvent {
 		// for the owner.
 		if s, ok := r.ApprovalPolicy.(string); ok && s != approvalPolicy {
 			p.policySaid = true
-			out = append(out, ports.HarnessEvent{Kind: ports.HarnessSettingOverridden,
-				Message: fmt.Sprintf("Codex runs with approval_policy %s, which its requirements set in place of %s: a command outside the sandbox waits for the owner's approval", s, approvalPolicy)})
+			t := domain.T("codex_approval_policy_overridden",
+				"Codex runs with approval_policy {{policy}}, which its requirements set in place of {{wanted}}: a command outside the sandbox waits for the owner's approval",
+				"policy", s, "wanted", approvalPolicy)
+			out = append(out, ports.HarnessEvent{Kind: ports.HarnessSettingOverridden, Message: t.Message, Text: &t})
 		}
 		turn := map[string]any{"threadId": r.Thread.ID}
 		for k, v := range p.turn {
@@ -521,7 +522,7 @@ func (p *parser) item(done bool, it *appItem) []ports.HarnessEvent {
 			if p.changes == nil {
 				p.changes = map[string][]string{}
 			}
-			paths := make([]string, 0, len(it.Changes))
+			var paths []string
 			for _, c := range it.Changes {
 				paths = append(paths, c.Path)
 			}

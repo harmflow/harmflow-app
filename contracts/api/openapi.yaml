@@ -1339,6 +1339,7 @@ components:
         - step_switching_harness
         - step_waiting_rate_limit
         - approval_requested
+        - codex_approval_policy_overridden
         - approval_answered
         - approval_declined_time_limit
         - approval_withdrawn

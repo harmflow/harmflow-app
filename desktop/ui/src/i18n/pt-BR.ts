@@ -474,6 +474,8 @@ export const ptBR: Resources = {
     step_waiting_rate_limit: "Aguardando o limite de taxa",
     step_waiting_approval: "Aguardando a aprovação do responsável",
     step_harness_running: "{{harness}} em execução",
+    codex_approval_policy_overridden:
+      "O Codex roda com approval_policy {{policy}}, que seus requisitos definem no lugar de {{wanted}}: um comando fora do sandbox aguarda a aprovação do responsável",
     approval_requested: "{{harness}} pede aprovação: {{what}}",
     approval_answered: "O responsável respondeu {{decision}}",
     approval_declined_time_limit: "Recusada: o pedido ainda não tinha resposta quando a execução atingiu seu tempo limite",
@@ -757,7 +759,6 @@ export const ptBR: Resources = {
       accept_for_session: "Aceitar nesta sessão",
       decline: "Recusar",
       sessionHint: "Aceitar na sessão vale só para a sessão desta tentativa; uma nova tentativa, uma troca de ferramenta e a próxima execução perguntam de novo.",
-      sent: "Resposta enviada",
     },
     activeTitle: "Execuções ativas ({{count}})",
     empty: "Nada está em execução agora.",

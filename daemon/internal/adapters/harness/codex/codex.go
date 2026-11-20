@@ -1,6 +1,7 @@
 // Package codex is the HarnessRunner adapter of the OpenAI Codex CLI: its app server, with the permission profile
-// translated to Codex's own sandbox modes, and the approvals it asks for relayed to the owner. Codex has no session plugin mechanism, so built-in agents and
-// skills are delivered as files of the execution and named in the session's instructions.
+// translated to Codex's own sandbox modes, and the approvals it asks for relayed to the owner. Codex has no session
+// plugin mechanism, so built-in agents and skills are delivered as files of the execution and named in the session's
+// instructions.
 package codex
 
 import (

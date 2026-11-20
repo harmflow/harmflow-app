@@ -283,11 +283,14 @@ func TestParseSuccess(t *testing.T) {
 func TestParseRequirementsOverride(t *testing.T) {
 	p, events := replay(t, "requirements-override.jsonl")
 	var kinds []ports.HarnessEventKind
-	var overridden string
+	var overridden, overriddenKey string
 	for _, e := range events {
 		kinds = append(kinds, e.Kind)
 		if e.Kind == ports.HarnessSettingOverridden {
 			overridden = e.Message
+			if e.Text != nil {
+				overriddenKey = e.Text.Key
+			}
 		}
 	}
 	// The thread's start names the approval policy its requirements set, which is said once: Codex's own notice of it
@@ -297,7 +300,7 @@ func TestParseRequirementsOverride(t *testing.T) {
 	if !slices.Equal(kinds, wantKinds) {
 		t.Errorf("replay(requirements-override.jsonl) kinds %q, want %q", kinds, wantKinds)
 	}
-	if !strings.Contains(overridden, "approval_policy on-request") {
+	if !strings.Contains(overridden, "approval_policy on-request") || overriddenKey != "codex_approval_policy_overridden" {
 		t.Errorf("the overridden setting's message %q, want the policy Codex runs with", overridden)
 	}
 	if end := p.Finish(0, "", false, false); end.Class != domain.ClassNone {
@@ -866,8 +869,8 @@ func TestPrepareDeliversBuiltins(t *testing.T) {
 	}
 }
 
-// The Costs tab (harmflow-app#39), on a real Codex 0.163.0 run: the thread's token usage carries the attempt's usage, its
-// inputTokens include the cached ones, and the cost is estimated from the table when the attempt ends.
+// The Costs tab (harmflow-app#39), on a real Codex 0.163.0 run: the thread's token usage carries the attempt's usage,
+// its inputTokens include the cached ones, and the cost is estimated from the table when the attempt ends.
 func TestUsageFromTurnCompleted(t *testing.T) {
 	price := domain.Price{Input: 1.25, CacheRead: 0.125, Output: 10}
 	prices := domain.PriceTable{AsOf: "2026-01-02", Prices: map[string]domain.Price{"gpt-test": price}}

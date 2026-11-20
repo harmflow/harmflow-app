@@ -166,10 +166,10 @@ func TestDetectionOnlyProbes(t *testing.T) {
 }
 
 // harmflow-app#1050: the Codex half of TestDetectionOnlyProbes for a Codex that says it is signed out. The stand-in is
-// the signed-out Codex of the sign-in tests, behind a wrapper that records each invocation. Detecting it and running a task on it invokes only the probes and the sign-in the daemon starts,
-// `codex login` with no other argument, which nobody approves and which ends at the one-second timeout: no installer,
-// no updater, no device-code sign-in, and no sign-in with an API key. The execution fails without starting, and Codex
-// reads not ready.
+// the signed-out Codex of the sign-in tests, behind a wrapper that records each invocation. Detecting it and running a
+// task on it invokes only the probes and the sign-in the daemon starts, `codex login` with no other argument, which
+// nobody approves and which ends at the one-second timeout: no installer, no updater, no device-code sign-in, and no
+// sign-in with an API key. The execution fails without starting, and Codex reads not ready.
 func TestDetectionOnlySignedOutCodexProbesAndSignIn(t *testing.T) {
 	t.Parallel()
 	codex, codexHome := newCodexSignInStandIn(t)

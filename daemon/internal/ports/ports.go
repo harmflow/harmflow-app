@@ -390,6 +390,8 @@ type HarnessEvent struct {
 	Approval *domain.ApprovalRequest
 	// Review is the automatic review of HarnessAutoReviewStarted and HarnessAutoReviewCompleted.
 	Review *domain.AutoReview
+	// Text is the daemon's own words for Message, with their key, when the adapter wrote them rather than the harness.
+	Text *domain.Text
 }
 
 // OutputParser turns one attempt's stdout lines into events and classifies its end.
