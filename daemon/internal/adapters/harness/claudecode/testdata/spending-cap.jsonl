@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","session_id":"44444444-4444-4444-4444-444444444444","model":"claude-sonnet-4-5"}
+{"type":"result","subtype":"success","is_error":true,"result":"Spending cap reached resets Dec 1","session_id":"44444444-4444-4444-4444-444444444444"}

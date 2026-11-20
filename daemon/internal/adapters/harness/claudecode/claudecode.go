@@ -1417,9 +1417,11 @@ const signedOutTexts = `please run /login|\bnot logged in\b|authentication_error
 var signedOut = regexp.MustCompile(`(?i)(` + signedOutTexts + `)`)
 
 // patterns match the CLI's own texts, not words a task's error can hold too: a bare quota or "limit reached", or the
-// "not logged into" of another tool, ends the attempt as a task error (harmflow-app#213).
+// "not logged into" of another tool, ends the attempt as a task error (harmflow-app#213). A window's name may hold a
+// hyphen, as the "5-hour limit" of 2.1.312 and later does, and 2.0.x names a reached spend control "Spending cap
+// reached", with no rate-limit event before it (harmflow-app#1121).
 var patterns = classify.Patterns{
-	Quota:       regexp.MustCompile(`(?i)(usage limit|you(’|')ve hit your ([\w’']+ ){0,3}limit|out of (extra )?usage|credit balance (is )?too low|usage allocation (has been )?disabled by your admin|(weekly|session|5-hour|opus|sonnet)( weekly)? limit (has been )?reached)`),
+	Quota:       regexp.MustCompile(`(?i)(usage limit|you(’|')ve hit your ([\w’'-]+ ){0,3}limit|out of (extra )?usage|credit balance (is )?too low|usage allocation (has been )?disabled by your admin|(weekly|session|5-hour|opus|sonnet)( weekly)? limit (has been )?reached|spending cap (has been )?reached)`),
 	RateLimit:   regexp.MustCompile(`(?i)(rate[ _-]?limit|too many requests|overloaded_error|api error:? (429|529))`),
 	Unavailable: regexp.MustCompile(`(?i)(invalid api key|` + signedOutTexts + `|managed settings .*could not be loaded)`),
 	Network:     regexp.MustCompile(`(?i)(ECONNREFUSED|ENOTFOUND|ETIMEDOUT|ECONNRESET|network error|getaddrinfo|fetch failed|connection error)`),
