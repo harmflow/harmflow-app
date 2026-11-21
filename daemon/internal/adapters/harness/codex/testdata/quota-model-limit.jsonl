@@ -1,4 +1,7 @@
-{"type":"thread.started","thread_id":"t-4"}
-{"type":"turn.started"}
-{"type":"error","message":"You’ve hit your usage limit for GPT-5.3-Codex-Spark. Switch to another model now, or try again later."}
-{"type":"turn.failed","error":{"message":"You’ve hit your usage limit for GPT-5.3-Codex-Spark. Switch to another model now, or try again later."}}
+{"id":1,"result":{"userAgent":"harmflow/0.163.0","codexHome":"/home/.codex","platformFamily":"unix","platformOs":"macos"}}
+{"id": 2, "result": {"thread": {"id": "t-4"}, "approvalPolicy": "never", "approvalsReviewer": "user"}}
+{"method": "thread/started", "params": {"thread": {"id": "t-4"}}}
+{"id": 3, "result": {"turn": {"id": "turn-1", "status": "inProgress"}}}
+{"method": "turn/started", "params": {"threadId": "t-4", "turn": {"id": "turn-1", "status": "inProgress"}}}
+{"method": "error", "params": {"threadId": "t-4", "turnId": "turn-1", "willRetry": false, "error": {"message": "You’ve hit your usage limit for GPT-5.3-Codex-Spark. Switch to another model now, or try again later."}}}
+{"method": "turn/completed", "params": {"threadId": "t-4", "turn": {"id": "turn-1", "status": "failed", "items": [], "error": {"message": "You’ve hit your usage limit for GPT-5.3-Codex-Spark. Switch to another model now, or try again later."}}}}
