@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","session_id":"55555555-5555-5555-5555-555555555555","model":"claude-opus-4-5"}
+{"type":"result","subtype":"success","is_error":true,"result":"You're out of extra usage","session_id":"55555555-5555-5555-5555-555555555555"}

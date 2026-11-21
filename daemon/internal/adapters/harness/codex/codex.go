@@ -835,8 +835,11 @@ const signedOutTexts = `\bnot logged in\b|please log in|codex login|refresh toke
 
 var signedOut = regexp.MustCompile(`(?i)(` + signedOutTexts + `)`)
 
+// patterns read the CLI's error as a class. A workspace out of credits, a spend cap reached, and "Quota exceeded", as
+// Codex 0.163.0 and 0.171.0 end a turn on them, are an exhausted quota as much as a usage limit is. Each is read in
+// Codex's own sentence, so the system's "Disk quota exceeded" in a write's error stays a task error.
 var patterns = classify.Patterns{
-	Quota:       regexp.MustCompile(`(?i)(usage limit|insufficient_quota|exceeded your current quota|purchase more credits|plan limit)`),
+	Quota:       regexp.MustCompile(`(?i)(usage limit|insufficient_quota|exceeded your current quota|purchase more credits|plan limit|workspace is out of credits|hit your spend cap|\bquota exceeded\. check your plan)`),
 	RateLimit:   regexp.MustCompile(`(?i)(rate[ _-]?limit|too many requests|status 429)`),
 	Unavailable: regexp.MustCompile(`(?i)(` + signedOutTexts + `|authentication failed|invalid api key|401 unauthorized)`),
 	Network:     regexp.MustCompile(`(?i)(stream disconnected|error sending request|connection (refused|reset)|dns error|timed out connecting)`),

@@ -6,8 +6,23 @@ import { envToLines, getIn, linesToArgs, linesToEnv, listToLines, programKind, s
 import { Checkbox, Field, FieldGroup, SegmentedControl, TextArea, TextInput } from "../ui";
 import type { SetFn } from "./formModel";
 
-/** A script task's program, in either form, its working directory, environment, and systems. */
-export function ScriptFields({ doc, onChange, set, err }: { doc: Doc; onChange: (doc: Doc) => void; set: SetFn; err: (path: Path) => string | undefined }) {
+/**
+ * A script task's program, in either form, its working directory, environment, and systems; `show` says which keys of
+ * `spec.script` the form shows, every one by default.
+ */
+export function ScriptFields({
+  doc,
+  onChange,
+  set,
+  err,
+  show = () => true,
+}: {
+  doc: Doc;
+  onChange: (doc: Doc) => void;
+  set: SetFn;
+  err: (path: Path) => string | undefined;
+  show?: (key: string) => boolean;
+}) {
   const { t } = useTranslation();
   const kind = programKind(doc);
   const systems = getIn<string[]>(doc, ["spec", "script", "systems"]) ?? [];
@@ -41,29 +56,37 @@ export function ScriptFields({ doc, onChange, set, err }: { doc: Doc; onChange: 
           </Field>
         </>
       )}
-      <div className="grid-2">
-        <Field label={t("tasks.fields.workingDirectory")} hint={t("tasks.fields.workingDirectoryHint")} error={err(["spec", "script", "workingDirectory"])}>
-          <TextInput
-            mono
-            value={getIn<string>(doc, ["spec", "script", "workingDirectory"]) ?? ""}
-            placeholder="~"
-            onChange={(e) => set(["spec", "script", "workingDirectory"], e.target.value)}
-          />
+      {show("workingDirectory") || show("systems") ? (
+        <div className="grid-2">
+          {show("workingDirectory") ? (
+            <Field label={t("tasks.fields.workingDirectory")} hint={t("tasks.fields.workingDirectoryHint")} error={err(["spec", "script", "workingDirectory"])}>
+              <TextInput
+                mono
+                value={getIn<string>(doc, ["spec", "script", "workingDirectory"]) ?? ""}
+                placeholder="~"
+                onChange={(e) => set(["spec", "script", "workingDirectory"], e.target.value)}
+              />
+            </Field>
+          ) : null}
+          {show("systems") ? (
+            <FieldGroup label={t("tasks.fields.systems")} hint={t("tasks.fields.systemsHint")} className="check-row">
+              {schemaEnum(["spec", "script", "systems"]).map((system) => (
+                <Checkbox
+                  key={system}
+                  checked={systems.includes(system)}
+                  label={t(`tasks.options.systems.${system}` as never, { defaultValue: system }) as string}
+                  onChange={(on) => set(["spec", "script", "systems"], on ? [...systems, system] : systems.filter((s) => s !== system))}
+                />
+              ))}
+            </FieldGroup>
+          ) : null}
+        </div>
+      ) : null}
+      {show("environment") ? (
+        <Field label={t("tasks.fields.environment")} hint={t("tasks.fields.environmentHint")} error={err(["spec", "script", "environment"])}>
+          <EnvArea value={getIn(doc, ["spec", "script", "environment"])} onValue={(v) => set(["spec", "script", "environment"], v)} />
         </Field>
-        <FieldGroup label={t("tasks.fields.systems")} hint={t("tasks.fields.systemsHint")} className="check-row">
-          {schemaEnum(["spec", "script", "systems"]).map((system) => (
-            <Checkbox
-              key={system}
-              checked={systems.includes(system)}
-              label={t(`tasks.options.systems.${system}` as never, { defaultValue: system }) as string}
-              onChange={(on) => set(["spec", "script", "systems"], on ? [...systems, system] : systems.filter((s) => s !== system))}
-            />
-          ))}
-        </FieldGroup>
-      </div>
-      <Field label={t("tasks.fields.environment")} hint={t("tasks.fields.environmentHint")} error={err(["spec", "script", "environment"])}>
-        <EnvArea value={getIn(doc, ["spec", "script", "environment"])} onValue={(v) => set(["spec", "script", "environment"], v)} />
-      </Field>
+      ) : null}
     </>
   );
 }

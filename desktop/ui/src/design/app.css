@@ -3352,6 +3352,13 @@ button.list-row--error:hover {
   min-width: 0;
 }
 
+/* The Form tab's Simple / Advanced switch, above the form. */
+.editor__modes {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--hf-space-3);
+}
+
 .editor__main--yaml {
   min-height: 560px;
 }

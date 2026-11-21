@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","session_id":"66666666-6666-6666-6666-666666666666","model":"claude-opus-4-5"}
+{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1792533600,"rateLimitType":"five_hour","overageStatus":"rejected","isUsingOverage":false}}
+{"type":"result","subtype":"success","is_error":true,"result":"You've hit your 5-hour limit · resets 3pm","session_id":"66666666-6666-6666-6666-666666666666"}

@@ -1066,3 +1066,50 @@ describe("task editor after an outside change", () => {
     expect(banner("warning")).toBeNull();
   });
 });
+
+// The Form tab's simple and advanced modes (harmflow-app#553): simple shows the fields the type needs to validate, its
+// schedule, and whether it is enabled; advanced shows every field. Both edit the one document the YAML tab shows, a
+// task that sets a field simple mode hides says how many, and the editor opens in the last mode chosen, for every task.
+describe("the Form tab's simple and advanced modes", () => {
+  const modeButton = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>('.editor__modes [role="radio"]')].find((b) => b.textContent === label)!;
+  const checkedMode = () => host!.querySelector('.editor__modes [role="radio"][aria-checked="true"]')?.textContent;
+  const hasToggle = (label: string) => [...host!.querySelectorAll(".toggle__label")].some((l) => l.textContent === label);
+  const hiddenLine = () => [...host!.querySelectorAll(".hint-line")].find((p) => p.querySelector("button"))?.textContent?.trim() ?? null;
+  const NEW_CRON = "0 10 * * 1-5";
+
+  afterEach(() => localStorage.removeItem("harmflow.editorMode"));
+
+  it("hides what simple mode leaves out, counts it, edits one definition, and opens in the last mode chosen", async () => {
+    localStorage.setItem("harmflow.editorMode", "simple");
+    await open("edit");
+    expect(checkedMode()).toBe("Simple");
+    expect(field("Name")).toBeDefined();
+    expect(field("Description")).toBeUndefined();
+    expect(field("Repeats")).toBeDefined();
+    expect(hasToggle("Allow extra usage")).toBe(false);
+    expect(hiddenLine()).toBeNull();
+
+    await click(modeButton("Advanced"));
+    expect(field("Description")).toBeDefined();
+    await click(extraUsage());
+    await click(modeButton("Simple"));
+    expect(hasToggle("Allow extra usage")).toBe(false);
+    expect(hiddenLine()).toBe("1 other field is set. Show in advanced mode");
+
+    await choose(field("Repeats").querySelector("select")!, "custom");
+    await type(cronField().querySelector("input")!, NEW_CRON);
+    await click(tab("YAML"));
+    expect(yamlText()).toBe(taskYaml("Standup notes", NEW_CRON, true));
+    expect([...host!.querySelectorAll('[role="tab"]')].map((b) => b.textContent)).toEqual(["Form", "YAML"]);
+
+    await click(tab("Form"));
+    expect(checkedMode()).toBe("Simple");
+    await click([...host!.querySelectorAll<HTMLButtonElement>(".hint-line button")].find((b) => b.textContent === "Show in advanced mode")!);
+    expect(checkedMode()).toBe("Advanced");
+    expect(extraUsage().checked).toBe(true);
+
+    close();
+    await open("create");
+    expect(checkedMode()).toBe("Advanced");
+  });
+});
