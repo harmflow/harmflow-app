@@ -1,4 +1,7 @@
-{"type":"thread.started","thread_id":"t-3"}
-{"type":"turn.started"}
-{"type":"error","message":"You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:15 PM."}
-{"type":"turn.failed","error":{"message":"You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:15 PM."}}
+{"id":1,"result":{"userAgent":"harmflow/0.163.0","codexHome":"/home/.codex","platformFamily":"unix","platformOs":"macos"}}
+{"id": 2, "result": {"thread": {"id": "t-3"}, "approvalPolicy": "never", "approvalsReviewer": "user"}}
+{"method": "thread/started", "params": {"thread": {"id": "t-3"}}}
+{"id": 3, "result": {"turn": {"id": "turn-1", "status": "inProgress"}}}
+{"method": "turn/started", "params": {"threadId": "t-3", "turn": {"id": "turn-1", "status": "inProgress"}}}
+{"method": "error", "params": {"threadId": "t-3", "turnId": "turn-1", "willRetry": false, "error": {"message": "You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:15 PM."}}}
+{"method": "turn/completed", "params": {"threadId": "t-3", "turn": {"id": "turn-1", "status": "failed", "items": [], "error": {"message": "You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:15 PM."}}}}

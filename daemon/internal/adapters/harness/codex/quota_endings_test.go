@@ -6,9 +6,10 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 )
 
-// Each quota ending of quota-endings.md that no other test replays, as `codex exec --json` prints it from 0.43.0 on.
-// TestParseQuota replays quota.jsonl and the workspace-credit, spend-cap, and "Quota exceeded" endings. The releases
-// before 0.43.0, whose output the adapter cannot read, are harmflow-app#1122.
+// Each quota ending of quota-endings.md that no other test replays, as the app server ends a turn on it: an error that
+// will not retry, then a failed turn/completed with the same message. TestParseQuota replays quota.jsonl and the
+// workspace-credit, spend-cap, and "Quota exceeded" endings. The releases before 0.43.0, whose output the adapter
+// cannot read, are harmflow-app#1122.
 func TestQuotaEndings(t *testing.T) {
 	for _, file := range []string{"quota-plus.jsonl", "quota-model-limit.jsonl", "quota-no-plan.jsonl"} {
 		t.Run(file, func(t *testing.T) {
