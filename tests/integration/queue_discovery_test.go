@@ -185,18 +185,18 @@ func awaitSelection(t *testing.T, d *daemon, id, dir string, want int) []string 
 	return selected
 }
 
-// selectedKeys reads the work items the session selected as the distinct issues they name, in the order it first named
-// each. A key that starts with queueRepo, #, and a number names that issue, whatever follows the number: a session's
-// own script has written the key "harmflow/harmflow-sandbox#81 8", and then the key as it should be, so the issue's
-// selection is read, and the defect of the key is #569's. Any other key, of another repository or with no number,
-// stays as it is, so that it fails the comparison. garbled lists the keys read past their text.
+// selectedKeys reads the work items the session selected as the distinct issues they name, in lower case, in the order
+// it first named each. A key that starts with a repository, #, and a number names that issue, whatever follows the
+// number: a session's own script has written the key "harmflow/harmflow-sandbox#81 8", and then the key as it should
+// be, so the issue's selection is read, and the defect of the key is #569's. Any other key, with no number, stays as it
+// is, so that it fails the comparison. garbled lists the keys read past their text.
 func selectedKeys(selected []string) (keys, garbled []string) {
 	for _, s := range selected {
 		k := strings.ToLower(s)
-		if rest, ok := strings.CutPrefix(k, strings.ToLower(queueRepo)+"#"); ok {
+		if repo, rest, ok := strings.Cut(k, "#"); ok && strings.Count(repo, "/") == 1 {
 			digits := rest[:len(rest)-len(strings.TrimLeft(rest, "0123456789"))]
 			if n, err := strconv.Atoi(digits); err == nil {
-				k = issueKey(n)
+				k = fmt.Sprintf("%s#%d", repo, n)
 				if digits != rest {
 					garbled = append(garbled, s)
 				}
