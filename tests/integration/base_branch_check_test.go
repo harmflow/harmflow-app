@@ -146,8 +146,10 @@ func waitWorkspaceChanged(t *testing.T, d *daemon, id, dir string, issue int, ti
 
 // baseCheckTask is the task queueTask builds, with the open issues of queueRepo labelled baseCheckLabel as its only
 // eligible ones, and what hf-github-worktree §2 runs to prepare a worktree added to its permissions: cd, and git
-// worktree. A push, a pull request, and a merge are denied, and a push would fail anyway on the clone's missing push
-// URL.
+// worktree. git push, gh pr create, and gh pr merge are denied, and a push would fail anyway on the clone's missing
+// push URL. gh api is allowed whole, as queueTask allows it, since the queue skill reads issues through it, so it can
+// still write: a pull request, a merge, or a ref through the REST or GraphQL API. Only the early stop at
+// workspace.changed guards against that.
 func baseCheckTask(d *daemon, clone string) string {
 	d.t.Helper()
 	task := issueQueueTask(d, clone,
