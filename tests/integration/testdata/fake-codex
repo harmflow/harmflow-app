@@ -1,60 +1,100 @@
 #!/bin/bash
-# A stand-in for the Codex CLI that speaks the JSONL of `codex exec --json`. CODEX=quota in the prompt fails the turn;
-# CODEX=slow starts a command and waits until it is ended, with a child the test finds in child.pid; CODEX=record first
-# copies the execution's record, as it is on disk when the attempt starts, to record-at-start.json. CODEX=home records
-# the CODEX_HOME the attempt started with in codex-home; CODEX=together then waits, for up to a minute, until another
-# execution of the daemon has recorded its own, and fails the turn when none has. A copy whose HOMES_LOG names a file
-# records there, for each of its processes, probes and attempts alike, the CODEX_HOME it started with and its first two
-# arguments, one line each; this copy, with none, records nothing.
+# A stand-in for the Codex CLI whose app server speaks the JSON lines of `codex app-server`: it answers the requests the
+# daemon makes of it, and runs one turn of a thread, whose input is the prompt. CODEX=quota in the prompt fails the
+# turn; CODEX=slow starts a command and waits until it is ended, with a child the test finds in child.pid; CODEX=record
+# first copies the execution's record, as it is on disk when the attempt starts, to record-at-start.json. CODEX=home
+# records the CODEX_HOME the attempt started with in codex-home; CODEX=together then waits, for up to a minute, until
+# another execution of the daemon has recorded its own, and fails the turn when none has. A copy whose HOMES_LOG names a
+# file records there, for each of its processes, probes and attempts alike, the CODEX_HOME it started with and its
+# first two arguments, one line each; this copy, with none, records nothing. A copy whose APP_SERVER_LOG names a file
+# records there each request its app server received, by its method, one line each.
 HOMES_LOG=
+APP_SERVER_LOG=
 if [ -n "$HOMES_LOG" ]; then printf '%s\t%s %s\n' "$CODEX_HOME" "$1" "$2" >> "$HOMES_LOG"; fi
 case "$1" in
   --version) echo "codex-cli 0.163.0"; exit 0 ;;
   login) echo "Logged in using ChatGPT"; exit 0 ;;
+  --help) echo "Commands: exec  app-server  login"; exit 0 ;;
   exec)
     if [ "$2" = "--help" ]; then
       echo "Usage: codex exec  --json  --sandbox <MODE>  --cd <DIR>  --skip-git-repo-check  --add-dir <DIR>  --ephemeral  --model <M>  --color <C>"
       exit 0
-    fi ;;
+    fi
+    exit 2 ;;
+  app-server) ;;
+  *) exit 2 ;;
 esac
-# The read builtin, not cat: on a loaded host, each process the stand-in starts can take seconds.
-IFS= read -r -d '' PROMPT
-if [[ "$PROMPT" == *"CODEX=record"* ]]; then
-  # The daemon keeps each execution's record in state/executions, beside the runs directory that holds the execution's.
-  RUNS=${HARMFLOW_EXECUTION_DIR%/*}
-  IFS= read -r -d '' RECORD < "${RUNS%/*}/state/executions/$HARMFLOW_EXECUTION_ID.json"
-  printf '%s' "$RECORD" > "$HARMFLOW_EXECUTION_DIR/record-at-start.json"
-fi
-if [[ "$PROMPT" == *"CODEX=home"* ]]; then
-  printf '%s' "$CODEX_HOME" > "$HARMFLOW_EXECUTION_DIR/codex-home"
-fi
-echo '{"type":"thread.started","thread_id":"fake-thread"}'
-echo '{"type":"turn.started"}'
-if [[ "$PROMPT" == *"CODEX=together"* ]]; then
-  together=
-  for _ in {1..600}; do
-    # The runs directory holds each execution's directory; a pattern that matches nothing stays one word.
-    homes=("${HARMFLOW_EXECUTION_DIR%/*}"/*/codex-home)
-    if [ "${#homes[@]}" -ge 2 ]; then together=1; break; fi
-    sleep 0.1
-  done
-  if [ -z "$together" ]; then
-    echo '{"type":"turn.failed","error":{"message":"no other execution recorded its CODEX_HOME within a minute"}}'
-    exit 1
+
+# turn runs the turn of the thread, its prompt in PROMPT, as the stand-in's earlier `codex exec` did.
+turn() {
+  if [[ "$PROMPT" == *"CODEX=record"* ]]; then
+    # The daemon keeps each execution's record in state/executions, beside the runs directory that holds the execution's.
+    RUNS=${HARMFLOW_EXECUTION_DIR%/*}
+    IFS= read -r -d '' RECORD < "${RUNS%/*}/state/executions/$HARMFLOW_EXECUTION_ID.json"
+    printf '%s' "$RECORD" > "$HARMFLOW_EXECUTION_DIR/record-at-start.json"
   fi
-fi
-if [[ "$PROMPT" == *"CODEX=quota"* ]]; then
-  echo '{"type":"turn.failed","error":{"message":"You have hit your usage limit."}}'
-  exit 1
-fi
-if [[ "$PROMPT" == *"CODEX=slow"* ]]; then
-  sleep 300 &
-  echo $! > "$HARMFLOW_EXECUTION_DIR/child.pid"
-  echo '{"type":"item.started","item":{"id":"i1","type":"command_execution","command":"/bin/zsh -lc '"'"'sleep 300'"'"'","status":"in_progress"}}'
-  wait
-  exit 0
-fi
-echo '{"type":"item.started","item":{"id":"i1","type":"command_execution","command":"/bin/zsh -lc '"'"'echo codex'"'"'","status":"in_progress"}}'
-echo '{"type":"item.completed","item":{"id":"i1","type":"command_execution","command":"/bin/zsh -lc '"'"'echo codex'"'"'","aggregated_output":"codex\n","exit_code":0,"status":"completed"}}'
-echo '{"type":"item.completed","item":{"id":"i2","type":"agent_message","text":"Codex finished."}}'
-echo '{"type":"turn.completed","usage":{"input_tokens":160035,"cached_input_tokens":135680,"cache_write_input_tokens":0,"output_tokens":1194,"reasoning_output_tokens":244}}'
+  if [[ "$PROMPT" == *"CODEX=home"* ]]; then
+    printf '%s' "$CODEX_HOME" > "$HARMFLOW_EXECUTION_DIR/codex-home"
+  fi
+  echo '{"method":"turn/started","params":{"threadId":"fake-thread","turn":{"id":"turn-1","status":"inProgress"}}}'
+  if [[ "$PROMPT" == *"CODEX=together"* ]]; then
+    together=
+    for _ in {1..600}; do
+      # The runs directory holds each execution's directory; a pattern that matches nothing stays one word.
+      homes=("${HARMFLOW_EXECUTION_DIR%/*}"/*/codex-home)
+      if [ "${#homes[@]}" -ge 2 ]; then together=1; break; fi
+      sleep 0.1
+    done
+    if [ -z "$together" ]; then
+      echo '{"method":"turn/completed","params":{"threadId":"fake-thread","turn":{"id":"turn-1","status":"failed","error":{"message":"no other execution recorded its CODEX_HOME within a minute"}}}}'
+      return
+    fi
+  fi
+  if [[ "$PROMPT" == *"CODEX=quota"* ]]; then
+    echo '{"method":"turn/completed","params":{"threadId":"fake-thread","turn":{"id":"turn-1","status":"failed","error":{"message":"You have hit your usage limit."}}}}'
+    return
+  fi
+  if [[ "$PROMPT" == *"CODEX=slow"* ]]; then
+    sleep 300 &
+    echo $! > "$HARMFLOW_EXECUTION_DIR/child.pid"
+    echo '{"method":"item/started","params":{"item":{"id":"i1","type":"commandExecution","command":"/bin/zsh -lc '"'"'sleep 300'"'"'","status":"inProgress"}}}'
+    wait
+    exit 0
+  fi
+  echo '{"method":"item/started","params":{"item":{"id":"i1","type":"commandExecution","command":"/bin/zsh -lc '"'"'echo codex'"'"'","status":"inProgress"}}}'
+  echo '{"method":"item/completed","params":{"item":{"id":"i1","type":"commandExecution","command":"/bin/zsh -lc '"'"'echo codex'"'"'","aggregatedOutput":"codex\n","exitCode":0,"status":"completed"}}}'
+  echo '{"method":"item/completed","params":{"item":{"id":"i2","type":"agentMessage","text":"Codex finished."}}}'
+  echo '{"method":"thread/tokenUsage/updated","params":{"threadId":"fake-thread","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":160035,"cachedInputTokens":135680,"cacheWriteInputTokens":0,"outputTokens":1194,"reasoningOutputTokens":244,"totalTokens":161229}}}}'
+  echo '{"method":"turn/completed","params":{"threadId":"fake-thread","turn":{"id":"turn-1","status":"completed"}}}'
+}
+
+# Each request is answered at once, from the builtins alone, since each process the stand-in starts can take seconds
+# on a loaded host. The account is the home's account.json, where a test wrote one; the managed requirements are none
+# and the quota has room left; the skill list is empty, and any other request is an error. The server ends when its stdin does.
+while IFS= read -r line; do
+  [[ $line =~ \"id\":([0-9]+) ]] || continue
+  id=${BASH_REMATCH[1]}
+  method=
+  [[ $line =~ \"method\":\"([^\"]+)\" ]] && method=${BASH_REMATCH[1]}
+  if [ -n "$APP_SERVER_LOG" ]; then echo "$method" >> "$APP_SERVER_LOG"; fi
+  case "$method" in
+    initialize) printf '{"id":%s,"result":{"userAgent":"stand-in"}}\n' "$id" ;;
+    configRequirements/read) printf '{"id":%s,"result":{"requirements":null}}\n' "$id" ;;
+    account/read)
+      # The account of the home's account.json, where a test wrote one; a ChatGPT Plus account otherwise.
+      account='{"type":"chatgpt","planType":"plus"}'
+      if [ -f "$CODEX_HOME/account.json" ]; then account=$(< "$CODEX_HOME/account.json"); fi
+      printf '{"id":%s,"result":{"account":%s}}\n' "$id" "$account" ;;
+    account/rateLimits/read) printf '{"id":%s,"result":{"rateLimits":{"primary":{"usedPercent":12,"resetsAt":null},"secondary":null,"rateLimitReachedType":null,"spendControlReached":false}}}\n' "$id" ;;
+    skills/list) printf '{"id":%s,"result":{"data":[]}}\n' "$id" ;;
+    thread/start) printf '{"id":%s,"result":{"thread":{"id":"fake-thread"},"approvalPolicy":"never","approvalsReviewer":"user"}}\n' "$id" ;;
+    turn/start)
+      # The prompt is the turn's text input, JSON's escapes left as they are: each CODEX= mark is plain text.
+      PROMPT=
+      [[ $line =~ \"text\":\"(([^\"\\]|\\.)*)\" ]] && PROMPT=${BASH_REMATCH[1]}
+      printf '{"id":%s,"result":{"turn":{"id":"turn-1","status":"inProgress"}}}\n' "$id"
+      turn ;;
+    *) printf '{"id":%s,"error":{"code":-32601,"message":"the stand-in does not answer %s"}}\n' "$id" "$method" ;;
+  esac
+done
+exit 0

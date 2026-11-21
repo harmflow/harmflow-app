@@ -312,6 +312,22 @@ type Invocation struct {
 	// ExecutionID is the value of HARMFLOW_EXECUTION_ID in Env. Ending the process also ends every process that still
 	// carries it, wherever it moved; empty, only the process's own tree is ended.
 	ExecutionID string
+	// Interactive keeps the process's stdin open for the attempt's parser, which is then a Conversation: Stdin is
+	// ignored, and the parser writes what the harness reads.
+	Interactive bool
+}
+
+// Conversation is the OutputParser of a harness that is spoken to while it runs, over its stdin: it opens the session,
+// and it sends the owner's answers to the harness's approval requests.
+type Conversation interface {
+	OutputParser
+	// Begin is given the process's stdin once the process started, and writes what opens the session.
+	Begin(stdin io.WriteCloser) error
+	// Answer sends the decision for the pending request id; an error says the request is not pending, or the harness
+	// could not be written to.
+	Answer(id string, decision domain.ApprovalDecision) error
+	// Pending are the requests that wait for an answer.
+	Pending() []domain.ApprovalRequest
 }
 
 // HarnessEventKind is a normalized observation of the harness's structured output.
@@ -339,6 +355,14 @@ const (
 	HarnessUsage HarnessEventKind = "usage"
 	// HarnessQuota carries the quota the harness reported while it runs, extra usage included.
 	HarnessQuota HarnessEventKind = "quota"
+	// HarnessApprovalRequested is a request that waits for the owner, in Approval; HarnessApprovalWithdrawn is the
+	// harness's word that a pending request, Approval.ID, no longer waits, as when its turn ended.
+	HarnessApprovalRequested HarnessEventKind = "approval_requested"
+	HarnessApprovalWithdrawn HarnessEventKind = "approval_withdrawn"
+	// HarnessAutoReviewStarted and HarnessAutoReviewCompleted are the harness's own automatic review of an approval, in
+	// Review, which HarmFlow records and never answers for.
+	HarnessAutoReviewStarted   HarnessEventKind = "auto_review_started"
+	HarnessAutoReviewCompleted HarnessEventKind = "auto_review_completed"
 )
 
 // HarnessEvent is one observation an OutputParser read from the harness's output; which fields it carries depends on
@@ -362,6 +386,12 @@ type HarnessEvent struct {
 	Effort string
 	Usage  *domain.Usage
 	Quota  *domain.Quota
+	// Approval is the request of HarnessApprovalRequested and HarnessApprovalWithdrawn.
+	Approval *domain.ApprovalRequest
+	// Review is the automatic review of HarnessAutoReviewStarted and HarnessAutoReviewCompleted.
+	Review *domain.AutoReview
+	// Text is the daemon's own words for Message, with their key, when the adapter wrote them rather than the harness.
+	Text *domain.Text
 }
 
 // OutputParser turns one attempt's stdout lines into events and classifies its end.

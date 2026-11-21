@@ -8,6 +8,7 @@ import { COUNTERS } from "../components/Aside";
 import { SCRIPT_STREAMS } from "../components/ExecutionDetail";
 import { CUSTOM_LISTS, OPTION_FIELDS } from "../components/TaskForm";
 import { COPIED_FIELDS } from "../lib/agentCopy";
+import { APPROVAL_KINDS } from "../lib/approvals";
 import { RECEIPT_CLASSES, SUMMARY_CLASSES } from "../lib/costs";
 import { DAY_NAMES, INTERVAL_UNITS, MONTH_NAMES, REPEATS } from "../lib/schedule";
 import { templateSources } from "../lib/templates";
@@ -145,6 +146,8 @@ const BUILT_KEYS: Record<string, (written: string[]) => readonly BuiltValue[]> =
   "warnings.${}": () => contractEnum("Warning", "code"),
   "eventTypes.${}": () => eventSchema.$defs.eventType.enum,
   "executions.detail.commandStatus.${}": () => contractEnum("Execution", "commands", "status"),
+  "executions.approval.${}": () => contractEnum("ApprovalAnswer", "decision"),
+  "executions.approval.kinds.${}": () => APPROVAL_KINDS,
   "executions.detail.costs.classes.${}": () => [...SUMMARY_CLASSES, ...RECEIPT_CLASSES],
   "executions.detail.script.streams.${}": () => SCRIPT_STREAMS,
   "harness.names.${}": () => [...HARNESS_PROVIDERS, ...contractEnum("Harness", "id")],

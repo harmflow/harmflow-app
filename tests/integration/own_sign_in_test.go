@@ -62,7 +62,7 @@ printf '%s' "$PROMPT" | '@FAKE@' "$@"
 	signedInCodex = `#!/bin/bash
 { echo "@@"; printf '%s\n' "$@"; env; } >> '@RECORD@'
 SESSION=
-[ "$1" = exec ] && [ "$2" != --help ] && SESSION=1
+[ "$1" = app-server ] && [ "$2" = --listen ] && SESSION=1
 if [ ! -f '@CREDENTIAL@' ]; then
   if [ "$1" = login ] || [ -n "$SESSION" ]; then
     echo "Not logged in" >&2
@@ -78,7 +78,7 @@ if [ "$1" = login ]; then
 fi
 if [ -n "$SESSION" ]; then
   echo "codex signed in with $CREDENTIAL" >&2
-  echo '{"type":"item.completed","item":{"id":"c0","type":"agent_message","text":"codex signed in with '"$CREDENTIAL"'"}}'
+  echo '{"method":"item/completed","params":{"item":{"id":"c0","type":"agentMessage","text":"codex signed in with '"$CREDENTIAL"'"}}}'
 fi
 exec '@FAKE@' "$@"
 `

@@ -170,14 +170,14 @@ func TestSkillsFromTheAppServer(t *testing.T) {
 	}
 
 	// The session is pointed at the SKILL.md Codex reported.
-	inv, _, err := a.Prepare(ports.HarnessInfo{Path: path, Features: map[string]bool{}},
+	_, out, err := a.Prepare(ports.HarnessInfo{Path: path, Features: map[string]bool{}},
 		ports.RunRequest{WorkDir: workspace, ExecutionDir: tempDir(t), Prompt: "do it",
 			Permissions: *domain.TaskDocument{}.Effective().Spec.Permissions, Skills: []ports.ResolvedItem{it}})
 	if err != nil {
 		t.Fatalf("Prepare(my-skill) = %v, want no error", err)
 	}
-	if !strings.Contains(inv.Stdin, mine) {
-		t.Errorf("Prepare(my-skill).Stdin = %q, want it to name %s", inv.Stdin, mine)
+	if !strings.Contains(input(out.(*parser)), mine) {
+		t.Errorf("Prepare(my-skill) input = %q, want it to name %s", input(out.(*parser)), mine)
 	}
 }
 

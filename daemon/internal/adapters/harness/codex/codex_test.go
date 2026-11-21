@@ -3,17 +3,69 @@ package codex
 import (
 	"bufio"
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
+
+// stdinRecorder stands in for the app server's stdin: it keeps each line the parser writes, and whether it was closed.
+type stdinRecorder struct {
+	mu     sync.Mutex
+	lines  []string
+	closed bool
+}
+
+func (s *stdinRecorder) Write(b []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lines = append(s.lines, strings.Split(strings.TrimRight(string(b), "\n"), "\n")...)
+	return len(b), nil
+}
+
+func (s *stdinRecorder) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
+	return nil
+}
+
+// sent is the last message the parser wrote whose method, or whose answer's id, is key.
+func (s *stdinRecorder) sent(t *testing.T, key string) map[string]any {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := len(s.lines) - 1; i >= 0; i-- {
+		var m map[string]any
+		if json.Unmarshal([]byte(s.lines[i]), &m) != nil {
+			continue
+		}
+		if m["method"] == key || (m["method"] == nil && fmt.Sprint(m["id"]) == key) {
+			return m
+		}
+	}
+	t.Fatalf("the parser sent no %s; it sent %q", key, s.lines)
+	return nil
+}
+
+// begun is a parser that said hello to a stand-in for the app server's stdin.
+func begun(t *testing.T, p *parser) *stdinRecorder {
+	t.Helper()
+	in := &stdinRecorder{}
+	if err := p.Begin(in); err != nil {
+		t.Fatal(err)
+	}
+	return in
+}
 
 func replay(t *testing.T, file string) (*parser, []ports.HarnessEvent) {
 	t.Helper()
@@ -23,6 +75,7 @@ func replay(t *testing.T, file string) (*parser, []ports.HarnessEvent) {
 	}
 	defer f.Close()
 	p := &parser{}
+	begun(t, p)
 	var events []ports.HarnessEvent
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
@@ -148,24 +201,47 @@ func TestDetectReadsAHelpCheckThatTimesOutAsFlagsUnknown(t *testing.T) {
 	}
 }
 
-// harmflow-app#329: with its flags unknown, Codex runs as if it had them, and the first attempt proves them: the
-// optional flags are passed, the added directories included.
+// harmflow-app#465: with its help unread, Codex runs as if it had an app server, and the first attempt proves it; a
+// Codex whose help was read and lists none cannot run, since every attempt goes through the app server.
 func TestUnknownFlagsAreTakenAsThere(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
 	a := &Adapter{Home: t.TempDir()}
-	info := ports.HarnessInfo{Path: "/bin/codex", Features: map[string]bool{}, FeaturesUnknown: true}
 	perm := *domain.TaskDocument{}.Effective().Spec.Permissions
-	inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, AdditionalDirs: []string{"/repo"},
-		Prompt: "do it"})
+	req := ports.RunRequest{WorkDir: "/w", Permissions: perm, AdditionalDirs: []string{"/repo"}, Prompt: "do it"}
+	unknown := ports.HarnessInfo{Path: "/bin/codex", Detected: true, Features: map[string]bool{}, FeaturesUnknown: true,
+		UnknownFeatures: map[string]bool{"app-server": true}}
+	inv, out, err := a.Prepare(unknown, req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	args := strings.Join(inv.Args, " ")
-	for _, want := range []string{"--ephemeral", "--color never", "--add-dir /repo"} {
-		if !strings.Contains(args, want) {
-			t.Errorf("Prepare args %s, want %q", args, want)
-		}
+	if !slices.Equal(inv.Args, []string{"app-server", "--listen", "stdio://"}) || !inv.Interactive {
+		t.Errorf("Prepare = %q (interactive %v), want an interactive app-server", inv.Args, inv.Interactive)
 	}
+	p := out.(*parser)
+	if p.thread["ephemeral"] != true || !slices.Contains(roots(p), "/repo") {
+		t.Errorf("Prepare thread %v, want it ephemeral with /repo writable", p.thread)
+	}
+	missing := ports.HarnessInfo{Path: "/bin/codex", Detected: true, Version: "0.1.0", Features: map[string]bool{}}
+	if _, _, err := a.Prepare(missing, req); domain.TextOf(err).Key != "codex_app_server_missing" {
+		t.Errorf("Prepare(no app server) = %v, want codex_app_server_missing", err)
+	}
+}
+
+// roots are the writable roots the thread's config gives the workspace-write sandbox.
+func roots(p *parser) []string {
+	config, _ := p.thread["config"].(map[string]any)
+	r, _ := config["sandbox_workspace_write.writable_roots"].([]string)
+	return r
+}
+
+// input is the turn's text input: the session's instructions.
+func input(p *parser) string {
+	in, _ := p.turn["input"].([]map[string]any)
+	if len(in) == 0 {
+		return ""
+	}
+	s, _ := in[0]["text"].(string)
+	return s
 }
 
 func TestParseSuccess(t *testing.T) {
@@ -207,21 +283,25 @@ func TestParseSuccess(t *testing.T) {
 func TestParseRequirementsOverride(t *testing.T) {
 	p, events := replay(t, "requirements-override.jsonl")
 	var kinds []ports.HarnessEventKind
-	var overridden string
+	var overridden, overriddenKey string
 	for _, e := range events {
 		kinds = append(kinds, e.Kind)
 		if e.Kind == ports.HarnessSettingOverridden {
 			overridden = e.Message
+			if e.Text != nil {
+				overriddenKey = e.Text.Key
+			}
 		}
 	}
-	wantKinds := []ports.HarnessEventKind{ports.HarnessStarted, ports.HarnessWarning, ports.HarnessSettingOverridden,
-		ports.HarnessWarning, ports.HarnessMessage, ports.HarnessUsage}
+	// The thread's start names the approval policy its requirements set, which is said once: Codex's own notice of it
+	// stays a warning beside it.
+	wantKinds := []ports.HarnessEventKind{ports.HarnessStarted, ports.HarnessSettingOverridden, ports.HarnessWarning,
+		ports.HarnessWarning, ports.HarnessWarning, ports.HarnessMessage, ports.HarnessUsage}
 	if !slices.Equal(kinds, wantKinds) {
 		t.Errorf("replay(requirements-override.jsonl) kinds %q, want %q", kinds, wantKinds)
 	}
-	if !strings.HasPrefix(overridden, "Configured value for `approval_policy` is disallowed by requirements; falling back "+
-		"to required value OnRequest.") {
-		t.Errorf("the overridden setting's message %q, want Codex's notice", overridden)
+	if !strings.Contains(overridden, "approval_policy on-request") || overriddenKey != "codex_approval_policy_overridden" {
+		t.Errorf("the overridden setting's message %q, want the policy Codex runs with", overridden)
 	}
 	if end := p.Finish(0, "", false, false); end.Class != domain.ClassNone {
 		t.Errorf("Finish(0) = %+v, want no failure", end)
@@ -229,7 +309,7 @@ func TestParseRequirementsOverride(t *testing.T) {
 
 	for _, field := range []string{"sandbox_mode", "permission_profile"} {
 		notice := "Configured value for `" + field + "` is disallowed by requirements; falling back to required value ReadOnly."
-		line := `{"type":"item.completed","item":{"id":"item_9","type":"error","message":"` + notice + `"}}`
+		line := `{"method":"configWarning","params":{"summary":"` + notice + `"}}`
 		got := (&parser{}).Line([]byte(line))
 		if len(got) != 1 || got[0].Kind != ports.HarnessSettingOverridden || got[0].Message != notice {
 			t.Errorf("Line(%s notice) = %+v, want one setting overridden quoting it", field, got)
@@ -262,18 +342,18 @@ func TestParseToolEnd(t *testing.T) {
 		item                    string
 		wantError, wantDeclined bool
 	}{
-		{"command succeeded", `{"id":"c","type":"command_execution","exit_code":0,"status":"completed"}`, false, false},
-		{"command exited 1", `{"id":"c","type":"command_execution","exit_code":1,"status":"failed"}`, true, false},
-		{"command failed with no exit", `{"id":"c","type":"command_execution","exit_code":null,"status":"failed"}`, true,
+		{"command succeeded", `{"id":"c","type":"commandExecution","exitCode":0,"status":"completed"}`, false, false},
+		{"command exited 1", `{"id":"c","type":"commandExecution","exitCode":1,"status":"failed"}`, true, false},
+		{"command failed with no exit", `{"id":"c","type":"commandExecution","exitCode":null,"status":"failed"}`, true,
 			false},
-		{"command declined", `{"id":"c","type":"command_execution","exit_code":null,"status":"declined"}`, false, true},
-		{"MCP call succeeded", `{"id":"c","type":"mcp_tool_call","tool":"search","status":"completed"}`, false, false},
-		{"MCP call failed", `{"id":"c","type":"mcp_tool_call","tool":"search","status":"failed"}`, true, false},
-		{"MCP call declined", `{"id":"c","type":"mcp_tool_call","tool":"search","status":"declined"}`, false, true},
+		{"command declined", `{"id":"c","type":"commandExecution","exitCode":null,"status":"declined"}`, false, true},
+		{"MCP call succeeded", `{"id":"c","type":"mcpToolCall","tool":"search","status":"completed"}`, false, false},
+		{"MCP call failed", `{"id":"c","type":"mcpToolCall","tool":"search","status":"failed"}`, true, false},
+		{"MCP call declined", `{"id":"c","type":"mcpToolCall","tool":"search","status":"declined"}`, false, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			line := `{"type":"item.completed","item":` + c.item + `}`
+			line := `{"method":"item/completed","params":{"item":` + c.item + `}}`
 			events := (&parser{}).Line([]byte(line))
 			if len(events) != 1 || events[0].Kind != ports.HarnessToolDone || events[0].IsError != c.wantError ||
 				events[0].Declined != c.wantDeclined {
@@ -291,8 +371,8 @@ func TestParseFileChangeStatus(t *testing.T) {
 		want   int
 	}{{"completed", 1}, {"", 1}, {"declined", 0}, {"failed", 0}} {
 		t.Run(c.status, func(t *testing.T) {
-			line := `{"type":"item.completed","item":{"id":"f","type":"file_change","changes":[{"path":"/work/a.md",` +
-				`"kind":"update"}],"status":"` + c.status + `"}}`
+			line := `{"method":"item/completed","params":{"item":{"id":"f","type":"fileChange","changes":[{"path":"/work/a.md",` +
+				`"kind":{"type":"update"}}],"status":"` + c.status + `"}}}`
 			var changed int
 			for _, e := range (&parser{}).Line([]byte(line)) {
 				if e.Kind == ports.HarnessFileChanged {
@@ -407,8 +487,8 @@ func TestParseNetwork(t *testing.T) {
 }
 
 const (
-	networkWait  = `{"type":"error","message":"Reconnecting... waiting for network (Connection failed: error sending request)"}`
-	agentMessage = `{"type":"item.completed","item":{"id":"i-1","type":"agent_message","text":"Back online."}}`
+	networkWait  = `{"method":"error","params":{"willRetry":true,"error":{"message":"Reconnecting... waiting for network (Connection failed: error sending request)"}}}`
+	agentMessage = `{"method":"item/completed","params":{"item":{"id":"i-1","type":"agentMessage","text":"Back online."}}}`
 )
 
 // feed gives the parser each line, as the executor does, and returns the events they produced.
@@ -432,17 +512,18 @@ func TestFinishAtTheTimeout(t *testing.T) {
 		{"waiting for the network", "network.jsonl", nil, domain.ClassNetwork},
 		{"an agent message after the wait", "network.jsonl", []string{agentMessage}, domain.ClassTimeout},
 		{"a line that is not JSON after the wait", "network.jsonl", []string{"panic: unexpected"}, domain.ClassTimeout},
-		{"no wait", "", []string{`{"type":"thread.started","thread_id":"t-1"}`, `{"type":"turn.started"}`, agentMessage},
-			domain.ClassTimeout},
+		{"no wait", "", []string{`{"id":2,"result":{"thread":{"id":"t-1"}}}`, `{"method":"turn/started","params":{}}`,
+			agentMessage}, domain.ClassTimeout},
 		// Numbered retries end on their own, and an error that names the network is not a wait.
-		{"a numbered retry", "", []string{`{"type":"error","message":"Reconnecting... 2/5 (stream disconnected before completion)"}`},
+		{"a numbered retry", "", []string{`{"method":"error","params":{"willRetry":true,"error":{"message":"Reconnecting... 2/5 (stream disconnected before completion)"}}}`},
 			domain.ClassTimeout},
-		{"a network error", "", []string{`{"type":"error","message":"stream disconnected before completion"}`},
+		{"a network error", "", []string{`{"method":"error","params":{"willRetry":false,"error":{"message":"stream disconnected before completion"}}}`},
 			domain.ClassTimeout},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			p := &parser{}
+			begun(t, p)
 			if c.file != "" {
 				p, _ = replay(t, c.file)
 			}
@@ -516,25 +597,26 @@ func TestPrepareSandbox(t *testing.T) {
 	info := ports.HarnessInfo{Path: "/bin/codex", Features: map[string]bool{"--add-dir": true, "--ephemeral": true}}
 	perm := *domain.TaskDocument{}.Effective().Spec.Permissions
 	perm.Network = domain.NetworkDeny
-	inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, ExecutionDir: "/x",
+	inv, out, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, ExecutionDir: "/x",
 		AdditionalDirs: []string{"/repo"}, Prompt: "do it", Model: "gpt-x", Effort: "high"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	args := strings.Join(inv.Args, " ")
-	for _, want := range []string{"exec --json", "--sandbox workspace-write", "sandbox_workspace_write.network_access=false",
-		"--add-dir /repo", "--add-dir /x", "--model gpt-x", `model_reasoning_effort="high"`, "--cd /w"} {
-		if !strings.Contains(args, want) {
-			t.Errorf("missing %q in %s", want, args)
-		}
+	p := out.(*parser)
+	config, _ := p.thread["config"].(map[string]any)
+	if p.thread["sandbox"] != "workspace-write" || config["sandbox_workspace_write.network_access"] != false ||
+		!slices.Equal(roots(p), []string{"/repo", "/x"}) || p.thread["model"] != "gpt-x" || p.turn["effort"] != "high" ||
+		p.thread["cwd"] != "/w" || p.thread["approvalPolicy"] != "never" {
+		t.Errorf("Prepare thread %v, turn effort %v; want workspace-write, no network, /repo and /x writable, gpt-x, high, "+
+			"in /w, approvals off", p.thread, p.turn["effort"])
 	}
 	for _, r := range inv.Restrictions {
 		if !r.Enforced {
 			t.Errorf("%s should be enforced by the sandbox", r.Name)
 		}
 	}
-	if !strings.HasSuffix(inv.Stdin, "do it\n") || inv.Args[len(inv.Args)-1] != "-" {
-		t.Error("the prompt goes through stdin")
+	if !strings.HasSuffix(input(p), "do it\n") || inv.Stdin != "" {
+		t.Error("the prompt goes as the turn's input")
 	}
 	perm.Profile = domain.ProfileCustom
 	perm.Custom = &domain.CustomPermissions{AllowedTools: []string{"Read"}}
@@ -568,7 +650,7 @@ func TestPrepareReportsProgramListsNotEnforced(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			perm := perm
 			perm.Custom = &domain.CustomPermissions{AllowedPrograms: c.allowed, DeniedPrograms: c.denied}
-			inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, ExecutionDir: "/x"})
+			inv, out, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, ExecutionDir: "/x"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -577,8 +659,8 @@ func TestPrepareReportsProgramListsNotEnforced(t *testing.T) {
 				t.Errorf("Prepare(%s) restrictions = %+v, want program_lists not enforced, restriction_codex_program_lists",
 					c.name, inv.Restrictions)
 			}
-			if slices.Contains(inv.Args, "git") || slices.Contains(inv.Args, "curl") {
-				t.Errorf("Prepare(%s) args = %s, want no program of the lists", c.name, strings.Join(inv.Args, " "))
+			if thread := fmt.Sprint(out.(*parser).thread); strings.Contains(thread, "git") || strings.Contains(thread, "curl") {
+				t.Errorf("Prepare(%s) thread = %s, want no program of the lists", c.name, thread)
 			}
 		})
 	}
@@ -601,7 +683,7 @@ func TestPrepareReportsReadPathsNotEnforced(t *testing.T) {
 	perm := *domain.TaskDocument{}.Effective().Spec.Permissions
 	perm.Profile = domain.ProfileCustom
 	perm.Custom = &domain.CustomPermissions{WritablePaths: []string{"/out"}, ReadablePaths: []string{"/docs"}}
-	inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, ExecutionDir: "/x"})
+	inv, out, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, ExecutionDir: "/x"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -616,9 +698,8 @@ func TestPrepareReportsReadPathsNotEnforced(t *testing.T) {
 	if !ok || r.Enforced || r.Text.Key != "restriction_codex_read_paths" {
 		t.Errorf("Prepare(read paths) readablePaths = %+v (found %v), want not enforced, restriction_codex_read_paths", r, ok)
 	}
-	args := strings.Join(inv.Args, " ")
-	if strings.Contains(args, "/docs") || !strings.Contains(args, "--add-dir /out") {
-		t.Errorf("Prepare(read paths) args = %s, want --add-dir /out and no /docs", args)
+	if w := roots(out.(*parser)); slices.Contains(w, "/docs") || !slices.Contains(w, "/out") {
+		t.Errorf("Prepare(read paths) writable roots = %q, want /out and no /docs", w)
 	}
 	perm.Custom = &domain.CustomPermissions{WritablePaths: []string{"/out"}}
 	inv, _, _ = a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, ExecutionDir: "/x"})
@@ -652,19 +733,14 @@ func TestPrepareReadOnly(t *testing.T) {
 				ManagedRequirements: c.requirements}
 			perm := *domain.TaskDocument{}.Effective().Spec.Permissions
 			perm.Profile = domain.ProfileReadOnly
-			inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, ExecutionDir: "/x"})
+			inv, out, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, ExecutionDir: "/x"})
 			if err != nil {
 				t.Fatalf("Prepare(read_only) = %v, want no error: the task still runs", err)
 			}
-			args := strings.Join(inv.Args, " ")
-			for _, want := range []string{"--sandbox read-only", `sandbox_mode="read-only"`, `approval_policy="never"`,
-				"--add-dir /x"} {
-				if !strings.Contains(args, want) {
-					t.Errorf("Prepare(read_only) args = %s, want %q in them", args, want)
-				}
-			}
-			if strings.Contains(args, "workspace-write") {
-				t.Errorf("Prepare(read_only) args = %s, want no workspace-write sandbox", args)
+			p := out.(*parser)
+			if p.thread["sandbox"] != "read-only" || p.thread["approvalPolicy"] != "never" || p.thread["config"] != nil {
+				t.Errorf("Prepare(read_only) thread = %v, want the read-only sandbox, approvals off, and no writable root",
+					p.thread)
 			}
 			got := map[string]ports.Restriction{}
 			for _, r := range inv.Restrictions {
@@ -687,10 +763,8 @@ func TestPrepareReadOnly(t *testing.T) {
 	}
 }
 
-// harmflow-app#473: a session is ephemeral unless the task keeps it. Kept, Codex runs without --ephemeral and its
-// thread.started names the folder where Codex keeps it, under the CODEX_HOME the attempt runs with. A Codex without
-// --ephemeral keeps every session, which the attempt says in a restriction not enforced instead of failing;
-// validation's policy check, which starts no attempt, leaves it out.
+// harmflow-app#473: a session is ephemeral unless the task keeps it. Kept, the thread starts not ephemeral, and its
+// start names the folder where Codex keeps it, under the CODEX_HOME the attempt runs with.
 func TestPrepareEphemeralSession(t *testing.T) {
 	daemonHome := t.TempDir()
 	t.Setenv("CODEX_HOME", daemonHome)
@@ -701,50 +775,35 @@ func TestPrepareEphemeralSession(t *testing.T) {
 	attemptHome := t.TempDir()
 	perm := *domain.TaskDocument{}.Effective().Spec.Permissions
 	for _, c := range []struct {
-		name        string
-		flag        bool // the CLI's help lists --ephemeral
-		keep        bool
-		env         []string
-		policyCheck bool
-		wantFlag    bool
-		wantDir     string
-		wantNotice  bool
+		name    string
+		keep    bool
+		env     []string
+		wantDir string
 	}{
-		{name: "on", flag: true, wantFlag: true},
-		{name: "off", flag: true, keep: true, wantDir: filepath.Join(daemonHome, "sessions")},
-		{name: "off with the attempt's own CODEX_HOME", flag: true, keep: true, env: []string{"CODEX_HOME=" + attemptHome},
+		{name: "on"},
+		{name: "off", keep: true, wantDir: filepath.Join(daemonHome, "sessions")},
+		{name: "off with the attempt's own CODEX_HOME", keep: true, env: []string{"CODEX_HOME=" + attemptHome},
 			wantDir: filepath.Join(attemptHome, "sessions")},
-		{name: "on without the flag", wantDir: filepath.Join(daemonHome, "sessions"), wantNotice: true},
-		{name: "off without the flag", keep: true, wantDir: filepath.Join(daemonHome, "sessions"), wantNotice: true},
-		{name: "policy check without the flag", policyCheck: true, wantDir: filepath.Join(daemonHome, "sessions")},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			info := ports.HarnessInfo{Path: "/bin/codex", Version: "0.100.0", Features: map[string]bool{"--ephemeral": c.flag}}
-			inv, parser, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, Prompt: "do it",
-				KeepSession: c.keep, Env: c.env, PolicyCheck: c.policyCheck})
+			info := ports.HarnessInfo{Path: "/bin/codex", Version: "0.163.0", Features: map[string]bool{}}
+			inv, out, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, Prompt: "do it",
+				KeepSession: c.keep, Env: c.env})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := slices.Contains(inv.Args, "--ephemeral"); got != c.wantFlag {
-				t.Errorf("Prepare args %q hold --ephemeral: %t, want %t", inv.Args, got, c.wantFlag)
+			p := out.(*parser)
+			if p.thread["ephemeral"] != !c.keep || slices.ContainsFunc(inv.Restrictions,
+				func(r ports.Restriction) bool { return r.Name == "ephemeral" }) {
+				t.Errorf("Prepare thread ephemeral %v, restrictions %+v; want %v, and none about it", p.thread["ephemeral"],
+					inv.Restrictions, !c.keep)
 			}
-			var notice *ports.Restriction
-			for i, r := range inv.Restrictions {
-				if r.Name == "ephemeral" {
-					notice = &inv.Restrictions[i]
-				}
-			}
-			switch {
-			case c.wantNotice && (notice == nil || notice.Enforced || notice.Text.Key != "restriction_codex_ephemeral_missing" ||
-				!strings.Contains(notice.Text.Message, "0.100.0")):
-				t.Errorf("Prepare restriction ephemeral = %+v, want one not enforced naming the version", notice)
-			case !c.wantNotice && notice != nil:
-				t.Errorf("Prepare restriction ephemeral = %+v, want none", notice)
-			}
-			events := parser.Line([]byte(`{"type":"thread.started","thread_id":"thread-1"}`))
+			begun(t, p)
+			feed(p, `{"id":1,"result":{}}`)
+			events := p.Line([]byte(`{"id":2,"result":{"thread":{"id":"thread-1"},"approvalPolicy":"never"}}`))
 			if len(events) != 1 || events[0].Kind != ports.HarnessStarted || events[0].SessionID != "thread-1" ||
 				events[0].SessionDir != c.wantDir {
-				t.Errorf("thread.started = %+v, want session thread-1 kept in %q", events, c.wantDir)
+				t.Errorf("thread start = %+v, want session thread-1 kept in %q", events, c.wantDir)
 			}
 		})
 	}
@@ -762,16 +821,17 @@ func TestPrepareLeavesTheDefaultsToCodex(t *testing.T) {
 		{"unset", "", ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, Prompt: "do it",
+			_, out, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", Permissions: perm, Prompt: "do it",
 				Model: c.model, Effort: c.effort})
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, arg := range inv.Args {
-				if arg == "--model" || arg == "-m" || strings.HasPrefix(arg, "model=") ||
-					strings.HasPrefix(arg, "model_reasoning_effort=") {
-					t.Errorf("%q was passed: %q", arg, inv.Args)
-				}
+			p := out.(*parser)
+			if _, ok := p.thread["model"]; ok {
+				t.Errorf("a model was passed: %v", p.thread)
+			}
+			if _, ok := p.turn["effort"]; ok {
+				t.Errorf("an effort was passed: %v", p.turn)
 			}
 		})
 	}
@@ -785,13 +845,13 @@ func TestPrepareOpensTheInputWithTheSessionContext(t *testing.T) {
 	info := ports.HarnessInfo{Path: "/bin/codex", Features: map[string]bool{"--add-dir": true}}
 	context := "## The user's general instructions\n\nAnswer in pt-BR.\n\n" +
 		"## HarmFlow's orchestration context\n\nThis session is run by HarmFlow, a local scheduler.\n"
-	inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", ExecutionDir: t.TempDir(), Prompt: "Do the work.",
+	_, out, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", ExecutionDir: t.TempDir(), Prompt: "Do the work.",
 		Context: context, Permissions: *domain.TaskDocument{}.Effective().Spec.Permissions})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := context + "\n\n## Task\n\nDo the work.\n"; inv.Stdin != want {
-		t.Errorf("Prepare instructions =\n%s\nwant\n%s", inv.Stdin, want)
+	if want := context + "\n\n## Task\n\nDo the work.\n"; input(out.(*parser)) != want {
+		t.Errorf("Prepare instructions =\n%s\nwant\n%s", input(out.(*parser)), want)
 	}
 }
 
@@ -813,7 +873,7 @@ func TestPrepareDeliversBuiltins(t *testing.T) {
 	t.Setenv("CODEX_HOME", "")
 	a := &Adapter{Home: t.TempDir()}
 	info := ports.HarnessInfo{Path: "/bin/codex", Features: map[string]bool{"--add-dir": true}}
-	inv, _, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", ExecutionDir: exec, Prompt: "do it",
+	_, out, err := a.Prepare(info, ports.RunRequest{WorkDir: "/w", ExecutionDir: exec, Prompt: "do it",
 		Permissions: *domain.TaskDocument{}.Effective().Spec.Permissions,
 		Skills: []ports.ResolvedItem{{Name: "hf-x", Kind: "skill", Builtin: true, Path: skill},
 			{Name: "mine", Kind: "skill", Path: userSkill}},
@@ -822,6 +882,7 @@ func TestPrepareDeliversBuiltins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	stdin := input(out.(*parser))
 	delivered := filepath.Join(exec, "codex-builtins")
 	for _, f := range []string{"skills/hf-x/SKILL.md", "skills/hf-x/scripts/run.sh", "agents/hf-a.md", "agents/hf-b.md"} {
 		if _, err := os.Stat(filepath.Join(delivered, f)); err != nil {
@@ -832,25 +893,25 @@ func TestPrepareDeliversBuiltins(t *testing.T) {
 		"hf-a — an agent — " + filepath.Join(delivered, "agents", "hf-a.md"),
 		"hf-b — another — " + filepath.Join(delivered, "agents", "hf-b.md"), filepath.Join(userSkill, "SKILL.md"),
 		"## Task\n\ndo it\n"} {
-		if !strings.Contains(inv.Stdin, want) {
-			t.Errorf("Prepare instructions =\n%s\nwant them to contain %q", inv.Stdin, want)
+		if !strings.Contains(stdin, want) {
+			t.Errorf("Prepare instructions =\n%s\nwant them to contain %q", stdin, want)
 		}
 	}
 	for _, unwanted := range []string{"You implement.", "Your role"} {
-		if strings.Contains(inv.Stdin, unwanted) {
-			t.Errorf("Prepare instructions =\n%s\nwant no inlined agent, and no %q", inv.Stdin, unwanted)
+		if strings.Contains(stdin, unwanted) {
+			t.Errorf("Prepare instructions =\n%s\nwant no inlined agent, and no %q", stdin, unwanted)
 		}
 	}
-	if strings.Contains(inv.Stdin, root) {
-		t.Errorf("the instructions name a built-in at its source:\n%s", inv.Stdin)
+	if strings.Contains(stdin, root) {
+		t.Errorf("the instructions name a built-in at its source:\n%s", stdin)
 	}
 	if entries, _ := os.ReadDir(a.Home); len(entries) > 0 {
 		t.Error("the user's home was touched")
 	}
 }
 
-// The Costs tab (harmflow-app#39), on a real Codex 0.163.0 run: one turn.completed carries the attempt's usage, its
-// input_tokens include the cached ones, and the cost is estimated from the table when the attempt ends.
+// The Costs tab (harmflow-app#39), on a real Codex 0.163.0 run: the thread's token usage carries the attempt's usage,
+// its inputTokens include the cached ones, and the cost is estimated from the table when the attempt ends.
 func TestUsageFromTurnCompleted(t *testing.T) {
 	price := domain.Price{Input: 1.25, CacheRead: 0.125, Output: 10}
 	prices := domain.PriceTable{AsOf: "2026-01-02", Prices: map[string]domain.Price{"gpt-test": price}}
@@ -882,7 +943,7 @@ func TestUsageFromTurnCompleted(t *testing.T) {
 	}
 	// Cache writes, which GPT-5.6 and later bill, are counted out of the input that includes them.
 	w := &parser{model: "gpt-test", modelSource: domain.ModelFromTask}
-	w.Line([]byte(`{"type":"turn.completed","usage":{"input_tokens":5000,"cached_input_tokens":3000,"cache_write_input_tokens":1500,"output_tokens":20}}`))
+	w.Line([]byte(`{"method":"thread/tokenUsage/updated","params":{"tokenUsage":{"total":{"inputTokens":5000,"cachedInputTokens":3000,"cacheWriteInputTokens":1500,"outputTokens":20}}}}`))
 	if got := w.Finish(0, "", false, false).Usage.Models[0].Tokens; got != (domain.Tokens{Input: 500, CacheWriteShort: 1500, CacheRead: 3000, Output: 20}) {
 		t.Errorf("cache writes: %+v", got)
 	}
@@ -1071,9 +1132,11 @@ func TestPrepareRunsWithTheInstallationsHome(t *testing.T) {
 	if !slices.Equal(homes, []string{home}) || !slices.Contains(inv.Env, "PATH=/bin") {
 		t.Errorf("Prepare env %q, want PATH kept and CODEX_HOME %q alone", inv.Env, home)
 	}
-	events := out.Line([]byte(`{"type":"thread.started","thread_id":"thread-1"}`))
+	begun(t, out.(*parser))
+	out.Line([]byte(`{"id":1,"result":{}}`))
+	events := out.Line([]byte(`{"id":2,"result":{"thread":{"id":"thread-1"},"approvalPolicy":"never"}}`))
 	if len(events) != 1 || events[0].SessionDir != filepath.Join(home, "sessions") {
-		t.Errorf("thread.started = %+v, want the session kept under %q", events, home)
+		t.Errorf("thread start = %+v, want the session kept under %q", events, home)
 	}
 	if p, ok := out.(*parser); !ok || p.model != "model-of-the-home" || p.modelSource != domain.ModelFromConfig {
 		t.Errorf("Prepare parser = %+v, want the model of the home's configuration", out)
