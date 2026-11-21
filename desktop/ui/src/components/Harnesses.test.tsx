@@ -10,7 +10,7 @@ import type { Harness } from "../api/types";
 import i18n from "../i18n";
 import { formatRelative } from "../lib/format";
 import { patchStateForTests, useStore } from "../state/store";
-import { HarnessInventory, HarnessRow, readinessTone } from "./Harnesses";
+import { AddCustomEntry, HarnessInventory, HarnessRow, readinessTone } from "./Harnesses";
 
 // The daemon as the client sees it: Codex's installations, Claude Code's sign-in, and every request it received. A path
 // PUT is in use and offered with the ones found; a null one returns to the first found, as the daemon does. A sign-in
@@ -51,6 +51,30 @@ vi.mock("../api/transport", () => ({
       if (method === "DELETE" && path === "/harnesses/claude-code/token" && daemon.claude) {
         daemon.claude = { ...daemon.claude, token: undefined };
         return { status: 200, body: daemon.claude };
+      }
+      // A custom entry's line with a pipe is refused as the daemon refuses it; any other is added to Codex.
+      if (method === "POST" && path === "/harness-entries") {
+        const { line, name } = body as { line: string; name?: string };
+        if (line.includes("|")) {
+          return {
+            status: 422,
+            body: {
+              error: {
+                code: "validation_failed",
+                message: "the command line holds a pipe, |, which is shell syntax: the daemon starts the command itself, with no shell",
+                messageKey: "custom_entry_shell_syntax",
+                params: { syntax: "a pipe, |" },
+              },
+            },
+          };
+        }
+        const entry: Harness = { ...daemon.codex, installationId: "custom-1", entryName: name ?? "Codex 2", entryLine: line, pathSource: "custom" };
+        daemon.codex = { ...daemon.codex, customEntries: [...(daemon.codex.customEntries ?? []), entry] };
+        return { status: 201, body: daemon.codex };
+      }
+      if (method === "DELETE" && path === "/harness-entries/custom-1") {
+        daemon.codex = { ...daemon.codex, customEntries: [] };
+        return { status: 200, body: daemon.codex };
       }
       if (method === "GET" && path === "/harnesses") return { status: 200, body: [daemon.claude ?? daemon.codex] };
       if (method === "GET" && path === "/tools") return { status: 200, body: [] };
@@ -680,6 +704,118 @@ describe("HarnessInventory of Codex homes", () => {
         { method: "PUT", path: "/harnesses/codex", body: { path: "/Users/someone/.codex-c" } },
       ]);
       expect(fields()).toStrictEqual(before);
+    });
+  });
+});
+
+// harmflow-app#826: Settings › AI tools adds an installation from a command line. The card lists each custom entry by
+// its name and line, a signed-out one as not authenticated, never hidden; the add form sends the line to the daemon,
+// shows its refusal on the field, and saves nothing then.
+describe("custom entries", () => {
+  const codex: Harness = { ...ready, id: "codex", name: "Codex", path: "/opt/homebrew/bin/codex", installationId: "/opt/homebrew/bin/codex" };
+  const signedOutEntry: Harness = {
+    ...codex,
+    installationId: "custom-1",
+    entryName: "Codex 2",
+    entryLine: 'CODEX_HOME="$HOME/.codex-personal" codex',
+    pathSource: "custom",
+    authentication: "invalid",
+    readiness: "not_ready",
+    models: [{ id: "model-b" }],
+  };
+
+  it("lists each custom entry by its name and line, a signed-out one shown as not authenticated", () => {
+    const html = renderToString(<HarnessInventory harness={{ ...codex, customEntries: [signedOutEntry] }} locale="en-US" />);
+    const shown = rows(html)[i18n.t("harness.customEntries")];
+    expect(shown).toContain("Codex 2");
+    expect(shown).toContain('CODEX_HOME="$HOME/.codex-personal" codex');
+    expect(shown).toContain(i18n.t("harness.readiness.not_ready"));
+    expect(shown).toContain(`Authentication: ${i18n.t("harness.authentication.invalid")}`);
+    expect(shown).toContain("Models: model-b");
+  });
+
+  it("shows no custom entries row for a harness that has none", () => {
+    expect(rows(renderToString(<HarnessInventory harness={codex} locale="en-US" />))).not.toHaveProperty(i18n.t("harness.customEntries"));
+  });
+
+  describe("in a DOM", () => {
+    let root: Root | undefined;
+    let host: HTMLElement | undefined;
+
+    beforeAll(() => {
+      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    });
+
+    afterEach(() => {
+      act(() => root?.unmount());
+      host?.remove();
+      root = host = undefined;
+      daemon.requests.length = 0;
+      daemon.claude = undefined;
+      vi.unstubAllGlobals();
+    });
+
+    const settle = () => act(() => new Promise<void>((resolve) => setImmediate(resolve)));
+    const button = (label: string) => [...host!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === label)!;
+    const type = async (id: string, value: string) => {
+      const input = host!.querySelector<HTMLInputElement>(`#${id}`)!;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    };
+
+    function Settings() {
+      const harness = useStore((s) => s.harnesses.find((h) => h.id === "codex"));
+      return (
+        <>
+          {harness ? <HarnessInventory harness={harness} locale="en-US" /> : null}
+          <AddCustomEntry />
+        </>
+      );
+    }
+
+    async function open() {
+      daemon.claude = undefined;
+      daemon.codex = { ...codex, customEntries: [] };
+      patchStateForTests({ harnesses: [daemon.codex] });
+      host = document.body.appendChild(document.createElement("div"));
+      root = createRoot(host);
+      await act(async () => root!.render(<Settings />));
+      await act(async () => button(i18n.t("harness.customEntryAdd")).click());
+    }
+
+    it("refuses a line with shell syntax, showing the daemon's reason, and adds nothing", async () => {
+      await open();
+      await type("custom-entry-line", "codex | tee log");
+      await act(async () => button(i18n.t("harness.customEntryAddSubmit")).click());
+      await settle();
+      expect(daemon.requests.filter((r) => r.method !== "GET")).toStrictEqual([
+        { method: "POST", path: "/harness-entries", body: { line: "codex | tee log" } },
+      ]);
+      expect(host!.textContent).toContain("the command line holds a pipe, |, which is shell syntax");
+      expect(host!.querySelector("#custom-entry-line")?.getAttribute("aria-invalid")).toBe("true");
+      expect(daemon.codex.customEntries).toStrictEqual([]);
+    });
+
+    it("adds an entry from its line, lists it under its harness, and removes it", async () => {
+      await open();
+      await type("custom-entry-line", 'CODEX_HOME="$HOME/.codex-personal" codex');
+      await act(async () => button(i18n.t("harness.customEntryAddSubmit")).click());
+      await settle();
+      expect(daemon.requests.filter((r) => r.method !== "GET")).toStrictEqual([
+        { method: "POST", path: "/harness-entries", body: { line: 'CODEX_HOME="$HOME/.codex-personal" codex' } },
+      ]);
+      expect(host!.querySelector(".custom-entry strong")?.textContent).toBe("Codex 2");
+      // The form closed, its draft gone.
+      expect(host!.querySelector("#custom-entry-line")).toBeNull();
+
+      // Outside the app's shell, the removal asks through the browser's confirm, which happy-dom lacks.
+      vi.stubGlobal("confirm", () => true);
+      await act(async () => host!.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t("harness.customEntryRemove", { name: "Codex 2" })}"]`)!.click());
+      await settle();
+      expect(daemon.requests.filter((r) => r.method === "DELETE")).toStrictEqual([{ method: "DELETE", path: "/harness-entries/custom-1", body: undefined }]);
+      expect(host!.querySelector(".custom-entry")).toBeNull();
     });
   });
 });

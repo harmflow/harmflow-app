@@ -207,6 +207,72 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/Invalid" }
 
+  /harness-entries:
+    post:
+      tags: [harnesses]
+      operationId: addCustomEntry
+      summary: Add an installation from a command line
+      description: >-
+        Reads the command line with no shell: zero or more NAME=value assignments, an executable (an absolute path or
+        a name on the daemon's PATH), then arguments, with $HOME and ~ expanded and nothing else. A line with shell
+        syntax is refused, naming what it found. The harness is the one the executable's --version names; a line that
+        names neither harness is refused. Nothing is saved on a refusal. The entry's probes and attempts run with its
+        assignments added to their environment, and nothing else does.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CustomEntryInput" }
+      responses:
+        "201":
+          description: The entry's harness, detected again, the entry among its customEntries.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Harness" }
+        "422": { $ref: "#/components/responses/Invalid" }
+
+  /harness-entries/{entryId}:
+    parameters:
+      - name: entryId
+        in: path
+        required: true
+        description: The entry's installationId.
+        schema: { type: string }
+    patch:
+      tags: [harnesses]
+      operationId: updateCustomEntry
+      summary: Rename a custom entry or give it another command line
+      description: >-
+        An absent field keeps what the entry had. A new line is read and checked as when the entry was added; one whose
+        executable names the other harness moves the entry there.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CustomEntryInput" }
+      responses:
+        "200":
+          description: The entry's harness, detected again.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Harness" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Invalid" }
+    delete:
+      tags: [harnesses]
+      operationId: removeCustomEntry
+      summary: Remove a custom entry
+      description: >-
+        The installations detection finds stay as they are. A task that still names the entry fails validation at its
+        profile's installation key from then on.
+      responses:
+        "200":
+          description: The entry's harness, detected again.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Harness" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /harnesses/{harnessId}/sign-in:
     parameters:
       - $ref: "#/components/parameters/HarnessId"
@@ -1231,6 +1297,15 @@ components:
         - harness_not_ready
         - harness_installation_missing
         - harness_installation_signed_out
+        - custom_entry_unclosed_quote
+        - custom_entry_no_executable
+        - custom_entry_shell_syntax
+        - custom_entry_unsupported
+        - custom_entry_executable_missing
+        - custom_entry_line_missing
+        - custom_entry_name_empty
+        - custom_entry_no_harness
+        - custom_entry_not_found
         - agent_missing
         - skill_missing
         - parameter_required
@@ -1619,7 +1694,10 @@ components:
         name: { type: string }
         detected: { type: boolean }
         path: { type: string, description: The resolved absolute path. }
-        pathSource: { type: string, enum: [path, known_location, manual] }
+        pathSource:
+          type: string
+          enum: [path, known_location, manual, custom]
+          description: How the path was found; custom for an entry the owner added from a command line.
         installations:
           description: >-
             The installations offered: every one detection found, on PATH and then in the known locations, and the path
@@ -1649,6 +1727,20 @@ components:
             homes.
           type: array
           items: { $ref: "#/components/schemas/Harness" }
+        customEntries:
+          description: >-
+            The installations the owner added from a command line, each probed with its own assignments, listed after
+            homes, each with its installationId, entryName, and entryLine. None has homes or customEntries of its own.
+          type: array
+          items: { $ref: "#/components/schemas/Harness" }
+        entryName:
+          type: string
+          description: >-
+            The name the owner gave a custom entry, by default its harness and a number, such as Codex 2; absent for
+            any other installation.
+        entryLine:
+          type: string
+          description: The command line a custom entry was added from, as typed; absent for any other installation.
         skills:
           description: >-
             The skills an entry of homes finds in its own list, by the names a task cites them by, sorted, the built-ins
@@ -2101,6 +2193,15 @@ components:
       type: string
       enum: [manual, schedule, catch_up, run_again]
 
+    CustomEntryInput:
+      type: object
+      properties:
+        line:
+          type: string
+          description: The command line, such as CODEX_HOME="$HOME/.codex-personal" codex. Required to add an entry.
+        name:
+          type: string
+          description: The entry's name; absent, a new entry takes its harness's name and a number, such as Codex 2.
     Attempt:
       type: object
       required: [number, harness, configuredModel, configuredEffort, startedAt]
@@ -2110,6 +2211,7 @@ components:
         harnessVersion: { type: string }
         installation: { type: string, description: "The installation of the harness the attempt ran on, as a task's harness profile names it; absent for a harness whose installations are its binaries alone." }
         installationHome: { type: string, description: "The home of that installation, which the attempt ran with; never anything read from it." }
+        installationName: { type: string, description: "The name of the custom entry the attempt ran on, whose home is left out, since it is one of the entry's assignments; absent for any other installation." }
         model: { type: string, description: "The model the harness reported using; absent when it reported none." }
         effort: { type: string, description: "The effort the harness reported using; absent when it reported none." }
         configuredModel: { type: string, description: "The model the task asked for, default when it set none. Never the one used." }

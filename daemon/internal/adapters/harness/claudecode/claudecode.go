@@ -70,6 +70,8 @@ type Adapter struct {
 	helpTimeout  time.Duration                   // the --help check; zero is defaultHelpTimeout
 	quotaTimeout time.Duration                   // `claude -p "/usage"`; zero is defaultQuotaTimeout
 	signInStep   time.Duration                   // the wait for each screen of the sign-in; zero is defaultSignInStep
+	// entryConfigDir is the configuration directory of an adapter ProbeEntry made; empty for the daemon's own.
+	entryConfigDir string
 
 	// tokenMu guards token alone, so reading it never waits on mu.
 	tokenMu sync.Mutex
@@ -89,6 +91,7 @@ var (
 	_ ports.UnverifiedItemsAllower = (*Adapter)(nil)
 	_ ports.ItemReloader           = (*Adapter)(nil)
 	_ ports.TokenSignIn            = (*Adapter)(nil)
+	_ ports.EntryProber            = (*Adapter)(nil)
 )
 
 // tokenVariable carries a long-lived token, the one `claude setup-token` prints, to the CLI in place of its own
@@ -139,7 +142,38 @@ func (a *Adapter) ID() string { return ID }
 // Name implements ports.HarnessAdapter: the harness's display name.
 func (a *Adapter) Name() string { return Name }
 
+// ProbeEntry implements ports.EntryProber: the binary at path read as Detect reads a path set by hand, every check run
+// with assignments added to Env, and the configuration read from the CLAUDE_CONFIG_DIR they set, or the one in use when
+// they set none.
+func (a *Adapter) ProbeEntry(ctx context.Context, path string, assignments []string) ports.HarnessInfo {
+	entry := &Adapter{Home: a.Home, PathEnv: a.PathEnv, Env: ports.WithAssignments(a.Env, assignments),
+		KnownLocations: []string{}, SkillListTimeout: a.SkillListTimeout, GitHubToken: a.GitHubToken,
+		helpTimeout: a.helpTimeout, quotaTimeout: a.quotaTimeout, entryConfigDir: a.configDir()}
+	if d, ok := ports.AssignmentValue(assignments, "CLAUDE_CONFIG_DIR"); ok && d != "" {
+		entry.entryConfigDir = d
+	}
+	a.tokenMu.Lock()
+	entry.token = a.token
+	a.tokenMu.Unlock()
+	info := entry.Detect(ctx, path)
+	info.Installations, info.EntryEnv = []string{path}, slices.Clone(assignments)
+	info.Home = entry.entryConfigDir
+	return info
+}
+
+// configDirOf is the configuration directory of an installation: the CLAUDE_CONFIG_DIR a custom entry's assignments
+// set, otherwise the one in use.
+func (a *Adapter) configDirOf(info ports.HarnessInfo) string {
+	if d, ok := ports.AssignmentValue(info.EntryEnv, "CLAUDE_CONFIG_DIR"); ok && d != "" {
+		return d
+	}
+	return a.configDir()
+}
+
 func (a *Adapter) configDir() string {
+	if a.entryConfigDir != "" {
+		return a.entryConfigDir
+	}
 	if d := os.Getenv("CLAUDE_CONFIG_DIR"); d != "" {
 		return d
 	}
@@ -321,9 +355,11 @@ func (a *Adapter) ValidateProfile(info ports.HarnessInfo, model, effort string) 
 	return nil
 }
 
-// agentDir is the folder the user's agents are read from, Claude Code's configuration directory, whatever the
+// agentDir is the folder the user's agents are read from, the installation's configuration directory, whatever the
 // workspace.
-func (a *Adapter) agentDir() catalog.Dir { return catalog.Dir{Root: a.configDir()} }
+func (a *Adapter) agentDir(info ports.HarnessInfo) catalog.Dir {
+	return catalog.Dir{Root: a.configDirOf(info)}
+}
 
 // UserItem implements ports.HarnessAdapter: a skill is one the installed Claude Code reports it loads, which a CLI that
 // was not detected cannot report; an agent is looked up in the configuration directory. The list is the installation's,
@@ -341,7 +377,7 @@ func (a *Adapter) UserItem(ctx context.Context, info ports.HarnessInfo, kind, na
 		}
 		return ports.ResolvedItem{}, false, nil, nil
 	}
-	it, ok := a.agentDir().Item(kind, name)
+	it, ok := a.agentDir(info).Item(kind, name)
 	return it, ok, nil, nil
 }
 
@@ -353,7 +389,7 @@ func (a *Adapter) UserItems(ctx context.Context, info ports.HarnessInfo, kind, _
 		skills, err := a.installedSkills(ctx, info)
 		return skills, nil, err
 	}
-	items := a.agentDir().Items(kind)
+	items := a.agentDir(info).Items(kind)
 	slices.SortFunc(items, func(x, y ports.ResolvedItem) int { return strings.Compare(x.Name, y.Name) })
 	return items, nil, nil
 }
@@ -366,8 +402,12 @@ var writeTools = append([]string{"Bash"}, editTools...)
 // Prepare implements ports.HarnessAdapter: a `claude -p` invocation with stream-json output, the model, effort, and
 // context asked for, the built-in skills as a session-only plugin, the built-in agents defined for the session, and
 // the permission profile translated to Claude Code's controls, with the restrictions it enforces and those it cannot.
+// A custom entry's arguments come first, and its assignments are added to the process's environment.
 func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.Invocation, ports.OutputParser, error) {
-	args := []string{"-p", "--output-format", "stream-json", "--verbose"}
+	args := append(slices.Clone(info.EntryArgs), "-p", "--output-format", "stream-json", "--verbose")
+	if len(info.EntryEnv) > 0 {
+		req.Env = ports.WithAssignments(req.Env, info.EntryEnv)
+	}
 	if info.HasFeature("--no-session-persistence") {
 		args = append(args, "--no-session-persistence")
 	}

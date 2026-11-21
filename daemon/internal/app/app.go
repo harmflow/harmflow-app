@@ -185,6 +185,7 @@ type App struct {
 	running       map[string]*runHandle // by task id
 	inventory     map[string]ports.HarnessInfo
 	manualPaths   map[string]string
+	customEntries []customEntry // the installations the owner added from a command line, in the order added
 	settings      Settings
 	sched         map[string]*scheduleState
 	firings       map[string][]firingRecord // by task id
@@ -363,6 +364,7 @@ func (a *App) Start(ctx context.Context) error {
 	if _, err := a.d.State.Load("harnesses", &a.manualPaths); err != nil {
 		a.log.Printf("loading the harness paths set by hand; detection finds them instead: %v", err)
 	}
+	a.loadCustomEntries()
 	if err := a.loadTasks(ctx); err != nil {
 		return err
 	}

@@ -182,6 +182,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/harness-entries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add an installation from a command line
+         * @description Reads the command line with no shell: zero or more NAME=value assignments, an executable (an absolute path or a name on the daemon's PATH), then arguments, with $HOME and ~ expanded and nothing else. A line with shell syntax is refused, naming what it found. The harness is the one the executable's --version names; a line that names neither harness is refused. Nothing is saved on a refusal. The entry's probes and attempts run with its assignments added to their environment, and nothing else does.
+         */
+        post: operations["addCustomEntry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/harness-entries/{entryId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The entry's installationId. */
+                entryId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a custom entry
+         * @description The installations detection finds stay as they are. A task that still names the entry fails validation at its profile's installation key from then on.
+         */
+        delete: operations["removeCustomEntry"];
+        options?: never;
+        head?: never;
+        /**
+         * Rename a custom entry or give it another command line
+         * @description An absent field keeps what the entry had. A new line is read and checked as when the entry was added; one whose executable names the other harness moves the entry there.
+         */
+        patch: operations["updateCustomEntry"];
+        trace?: never;
+    };
     "/harnesses/{harnessId}/sign-in": {
         parameters: {
             query?: never;
@@ -866,7 +913,7 @@ export interface components {
          * @description Names a text the daemon writes for the user. The desktop shows it in the interface's language, filling it with its params; the message beside it is the same text in en-US, shown for a key the desktop does not know. The agent's text, tool output, and a tool's own error get no key and stay as they are. A text is a message with messageKey and params, or a field such as errorMessage with errorKey and errorParams.
          * @enum {string}
          */
-        MessageKey: "host_forbidden" | "origin_forbidden" | "token_required" | "route_not_found" | "body_not_json" | "task_not_found" | "execution_not_found" | "harness_not_found" | "task_exists" | "task_file_exists" | "base_revision_required" | "task_changed_on_disk" | "task_invalid" | "task_disabled" | "task_being_deleted" | "daemon_stopping" | "daemon_starting" | "execution_ended" | "executions_running" | "drain_deadline_invalid" | "harness_path_not_absolute" | "harness_path_not_executable" | "settings_language_invalid" | "settings_typeface_invalid" | "settings_notification_level_invalid" | "settings_log_retention_invalid" | "settings_path_variable_invalid" | "settings_allowed_folder_invalid" | "settings_change_breaks_task" | "settings_quota_harness_unknown" | "settings_quota_share_invalid" | "settings_quota_interval_invalid" | "settings_system_prompt_too_long" | "harness_not_identified" | "template_not_found" | "template_read_only" | "template_invalid" | "template_language_invalid" | "template_exists" | "template_base_revision_required" | "template_changed_on_disk" | "template_input_missing" | "yaml_syntax" | "document_empty" | "document_not_json" | "document_not_representable" | "task_input_missing" | "schema_type" | "schema_const" | "schema_enum" | "schema_required" | "schema_additional_properties" | "schema_pattern" | "schema_min_length" | "schema_max_length" | "schema_minimum" | "schema_maximum" | "schema_min_items" | "schema_unique_items" | "schema_not" | "schema_false" | "id_immutable" | "type_immutable" | "id_file_mismatch" | "task_file_invalid" | "task_file_error" | "template_id_not_builtin" | "template_id_reserved" | "template_file_invalid" | "template_type_unknown" | "schedule_missing" | "schedule_empty" | "schedule_cron_and_interval" | "timezone_unknown" | "interval_invalid" | "interval_unit_invalid" | "cron_seconds" | "cron_field_count" | "cron_step_invalid" | "cron_value_invalid" | "cron_value_out_of_range" | "harness_unknown" | "claude_model_unknown" | "claude_effort_unsupported" | "claude_effort_invalid" | "codex_model_unknown" | "codex_effort_invalid" | "codex_profile_unchecked" | "harness_not_detected" | "harness_not_ready" | "harness_installation_missing" | "harness_installation_signed_out" | "agent_missing" | "skill_missing" | "parameter_required" | "parameter_wrong_type" | "parameter_schema_mismatch" | "parameter_schema_invalid" | "parameter_schema_missing" | "parameter_type_unknown" | "parameter_undeclared" | "parameters_unverified" | "skill_list_unreadable" | "skill_list_unverified" | "codex_app_server_missing" | "codex_app_server_start_failed" | "codex_app_server_exited" | "codex_app_server_timed_out" | "codex_app_server_error" | "claude_skill_list_unrecognized" | "claude_skill_list_timed_out" | "fallback_repeats_preferred" | "harness_session_not_kept" | "session_kept_note" | "extra_usage_unenforced" | "cost_cap_unenforced" | "attempt_cost_cap_invalid" | "path_variable_unterminated" | "path_variable_undefined" | "path_not_absolute" | "path_forbidden_home" | "path_forbidden_place" | "path_outside_allowed_area" | "script_program_relative" | "script_working_directory_relative" | "local_path_missing" | "script_system_not_declared" | "script_program_not_found" | "script_working_directory_missing" | "script_imported_disabled" | "restriction_claude_shell_workspace" | "restriction_claude_shell_network" | "restriction_claude_sandbox_write_rules" | "restriction_claude_sandbox_network_rules" | "restriction_claude_sandbox_network" | "restriction_claude_allow_rules" | "restriction_claude_edit_rules" | "restriction_claude_shell_reads" | "restriction_claude_read_tools" | "restriction_claude_read_rules" | "restriction_claude_shell_programs" | "restriction_claude_program_children" | "restriction_codex_tool_lists" | "restriction_codex_read_paths" | "restriction_codex_program_lists" | "restriction_codex_read_only" | "restriction_codex_ephemeral_missing" | "restriction_script_unenforced" | "script_leftovers_ended" | "harness_version_untested" | "harness_version_unknown" | "quota_unread" | "repository_unprotected" | "report_not_json" | "report_schema_invalid" | "report_not_decodable" | "work_item_key_invalid" | "pull_request_not_opened" | "pull_requests_not_opened" | "step_checking_harness" | "step_preparing_workspace" | "step_starting_harness" | "step_switching_harness" | "step_waiting_rate_limit" | "step_preparing_program" | "step_running_program" | "attempt_first" | "attempt_rate_limit_retry" | "attempt_failover" | "daemon_started" | "daemon_signal" | "daemon_stop_requested" | "daemon_drained" | "drain_deadline_passed" | "local_api_stopped" | "task_delete_pending" | "task_checked" | "task_changed_externally" | "task_changed_externally_invalid" | "task_removed_externally" | "task_was_disabled" | "task_was_deleted" | "task_file_removed" | "task_gone" | "template_changed_externally" | "template_changed_externally_invalid" | "template_removed_externally" | "firing_queued" | "firing_coalesced" | "firing_skipped" | "firings_missed_catch_up" | "firings_missed_skipped" | "run_again_limit_reached" | "cancel_requested" | "cancelled_before_start" | "execution_cancelled" | "execution_timed_out" | "execution_budget_exhausted" | "attempt_budget_exhausted" | "execution_status" | "daemon_stopped_execution" | "execution_dir_failed" | "workspace_create_failed" | "repository_path_missing" | "context_write_failed" | "harness_started" | "harness_session" | "harness_session_kept" | "harness_exited" | "harness_exit_code" | "harness_start_failed" | "harness_ended_with_error" | "harness_unavailable" | "harness_unavailable_readiness" | "harness_rate_limited" | "harness_quota_exhausted" | "quota_exhausted" | "quota_exhausted_until" | "quota_share_reached" | "quota_share_reached_until" | "extra_usage_stopped" | "harness_switched" | "no_alternative_harness" | "no_alternative_harness_detail" | "skill_delivery_failed" | "agent_delivery_failed" | "tool_succeeded" | "tool_failed" | "tool_declined" | "tests_failed" | "script_started" | "script_exit_code" | "script_signaled" | "script_start_failed" | "script_write_failed" | "process_ended" | "process_left_ended" | "process_interrupted_ended" | "task_path_refused" | "detection_running" | "harness_manual_path_invalid" | "claude_not_found" | "codex_not_found" | "git_not_found" | "gh_not_found" | "command_failed" | "harness_feature_missing" | "harness_help_timed_out" | "codex_app_server_help_timed_out" | "harness_version_below_minimum" | "claude_not_signed_in" | "quota_report_unrecognized" | "not_signed_in" | "authentication_unverified" | "codex_requirements_disallow" | "codex_plan_unknown" | "codex_account_unnamed" | "harness_sign_in_unsupported" | "harness_sign_in_not_completed" | "harness_sign_in_started" | "harness_sign_in_completed" | "harness_sign_in_timed_out" | "harness_sign_in_unknown_screen" | "harness_sign_in_unconfirmed" | "harness_sign_in_start_failed" | "harness_sign_in_ended" | "harness_token_unsupported" | "harness_token_store_unavailable" | "harness_token_empty" | "harness_token_invalid" | "harness_token_store_failed" | "harness_token_remove_failed" | "harness_token_rejected" | "harness_token_expiring";
+        MessageKey: "host_forbidden" | "origin_forbidden" | "token_required" | "route_not_found" | "body_not_json" | "task_not_found" | "execution_not_found" | "harness_not_found" | "task_exists" | "task_file_exists" | "base_revision_required" | "task_changed_on_disk" | "task_invalid" | "task_disabled" | "task_being_deleted" | "daemon_stopping" | "daemon_starting" | "execution_ended" | "executions_running" | "drain_deadline_invalid" | "harness_path_not_absolute" | "harness_path_not_executable" | "settings_language_invalid" | "settings_typeface_invalid" | "settings_notification_level_invalid" | "settings_log_retention_invalid" | "settings_path_variable_invalid" | "settings_allowed_folder_invalid" | "settings_change_breaks_task" | "settings_quota_harness_unknown" | "settings_quota_share_invalid" | "settings_quota_interval_invalid" | "settings_system_prompt_too_long" | "harness_not_identified" | "template_not_found" | "template_read_only" | "template_invalid" | "template_language_invalid" | "template_exists" | "template_base_revision_required" | "template_changed_on_disk" | "template_input_missing" | "yaml_syntax" | "document_empty" | "document_not_json" | "document_not_representable" | "task_input_missing" | "schema_type" | "schema_const" | "schema_enum" | "schema_required" | "schema_additional_properties" | "schema_pattern" | "schema_min_length" | "schema_max_length" | "schema_minimum" | "schema_maximum" | "schema_min_items" | "schema_unique_items" | "schema_not" | "schema_false" | "id_immutable" | "type_immutable" | "id_file_mismatch" | "task_file_invalid" | "task_file_error" | "template_id_not_builtin" | "template_id_reserved" | "template_file_invalid" | "template_type_unknown" | "schedule_missing" | "schedule_empty" | "schedule_cron_and_interval" | "timezone_unknown" | "interval_invalid" | "interval_unit_invalid" | "cron_seconds" | "cron_field_count" | "cron_step_invalid" | "cron_value_invalid" | "cron_value_out_of_range" | "harness_unknown" | "claude_model_unknown" | "claude_effort_unsupported" | "claude_effort_invalid" | "codex_model_unknown" | "codex_effort_invalid" | "codex_profile_unchecked" | "harness_not_detected" | "harness_not_ready" | "harness_installation_missing" | "harness_installation_signed_out" | "custom_entry_unclosed_quote" | "custom_entry_no_executable" | "custom_entry_shell_syntax" | "custom_entry_unsupported" | "custom_entry_executable_missing" | "custom_entry_line_missing" | "custom_entry_name_empty" | "custom_entry_no_harness" | "custom_entry_not_found" | "agent_missing" | "skill_missing" | "parameter_required" | "parameter_wrong_type" | "parameter_schema_mismatch" | "parameter_schema_invalid" | "parameter_schema_missing" | "parameter_type_unknown" | "parameter_undeclared" | "parameters_unverified" | "skill_list_unreadable" | "skill_list_unverified" | "codex_app_server_missing" | "codex_app_server_start_failed" | "codex_app_server_exited" | "codex_app_server_timed_out" | "codex_app_server_error" | "claude_skill_list_unrecognized" | "claude_skill_list_timed_out" | "fallback_repeats_preferred" | "harness_session_not_kept" | "session_kept_note" | "extra_usage_unenforced" | "cost_cap_unenforced" | "attempt_cost_cap_invalid" | "path_variable_unterminated" | "path_variable_undefined" | "path_not_absolute" | "path_forbidden_home" | "path_forbidden_place" | "path_outside_allowed_area" | "script_program_relative" | "script_working_directory_relative" | "local_path_missing" | "script_system_not_declared" | "script_program_not_found" | "script_working_directory_missing" | "script_imported_disabled" | "restriction_claude_shell_workspace" | "restriction_claude_shell_network" | "restriction_claude_sandbox_write_rules" | "restriction_claude_sandbox_network_rules" | "restriction_claude_sandbox_network" | "restriction_claude_allow_rules" | "restriction_claude_edit_rules" | "restriction_claude_shell_reads" | "restriction_claude_read_tools" | "restriction_claude_read_rules" | "restriction_claude_shell_programs" | "restriction_claude_program_children" | "restriction_codex_tool_lists" | "restriction_codex_read_paths" | "restriction_codex_program_lists" | "restriction_codex_read_only" | "restriction_codex_ephemeral_missing" | "restriction_script_unenforced" | "script_leftovers_ended" | "harness_version_untested" | "harness_version_unknown" | "quota_unread" | "repository_unprotected" | "report_not_json" | "report_schema_invalid" | "report_not_decodable" | "work_item_key_invalid" | "pull_request_not_opened" | "pull_requests_not_opened" | "step_checking_harness" | "step_preparing_workspace" | "step_starting_harness" | "step_switching_harness" | "step_waiting_rate_limit" | "step_preparing_program" | "step_running_program" | "attempt_first" | "attempt_rate_limit_retry" | "attempt_failover" | "daemon_started" | "daemon_signal" | "daemon_stop_requested" | "daemon_drained" | "drain_deadline_passed" | "local_api_stopped" | "task_delete_pending" | "task_checked" | "task_changed_externally" | "task_changed_externally_invalid" | "task_removed_externally" | "task_was_disabled" | "task_was_deleted" | "task_file_removed" | "task_gone" | "template_changed_externally" | "template_changed_externally_invalid" | "template_removed_externally" | "firing_queued" | "firing_coalesced" | "firing_skipped" | "firings_missed_catch_up" | "firings_missed_skipped" | "run_again_limit_reached" | "cancel_requested" | "cancelled_before_start" | "execution_cancelled" | "execution_timed_out" | "execution_budget_exhausted" | "attempt_budget_exhausted" | "execution_status" | "daemon_stopped_execution" | "execution_dir_failed" | "workspace_create_failed" | "repository_path_missing" | "context_write_failed" | "harness_started" | "harness_session" | "harness_session_kept" | "harness_exited" | "harness_exit_code" | "harness_start_failed" | "harness_ended_with_error" | "harness_unavailable" | "harness_unavailable_readiness" | "harness_rate_limited" | "harness_quota_exhausted" | "quota_exhausted" | "quota_exhausted_until" | "quota_share_reached" | "quota_share_reached_until" | "extra_usage_stopped" | "harness_switched" | "no_alternative_harness" | "no_alternative_harness_detail" | "skill_delivery_failed" | "agent_delivery_failed" | "tool_succeeded" | "tool_failed" | "tool_declined" | "tests_failed" | "script_started" | "script_exit_code" | "script_signaled" | "script_start_failed" | "script_write_failed" | "process_ended" | "process_left_ended" | "process_interrupted_ended" | "task_path_refused" | "detection_running" | "harness_manual_path_invalid" | "claude_not_found" | "codex_not_found" | "git_not_found" | "gh_not_found" | "command_failed" | "harness_feature_missing" | "harness_help_timed_out" | "codex_app_server_help_timed_out" | "harness_version_below_minimum" | "claude_not_signed_in" | "quota_report_unrecognized" | "not_signed_in" | "authentication_unverified" | "codex_requirements_disallow" | "codex_plan_unknown" | "codex_account_unnamed" | "harness_sign_in_unsupported" | "harness_sign_in_not_completed" | "harness_sign_in_started" | "harness_sign_in_completed" | "harness_sign_in_timed_out" | "harness_sign_in_unknown_screen" | "harness_sign_in_unconfirmed" | "harness_sign_in_start_failed" | "harness_sign_in_ended" | "harness_token_unsupported" | "harness_token_store_unavailable" | "harness_token_empty" | "harness_token_invalid" | "harness_token_store_failed" | "harness_token_remove_failed" | "harness_token_rejected" | "harness_token_expiring";
         /** @description Values the desktop interpolates into the translated text of a messageKey; a count param picks its plural form. A param that quotes another text the daemon wrote has a param named after it with Key appended, its key, and params prefixed with its name and a dot, its params, so it is translated in place too. */
         MessageParams: {
             [key: string]: string;
@@ -1035,8 +1082,11 @@ export interface components {
             detected: boolean;
             /** @description The resolved absolute path. */
             path?: string;
-            /** @enum {string} */
-            pathSource?: "path" | "known_location" | "manual";
+            /**
+             * @description How the path was found; custom for an entry the owner added from a command line.
+             * @enum {string}
+             */
+            pathSource?: "path" | "known_location" | "manual" | "custom";
             /** @description The installations offered: every one detection found, on PATH and then in the known locations, and the path set by hand when detection did not find it. */
             installations: string[];
             /** @description The entry of installations in use, as found or set by hand. path is where it resolves to, a symlink's target included. */
@@ -1047,6 +1097,12 @@ export interface components {
             home?: string;
             /** @description The installations of the binary in use, one per home detection found, each with what its own probes read: its sign-in, plan, managed requirements, models, efforts, skills, and quota. The one in use is among them, with the installationId of the harness itself, and none has homes of its own. Absent for a harness without homes. */
             homes?: components["schemas"]["Harness"][];
+            /** @description The installations the owner added from a command line, each probed with its own assignments, listed after homes, each with its installationId, entryName, and entryLine. None has homes or customEntries of its own. */
+            customEntries?: components["schemas"]["Harness"][];
+            /** @description The name the owner gave a custom entry, by default its harness and a number, such as Codex 2; absent for any other installation. */
+            entryName?: string;
+            /** @description The command line a custom entry was added from, as typed; absent for any other installation. */
+            entryLine?: string;
             /** @description The skills an entry of homes finds in its own list, by the names a task cites them by, sorted, the built-ins left out. Absent when the list could not be read or holds none, and on the harness itself. */
             skills?: string[];
             /** @description The last reading of an entry of homes' own quota: its plan windows, each with the share of it used and when it resets, and when it was read, by the quota check before an attempt on that installation or by a running one's report. Absent before any, and on the harness itself. */
@@ -1393,6 +1449,12 @@ export interface components {
         ExecutionStatus: "queued" | "preparing" | "running" | "switching_harness" | "testing" | "publishing" | "completed" | "no_work" | "failed" | "cancelled" | "interrupted" | "needs_attention";
         /** @enum {string} */
         Trigger: "manual" | "schedule" | "catch_up" | "run_again";
+        CustomEntryInput: {
+            /** @description The command line, such as CODEX_HOME="$HOME/.codex-personal" codex. Required to add an entry. */
+            line?: string;
+            /** @description The entry's name; absent, a new entry takes its harness's name and a number, such as Codex 2. */
+            name?: string;
+        };
         Attempt: {
             number: number;
             /** @description Empty for a script task's attempt, which runs a program instead of a harness. */
@@ -1402,6 +1464,8 @@ export interface components {
             installation?: string;
             /** @description The home of that installation, which the attempt ran with; never anything read from it. */
             installationHome?: string;
+            /** @description The name of the custom entry the attempt ran on, whose home is left out, since it is one of the entry's assignments; absent for any other installation. */
+            installationName?: string;
             /** @description The model the harness reported using; absent when it reported none. */
             model?: string;
             /** @description The effort the harness reported using; absent when it reported none. */
@@ -2123,6 +2187,84 @@ export interface operations {
         };
         responses: {
             /** @description The harness, revalidated. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Harness"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Invalid"];
+        };
+    };
+    addCustomEntry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomEntryInput"];
+            };
+        };
+        responses: {
+            /** @description The entry's harness, detected again, the entry among its customEntries. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Harness"];
+                };
+            };
+            422: components["responses"]["Invalid"];
+        };
+    };
+    removeCustomEntry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The entry's installationId. */
+                entryId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The entry's harness, detected again. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Harness"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateCustomEntry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The entry's installationId. */
+                entryId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomEntryInput"];
+            };
+        };
+        responses: {
+            /** @description The entry's harness, detected again. */
             200: {
                 headers: {
                     [name: string]: unknown;
