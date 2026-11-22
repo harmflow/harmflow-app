@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api/client";
-import { HarnessInventory, ToolRow } from "../../components/Harnesses";
+import { AddCustomEntry, HarnessInventory, ToolRow } from "../../components/Harnesses";
 import { toast } from "../../components/toast";
 import { Button, cx, Field, NumberInput, Panel, TextArea } from "../../components/ui";
 import { errorMessage } from "../../lib/errorMessage";
@@ -40,6 +40,7 @@ export function AgentsSection({ report }: { report: DraftReport }) {
             <HarnessInventory key={h.id} harness={h} locale={i18n.language} onDraft={report} />
           ))}
         </div>
+        <AddCustomEntry onDraft={report} />
       </Panel>
       <Panel title={t("settings.subheads.quota")}>
         {harnesses.map((h) => {

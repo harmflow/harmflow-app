@@ -200,6 +200,9 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, 200, s.App.Harnesses())
 	})
 	h("PUT /api/v1/harnesses/{harnessId}", s.setHarnessPath)
+	h("POST /api/v1/harness-entries", s.addCustomEntry)
+	h("PATCH /api/v1/harness-entries/{entryId}", s.updateCustomEntry)
+	h("DELETE /api/v1/harness-entries/{entryId}", s.removeCustomEntry)
 	h("POST /api/v1/harnesses/{harnessId}/sign-in", s.signInHarness)
 	h("PUT /api/v1/harnesses/{harnessId}/token", s.setHarnessToken)
 	h("DELETE /api/v1/harnesses/{harnessId}/token", s.deleteHarnessToken)
@@ -445,6 +448,47 @@ func (s *Server) setHarnessPath(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	info, err := s.App.SetHarnessPath(r.Context(), r.PathValue("harnessId"), body.Path)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, 200, info)
+}
+
+// addCustomEntry adds an installation from a command line; its harness comes back detected again, the entry among its
+// customEntries.
+func (s *Server) addCustomEntry(w http.ResponseWriter, r *http.Request) {
+	var body app.CustomEntryInput
+	if err := decode(r, &body); err != nil {
+		fail(w, err)
+		return
+	}
+	info, err := s.App.AddCustomEntry(r.Context(), body)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, 201, info)
+}
+
+// updateCustomEntry renames a custom entry or gives it another command line.
+func (s *Server) updateCustomEntry(w http.ResponseWriter, r *http.Request) {
+	var body app.CustomEntryInput
+	if err := decode(r, &body); err != nil {
+		fail(w, err)
+		return
+	}
+	info, err := s.App.UpdateCustomEntry(r.Context(), r.PathValue("entryId"), body)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, 200, info)
+}
+
+// removeCustomEntry removes a custom entry; its harness comes back detected again.
+func (s *Server) removeCustomEntry(w http.ResponseWriter, r *http.Request) {
+	info, err := s.App.RemoveCustomEntry(r.Context(), r.PathValue("entryId"))
 	if err != nil {
 		fail(w, err)
 		return

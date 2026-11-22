@@ -197,14 +197,14 @@ func startFailed(err error) error {
 }
 
 // listSkills asks the app server for the skills the installed Codex has in the user's home folder, which are its own,
-// the user's, and its system and admin scopes', whatever a task's workspace. The first list of each home after
+// the user's, and its system and admin scopes', whatever a task's workspace. The first list of each installation after
 // ReloadUserItems carries forceReload.
 func (a *Adapter) listSkills(ctx context.Context, info ports.HarnessInfo) (skillsList, error) {
 	var list skillsList
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	home := a.homeOf(info)
-	force := a.reload && !a.reloaded[home]
+	key := a.serverKey(info)
+	force := a.reload && !a.reloaded[key]
 	params := map[string]any{"cwds": []string{a.Home}, "forceReload": force}
 	if err := a.callLocked(ctx, info, "skills/list", params, &list); err != nil {
 		return skillsList{}, err
@@ -213,13 +213,15 @@ func (a *Adapter) listSkills(ctx context.Context, info ports.HarnessInfo) (skill
 		if a.reloaded == nil {
 			a.reloaded = map[string]bool{}
 		}
-		a.reloaded[home] = true
+		a.reloaded[key] = true
 	}
 	return list, nil
 }
 
-// callLocked sends one request to the app server of the installation's home, starting it on first use and again once
-// it broke; a.mu is held. The server runs with that home as CODEX_HOME, so what it answers is that installation's.
+// callLocked sends one request to the app server of the installation, starting it on first use and again once it
+// broke; a.mu is held. The server runs with the installation's home as CODEX_HOME, and a custom entry's with the
+// entry's assignments too, so what it answers is that installation's. A custom entry has a server of its own, apart
+// from any home's, since its assignments may change what that home's server would answer.
 func (a *Adapter) callLocked(ctx context.Context, info ports.HarnessInfo, method string, params, result any) error {
 	if !info.Detected || info.Path == "" {
 		return domain.TextErr("harness_not_detected", "{{harness}} was not detected on this machine", "harness", Name)
@@ -232,15 +234,18 @@ func (a *Adapter) callLocked(ctx context.Context, info ports.HarnessInfo, method
 	if timeout == 0 {
 		timeout = defaultListTimeout
 	}
-	home := a.homeOf(info)
-	s := a.servers[home]
+	key := a.serverKey(info)
+	s := a.servers[key]
 	if s != nil && s.path != info.Path {
 		s.close()
 		s = nil
-		delete(a.servers, home)
+		delete(a.servers, key)
 	}
 	if s == nil {
 		env := a.Env
+		if len(info.EntryEnv) > 0 {
+			env = ports.WithAssignments(env, info.EntryEnv)
+		}
 		if info.Home != "" {
 			env = envWith(env, info.Home)
 		}
@@ -252,15 +257,20 @@ func (a *Adapter) callLocked(ctx context.Context, info ports.HarnessInfo, method
 			a.servers = map[string]*appServer{}
 		}
 		s = started
-		a.servers[home] = s
+		a.servers[key] = s
 	}
 	err := s.call(ctx, timeout, method, params, result)
 	var se *serverError
 	if errors.As(err, &se) && se.broken {
 		s.close()
-		delete(a.servers, home)
+		delete(a.servers, key)
 	}
 	return err
+}
+
+// serverKey names the app server of an installation: its home, and a custom entry's assignments after it.
+func (a *Adapter) serverKey(info ports.HarnessInfo) string {
+	return strings.Join(append([]string{a.homeOf(info)}, info.EntryEnv...), "\x00")
 }
 
 // rateLimitsRead is the answer to account/rateLimits/read, as Codex 0.163.0 writes it: its plan windows, which some

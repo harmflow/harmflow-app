@@ -1,17 +1,20 @@
 // The AI tools list: each harness detected, where, at which version, and whether it is ready.
 // Credentials are never shown.
 import { useState, type ReactNode } from "react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
+import { native } from "../api/native";
 import type { Harness, Tool } from "../api/types";
 import type { Tone } from "../design/theme";
 import { fieldText } from "../lib/daemonText";
+import { errorMessage } from "../lib/errorMessage";
 import { formatDateTime, formatRelative } from "../lib/format";
 import { useDraft, type DraftReport } from "../lib/hooks";
 import { actions } from "../state/store";
 import { HarnessMark, Icon, type IconName } from "./Icon";
 import { toast } from "./toast";
-import { Button, Chip, KeyValue, TextInput } from "./ui";
+import { Button, Chip, Field, KeyValue, TextInput } from "./ui";
 
 // A ready harness with something detection could not establish — its sign-in, or a version it can vouch for — is a
 // warning, with the diagnostic saying why.
@@ -154,6 +157,25 @@ function authenticationTone(h: Harness): Tone {
   return h.authentication === "valid" ? "success" : h.authentication === "invalid" ? "danger" : h.detected ? "warning" : "neutral";
 }
 
+// What an installation's own probes read, in one line: its sign-in, plan, managed requirements, models, efforts,
+// skills, and the share of each quota window used.
+function installationDetails(t: TFunction, inst: Harness): string {
+  const requirements = inst.managedRequirements;
+  return [
+    `${t("harness.authLabel")}: ${t(`harness.authentication.${inst.authentication}`)}`,
+    inst.account?.plan ? `${t("harness.plan")}: ${inst.account.plan === "unknown" ? t("harness.planUnknown") : inst.account.plan}` : "",
+    inst.account ? `${t("harness.requirements")}: ${t(`harness.requirementsState.${!requirements ? "unknown" : requirements.managed ? "managed" : "none"}`)}` : "",
+    inst.models.length ? `${t("harness.models")}: ${inst.models.map((m) => m.id).join(", ")}` : "",
+    inst.efforts.length ? `${t("harness.efforts")}: ${inst.efforts.join(", ")}` : "",
+    inst.skills?.length ? `${t("harness.skills")}: ${inst.skills.join(", ")}` : "",
+    inst.quota?.windows.length
+      ? `${t("harness.quota")}: ${inst.quota.windows.map((w) => t("harness.quotaWindow", { window: w.name, percent: Math.round(w.usedPercent) })).join(", ")}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 /**
  * The installations of a harness's binary, one per home: each by the identifier a task names it by, its home, how ready
  * it is, and what its own probes read — its sign-in, plan, managed requirements, models, efforts, skills, and the share
@@ -166,20 +188,6 @@ function HomeList({ harness }: { harness: Harness }) {
     <div>
       <ul className="installations">
         {homes.map((home) => {
-          const requirements = home.managedRequirements;
-          const details = [
-            `${t("harness.authLabel")}: ${t(`harness.authentication.${home.authentication}`)}`,
-            home.account?.plan ? `${t("harness.plan")}: ${home.account.plan === "unknown" ? t("harness.planUnknown") : home.account.plan}` : "",
-            home.account ? `${t("harness.requirements")}: ${t(`harness.requirementsState.${!requirements ? "unknown" : requirements.managed ? "managed" : "none"}`)}` : "",
-            home.models.length ? `${t("harness.models")}: ${home.models.map((m) => m.id).join(", ")}` : "",
-            home.efforts.length ? `${t("harness.efforts")}: ${home.efforts.join(", ")}` : "",
-            home.skills?.length ? `${t("harness.skills")}: ${home.skills.join(", ")}` : "",
-            home.quota?.windows.length
-              ? `${t("harness.quota")}: ${home.quota.windows
-                  .map((w) => t("harness.quotaWindow", { window: w.name, percent: Math.round(w.usedPercent) }))
-                  .join(", ")}`
-              : "",
-          ].filter(Boolean);
           return (
             <li key={home.installationId} className="installations__item" title={home.home}>
               <span className="mono">{home.installationId}</span>
@@ -191,12 +199,200 @@ function HomeList({ harness }: { harness: Harness }) {
                   {t("harness.inUse")}
                 </Chip>
               ) : null}
-              <span className="muted">{details.join(" · ")}</span>
+              <span className="muted">{installationDetails(t, home)}</span>
             </li>
           );
         })}
       </ul>
       <span className="muted">{t("harness.homesHint")}</span>
+    </div>
+  );
+}
+
+/**
+ * The installations the owner added from a command line: each by its name, the line it was added from, how ready it
+ * is, and what its own probes read, with controls that rename it, give it another line, or remove it. A signed-out
+ * entry is listed as not authenticated, never hidden.
+ */
+function CustomEntryList({ harness }: { harness: Harness }) {
+  return (
+    <ul className="installations">
+      {(harness.customEntries ?? []).map((entry) => (
+        <CustomEntryItem key={entry.installationId} entry={entry} />
+      ))}
+    </ul>
+  );
+}
+
+function CustomEntryItem({ entry }: { entry: Harness }) {
+  const { t } = useTranslation();
+  const id = entry.installationId ?? "";
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(entry.entryName ?? "");
+  const [line, setLine] = useState(entry.entryLine ?? "");
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+
+  const run = async (change: () => Promise<unknown>) => {
+    setBusy(true);
+    try {
+      await change();
+      await actions.refreshHarnesses();
+      setEditing(false);
+      setError(undefined);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const save = () => {
+    const change: { name?: string; line?: string } = {};
+    if (name.trim() !== (entry.entryName ?? "")) change.name = name.trim();
+    if (line.trim() !== (entry.entryLine ?? "")) change.line = line.trim();
+    void run(() => api.updateCustomEntry(id, change));
+  };
+  const remove = async () => {
+    const title = t("harness.customEntryRemoveTitle", { name: entry.entryName ?? id });
+    if (!(await native.confirm(t("harness.customEntryRemoveConfirm"), title, t("common.delete"), t("common.cancel")))) return;
+    await run(() => api.removeCustomEntry(id));
+  };
+
+  return (
+    <li className="installations__item custom-entry">
+      <strong>{entry.entryName}</strong>
+      <span className="mono muted">{id}</span>
+      <Chip tone={readinessTone(entry)} icon={readinessIcon(entry)} title={fieldText(entry.diagnostic, entry.diagnosticKey, entry.diagnosticParams)}>
+        {t(`harness.readiness.${entry.readiness}`)}
+      </Chip>
+      <span className="mono">{entry.entryLine}</span>
+      <span className="muted">{installationDetails(t, entry)}</span>
+      {editing ? (
+        <Field label={t("harness.customEntryLine")} error={error}>
+          <div className="inline-form">
+            <TextInput aria-label={t("harness.customEntryName")} value={name} onChange={(e) => setName(e.target.value)} />
+            <TextInput
+              aria-label={t("harness.customEntryLine")}
+              value={line}
+              spellCheck={false}
+              autoComplete="off"
+              aria-invalid={error ? true : undefined}
+              onChange={(e) => {
+                setLine(e.target.value);
+                setError(undefined);
+              }}
+              mono
+            />
+            <Button size="sm" variant="primary" disabled={busy || !name.trim() || !line.trim()} onClick={save}>
+              {t("common.save")}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+              {t("common.cancel")}
+            </Button>
+          </div>
+        </Field>
+      ) : (
+        <span className="inline-actions">
+          <Button
+            size="sm"
+            variant="ghost"
+            icon="pencil"
+            aria-label={t("harness.customEntryEdit", { name: entry.entryName ?? id })}
+            onClick={() => {
+              setName(entry.entryName ?? "");
+              setLine(entry.entryLine ?? "");
+              setError(undefined);
+              setEditing(true);
+            }}
+          >
+            {t("harness.customEntryEditShort")}
+          </Button>
+          <Button size="sm" variant="ghost" icon="trash" disabled={busy} aria-label={t("harness.customEntryRemove", { name: entry.entryName ?? id })} onClick={() => void remove()}>
+            {t("harness.customEntryRemoveShort")}
+          </Button>
+          {error ? <span className="field__error">{error}</span> : null}
+        </span>
+      )}
+    </li>
+  );
+}
+
+/**
+ * Settings › AI tools' "Add custom entry": a command line — assignments, an executable, arguments — that the daemon
+ * reads with no shell. It identifies the harness from the executable's --version and adds the entry under it; a
+ * refusal (shell syntax, no harness, no executable) shows the daemon's reason on the field, and nothing is saved.
+ */
+export function AddCustomEntry({ onDraft }: { onDraft?: DraftReport }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const [line, setLine] = useState("");
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  useDraft(onDraft, "customEntry", open && (line.trim() !== "" || name.trim() !== ""));
+
+  const add = async () => {
+    setBusy(true);
+    try {
+      const harness = await api.addCustomEntry(line.trim(), name.trim() || undefined);
+      await actions.refreshHarnesses();
+      const added = harness.customEntries?.find((e) => e.entryLine === line.trim());
+      toast(t("harness.customEntryAdded", { name: added?.entryName ?? harness.name }));
+      setLine("");
+      setName("");
+      setError(undefined);
+      setOpen(false);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <div className="inline-actions">
+        <Button size="sm" icon="plus" onClick={() => setOpen(true)}>
+          {t("harness.customEntryAdd")}
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div className="row-list">
+      <Field label={t("harness.customEntryLine")} hint={t("harness.customEntryLineHint")} error={error}>
+        <TextInput
+          id="custom-entry-line"
+          value={line}
+          placeholder={'CODEX_HOME="$HOME/.codex-personal" codex'}
+          spellCheck={false}
+          autoComplete="off"
+          aria-invalid={error ? true : undefined}
+          onChange={(e) => {
+            setLine(e.target.value);
+            setError(undefined);
+          }}
+          mono
+        />
+      </Field>
+      <Field label={t("harness.customEntryName")} hint={t("harness.customEntryNameHint")}>
+        <TextInput id="custom-entry-name" value={name} onChange={(e) => setName(e.target.value)} />
+      </Field>
+      <div className="inline-actions">
+        <Button size="sm" variant="primary" disabled={busy || !line.trim()} aria-busy={busy} onClick={() => void add()}>
+          {t("harness.customEntryAddSubmit")}
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => {
+            setOpen(false);
+            setError(undefined);
+          }}
+        >
+          {t("common.cancel")}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -308,6 +504,8 @@ export function HarnessInventory({ harness, locale, onDraft }: { harness: Harnes
           ],
           // Only a harness with installations by home has the row.
           ...(harness.homes?.length ? [[t("harness.homes"), <HomeList harness={harness} />] as [string, ReactNode]] : []),
+          // Only a harness the owner added entries to has the row.
+          ...(harness.customEntries?.length ? [[t("harness.customEntries"), <CustomEntryList harness={harness} />] as [string, ReactNode]] : []),
           [
             t("harness.version"),
             harness.version || harness.versionSupport ? (

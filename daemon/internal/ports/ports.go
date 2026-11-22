@@ -5,6 +5,9 @@ package ports
 import (
 	"context"
 	"io"
+	"os"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
@@ -150,11 +153,25 @@ type HarnessInfo struct {
 	// Homes are the installations of the binary in use, one per home detection found, each with what its own probes
 	// read; the one in use is among them, and none has Homes of its own. Empty for a harness without homes.
 	Homes []HarnessInfo `json:"homes,omitempty"`
-	// Skills are the names of the skills an entry of Homes finds in its own list that a task can cite, sorted, the
-	// built-ins left out; empty when the list could not be read or holds none, and on the harness itself.
+	// CustomEntries are the installations the owner added from a command line, each probed with its own assignments,
+	// listed after Homes; none has Homes or CustomEntries of its own. The use cases set them, not detection.
+	CustomEntries []HarnessInfo `json:"customEntries,omitempty"`
+	// EntryName is the name the owner gave a custom entry; empty for any other installation.
+	EntryName string `json:"entryName,omitempty"`
+	// EntryLine is the command line a custom entry was added from, as typed; empty for any other installation.
+	EntryLine string `json:"entryLine,omitempty"`
+	// EntryEnv are a custom entry's `NAME=value` assignments, expanded, which its probes and attempts add to their
+	// environment and nothing else does. Never shown.
+	EntryEnv []string `json:"-"`
+	// EntryArgs are the arguments a custom entry's command line gives after its executable, which each attempt on it
+	// passes first. Never shown.
+	EntryArgs []string `json:"-"`
+	// Skills are the names of the skills an entry of Homes or CustomEntries finds in its own list that a task can
+	// cite, sorted, the built-ins left out; empty when the list could not be read or holds none, and on the harness
+	// itself.
 	Skills []string `json:"skills,omitempty"`
-	// Quota is the last reading of an entry of Homes' own quota, by the check before an attempt on it or a running
-	// one's report; nil before any, and on the harness itself.
+	// Quota is the last reading of the own quota of an entry of Homes or CustomEntries, by the check before an attempt
+	// on it or a running one's report; nil before any, and on the harness itself.
 	Quota    *InstallationQuota `json:"quota,omitempty"`
 	Features map[string]bool    `json:"-"`
 	// FeaturesUnknown is true when the help that lists the CLI's flags could not be read within its check's limit, so
@@ -234,17 +251,51 @@ type ModelInfo struct {
 func (h HarnessInfo) Ready() bool { return h.Readiness == "ready" }
 
 // InstallationNamed is the installation of the harness that a profile's installation key id names: the one in use, h
-// itself, for an empty id, and otherwise the entry of Homes with that InstallationID. found is false when none has it.
+// itself, for an empty id, and otherwise the entry of Homes or CustomEntries with that InstallationID. found is false
+// when none has it.
 func (h HarnessInfo) InstallationNamed(id string) (inst HarnessInfo, found bool) {
 	if id == "" {
 		return h, true
 	}
-	for _, home := range h.Homes {
+	for _, home := range append(slices.Clone(h.Homes), h.CustomEntries...) {
 		if home.InstallationID == id {
 			return home, true
 		}
 	}
 	return HarnessInfo{}, false
+}
+
+// Custom reports whether the installation is a custom entry the owner added from a command line.
+func (h HarnessInfo) Custom() bool { return h.EntryLine != "" }
+
+// EntryProber is a HarnessAdapter that can probe a custom entry. EntryExecutable is the executable a command line
+// names: name itself when it is an absolute path to an executable file, otherwise the first of that name on the PATH
+// detection looks the harness up on; "" when there is none. ProbeEntry reads the binary at path, run with the entry's
+// `NAME=value` assignments added to its environment, as the installation of the home those assignments set, or of the
+// home in use when they set none. The probes are those of Detect; the result names no other installation.
+type EntryProber interface {
+	EntryExecutable(name string) string
+	ProbeEntry(ctx context.Context, path string, assignments []string) HarnessInfo
+}
+
+// WithAssignments is env, or the daemon's own environment when env is nil, with assignments added after it, so each
+// assignment wins over a variable of the same name. It is a copy.
+func WithAssignments(env, assignments []string) []string {
+	if env == nil {
+		env = os.Environ()
+	}
+	return append(slices.Clone(env), assignments...)
+}
+
+// AssignmentValue is the value the last of assignments gives name, and whether one does.
+func AssignmentValue(assignments []string, name string) (string, bool) {
+	value, found := "", false
+	for _, kv := range assignments {
+		if v, ok := strings.CutPrefix(kv, name+"="); ok {
+			value, found = v, true
+		}
+	}
+	return value, found
 }
 
 // Resolved agent or skill, delivered to the harness.
