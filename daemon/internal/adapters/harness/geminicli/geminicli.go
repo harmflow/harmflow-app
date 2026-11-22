@@ -33,6 +33,9 @@ const (
 	// credentialsFile is the file, in the CLI's own .gemini folder, where its own Google sign-in is kept. Only its
 	// presence is checked: the daemon never reads it.
 	credentialsFile = "oauth_creds.json"
+	// trustVariable tells the CLI to trust the folder it runs in. Without it, its non-interactive mode refuses a folder
+	// the owner has not trusted by hand, and turns the yolo approval mode back to default.
+	trustVariable = "GEMINI_CLI_TRUST_WORKSPACE"
 )
 
 // apiKeyVariables are the environment variables through which the CLI would sign in with a key rather than its own
@@ -73,6 +76,12 @@ func (a *Adapter) Name() string { return Name }
 // env is the environment the CLI's probes and runs start with: Env, or the daemon's own when Env is nil, without the
 // CODEX_HOME of a Codex installation and without the API-key variables. It is a copy, never nil.
 func (a *Adapter) env() []string { return withoutKeys(ports.WithoutCodexHome(a.Env)) }
+
+// trusted is env, which it may change, with the CLI told to trust the folder it runs in, whatever env said of it.
+func trusted(env []string) []string {
+	env = slices.DeleteFunc(env, func(kv string) bool { return strings.HasPrefix(kv, trustVariable+"=") })
+	return append(env, trustVariable+"=true")
+}
 
 // withoutKeys is env without the API-key variables, in a copy.
 func withoutKeys(env []string) []string {
@@ -273,7 +282,8 @@ func unenforced(name, setting string) ports.Restriction {
 // Prepare implements ports.HarnessAdapter: a non-interactive `gemini` run with stream-json output, the prompt and
 // HarmFlow's context on stdin, the model asked for, the task's extra folders included, and the permission profile
 // translated to the CLI's approval mode. The CLI's sandbox is not turned on, so the workspace limits, the network
-// setting, and a custom profile's lists are reported as not enforced.
+// setting, and a custom profile's lists are reported as not enforced. The CLI is told to trust the workspace, so it
+// runs there unattended and also reads the workspace's own .gemini settings.
 func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.Invocation, ports.OutputParser, error) {
 	args := []string{"--output-format", "stream-json"}
 	if req.Model != "" && req.Model != domain.DefaultModel {
@@ -331,7 +341,7 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 	if req.Context != "" {
 		stdin = req.Context + "\n\n" + req.Prompt
 	}
-	inv := ports.Invocation{Path: info.Path, Args: args, Env: withoutKeys(req.Env), Dir: req.WorkDir, Stdin: stdin,
+	inv := ports.Invocation{Path: info.Path, Args: args, Env: trusted(withoutKeys(req.Env)), Dir: req.WorkDir, Stdin: stdin,
 		Restrictions: restrictions}
 	return inv, &parser{tools: map[string]string{}}, nil
 }
@@ -440,6 +450,12 @@ const signedOutTexts = `failed to sign in|login required|please (sign|log) ?in|n
 
 var signedOut = regexp.MustCompile(`(?i)(` + signedOutTexts + `)`)
 
+// unusableTexts are the CLI's own words that it will not run although it is signed in: the signed-in account is not
+// eligible for the CLI's plan, or the folder is not trusted. Signing in again with the same account changes neither.
+const unusableTexts = `IneligibleTierError|not eligible for Gemini Code Assist|not running in a trusted directory`
+
+var unusable = regexp.MustCompile(`(?i)(` + unusableTexts + `)`)
+
 // authExitCode is the CLI's exit code for a fatal authentication error.
 const authExitCode = 41
 
@@ -447,12 +463,23 @@ const authExitCode = 41
 var patterns = classify.Patterns{
 	Quota:       regexp.MustCompile(`(?i)(quota exceeded|exceeded your current quota|exhausted your (daily )?quota|daily (request )?limit|usage limit reached)`),
 	RateLimit:   regexp.MustCompile(`(?i)(rate[ _-]?limit|too many requests|resource_exhausted|status 429|code"?:? ?429)`),
-	Unavailable: regexp.MustCompile(`(?i)(` + signedOutTexts + `)`),
+	Unavailable: regexp.MustCompile(`(?i)(` + signedOutTexts + `|` + unusableTexts + `)`),
 	Network:     regexp.MustCompile(`(?i)(ECONNREFUSED|ENOTFOUND|ETIMEDOUT|ECONNRESET|EAI_AGAIN|network error|getaddrinfo|fetch failed|connection error)`),
 }
 
+var (
+	// ansi is a terminal's color or cursor code, which the CLI's stderr carries.
+	ansi = regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]`)
+	// stackFrame is one frame line of a stack trace the CLI prints with an error.
+	stackFrame = regexp.MustCompile(`(?m)^[ \t]+at .*(\n|$)`)
+)
+
+// readable is the CLI's stderr without its color codes and the frames of its stack traces.
+func readable(s string) string { return stackFrame.ReplaceAllString(ansi.ReplaceAllString(s, ""), "") }
+
 // Finish implements ports.OutputParser: a run that exited 0 with a successful result completed; any other is classified
-// from the CLI's result, its error lines, and its stderr, an exit code of 41 reading as signed out.
+// from the CLI's result, its error lines, and its stderr, an exit code of 41 reading as signed out unless the CLI said
+// the account or the folder is one it will not run with.
 func (p *parser) Finish(exitCode int, stderrTail string, timedOut, cancelled bool) domain.AttemptEnd {
 	p.flushText()
 	end := domain.AttemptEnd{ExitCode: exitCode, SessionID: p.sessionID, FinalText: p.lastText, Usage: domain.NotReported()}
@@ -471,7 +498,7 @@ func (p *parser) Finish(exitCode int, stderrTail string, timedOut, cancelled boo
 	if p.result != nil && p.result.Error != nil {
 		parts = append(parts, p.result.Error.Message)
 	}
-	if t := strings.TrimSpace(stderrTail); t != "" {
+	if t := strings.TrimSpace(readable(stderrTail)); t != "" {
 		parts = append(parts, t)
 	}
 	text := strings.TrimSpace(strings.Join(parts, "\n"))
@@ -482,6 +509,10 @@ func (p *parser) Finish(exitCode int, stderrTail string, timedOut, cancelled boo
 		end.Error = domain.Text{Message: classify.Tail(eventlog.Redact(text), 2000)}
 	}
 	end.Class = patterns.Text(text)
+	if unusable.MatchString(text) {
+		end.Class = domain.ClassHarnessUnavailable
+		return end
+	}
 	if exitCode == authExitCode {
 		end.Class = domain.ClassHarnessUnavailable
 		end.SignedOut = true

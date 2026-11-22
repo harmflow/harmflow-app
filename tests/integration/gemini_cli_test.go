@@ -80,8 +80,9 @@ func TestGeminiCLISignedOutDespiteAnAPIKey(t *testing.T) {
 	t.Fatal("the harness list has no gemini-cli")
 }
 
-// The Gemini CLI's failures are classified as the others' are; quota and a sign-in fail over to Claude
-// Code, a network failure does not, and a task whose Claude Code runs out of quota fails over to the Gemini CLI.
+// The Gemini CLI's failures are classified as the others' are; quota, a sign-in, and an account the CLI's plan does
+// not serve fail over to Claude Code, a network failure does not, and a task whose Claude Code runs out of quota fails
+// over to the Gemini CLI.
 func TestGeminiCLIFailover(t *testing.T) {
 	t.Parallel()
 	d := startWithGeminiSignedIn(t)
@@ -92,6 +93,7 @@ func TestGeminiCLIFailover(t *testing.T) {
 	}{
 		{"quota", "completed", "quota_exhausted", 2},
 		{"signedout", "completed", "harness_unavailable", 2},
+		{"ineligible", "completed", "harness_unavailable", 2},
 		{"network", "failed", "network_failed", 1},
 	}
 	for _, c := range cases {

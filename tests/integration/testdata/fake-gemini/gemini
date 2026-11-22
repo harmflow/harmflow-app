@@ -3,8 +3,9 @@
 # by its executable's name and a version-shaped --version output. The task's prompt picks the scenario, by a variable of
 # its own so that a task can fail over between it and another stand-in: GEMINI=ok (default),
 # GEMINI=quota, GEMINI=ratelimit, GEMINI=signedout (exits 41, the CLI's authentication
-# error), GEMINI=network, or GEMINI=error (a task error). It writes the arguments it was started with,
-# one per line, to gemini-args in its working directory.
+# error), GEMINI=ineligible (an account the CLI's plan does not serve), GEMINI=network, or GEMINI=error (a task error).
+# It writes the arguments it was started with, one per line, to gemini-args in its working directory. As the real CLI
+# does, it refuses to run in a folder it is not told to trust, exiting 55.
 case "$1" in
   --version) echo "0.18.0"; exit 0 ;;
   --help) cat <<'HELP'
@@ -14,12 +15,17 @@ HELP
     exit 0 ;;
 esac
 printf '%s\n' "$@" > gemini-args
+if [ "$GEMINI_CLI_TRUST_WORKSPACE" != "true" ]; then
+  echo "Gemini CLI is not running in a trusted directory. To proceed, either use --skip-trust, set the GEMINI_CLI_TRUST_WORKSPACE=true environment variable, or trust this directory in interactive mode." >&2
+  exit 55
+fi
 prompt=$(cat)
 scenario=ok
 case "$prompt" in
   *GEMINI=quota*) scenario=quota ;;
   *GEMINI=ratelimit*) scenario=ratelimit ;;
   *GEMINI=signedout*) scenario=signedout ;;
+  *GEMINI=ineligible*) scenario=ineligible ;;
   *GEMINI=network*) scenario=network ;;
   *GEMINI=error*) scenario=error ;;
 esac
@@ -34,6 +40,10 @@ case "$scenario" in
   signedout)
     echo "Error authenticating: login required" >&2
     exit 41 ;;
+  ineligible)
+    echo "Error authenticating: IneligibleTierError: Your current account is not eligible for Gemini Code Assist for individuals, the free version of Gemini Code Assist." >&2
+    echo "    at throwIneligibleOrProjectIdError (file:///gemini-cli/bundle/chunk.js:1:1)" >&2
+    exit 1 ;;
   network)
     echo "fetch failed: getaddrinfo ENOTFOUND generativelanguage.googleapis.com" >&2
     exit 1 ;;

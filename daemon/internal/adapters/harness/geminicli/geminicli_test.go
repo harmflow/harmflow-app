@@ -142,7 +142,8 @@ func TestPrepare(t *testing.T) {
 	a := &Adapter{}
 	info := ports.HarnessInfo{Path: "/bin/gemini", Features: map[string]bool{"--include-directories": true}}
 	req := ports.RunRequest{Prompt: "do it", Context: "ctx", Model: "gemini-2.5-pro", WorkDir: "/w",
-		AdditionalDirs: []string{"/extra"}, ExecutionDir: "/exec", Env: []string{"A=1", "GEMINI_API_KEY=k"},
+		AdditionalDirs: []string{"/extra"}, ExecutionDir: "/exec",
+		Env: []string{"A=1", "GEMINI_API_KEY=k", "GEMINI_CLI_TRUST_WORKSPACE=false"},
 		Permissions: domain.Permissions{Profile: domain.ProfileWorkspaceWrite, RestrictToWorkspace: boolp(true),
 			Network: domain.NetworkDeny}}
 	inv, parser, err := a.Prepare(info, req)
@@ -158,6 +159,11 @@ func TestPrepare(t *testing.T) {
 	}
 	if inv.Dir != "/w" || inv.Stdin != "ctx\n\ndo it" || slices.Contains(inv.Env, "GEMINI_API_KEY=k") {
 		t.Errorf("invocation %+v", inv)
+	}
+	// The CLI's non-interactive mode refuses a folder it does not trust, so the workspace is trusted whatever the
+	// environment said.
+	if !slices.Contains(inv.Env, "GEMINI_CLI_TRUST_WORKSPACE=true") || slices.Contains(inv.Env, "GEMINI_CLI_TRUST_WORKSPACE=false") {
+		t.Errorf("Prepare env = %q, want GEMINI_CLI_TRUST_WORKSPACE=true alone", inv.Env)
 	}
 	names := map[string]bool{}
 	for _, r := range inv.Restrictions {
@@ -243,6 +249,10 @@ func TestFinishClassifiesFailures(t *testing.T) {
 		{"signed out by text", "", 1, "Login required. Please sign in.", domain.ClassHarnessUnavailable, true},
 		{"network", "", 1, "fetch failed: getaddrinfo ENOTFOUND generativelanguage.googleapis.com", domain.ClassNetwork, false},
 		{"task error", "", 1, "the tests failed", domain.ClassTaskError, false},
+		// The CLI 0.68.0's own words, signed in with an account its free plan does not serve.
+		{"ineligible account", "", 1, ineligibleStderr, domain.ClassHarnessUnavailable, false},
+		{"ineligible account at the authentication exit code", "", 41, ineligibleStderr, domain.ClassHarnessUnavailable, false},
+		{"untrusted folder", "", 55, untrustedStderr, domain.ClassHarnessUnavailable, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -259,5 +269,36 @@ func TestFinishClassifiesFailures(t *testing.T) {
 	_, p, _ := (&Adapter{}).Prepare(ports.HarnessInfo{}, ports.RunRequest{})
 	if end := p.Finish(-1, "", true, false); end.Class != domain.ClassTimeout {
 		t.Fatalf("timeout: %+v", end)
+	}
+}
+
+// ineligibleStderr is the CLI 0.68.0's stderr when its account is not eligible for its free plan.
+const ineligibleStderr = `Error authenticating: IneligibleTierError: Your current account is not eligible for Gemini Code Assist for individuals, the free version of Gemini Code Assist.
+    at throwIneligibleOrProjectIdError (file:///opt/homebrew/Cellar/gemini-cli/0.68.0/libexec/lib/node_modules/@google/gemini-cli/bundle/chunk-RCB6BI5H.js:312981:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  ineligibleTiers: [
+    {
+      reasonCode: 'RESTRICTED_DASHER_USER',
+      tierId: 'free-tier'
+    }
+  ]
+}`
+
+// untrustedStderr is the CLI 0.68.0's stderr when its non-interactive mode starts in a folder it does not trust.
+const untrustedStderr = "Approval mode overridden to \"default\" because the current folder is not trusted.\n" +
+	"\x1b[31mGemini CLI is not running in a trusted directory. To proceed, either use `--skip-trust`, set the " +
+	"`GEMINI_CLI_TRUST_WORKSPACE=true` environment variable, or trust this directory in interactive mode.\x1b[0m"
+
+// The error of a failed attempt keeps the CLI's words without its color codes or its stack trace.
+func TestFinishKeepsTheErrorReadable(t *testing.T) {
+	for name, stderr := range map[string]string{"ineligible": ineligibleStderr, "untrusted": untrustedStderr} {
+		_, p, _ := (&Adapter{}).Prepare(ports.HarnessInfo{}, ports.RunRequest{})
+		msg := p.Finish(1, stderr, false, false).Error.Message
+		if strings.Contains(msg, "\x1b[") || strings.Contains(msg, "    at ") || strings.Contains(msg, "chunk-") {
+			t.Errorf("%s: Finish error = %q, want no color codes or stack frames", name, msg)
+		}
+		if !strings.Contains(msg, "IneligibleTierError") && !strings.Contains(msg, "not running in a trusted directory") {
+			t.Errorf("%s: Finish error = %q, want the CLI's own words", name, msg)
+		}
 	}
 }
