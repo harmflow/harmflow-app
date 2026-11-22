@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -478,6 +479,25 @@ func LookPath(name string, pathEnv string, known []string) []string {
 		add(k)
 	}
 	return out
+}
+
+// FindExecutable is the executable a command line names: name itself when it is an absolute path to an executable
+// file, otherwise the first executable file of that name in pathEnv's folders; "" when there is none, and for a
+// relative path, which names no folder of pathEnv.
+func FindExecutable(name, pathEnv string) string {
+	if strings.HasPrefix(name, "/") {
+		if Executable(name) {
+			return name
+		}
+		return ""
+	}
+	if strings.Contains(name, "/") {
+		return ""
+	}
+	if found := LookPath(name, pathEnv, nil); len(found) > 0 {
+		return found[0]
+	}
+	return ""
 }
 
 // Executable reports whether path names a regular file with an execute bit, a symlink to one included.

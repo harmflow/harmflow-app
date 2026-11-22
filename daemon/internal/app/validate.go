@@ -519,7 +519,8 @@ func (a *App) profileInstallation(ctx context.Context, r *ValidationResult, ad p
 		r.addError(path+"/installation", installationMissing(ad.Name(), p.Installation))
 		return info
 	}
-	if inst.Authentication == "invalid" {
+	// A custom entry signed out is no validation matter: the check before each run reads it not ready.
+	if inst.Authentication == "invalid" && !inst.Custom() {
 		r.addError(path+"/installation", domain.T("harness_installation_signed_out",
 			`{{harness}}'s installation "{{installation}}" is not signed in`, "harness", ad.Name(), "installation", p.Installation))
 	}

@@ -110,6 +110,7 @@ func (a *App) detect(ctx context.Context, id string) ports.HarnessInfo {
 		// The harness rejected its saved token: check it again without, on its own sign-in.
 		info = ad.Detect(ctx, manual)
 	}
+	info.CustomEntries = a.probeCustomEntries(ctx, ad)
 	info = a.withHomeSkills(ctx, ad, info)
 	info.LastCheckedAt = a.now()
 	// Taken only once Detect returns, so a slow check never holds up Stop; see announceMu.
@@ -132,42 +133,50 @@ func (a *App) detect(ctx context.Context, id string) ports.HarnessInfo {
 	return info
 }
 
-// withHomeSkills gives each installation among info's Homes the skills its own list holds, which Settings shows beside
-// what its probes read and the task form offers. A list that cannot be read is left out, and a harness without homes is
-// left as it is.
+// withHomeSkills gives each installation among info's Homes and CustomEntries the skills its own list holds, which
+// Settings shows beside what its probes read and the task form offers. A list that cannot be read is left out, and a
+// harness without either is left as it is.
 func (a *App) withHomeSkills(ctx context.Context, ad ports.HarnessAdapter, info ports.HarnessInfo) ports.HarnessInfo {
-	if len(info.Homes) == 0 {
-		return info
-	}
-	info.Homes = slices.Clone(info.Homes)
 	workspace := a.taskFolder("", "")
-	for i := range info.Homes {
-		home := &info.Homes[i]
-		if items, _, err := ad.UserItems(ctx, *home, "skill", workspace, nil); err == nil {
-			for _, it := range items {
-				if !strings.HasPrefix(it.Name, BuiltinPrefix) && a.citable("skill", it.Name) {
-					home.Skills = append(home.Skills, it.Name)
-				}
-			}
-			slices.Sort(home.Skills)
+	withSkills := func(list []ports.HarnessInfo) []ports.HarnessInfo {
+		if len(list) == 0 {
+			return list
 		}
+		list = slices.Clone(list)
+		for i := range list {
+			inst := &list[i]
+			if items, _, err := ad.UserItems(ctx, *inst, "skill", workspace, nil); err == nil {
+				for _, it := range items {
+					if !strings.HasPrefix(it.Name, BuiltinPrefix) && a.citable("skill", it.Name) {
+						inst.Skills = append(inst.Skills, it.Name)
+					}
+				}
+				slices.Sort(inst.Skills)
+			}
+		}
+		return list
 	}
+	info.Homes, info.CustomEntries = withSkills(info.Homes), withSkills(info.CustomEntries)
 	return info
 }
 
-// withHomeQuotasLocked gives each installation among info's Homes the last reading of its own quota HarmFlow kept: the
-// one the check before an attempt on it read, or the one a running attempt on it reported. One never read has none.
-// a.mu is held.
+// withHomeQuotasLocked gives each installation among info's Homes and CustomEntries the last reading of its own quota
+// HarmFlow kept: the one the check before an attempt on it read, or the one a running attempt on it reported. One never
+// read has none. a.mu is held.
 func (a *App) withHomeQuotasLocked(id string, info ports.HarnessInfo) ports.HarnessInfo {
-	if len(info.Homes) == 0 {
-		return info
-	}
-	info.Homes = slices.Clone(info.Homes)
-	for i := range info.Homes {
-		if r, ok := a.quotas[quotaKey(id, info.Homes[i].InstallationID)]; ok {
-			info.Homes[i].Quota = r.installationQuota()
+	withQuotas := func(list []ports.HarnessInfo) []ports.HarnessInfo {
+		if len(list) == 0 {
+			return list
 		}
+		list = slices.Clone(list)
+		for i := range list {
+			if r, ok := a.quotas[quotaKey(id, list[i].InstallationID)]; ok {
+				list[i].Quota = r.installationQuota()
+			}
+		}
+		return list
 	}
+	info.Homes, info.CustomEntries = withQuotas(info.Homes), withQuotas(info.CustomEntries)
 	return info
 }
 

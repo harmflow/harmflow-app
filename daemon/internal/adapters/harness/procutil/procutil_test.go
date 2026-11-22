@@ -1046,3 +1046,33 @@ func TestInteractiveStdinStaysOpen(t *testing.T) {
 		t.Error("Stdin() is open for an invocation that is not interactive")
 	}
 }
+
+// FindExecutable takes an absolute path to an executable file as it is, looks a bare name up in the folders of pathEnv
+// in order, and finds nothing for a relative path, a file without an execute bit, or a name on no folder.
+func TestFindExecutable(t *testing.T) {
+	first, second := t.TempDir(), t.TempDir()
+	for path, mode := range map[string]os.FileMode{
+		filepath.Join(first, "plain"):  0o600,
+		filepath.Join(second, "tool"):  0o700,
+		filepath.Join(second, "plain"): 0o700,
+	} {
+		if err := os.WriteFile(path, []byte("#!/bin/sh\n"), mode); err != nil {
+			t.Fatalf("WriteFile(%s) error = %v, want none", path, err)
+		}
+	}
+	pathEnv := first + ":" + second
+	for _, c := range []struct{ name, want string }{
+		{"tool", filepath.Join(second, "tool")},
+		{"plain", filepath.Join(second, "plain")},
+		{filepath.Join(second, "tool"), filepath.Join(second, "tool")},
+		{filepath.Join(first, "plain"), ""},
+		{"bin/tool", ""},
+		{"missing", ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := FindExecutable(c.name, pathEnv); got != c.want {
+				t.Errorf("FindExecutable(%q, %q) = %q, want %q", c.name, pathEnv, got, c.want)
+			}
+		})
+	}
+}

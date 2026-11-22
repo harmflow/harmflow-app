@@ -70,6 +70,8 @@ type Adapter struct {
 	helpTimeout  time.Duration                   // the --help check; zero is defaultHelpTimeout
 	quotaTimeout time.Duration                   // `claude -p "/usage"`; zero is defaultQuotaTimeout
 	signInStep   time.Duration                   // the wait for each screen of the sign-in; zero is defaultSignInStep
+	// entryConfigDir is the configuration directory of an adapter ProbeEntry made; empty for the daemon's own.
+	entryConfigDir string
 
 	// tokenMu guards token alone, so reading it never waits on mu.
 	tokenMu sync.Mutex
@@ -89,6 +91,7 @@ var (
 	_ ports.UnverifiedItemsAllower = (*Adapter)(nil)
 	_ ports.ItemReloader           = (*Adapter)(nil)
 	_ ports.TokenSignIn            = (*Adapter)(nil)
+	_ ports.EntryProber            = (*Adapter)(nil)
 )
 
 // tokenVariable carries a long-lived token, the one `claude setup-token` prints, to the CLI in place of its own
@@ -139,7 +142,69 @@ func (a *Adapter) ID() string { return ID }
 // Name implements ports.HarnessAdapter: the harness's display name.
 func (a *Adapter) Name() string { return Name }
 
+// EntryExecutable implements ports.EntryProber: name as an absolute path to an executable file, or the first of that
+// name on PathEnv, where detection looks for the CLI.
+func (a *Adapter) EntryExecutable(name string) string {
+	return procutil.FindExecutable(name, a.PathEnv)
+}
+
+// ProbeEntry implements ports.EntryProber: the binary at path read as Detect reads a path set by hand, every check run
+// with assignments added to Env, and the configuration read from the CLAUDE_CONFIG_DIR they set, or the one in use when
+// they set none. The saved token signs the checks in only where it signs a run on the entry in (tokenSignsIn).
+func (a *Adapter) ProbeEntry(ctx context.Context, path string, assignments []string) ports.HarnessInfo {
+	entry := &Adapter{Home: a.Home, PathEnv: a.PathEnv, Env: ports.WithAssignments(a.Env, assignments),
+		KnownLocations: []string{}, SkillListTimeout: a.SkillListTimeout, GitHubToken: a.GitHubToken,
+		helpTimeout: a.helpTimeout, quotaTimeout: a.quotaTimeout, entryConfigDir: a.configDir()}
+	if d, ok := ports.AssignmentValue(assignments, "CLAUDE_CONFIG_DIR"); ok && d != "" {
+		entry.entryConfigDir = d
+	}
+	if a.tokenSignsIn(ports.HarnessInfo{EntryEnv: assignments}) {
+		a.tokenMu.Lock()
+		entry.token = a.token
+		a.tokenMu.Unlock()
+	}
+	info := entry.Detect(ctx, path)
+	info.Installations, info.EntryEnv = []string{path}, slices.Clone(assignments)
+	info.Home = entry.entryConfigDir
+	return info
+}
+
+// tokenSignsIn reports whether the long-lived token UseToken set signs the installation in: the one in use, and a
+// custom entry that reads the configuration directory in use and assigns no token of its own. An entry with another
+// CLAUDE_CONFIG_DIR is another account, signed in on that directory's own sign-in, and an entry's own token assignment
+// wins over the saved one.
+func (a *Adapter) tokenSignsIn(info ports.HarnessInfo) bool {
+	if _, own := ports.AssignmentValue(info.EntryEnv, tokenVariable); own {
+		return false
+	}
+	return filepath.Clean(a.configDirOf(info)) == filepath.Clean(a.configDir())
+}
+
+// installationEnv is env, or the daemon's own when env is nil, with the installation's assignments added, and the
+// long-lived token where it signs the installation in.
+func (a *Adapter) installationEnv(info ports.HarnessInfo, env []string) []string {
+	if len(info.EntryEnv) > 0 {
+		env = ports.WithAssignments(env, info.EntryEnv)
+	}
+	if !a.tokenSignsIn(info) {
+		return env
+	}
+	return a.withToken(env)
+}
+
+// configDirOf is the configuration directory of an installation: the CLAUDE_CONFIG_DIR a custom entry's assignments
+// set, otherwise the one in use.
+func (a *Adapter) configDirOf(info ports.HarnessInfo) string {
+	if d, ok := ports.AssignmentValue(info.EntryEnv, "CLAUDE_CONFIG_DIR"); ok && d != "" {
+		return d
+	}
+	return a.configDir()
+}
+
 func (a *Adapter) configDir() string {
+	if a.entryConfigDir != "" {
+		return a.entryConfigDir
+	}
 	if d := os.Getenv("CLAUDE_CONFIG_DIR"); d != "" {
 		return d
 	}
@@ -321,9 +386,11 @@ func (a *Adapter) ValidateProfile(info ports.HarnessInfo, model, effort string) 
 	return nil
 }
 
-// agentDir is the folder the user's agents are read from, Claude Code's configuration directory, whatever the
+// agentDir is the folder the user's agents are read from, the installation's configuration directory, whatever the
 // workspace.
-func (a *Adapter) agentDir() catalog.Dir { return catalog.Dir{Root: a.configDir()} }
+func (a *Adapter) agentDir(info ports.HarnessInfo) catalog.Dir {
+	return catalog.Dir{Root: a.configDirOf(info)}
+}
 
 // UserItem implements ports.HarnessAdapter: a skill is one the installed Claude Code reports it loads, which a CLI that
 // was not detected cannot report; an agent is looked up in the configuration directory. The list is the installation's,
@@ -341,7 +408,7 @@ func (a *Adapter) UserItem(ctx context.Context, info ports.HarnessInfo, kind, na
 		}
 		return ports.ResolvedItem{}, false, nil, nil
 	}
-	it, ok := a.agentDir().Item(kind, name)
+	it, ok := a.agentDir(info).Item(kind, name)
 	return it, ok, nil, nil
 }
 
@@ -353,7 +420,7 @@ func (a *Adapter) UserItems(ctx context.Context, info ports.HarnessInfo, kind, _
 		skills, err := a.installedSkills(ctx, info)
 		return skills, nil, err
 	}
-	items := a.agentDir().Items(kind)
+	items := a.agentDir(info).Items(kind)
 	slices.SortFunc(items, func(x, y ports.ResolvedItem) int { return strings.Compare(x.Name, y.Name) })
 	return items, nil, nil
 }
@@ -366,8 +433,10 @@ var writeTools = append([]string{"Bash"}, editTools...)
 // Prepare implements ports.HarnessAdapter: a `claude -p` invocation with stream-json output, the model, effort, and
 // context asked for, the built-in skills as a session-only plugin, the built-in agents defined for the session, and
 // the permission profile translated to Claude Code's controls, with the restrictions it enforces and those it cannot.
+// A custom entry's arguments come first, and its assignments are added to the process's environment
+// (installationEnv).
 func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.Invocation, ports.OutputParser, error) {
-	args := []string{"-p", "--output-format", "stream-json", "--verbose"}
+	args := append(slices.Clone(info.EntryArgs), "-p", "--output-format", "stream-json", "--verbose")
 	if info.HasFeature("--no-session-persistence") {
 		args = append(args, "--no-session-persistence")
 	}
@@ -488,13 +557,13 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 			args = append(args, "--disallowedTools", strings.Join(denied, ","))
 		}
 		dirs = append(dirs, perm.Custom.WritablePaths...)
-		restrictions = append(restrictions, a.allowlistRestriction(req, append(append([]string{}, allowed...), denied...)))
+		restrictions = append(restrictions, a.allowlistRestriction(info, req, append(append([]string{}, allowed...), denied...)))
 		restrictions = append(restrictions, shellRestrictions(hasShell(allowed), network, *perm.RestrictToWorkspace)...)
 		if perm.Custom.HasProgramLists() {
 			restrictions = append(restrictions, programRestrictions(taskTools, allowed, perm.Custom.AllowedPrograms)...)
 		}
 		if len(perm.Custom.ReadablePaths) > 0 {
-			restrictions = append(restrictions, a.readRestrictions(req, allowed, readRoots)...)
+			restrictions = append(restrictions, a.readRestrictions(info, req, allowed, readRoots)...)
 		}
 	default: // workspace_write
 		// The editing tools get no allow rule: a bare one allows them on any path, and acceptEdits alone approves their
@@ -506,7 +575,7 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 			args = append(args, "--disallowedTools", strings.Join(webTools, ","))
 		}
 		args = append(args, "--permission-mode", "acceptEdits", "--allowedTools", strings.Join(tools, ","))
-		restrictions = append(restrictions, a.editRestriction(req))
+		restrictions = append(restrictions, a.editRestriction(info, req))
 		if !*perm.RestrictToWorkspace || !sandboxed(info) {
 			restrictions = append(restrictions, shellRestrictions(true, network, *perm.RestrictToWorkspace)...)
 			break
@@ -521,7 +590,7 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 		var header string
 		env, header = withGitHubToken(env, token)
 		args = append(args, "--settings", sandboxSettings(network, header))
-		restrictions = append(restrictions, a.sandboxRestrictions(req, network)...)
+		restrictions = append(restrictions, a.sandboxRestrictions(info, req, network)...)
 	}
 	if req.ExecutionDir != "" {
 		dirs = append(dirs, req.ExecutionDir)
@@ -531,7 +600,7 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 			args = append(args, "--add-dir", d)
 		}
 	}
-	inv := ports.Invocation{Path: info.Path, Args: args, Env: a.withToken(env), Dir: req.WorkDir, Stdin: req.Prompt,
+	inv := ports.Invocation{Path: info.Path, Args: args, Env: a.installationEnv(info, env), Dir: req.WorkDir, Stdin: req.Prompt,
 		Restrictions: restrictions}
 	return inv, &parser{tools: map[string]toolUse{}}, nil
 }
@@ -547,14 +616,15 @@ var settingsSources = []struct{ name, file string }{
 
 // wideningSources names, in the order of settingsSources, the settings sources that widen what the task allows: those
 // whose settings widens reports, and those whose file exists but cannot be read or parsed, since it cannot be checked.
-// Validation reads only the user's settings; the workspace's own are read when each execution starts.
-func (a *Adapter) wideningSources(req ports.RunRequest, widens func(source string, settings claudeSettings) bool) []string {
+// Validation reads only the user's settings; the workspace's own are read when each execution starts. The user's are
+// those of the installation's configuration directory, a custom entry's own one included.
+func (a *Adapter) wideningSources(info ports.HarnessInfo, req ports.RunRequest, widens func(source string, settings claudeSettings) bool) []string {
 	var out []string
 	for _, s := range settingsSources {
 		path := filepath.Join(req.WorkDir, s.file)
 		switch {
 		case s.name == "user":
-			path = filepath.Join(a.configDir(), s.file)
+			path = filepath.Join(a.configDirOf(info), s.file)
 		case req.PolicyCheck || req.WorkDir == "":
 			continue
 		}
@@ -569,8 +639,8 @@ func (a *Adapter) wideningSources(req ports.RunRequest, widens func(source strin
 // allowlistRestriction says whether the custom profile's tool list is enforced. Claude Code merges the allow rules of
 // every settings source it loads into the list it is given, so an allow rule that covered, the task's allowed and
 // denied tools, does not hold widens the list. A rule is covered only when it is identical to an entry.
-func (a *Adapter) allowlistRestriction(req ports.RunRequest, covered []string) ports.Restriction {
-	widening := a.wideningSources(req, func(_ string, s claudeSettings) bool {
+func (a *Adapter) allowlistRestriction(info ports.HarnessInfo, req ports.RunRequest, covered []string) ports.Restriction {
+	widening := a.wideningSources(info, req, func(_ string, s claudeSettings) bool {
 		return slices.ContainsFunc(s.Permissions.Allow, func(r string) bool { return !slices.Contains(covered, r) })
 	})
 	if len(widening) == 0 {
@@ -592,8 +662,8 @@ func (a *Adapter) allowlistRestriction(req ports.RunRequest, covered []string) p
 // the additional directories' paths are, so a link on either side does not decide. The project settings' additional
 // directories are not read: Claude Code refuses edits in the folders they name, as a real run showed. The user's and
 // the local settings' ones still count until a real run shows the same of them.
-func (a *Adapter) editRestriction(req ports.RunRequest) ports.Restriction {
-	widening := a.wideningSources(req, a.editsOutside(workspaceRoots(req)))
+func (a *Adapter) editRestriction(info ports.HarnessInfo, req ports.RunRequest) ports.Restriction {
+	widening := a.wideningSources(info, req, a.editsOutside(workspaceRoots(req)))
 	if len(widening) == 0 {
 		return ports.Restriction{Name: "edit_directories", Enforced: true,
 			Text: domain.Text{Message: "file edits are limited to the workspace and the added directories"}}
@@ -742,10 +812,10 @@ func GHAuthToken(pathEnv string, env []string) func() string {
 // it. So the shell's writes are confined when no source adds any of those outside the workspace. The sandbox's network
 // allowlist takes the domains of every source's WebFetch rules and its own; no test shows yet that it holds, so a
 // denied network is reported as not enforced, naming the sources that widen it.
-func (a *Adapter) sandboxRestrictions(req ports.RunRequest, network bool) []ports.Restriction {
+func (a *Adapter) sandboxRestrictions(info ports.HarnessInfo, req ports.RunRequest, network bool) []ports.Restriction {
 	roots := workspaceRoots(req)
 	edits := a.editsOutside(roots)
-	widening := a.wideningSources(req, func(source string, s claudeSettings) bool {
+	widening := a.wideningSources(info, req, func(source string, s claudeSettings) bool {
 		return edits(source, s) || len(s.Sandbox.ExcludedCommands) > 0 ||
 			slices.ContainsFunc(s.Sandbox.Filesystem.AllowWrite, func(p string) bool { return !a.sandboxPathInside(p, roots) }) ||
 			(source != "user" && s.hasHooks())
@@ -761,7 +831,7 @@ func (a *Adapter) sandboxRestrictions(req ports.RunRequest, network bool) []port
 	if network {
 		return out
 	}
-	widening = a.wideningSources(req, func(_ string, s claudeSettings) bool {
+	widening = a.wideningSources(info, req, func(_ string, s claudeSettings) bool {
 		return len(s.Sandbox.Network.AllowedDomains) > 0 || slices.ContainsFunc(s.Permissions.Allow, func(r string) bool {
 			return strings.HasPrefix(r, "WebFetch(domain:")
 		})
@@ -831,7 +901,7 @@ func scopedReads(allowed, roots []string) []string {
 // anywhere; a reading rule of the task's list whose path may lie outside the roots reads there; and Claude Code adds
 // the allow rules and additional directories of every settings source it loads, where a reading rule or a directory
 // that may lie outside the roots does too. Each that applies is named; with none, the read paths are enforced.
-func (a *Adapter) readRestrictions(req ports.RunRequest, allowed, roots []string) []ports.Restriction {
+func (a *Adapter) readRestrictions(info ports.HarnessInfo, req ports.RunRequest, allowed, roots []string) []ports.Restriction {
 	var out []ports.Restriction
 	if hasShell(allowed) {
 		out = append(out, ports.Restriction{Name: "readablePaths", Enforced: false,
@@ -845,7 +915,7 @@ func (a *Adapter) readRestrictions(req ports.RunRequest, allowed, roots []string
 			Text: domain.T("restriction_claude_read_tools",
 				"the task's allowed tools let Claude Code's reading tools read outside the workspace, the writable paths, and the read paths")})
 	}
-	widening := a.wideningSources(req, func(source string, s claudeSettings) bool {
+	widening := a.wideningSources(info, req, func(source string, s claudeSettings) bool {
 		dirs, ok := s.additionalDirs()
 		return !ok || slices.ContainsFunc(dirs, func(d string) bool { return !dirInside(d, roots) }) ||
 			slices.ContainsFunc(s.Permissions.Allow, func(r string) bool {

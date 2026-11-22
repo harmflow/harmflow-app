@@ -96,13 +96,15 @@ const (
 // Attempt is one harness process. Model and Effort are what the harness reported using, empty when it reported
 // nothing; the configured ones, default when the task set none, are kept apart and never stand in for them.
 // Installation and InstallationHome name the installation of the harness the attempt ran on, empty for a harness
-// whose installations are its binaries alone.
+// whose installations are its binaries alone. InstallationName is the name of a custom entry the owner added from a
+// command line, whose home the record leaves out, since it is one of the entry's assignments.
 type Attempt struct {
 	Number           int               `json:"number"`
 	Harness          string            `json:"harness"`
 	HarnessVersion   string            `json:"harnessVersion,omitempty"`
 	Installation     string            `json:"installation,omitempty"`
 	InstallationHome string            `json:"installationHome,omitempty"`
+	InstallationName string            `json:"installationName,omitempty"`
 	Model            string            `json:"model,omitempty"`
 	Effort           string            `json:"effort,omitempty"`
 	ConfiguredModel  string            `json:"configuredModel"`

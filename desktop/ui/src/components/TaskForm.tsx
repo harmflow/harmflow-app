@@ -56,14 +56,16 @@ function Section({ id, title, icon, children }: { id: string; title: string; ico
 /**
  * The skills the form offers. When the preferred harness has installations by home, they follow the installation the
  * profile names, or the one in use while it names none, as its Model and Effort lists do: the built-ins, and the skills
- * that installation's own list holds, which validation and a run resolve the task's against. Otherwise, the catalog's.
+ * that installation's own list holds, which validation and a run resolve the task's against. A custom entry the profile
+ * names offers its own list the same way. Otherwise, the catalog's.
  */
 function installationSkills(entries: CatalogEntry[], harnesses: Harness[], profile: Item): CatalogEntry[] {
   const provider = (profile.provider as string) ?? "claude-code";
   const harness = harnesses.find((h) => h.id === provider);
-  if (!harness?.homes?.length) return entries;
+  const custom = harness?.customEntries?.find((h) => h.installationId === profile.installation);
+  if (!harness || (!harness.homes?.length && !custom)) return entries;
   const id = (profile.installation as string) || harness.installationId;
-  const names = harness.homes.find((h) => h.installationId === id)?.skills ?? [];
+  const names = (custom ?? harness.homes?.find((h) => h.installationId === id))?.skills ?? [];
   const offered = entries.filter((e) => e.source === "builtin" || names.includes(e.name));
   for (const name of names) {
     if (!offered.some((e) => e.name === name)) offered.push({ name, kind: "skill", source: "user", harnesses: [provider] });

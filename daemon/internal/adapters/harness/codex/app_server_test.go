@@ -418,3 +418,38 @@ func TestDetectReadsATopLevelHelpCheckThatTimesOutAsAppServerUnknown(t *testing.
 		})
 	}
 }
+
+// harmflow-app#826: a custom entry's app server runs with the entry's assignments, apart from the server of the home it
+// shares: the entry's skill list is the one its assignments make Codex answer, and the plain installation's is still
+// its own.
+func TestACustomEntryHasAnAppServerOfItsOwn(t *testing.T) {
+	skills := func(name string) string {
+		return `printf '{"id":%s,"result":{"data":[{"cwd":"/w","skills":[{"name":"` + name +
+			`","description":"d","enabled":true,"path":"/x/` + name + `/SKILL.md","scope":"user"}],"errors":[]}]}}\n' "$id"`
+	}
+	path, received := appServerStandIn(t, `if [ "$ENTRY_MARK" = on ]; then `+skills("entry-skill")+`; else `+
+		skills("plain-skill")+`; fi`)
+	a := appServerAdapter(t)
+	plain := appServerInfo(path)
+	entry := appServerInfo(path)
+	entry.EntryEnv = []string{"ENTRY_MARK=on"}
+	for _, c := range []struct {
+		name string
+		info ports.HarnessInfo
+		want string
+	}{
+		{"the entry", entry, "entry-skill"},
+		{"the plain installation", plain, "plain-skill"},
+		{"the entry again", entry, "entry-skill"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			items, _, err := a.UserItems(t.Context(), c.info, "skill", tempDir(t), nil)
+			if err != nil || len(items) != 1 || items[0].Name != c.want {
+				t.Errorf("UserItems(skill, assignments %q) = %+v, %v; want %s alone", c.info.EntryEnv, items, err, c.want)
+			}
+		})
+	}
+	if n := len(requests(t, received)["initialize"]); n != 2 {
+		t.Errorf("UserItems(skill) on the entry and the plain installation started %d app servers, want 2, one each", n)
+	}
+}

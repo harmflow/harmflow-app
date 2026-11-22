@@ -111,6 +111,16 @@ export const api = {
   /** Saves the harness's long-lived token in the credential store; the answer never carries it back. */
   setHarnessToken: (id: HarnessId, token: string) => call<Harness>("PUT", `/harnesses/${id}/token`, { token }),
   removeHarnessToken: (id: HarnessId) => call<Harness>("DELETE", `/harnesses/${id}/token`),
+  /**
+   * Adds an installation from a command line, which the daemon reads with no shell and whose harness it identifies;
+   * the answer is that harness, the entry among its custom entries.
+   */
+  addCustomEntry: (line: string, name?: string) => call<Harness>("POST", "/harness-entries", name ? { line, name } : { line }),
+  /** Renames a custom entry or gives it another command line; an absent field keeps what the entry had. */
+  updateCustomEntry: (id: string, change: { line?: string; name?: string }) =>
+    call<Harness>("PATCH", `/harness-entries/${encodeURIComponent(id)}`, change),
+  /** Removes a custom entry; the installations detection finds stay. */
+  removeCustomEntry: (id: string) => call<Harness>("DELETE", `/harness-entries/${encodeURIComponent(id)}`),
   tools: () => call<Tool[]>("GET", "/tools"),
   /**
    * What a task can cite. Claude Code's and Codex's skills are the installation's, the same for every workspace; a

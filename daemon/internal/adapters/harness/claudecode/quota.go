@@ -22,13 +22,14 @@ const defaultQuotaTimeout = 20 * time.Second
 var usageLineRe = regexp.MustCompile(`(?m)^[ \t]*(Current [^:\n]+):[ \t]*(\d+(?:\.\d+)?)%[ \t]+used(?:[ \t]*·[ \t]*resets[ \t]+([^\n]*?))?[ \t]*$`)
 
 // ReadQuota implements ports.QuotaReader with `claude -p "/usage"`, which runs no turn and makes no model call: the
-// plan windows it prints, each reset in the CLI's own words.
+// plan windows it prints, each reset in the CLI's own words. A custom entry's report is its own account's, read with
+// its assignments.
 func (a *Adapter) ReadQuota(ctx context.Context, info ports.HarnessInfo) (domain.Quota, error) {
 	timeout := a.quotaTimeout
 	if timeout == 0 {
 		timeout = defaultQuotaTimeout
 	}
-	out, _, err := procutil.Output(ctx, timeout, a.withToken(a.env()), info.Path, "-p", "/usage")
+	out, _, err := procutil.Output(ctx, timeout, a.installationEnv(info, a.env()), info.Path, "-p", "/usage")
 	if err != nil {
 		return domain.Quota{}, domain.TextErr("command_failed", "{{command}} failed: {{detail}}",
 			"command", `claude -p "/usage"`, "detail", err.Error())

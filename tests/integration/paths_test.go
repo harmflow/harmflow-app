@@ -52,6 +52,9 @@ func TestPathsInRequestsAreChecked(t *testing.T) {
 		key, field         string
 	}{
 		{"a shell as Codex", "PUT", "/harnesses/codex", map[string]any{"path": "/bin/sh"}, "harness_not_identified", "/path"},
+		// Whatever /bin/sh answers to --version, it names no harness, so a custom entry refuses it on every system.
+		{"a shell as a custom entry", "POST", "/harness-entries", map[string]any{"line": "CODEX_HOME=/tmp /bin/sh"},
+			"custom_entry_no_harness", "/line"},
 		{"a workspace of /", "POST", "/tasks", map[string]any{"yaml": task("root", "p", "  workspace:\n    path: /\n")},
 			"path_forbidden_home", "/spec/workspace/path"},
 		// Not created: it resolves through the home folder, which exists, into ~/Library.
@@ -81,6 +84,9 @@ func TestPathsInRequestsAreChecked(t *testing.T) {
 	}
 	if after, _ := os.ReadFile(filepath.Join(home, "state", "harnesses.json")); string(after) != string(harnesses) {
 		t.Errorf("state/harnesses.json changed:\n%s\nwas\n%s", after, harnesses)
+	}
+	if _, err := os.Stat(filepath.Join(home, "state", "custom-entries.json")); !os.IsNotExist(err) {
+		t.Errorf("os.Stat(state/custom-entries.json) error = %v, want none saved after the refusal", err)
 	}
 	sameTaskFiles(t, home, files)
 	if after := d.call("GET", "/settings", nil, 200); !reflect.DeepEqual(after, settings) {
