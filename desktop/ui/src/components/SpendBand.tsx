@@ -30,7 +30,7 @@ import { Panel, SegmentedControl, cx } from "./ui";
 const GRID = [1, 0.5, 0];
 
 /** Each harness's color in the split, the one the interface already gives it; a harness it does not know is muted. */
-const HARNESS_COLORS: Record<string, string> = { "claude-code": color.claude, codex: color.codex };
+const HARNESS_COLORS: Record<string, string> = { "claude-code": color.claude, codex: color.codex, "antigravity-cli": color.antigravity };
 
 function harnessColor(harness: string): string {
   return HARNESS_COLORS[harness] ?? color.textMuted;

@@ -63,6 +63,34 @@ func (k Keychain) Get() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// Exists reports whether the keychain holds the item, without reading its secret: security is not asked for the
+// password, and what it prints of the item's attributes is dropped. A missing item is false with no error; a keychain
+// it could not search is an error.
+func (k Keychain) Exists() (bool, error) {
+	if k.Path != "" {
+		if err := k.checkPath(); err != nil {
+			return false, err
+		}
+	}
+	if _, err := security(k.existsArgs()...).Output(); err != nil {
+		if err := keychainError(err); !errors.Is(err, ErrNoToken) {
+			return false, err
+		}
+		return false, nil
+	}
+	return true, nil
+}
+
+// existsArgs are the arguments of Exists's search: the item's service and account, and the keychain file when Path
+// names one; never -w or -g, which would print the secret.
+func (k Keychain) existsArgs() []string {
+	args := []string{"find-generic-password", "-s", k.Service, "-a", k.Account}
+	if k.Path != "" {
+		args = append(args, k.Path)
+	}
+	return args
+}
+
 // security is a run of /usr/bin/security with the daemon's environment but CODEX_HOME, which only Codex's own
 // processes get.
 func security(args ...string) *exec.Cmd {

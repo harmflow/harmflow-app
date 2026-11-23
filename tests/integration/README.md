@@ -10,7 +10,7 @@ make test-integration
 
 It runs `go -C tests test -count=1 -timeout 30m ./...`, the time limit the `Makefile`'s `INTEGRATION_TIMEOUT` sets for
 this target and `make coverage-daemon` alike. The test binary builds its own `harmflowd` from `daemon/` before the first
-test. By default the tests use the stand-in harnesses in [`testdata`](testdata), `fake-claude` and `fake-codex`, which
+test. By default the tests use the stand-in harnesses in [`testdata`](testdata), `fake-claude`, `fake-codex`, and `fake-antigravity/agy`, which
 speak the real harnesses' output formats, so they need no harness installed and no account.
 
 ## In parallel

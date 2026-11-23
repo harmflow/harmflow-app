@@ -117,3 +117,35 @@ func TestKeychainDeleteChecksItsPath(t *testing.T) {
 		t.Errorf("Delete() from a missing keychain file = %v, want os.ErrNotExist", err)
 	}
 }
+
+// Exists searches for the item by its service and account alone, in the keychain file when one is named, and never asks
+// security for the secret.
+func TestKeychainExistsNeverAsksForTheSecret(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "throwaway.keychain-db")
+	cases := []struct {
+		name string
+		k    Keychain
+		want []string
+	}{
+		{"default keychain", Keychain{Service: "svc", Account: "acct"},
+			[]string{"find-generic-password", "-s", "svc", "-a", "acct"}},
+		{"keychain file", Keychain{Service: "svc", Account: "acct", Path: path},
+			[]string{"find-generic-password", "-s", "svc", "-a", "acct", path}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := c.k.existsArgs()
+			if !slices.Equal(got, c.want) {
+				t.Errorf("existsArgs() = %q, want %q", got, c.want)
+			}
+			if slices.Contains(got, "-w") || slices.Contains(got, "-g") {
+				t.Errorf("existsArgs() = %q asks for the secret", got)
+			}
+		})
+	}
+	k := Keychain{Service: "svc", Account: "acct", Path: filepath.Join(dir, "missing.keychain-db")}
+	if ok, err := k.Exists(); ok || !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Exists() in a missing keychain file = %v, %v; want false, os.ErrNotExist", ok, err)
+	}
+}

@@ -6,8 +6,10 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
+	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/antigravitycli"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/secret"
 	"github.com/harmflow/harmflow-app/daemon/internal/app"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
@@ -28,6 +30,17 @@ func tokenStore(p app.Paths) (ports.SecretStore, string) {
 	}
 	return secret.Keychain{Service: secret.KeychainService, Account: secret.KeychainAccount,
 		Path: os.Getenv("HARMFLOW_KEYCHAIN")}, file
+}
+
+// antigravitySignIn tells whether the Antigravity CLI's own sign-in is in the Keychain, by its item's presence alone,
+// in the keychain file HARMFLOW_KEYCHAIN names when it is set. It is nil, the sign-in left unknown, away from macOS and
+// when HARMFLOW_TOKEN_STORE=file keeps the daemon off the Keychain.
+func antigravitySignIn() func() (bool, error) {
+	if runtime.GOOS != "darwin" || os.Getenv("HARMFLOW_TOKEN_STORE") == "file" {
+		return nil
+	}
+	return secret.Keychain{Service: antigravitycli.KeychainService, Account: antigravitycli.KeychainAccount,
+		Path: os.Getenv("HARMFLOW_KEYCHAIN")}.Exists
 }
 
 // startupToken reads the local API token from store, and makes one only on a first start, when store holds none. A

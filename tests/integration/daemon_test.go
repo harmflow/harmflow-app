@@ -252,7 +252,8 @@ func awaitStarted(base, token string, timeout time.Duration) bool {
 // fakeHarnesses are the paths of the stand-in CLIs of testdata/, by harness id.
 func fakeHarnesses() map[string]string {
 	fakes := filepath.Join(repoRoot(), "tests", "integration", "testdata")
-	return map[string]string{"claude-code": filepath.Join(fakes, "fake-claude"), "codex": filepath.Join(fakes, "fake-codex")}
+	return map[string]string{"claude-code": filepath.Join(fakes, "fake-claude"), "codex": filepath.Join(fakes, "fake-codex"),
+		"antigravity-cli": filepath.Join(fakes, "fake-antigravity", "agy")}
 }
 
 // setStandInsBeforeStart sets the stand-ins' paths by hand in the home's state/harnesses.json, where the daemon keeps
@@ -283,6 +284,7 @@ func (d *daemon) useFakeHarnesses() {
 	fakes := fakeHarnesses()
 	d.call("PUT", "/harnesses/claude-code", map[string]any{"path": fakes["claude-code"]}, 200)
 	d.call("PUT", "/harnesses/codex", map[string]any{"path": fakes["codex"]}, 200)
+	d.call("PUT", "/harnesses/antigravity-cli", map[string]any{"path": fakes["antigravity-cli"]}, 200)
 }
 
 func (d *daemon) stop() {

@@ -366,7 +366,8 @@
       "type": "string",
       "enum": [
         "claude-code",
-        "codex"
+        "codex",
+        "antigravity-cli"
       ]
     },
     "harnessProfile": {

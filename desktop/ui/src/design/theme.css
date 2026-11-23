@@ -79,6 +79,7 @@
   /* Harness marks */
   --hf-color-claude: #f2895d;
   --hf-color-codex: #dfe6f3;
+  --hf-color-antigravity: #8ab4f8;
 
   /* Logo — the mark's own colors, the app icon's (src-tauri/icons/source/app-icon.svg); the palette above can change
      without them */

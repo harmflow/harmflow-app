@@ -17,6 +17,7 @@ export const color = {
   border: "var(--hf-color-border)",
   claude: "var(--hf-color-claude)",
   codex: "var(--hf-color-codex)",
+  antigravity: "var(--hf-color-antigravity)",
 } as const;
 
 export type Tone = "cyan" | "violet" | "magenta" | "blue" | "success" | "warning" | "danger" | "neutral";
