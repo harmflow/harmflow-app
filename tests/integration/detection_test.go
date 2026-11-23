@@ -87,7 +87,7 @@ var (
 	claudeProbes = []string{"--version", "--help", "auth status", claudeQuota}
 	claudeQuota  = "-p /usage"
 	claudeSignIn = ""
-	codexProbes  = []string{"--version", "exec --help", "--help", "login status", "app-server"}
+	codexProbes  = []string{"--version", "--help", "login status", "app-server"}
 	codexSignIn  = "login"
 	claudeRun    = "-p --output-format"
 	codexRun     = "app-server --listen"
@@ -134,18 +134,19 @@ func neverStarted(t *testing.T, x map[string]any, name string) {
 // harmflow-app#68: the daemon never installs or updates a harness. Detecting a signed-out Claude Code and a Codex below
 // the minimum, and running a task on each, invokes only the probes, and Claude Code's sign-in session, which the user
 // approves in the browser (harmflow-app#543); each execution fails without starting, and the inventory says why.
+// harmflow-app#1117: the Codex below the minimum is one whose help lists no app server, which every attempt runs on.
 func TestDetectionOnlyProbes(t *testing.T) {
 	t.Parallel()
 	d := startDaemon(t, t.TempDir())
 	claude := standIn(t, "fake-claude", "claude", `auth) echo '{"loggedIn": true}'; exit 0 ;;`,
 		`auth) echo '{"loggedIn": false, "authMethod": "none"}'; exit 1 ;;`)
-	codex := standIn(t, "fake-codex", "codex", "--sandbox <MODE>  ", "")
+	codex := standIn(t, "fake-codex", "codex", "Commands: exec  app-server  login", "Commands: exec  login")
 	d.setHarness("claude-code", claude.path)
 	d.setHarness("codex", codex.path)
 
 	neverStarted(t, d.runOn("signedout", "claude-code"), "Claude Code")
 	neverStarted(t, d.runOn("belowminimum", "codex"), "Codex")
-	for id, key := range map[string]string{"claude-code": "claude_not_signed_in", "codex": "harness_feature_missing"} {
+	for id, key := range map[string]string{"claude-code": "claude_not_signed_in", "codex": "codex_app_server_missing"} {
 		h := d.harness(id)
 		if h["readiness"] != "not_ready" || h["diagnosticKey"] != key || h["diagnostic"] == nil {
 			t.Errorf("GET /harnesses: %s is %v, diagnostic %v (%v); want not_ready, %s", id, h["readiness"],
@@ -521,12 +522,11 @@ func TestInventoryCarriesNoCredential(t *testing.T) {
 	}
 }
 
-// harmflow-app#746: a Codex whose top-level --help check outlasts the check's limit, while exec --help was read in
-// full, reads ready, at its version, with the diagnostic that says whether it has an app server is unknown, and not as
-// a Codex that lacks one. The daemon then calls the app server: it reads the managed requirements at the check, and the
-// quota before the attempt, whose answer leaves no quota_unread warning, and a task on Codex completes. The check's
-// limit is 15 seconds, which the daemon has no setting to shorten, and the daemon checks Codex when its path is set and
-// again before the attempt.
+// harmflow-app#746: a Codex whose top-level --help check outlasts the check's limit reads ready, at its version, with
+// the diagnostic that says whether it has an app server is unknown, and not as a Codex that lacks one. The daemon then
+// calls the app server: it reads the managed requirements at the check, and the quota before the attempt, whose answer
+// leaves no quota_unread warning, and a task on Codex completes. The check's limit is 15 seconds, which the daemon has
+// no setting to shorten, and the daemon checks Codex when its path is set and again before the attempt.
 func TestTopLevelHelpCheckThatTimesOutLeavesCodexReady(t *testing.T) {
 	t.Parallel()
 	// Made before the daemon, so its folder is removed after the daemon and the app server it started have stopped.
@@ -653,7 +653,9 @@ func TestVersionsOutsideTheTestedRange(t *testing.T) {
 // not as a version that lacks one. A task that prefers it, with the other harness ready as its fallback, runs its first
 // attempt on it and completes there, with no switch. Each case has a daemon of its own, so the other harness is the
 // stand-in every daemon starts with. The check's limit is 15 seconds, which the daemon has no setting to shorten, and
-// the daemon checks the harness when its path is set and again before the attempt.
+// the daemon checks the harness when its path is set and again before the attempt. Codex checks no flags
+// (harmflow-app#1117): its one help check is the top-level --help, which
+// TestTopLevelHelpCheckThatTimesOutLeavesCodexReady covers.
 func TestHelpCheckThatTimesOutLeavesTheHarnessReady(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -661,7 +663,6 @@ func TestHelpCheckThatTimesOutLeavesTheHarnessReady(t *testing.T) {
 		probes                                       []string
 	}{
 		{"claude-code", "codex", "fake-claude", "claude", "2.1.239", "--help", claudeRun, claudeProbes},
-		{"codex", "claude-code", "fake-codex", "codex", "0.163.0", "exec --help", codexRun, codexProbes},
 	} {
 		t.Run(c.id, func(t *testing.T) {
 			t.Parallel()

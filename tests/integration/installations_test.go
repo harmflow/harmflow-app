@@ -171,7 +171,7 @@ func TestEachCodexInstallationRunsWithItsOwnHome(t *testing.T) {
 	// daemon's own environment, so it carries the CODEX_HOME of the installation in use, never ~/.codex's.
 	both := []string{first, second}
 	slices.Sort(both)
-	wantHomes := map[string][]string{"--version": {second}, "exec --help": {second}, "--help": {second},
+	wantHomes := map[string][]string{"--version": {second}, "--help": {second},
 		"login status": both, "app-server": both, codexRun: both}
 	started := startedWith(t, log)
 	for args, homes := range started {

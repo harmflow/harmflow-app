@@ -3,6 +3,7 @@ package codex
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -339,7 +340,7 @@ func TestAgentsStayInTheCodexHome(t *testing.T) {
 func TestDetectRecordsTheAppServer(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
 	withServer, _ := appServerStandIn(t, answer(`{"data":[]}`))
-	without := standIn(t, `echo "codex-cli 0.163.0"`, signedIn)
+	without := noAppServer(t, standIn(t, `echo "codex-cli 0.163.0"`, signedIn))
 	for path, want := range map[string]bool{withServer: true, without: false} {
 		info := (&Adapter{Home: tempDir(t), KnownLocations: []string{}}).Detect(context.Background(), path)
 		if info.Features["app-server"] != want {
@@ -366,46 +367,53 @@ func slowTopHelp(t *testing.T, path string) string {
 // harmflow-app#495: a top-level --help check that times out leaves Codex ready, its app server unknown, and a
 // diagnostic saying the check timed out, which the dashboard shows as a warning. A call that needs the app server is
 // tried: it lists the skills of a Codex that has one, and fails with its own error on a Codex that has none, never with
-// codex_app_server_missing. Help read in full that does not list the app server still reads as a Codex without it.
-// harmflow-app#643: that help lists commands, not flags, so the diagnostic has a key of its own, which says the app
-// server is unknown and never that the flags are; the exec --help timeout keeps harness_help_timed_out.
+// codex_app_server_missing. harmflow-app#643: that help lists commands, not flags, so the diagnostic has a key of its
+// own, which says the app server is unknown and never that the flags are. harmflow-app#1117: help read in full that
+// does not list the app server reads as a Codex without it, below the minimum and not ready.
 func TestDetectReadsATopLevelHelpCheckThatTimesOutAsAppServerUnknown(t *testing.T) {
-	const wantText = "the Codex --help check timed out, so whether it has an app server is unknown; the first call to the " +
+	const timedOut = "the Codex --help check timed out, so whether it has an app server is unknown; the first call to the " +
 		"app server proves it"
 	t.Setenv("CODEX_HOME", t.TempDir())
 	withServer := func(t *testing.T) string {
 		path, _ := appServerStandIn(t, answer(`{"data":[]}`))
 		return path
 	}
+	// A Codex that serves no app server: a slow help hides what its help lists.
 	without := func(t *testing.T) string { return standIn(t, `echo "codex-cli 0.163.0"`, signedIn) }
 	cases := []struct {
-		name        string
-		codex       func(t *testing.T) string
-		wantUnknown bool
-		wantKey     string // the diagnostic
-		wantListKey string // the error of the skill list; empty is none
+		name                       string
+		codex                      func(t *testing.T) string
+		wantUnknown                bool
+		wantSupport, wantReadiness string
+		wantKey, wantText          string // the diagnostic
+		wantParams                 map[string]string
+		wantListKey                string // the error of the skill list; empty is none
 	}{
 		{"timed out, with an app server", func(t *testing.T) string { return slowTopHelp(t, withServer(t)) }, true,
-			"codex_app_server_help_timed_out", ""},
+			"supported", "ready", "codex_app_server_help_timed_out", timedOut, map[string]string{"harness": Name}, ""},
 		{"timed out, without an app server", func(t *testing.T) string { return slowTopHelp(t, without(t)) }, true,
-			"codex_app_server_help_timed_out", "codex_app_server_exited"},
-		{"read in full, without an app server", without, false, "", "codex_app_server_missing"},
+			"supported", "ready", "codex_app_server_help_timed_out", timedOut, map[string]string{"harness": Name},
+			"codex_app_server_exited"},
+		{"read in full, without an app server", func(t *testing.T) string { return noAppServer(t, without(t)) }, false,
+			"below_minimum", "not_ready", "codex_app_server_missing", "Codex 0.163.0 has no app server",
+			map[string]string{"version": "0.163.0"}, "codex_app_server_missing"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			a := appServerAdapter(t)
 			a.helpTimeout = time.Second
 			info := a.Detect(context.Background(), c.codex(t))
-			if info.Readiness != "ready" || info.FeaturesUnknown || info.Features["app-server"] ||
-				info.UnknownFeatures["app-server"] != c.wantUnknown || info.DiagnosticKey != c.wantKey {
-				t.Errorf("Detect: readiness %s, flags unknown %v, app server %v, app server unknown %v, diagnostic %q (%s); "+
-					"want ready, false, false, %v, %q", info.Readiness, info.FeaturesUnknown, info.Features["app-server"],
-					info.UnknownFeatures["app-server"], info.DiagnosticKey, info.Diagnostic, c.wantUnknown, c.wantKey)
+			if info.Readiness != c.wantReadiness || info.VersionSupport != c.wantSupport || info.FeaturesUnknown ||
+				info.Features["app-server"] || info.UnknownFeatures["app-server"] != c.wantUnknown ||
+				info.DiagnosticKey != c.wantKey {
+				t.Errorf("Detect: readiness %s, support %s, flags unknown %v, app server %v, app server unknown %v, "+
+					"diagnostic %q (%s); want %s, %s, false, false, %v, %q", info.Readiness, info.VersionSupport,
+					info.FeaturesUnknown, info.Features["app-server"], info.UnknownFeatures["app-server"], info.DiagnosticKey,
+					info.Diagnostic, c.wantReadiness, c.wantSupport, c.wantUnknown, c.wantKey)
 			}
-			if c.wantKey != "" && (info.Diagnostic != wantText || len(info.DiagnosticParams) != 1 ||
-				info.DiagnosticParams["harness"] != Name) {
-				t.Errorf("Detect: diagnostic %q, params %v; want %q, the harness %q alone", info.Diagnostic,
-					info.DiagnosticParams, wantText, Name)
+			if info.Diagnostic != c.wantText || !maps.Equal(info.DiagnosticParams, c.wantParams) {
+				t.Errorf("Detect: diagnostic %q, params %v; want %q, %v", info.Diagnostic, info.DiagnosticParams,
+					c.wantText, c.wantParams)
 			}
 			_, _, err := a.UserItems(context.Background(), info, "skill", "/w", nil)
 			var got string

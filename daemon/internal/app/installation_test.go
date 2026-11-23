@@ -26,8 +26,8 @@ import (
 const homesCodex = `#!/bin/sh
 case "$1" in
   --version) echo "codex-cli 0.163.0" ;;
+  --help) echo "Commands: exec app-server login" ;;
   login) if [ -f "$CODEX_HOME/signed-in" ]; then echo "Logged in using ChatGPT"; else echo "Not logged in"; exit 1; fi ;;
-  exec) echo "Usage: codex exec --json --sandbox <MODE> --cd <DIR> --skip-git-repo-check" ;;
 esac
 `
 
