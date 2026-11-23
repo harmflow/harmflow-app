@@ -25,8 +25,8 @@ import (
 const standInCodex = `#!/bin/sh
 case "$1" in
   --version) echo "codex-cli 0.163.0" ;;
+  --help) echo "Commands: exec app-server login" ;;
   login) echo "Logged in using ChatGPT" ;;
-  exec) echo "Usage: codex exec --json --sandbox <MODE> --cd <DIR> --skip-git-repo-check" ;;
 esac
 `
 

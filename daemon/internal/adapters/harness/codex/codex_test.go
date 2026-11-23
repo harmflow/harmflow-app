@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
@@ -85,15 +84,15 @@ func replay(t *testing.T, file string) (*parser, []ports.HarnessEvent) {
 }
 
 // standIn writes a stand-in for the codex CLI whose --version and `login status` run the given shell commands, and
-// whose `exec --help` lists every flag the adapter needs.
+// whose top-level --help lists the app server, which the stand-in does not serve.
 func standIn(t *testing.T, version, login string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "codex")
 	script := `#!/bin/bash
 case "$1" in
   --version) ` + version + ` ;;
+  --help) echo "Commands: exec  app-server  login" ;;
   login) ` + login + ` ;;
-  exec) echo "Usage: codex exec  --json  --sandbox <MODE>  --cd <DIR>  --skip-git-repo-check" ;;
 esac
 `
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
@@ -138,64 +137,59 @@ func TestDetectReadsOnlyWhatTheProbesEstablish(t *testing.T) {
 	}
 }
 
-// helpStandIn writes a stand-in for the codex CLI at a supported version whose `exec --help` and `login status` run the
-// given shell commands.
-func helpStandIn(t *testing.T, help, login string) string {
+// noAppServer rewrites the stand-in at path so that its top-level --help lists no app server, as a Codex without one.
+func noAppServer(t *testing.T, path string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "codex")
-	script := `#!/bin/bash
-case "$1" in
-  --version) echo "codex-cli 0.163.0" ;;
-  login) ` + login + ` ;;
-  exec) ` + help + ` ;;
-esac
-`
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%s) = %v, want no error", path, err)
+	}
+	script := strings.Replace(string(data), "exec  app-server  login", "exec  login", 1)
+	if script == string(data) {
+		t.Fatalf("noAppServer(%s): its --help lists no app server to remove", path)
+	}
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("os.WriteFile(%s) = %v, want no error", path, err)
 	}
 	return path
 }
 
-// harmflow-app#329: an `exec --help` check that times out leaves Codex ready, with its flags unknown and a diagnostic
-// saying the check timed out, which the dashboard shows as a warning; it never names a flag the version lacks. Help
-// read in full that lacks a flag still reads as a version that lacks it.
-func TestDetectReadsAHelpCheckThatTimesOutAsFlagsUnknown(t *testing.T) {
+// harmflow-app#1117: every attempt runs on the app server, so a Codex whose top-level help, read in full, lists none
+// is below the minimum and not ready, its diagnostic the one Prepare gives such a Codex, naming its version, whatever
+// its sign-in. The `exec --help` flags decide nothing: the stand-in's `exec --help` lists none of them, and a Codex
+// with an app server reads ready.
+func TestDetectRequiresTheAppServer(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
-	signedIn := `echo "Logged in using ChatGPT" >&2`
-	someFlags := `echo "Usage: codex exec  --json  --sandbox <MODE>  --cd <DIR>"`
-	allFlags := `echo "Usage: codex exec  --json  --sandbox <MODE>  --cd <DIR>  --skip-git-repo-check"`
+	version := `echo "codex-cli 0.163.0"`
 	cases := []struct {
-		name, help, login          string
-		timeout                    time.Duration // the check's limit; zero is its own
-		wantUnknown                bool
+		name, login                string
+		appServer                  bool
 		wantSupport, wantReadiness string
 		wantKey                    string
 	}{
-		{"read in full", allFlags, signedIn, 0, false, "supported", "ready", ""},
-		// exec, so the check's timeout ends the sleep itself, and no child keeps the help's output open.
-		{"timed out", `exec sleep 30`, signedIn, time.Second, true, "supported", "ready", "harness_help_timed_out"},
-		{"timed out after some flags", someFlags + `; exec sleep 30`, signedIn, time.Second, true, "supported", "ready",
-			"harness_help_timed_out"},
-		// The sign-in shows unknown in its own field, so the timed-out check keeps the diagnostic.
-		{"timed out, sign-in unverified", `exec sleep 30`, `kill -KILL $$`, time.Second, true, "supported", "ready",
-			"harness_help_timed_out"},
-		{"read in full, lacking a flag", someFlags, signedIn, 0, false, "below_minimum", "not_ready",
-			"harness_feature_missing"},
+		{"with an app server", signedIn, true, "supported", "ready", ""},
+		{"without an app server", signedIn, false, "below_minimum", "not_ready", "codex_app_server_missing"},
+		{"without an app server, signed out", `echo "Not logged in" >&2; exit 1`, false, "below_minimum", "not_ready",
+			"codex_app_server_missing"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			a := &Adapter{Home: t.TempDir(), helpTimeout: c.timeout}
-			info := a.Detect(context.Background(), helpStandIn(t, c.help, c.login))
-			if info.FeaturesUnknown != c.wantUnknown || info.VersionSupport != c.wantSupport ||
-				info.Readiness != c.wantReadiness || info.DiagnosticKey != c.wantKey {
-				t.Errorf("Detect: flags unknown %v, support %s, readiness %s, diagnostic %q (%s); want %v, %s, %s, %q",
-					info.FeaturesUnknown, info.VersionSupport, info.Readiness, info.DiagnosticKey, info.Diagnostic,
-					c.wantUnknown, c.wantSupport, c.wantReadiness, c.wantKey)
+			path := standIn(t, version, c.login)
+			if !c.appServer {
+				path = noAppServer(t, path)
 			}
-			if c.wantKey == "harness_help_timed_out" && (info.DiagnosticParams["harness"] != Name ||
-				info.DiagnosticParams["command"] != "exec --help") {
-				t.Errorf("Detect: diagnostic params %v, want the harness %q and the command exec --help",
-					info.DiagnosticParams, Name)
+			info := appServerAdapter(t).Detect(context.Background(), path)
+			if info.VersionSupport != c.wantSupport || info.Readiness != c.wantReadiness || info.DiagnosticKey != c.wantKey ||
+				info.Features["app-server"] != c.appServer || info.UnknownFeatures["app-server"] {
+				t.Errorf("Detect: support %s, readiness %s, diagnostic %q (%s), app server %v, app server unknown %v; "+
+					"want %s, %s, %q, %v, false", info.VersionSupport, info.Readiness, info.DiagnosticKey, info.Diagnostic,
+					info.Features["app-server"], info.UnknownFeatures["app-server"], c.wantSupport, c.wantReadiness,
+					c.wantKey, c.appServer)
+			}
+			if c.wantKey != "" && (info.Diagnostic != "Codex 0.163.0 has no app server" ||
+				info.DiagnosticParams["version"] != "0.163.0") {
+				t.Errorf("Detect: diagnostic %q, params %v; want %q, naming the version 0.163.0", info.Diagnostic,
+					info.DiagnosticParams, "Codex 0.163.0 has no app server")
 			}
 		})
 	}

@@ -35,8 +35,6 @@ const (
 	TestedUpTo = "0.163.0"
 )
 
-var requiredFlags = []string{"--json", "--sandbox", "--cd", "--skip-git-repo-check"}
-
 // Adapter is the HarnessAdapter of the Codex CLI. It looks for the CLI on PathEnv, then in KnownLocations, and runs its
 // probes with Env, each within ProbeTimeout. Each Codex home it finds, `.codex` under Home and the one the daemon's
 // CODEX_HOME names, is an installation of its own: its sign-in, models cache, configuration, and agents are read from
@@ -59,7 +57,7 @@ type Adapter struct {
 	reload      bool                  // the next skills/list of each home not in reloaded carries forceReload
 	reloaded    map[string]bool       // the homes whose skills/list carried forceReload since ReloadUserItems
 	listTimeout time.Duration         // a call to the app server; zero is defaultListTimeout
-	helpTimeout time.Duration         // each help check, `exec --help` and the top-level --help; zero is the probe's own limit
+	helpTimeout time.Duration         // the top-level --help check; zero is the probe's own limit
 	signInStep  time.Duration         // the wait for `codex login` to reach its browser's step; zero is defaultSignInStep
 }
 
@@ -165,8 +163,8 @@ func (a *Adapter) knownLocations() []string {
 var versionRe = regexp.MustCompile(`(\d+\.\d+\.\d+)`)
 
 // Detect implements ports.HarnessAdapter: it finds the CLI, the path set by hand when there is one, then checks its
-// version, the flags HarmFlow needs, the models and efforts of its models cache, and its sign-in, and says how ready it
-// is.
+// version, the app server every attempt runs on, the models and efforts of its models cache, and its sign-in, and says
+// how ready it is.
 func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessInfo {
 	info := ports.HarnessInfo{ID: ID, Name: Name, Authentication: "unknown", Readiness: "not_installed",
 		Models: []ports.ModelInfo{}, Efforts: []string{}, EnforceableControls: []string{}, Installations: []string{},
@@ -212,47 +210,29 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 		info.Version = m[1]
 		info.Readiness = "version_identified"
 	}
-	// Help read in full that does not list a flag reads as a version that lacks it. Help the check could not read within
-	// its limit leaves the flags unknown instead: a slow check does not turn the harness away, and the first attempt
-	// proves them.
+	// Every attempt runs on the app server, which also lists the user's skills, so a Codex without one cannot run. Codex
+	// 0.163.0 marks the command experimental, though its methods are in its stable schema; the top-level help lists it
+	// either way. Help read in full that does not list the command reads as a Codex without it, below the minimum and
+	// not ready. Help the check could not read within its limit leaves it unknown instead: a slow check does not turn the
+	// harness away, and the first call to the app server proves it.
 	helpTimeout := a.helpTimeout
 	if helpTimeout == 0 {
 		helpTimeout = a.probeTimeout(15 * time.Second)
 	}
-	help, read := procutil.Help(ctx, helpTimeout, a.Env, info.Path, "exec", "--help")
-	for _, f := range append(requiredFlags, "--add-dir", "--ephemeral", "--model", "--color") {
-		info.Features[f] = strings.Contains(help, f)
-	}
-	info.FeaturesUnknown = !read
-	if info.FeaturesUnknown {
-		info.SetDiagnostic(domain.T("harness_help_timed_out",
-			"the {{harness}} {{command}} check timed out, so the flags it has are unknown; the first attempt proves them",
-			"harness", Name, "command", "exec --help"))
-	}
-	// The app server lists the user's skills. Codex 0.163.0 marks the command experimental, though skills/list is in its
-	// stable schema; the help lists it either way. The top-level help reads a timeout as the flags' help does: help read
-	// in full that does not list the command reads as a Codex without it, and help the check could not read within its
-	// limit leaves it unknown, so the first call to the app server proves it. That help lists commands, not flags, so its
-	// diagnostic names the app server, never the flags exec --help gave.
 	top, topRead := procutil.Help(ctx, helpTimeout, a.Env, info.Path, "--help")
 	info.Features["app-server"] = strings.Contains(top, "app-server")
 	if !topRead && !info.Features["app-server"] {
 		info.UnknownFeatures = map[string]bool{"app-server": true}
-		if !info.FeaturesUnknown {
-			info.SetDiagnostic(domain.T("codex_app_server_help_timed_out",
-				"the {{harness}} --help check timed out, so whether it has an app server is unknown; the first call to the app server proves it",
-				"harness", Name))
-		}
+		info.SetDiagnostic(domain.T("codex_app_server_help_timed_out",
+			"the {{harness}} --help check timed out, so whether it has an app server is unknown; the first call to the app server proves it",
+			"harness", Name))
 	}
-	helpTimedOut := info.FeaturesUnknown || info.UnknownFeatures["app-server"]
+	helpTimedOut := info.UnknownFeatures["app-server"]
 	info.VersionSupport = "supported"
-	for _, f := range requiredFlags {
-		if !info.HasFeature(f) {
-			info.VersionSupport = "below_minimum"
-			info.Readiness = "not_ready"
-			info.SetDiagnostic(domain.T("harness_feature_missing", "this {{harness}} version lacks {{feature}}, which HarmFlow needs",
-				"harness", Name, "feature", "exec "+f))
-		}
+	if !info.Features["app-server"] && !helpTimedOut {
+		info.VersionSupport = "below_minimum"
+		info.Readiness = "not_ready"
+		info.SetDiagnostic(domain.T("codex_app_server_missing", "Codex {{version}} has no app server", "version", info.Version))
 	}
 	if info.VersionSupport == "supported" {
 		switch {
