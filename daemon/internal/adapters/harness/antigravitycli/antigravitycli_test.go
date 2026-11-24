@@ -186,10 +186,20 @@ func settingsOf(t *testing.T, args []string) sessionSettings {
 	return s
 }
 
+// restrictionKeys is the key of each restriction's warning, by the restriction's name.
+var restrictionKeys = map[string]string{
+	"tool_allowlist":      "restriction_antigravity_tool_lists",
+	"readablePaths":       "restriction_antigravity_read_paths",
+	"restrictToWorkspace": "restriction_antigravity_workspace",
+	"network":             "restriction_antigravity_network",
+}
+
+// unenforcedNames is the names of the restrictions warned as not enforced, each with the key of its own text and no
+// param.
 func unenforcedNames(rs []ports.Restriction) map[string]bool {
 	names := map[string]bool{}
 	for _, r := range rs {
-		if !r.Enforced && r.Text.Key == "restriction_antigravity_unenforced" {
+		if !r.Enforced && r.Text.Key == restrictionKeys[r.Name] && len(r.Text.Params) == 0 {
 			names[r.Name] = true
 		}
 	}

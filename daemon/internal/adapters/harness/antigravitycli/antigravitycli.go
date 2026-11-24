@@ -283,11 +283,30 @@ func (a *Adapter) UserItems(context.Context, ports.HarnessInfo, string, string, 
 	return []ports.ResolvedItem{}, nil, nil
 }
 
-// unenforced is the restriction named name, which the Antigravity CLI does not enforce, with the setting the warning
-// names.
-func unenforced(name, setting string) ports.Restriction {
-	return ports.Restriction{Name: name, Enforced: false, Text: domain.T("restriction_antigravity_unenforced",
-		"the Antigravity CLI does not enforce {{setting}}; it runs with a warning", "setting", setting)}
+// unenforced is the restriction named name, which the Antigravity CLI does not enforce, warned with text.
+func unenforced(name string, text domain.Text) ports.Restriction {
+	return ports.Restriction{Name: name, Enforced: false, Text: text}
+}
+
+// The restrictions the Antigravity CLI does not enforce, each warned with a text of its own.
+func unenforcedToolLists() ports.Restriction {
+	return unenforced("tool_allowlist", domain.T("restriction_antigravity_tool_lists",
+		"the Antigravity CLI does not take a per-tool allow or deny list; the custom tool lists are not enforced"))
+}
+
+func unenforcedReadPaths() ports.Restriction {
+	return unenforced("readablePaths", domain.T("restriction_antigravity_read_paths",
+		"the Antigravity CLI does not limit what the session reads; the custom read paths are not enforced"))
+}
+
+func unenforcedWorkspace() ports.Restriction {
+	return unenforced("restrictToWorkspace", domain.T("restriction_antigravity_workspace",
+		"the Antigravity CLI does not keep the commands it runs in the workspace; restrictToWorkspace is not enforced for them"))
+}
+
+func unenforcedNetwork() ports.Restriction {
+	return unenforced("network", domain.T("restriction_antigravity_network",
+		"the Antigravity CLI does not keep the commands it runs off the network; network: deny is not enforced for them"))
 }
 
 // sessionSettings are the CLI's settings for one run alone, passed with --settings and never saved: the permission
@@ -343,28 +362,28 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 				settings.Permissions.Deny = append(settings.Permissions.Deny, commandRule(p))
 			}
 			if len(c.AllowedTools) > 0 || len(c.DeniedTools) > 0 {
-				restrictions = append(restrictions, unenforced("tool_allowlist", "the custom tool lists"))
+				restrictions = append(restrictions, unenforcedToolLists())
 			}
 			if len(c.ReadablePaths) > 0 {
-				restrictions = append(restrictions, unenforced("readablePaths", "the custom read paths"))
+				restrictions = append(restrictions, unenforcedReadPaths())
 			}
 		} else {
 			settings.Permissions.Allow = append(settings.Permissions.Allow, commandRule("*"))
 		}
 		if perm.RestrictToWorkspace != nil && *perm.RestrictToWorkspace {
-			restrictions = append(restrictions, unenforced("restrictToWorkspace", "restrictToWorkspace for the commands it runs"))
+			restrictions = append(restrictions, unenforcedWorkspace())
 		}
 	default: // workspace_write
 		commands = true
 		settings.Permissions.Allow = append(settings.Permissions.Allow, commandRule("*"))
 		if perm.RestrictToWorkspace == nil || *perm.RestrictToWorkspace {
-			restrictions = append(restrictions, unenforced("restrictToWorkspace", "restrictToWorkspace for the commands it runs"))
+			restrictions = append(restrictions, unenforcedWorkspace())
 		}
 	}
 	if perm.Network == domain.NetworkDeny {
 		settings.Permissions.Deny = append(settings.Permissions.Deny, "read_url(*)", "execute_url(*)")
 		if commands {
-			restrictions = append(restrictions, unenforced("network", "network: deny for the commands it runs"))
+			restrictions = append(restrictions, unenforcedNetwork())
 		}
 	}
 	if req.ExecutionDir != "" {

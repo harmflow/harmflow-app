@@ -458,7 +458,14 @@ export const enUS = {
       "Codex's sandbox does not limit the programs its shell starts; the custom program lists are not enforced",
     restriction_codex_read_only:
       "Codex's managed requirements do not allow its read-only sandbox with approvals off, or could not be read, so Codex may approve a change to a file of the workspace; the session may change files in its workspace",
-    restriction_antigravity_unenforced: "the Antigravity CLI does not enforce {{setting}}; it runs with a warning",
+    restriction_antigravity_tool_lists:
+      "the Antigravity CLI does not take a per-tool allow or deny list; the custom tool lists are not enforced",
+    restriction_antigravity_read_paths:
+      "the Antigravity CLI does not limit what the session reads; the custom read paths are not enforced",
+    restriction_antigravity_workspace:
+      "the Antigravity CLI does not keep the commands it runs in the workspace; restrictToWorkspace is not enforced for them",
+    restriction_antigravity_network:
+      "the Antigravity CLI does not keep the commands it runs off the network; network: deny is not enforced for them",
     harness_version_untested: "{{harness}} {{version}} is newer than the versions HarmFlow was tested with",
     harness_version_unknown: "{{harness}} reported no version number, so HarmFlow cannot tell whether it was tested with it",
     quota_unread: "{{harness}}'s quota could not be read, so the attempt started without that check: {{detail}}",

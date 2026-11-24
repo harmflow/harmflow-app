@@ -175,15 +175,15 @@ func TestAntigravityCLIUnenforcedSettingIsWarned(t *testing.T) {
 	d := startDaemon(t, t.TempDir())
 	extra := "  permissions:\n    profile: workspace_write\n    network: deny\n"
 	saved := d.call("POST", "/tasks", map[string]any{"yaml": antigravityTask("agy-offline", "AGY=ok", extra)}, 201)
-	if w := policyWarning(saved["warnings"], "messageKey", "restriction_antigravity_unenforced"); w == nil {
-		t.Errorf("POST /tasks warnings = %v, want a restriction_antigravity_unenforced warning", saved["warnings"])
+	if w := policyWarning(saved["warnings"], "messageKey", "restriction_antigravity_network"); w == nil {
+		t.Errorf("POST /tasks warnings = %v, want a restriction_antigravity_network warning", saved["warnings"])
 	}
 	run := d.call("POST", "/tasks/agy-offline/run", nil, 202)
 	x := d.waitStatus(run["executionId"].(string), "completed", "failed")
 	if x["status"] != "completed" {
 		t.Fatalf("status %v error %v, want completed", x["status"], x["errorMessage"])
 	}
-	if w := policyWarning(x["warnings"], "subject", "network"); w == nil || w["messageKey"] != "restriction_antigravity_unenforced" {
+	if w := policyWarning(x["warnings"], "subject", "network"); w == nil || w["messageKey"] != "restriction_antigravity_network" {
 		t.Errorf("execution warnings = %v, want the network setting warned", x["warnings"])
 	}
 	found := false

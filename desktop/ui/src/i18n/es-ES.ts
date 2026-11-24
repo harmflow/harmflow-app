@@ -468,7 +468,14 @@ export const esES: Resources = {
       "el sandbox de Codex no limita los programas que inicia su shell; las listas de programas personalizadas no se aplican",
     restriction_codex_read_only:
       "los requisitos administrados de Codex no permiten su sandbox de solo lectura con las aprobaciones desactivadas, o no se pudieron leer, así que Codex puede aprobar un cambio en un archivo del espacio de trabajo; la sesión puede cambiar archivos de su espacio de trabajo",
-    restriction_antigravity_unenforced: "Antigravity CLI no aplica {{setting}}; se ejecuta con una advertencia",
+    restriction_antigravity_tool_lists:
+      "Antigravity CLI no admite listas de herramientas permitidas o denegadas; las listas personalizadas no se aplican",
+    restriction_antigravity_read_paths:
+      "Antigravity CLI no limita lo que lee la sesión; las rutas de lectura personalizadas no se aplican",
+    restriction_antigravity_workspace:
+      "Antigravity CLI no mantiene en el espacio de trabajo los comandos que ejecuta; restrictToWorkspace no se les aplica",
+    restriction_antigravity_network:
+      "Antigravity CLI no mantiene fuera de la red los comandos que ejecuta; network: deny no se les aplica",
     harness_version_untested: "{{harness}} {{version}} es más reciente que las versiones con las que se probó HarmFlow",
     harness_version_unknown: "{{harness}} no informó un número de versión, así que HarmFlow no sabe si se probó con ella",
     quota_unread: "no se pudo leer la cuota de {{harness}}, así que el intento empezó sin esa comprobación: {{detail}}",

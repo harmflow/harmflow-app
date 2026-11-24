@@ -467,7 +467,14 @@ export const ptBR: Resources = {
       "o sandbox do Codex não limita os programas que o seu shell inicia; as listas de programas personalizadas não são aplicadas",
     restriction_codex_read_only:
       "os requisitos gerenciados do Codex não permitem o sandbox somente leitura com as aprovações desligadas, ou não puderam ser lidos, então o Codex pode aprovar uma alteração em um arquivo do workspace; a sessão pode alterar arquivos do seu workspace",
-    restriction_antigravity_unenforced: "o Antigravity CLI não aplica {{setting}}; ele é executado com um aviso",
+    restriction_antigravity_tool_lists:
+      "o Antigravity CLI não aceita lista de ferramentas permitidas ou negadas; as listas personalizadas não são aplicadas",
+    restriction_antigravity_read_paths:
+      "o Antigravity CLI não limita o que a sessão lê; os caminhos de leitura personalizados não são aplicados",
+    restriction_antigravity_workspace:
+      "o Antigravity CLI não mantém no workspace os comandos que executa; restrictToWorkspace não é aplicado a eles",
+    restriction_antigravity_network:
+      "o Antigravity CLI não mantém fora da rede os comandos que executa; network: deny não é aplicado a eles",
     harness_version_untested: "{{harness}} {{version}} é mais novo que as versões com que o HarmFlow foi testado",
     harness_version_unknown: "{{harness}} não informou um número de versão, então o HarmFlow não sabe se foi testado com ela",
     quota_unread: "não foi possível ler a cota do {{harness}}, então a tentativa começou sem essa verificação: {{detail}}",
