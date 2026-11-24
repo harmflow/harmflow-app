@@ -648,10 +648,10 @@ func TestPrepareSandbox(t *testing.T) {
 	p := out.(*parser)
 	config, _ := p.thread["config"].(map[string]any)
 	if p.thread["sandbox"] != "workspace-write" || config["sandbox_workspace_write.network_access"] != false ||
-		!slices.Equal(roots(p), []string{"/repo", "/x"}) || p.thread["model"] != "gpt-x" || p.turn["effort"] != "high" ||
-		p.thread["cwd"] != "/w" || p.thread["approvalPolicy"] != "never" {
-		t.Errorf("Prepare thread %v, turn effort %v; want workspace-write, no network, /repo and /x writable, gpt-x, high, "+
-			"in /w, approvals off", p.thread, p.turn["effort"])
+		!slices.Equal(roots(p), []string{"/repo", "/repo/.git", "/x"}) || p.thread["model"] != "gpt-x" ||
+		p.turn["effort"] != "high" || p.thread["cwd"] != "/w" || p.thread["approvalPolicy"] != "never" {
+		t.Errorf("Prepare thread %v, turn effort %v; want workspace-write, no network, /repo, /repo/.git, and /x writable, "+
+			"gpt-x, high, in /w, approvals off", p.thread, p.turn["effort"])
 	}
 	for _, r := range inv.Restrictions {
 		if !r.Enforced {
@@ -673,6 +673,55 @@ func TestPrepareSandbox(t *testing.T) {
 	}
 	if !found {
 		t.Error("a custom tool list Codex cannot enforce must be warned")
+	}
+}
+
+// harmflow-app#1128: Codex's sandbox keeps the .git folder of a writable root read-only, so a GitHub task's session
+// could not fetch or add a worktree in a repository's local path outside the workspace. Under workspace_write, the .git
+// folder of each repository's local path is a writable root of its own; a custom profile's writable paths and the
+// read-only sandbox stay as they are.
+func TestPrepareMakesRepositoryGitFoldersWritable(t *testing.T) {
+	a := &Adapter{Home: t.TempDir()}
+	info := ports.HarnessInfo{Path: "/bin/codex", Features: map[string]bool{"--add-dir": true, "--ephemeral": true}}
+	work, exec := t.TempDir(), t.TempDir()
+	repos := []string{t.TempDir(), t.TempDir()} // local paths outside the workspace
+	perm := *domain.TaskDocument{}.Effective().Spec.Permissions
+	if perm.Profile != domain.ProfileWorkspaceWrite {
+		t.Fatalf("default profile = %q, want %q", perm.Profile, domain.ProfileWorkspaceWrite)
+	}
+	req := ports.RunRequest{WorkDir: work, AdditionalDirs: repos, ExecutionDir: exec, Prompt: "do it"}
+
+	req.Permissions = perm
+	_, out, err := a.Prepare(info, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{repos[0], repos[1], filepath.Join(repos[0], ".git"), filepath.Join(repos[1], ".git"), exec}
+	if got := roots(out.(*parser)); !slices.Equal(got, want) {
+		t.Errorf("Prepare(workspace_write) writable roots = %q, want %q", got, want)
+	}
+
+	custom := perm
+	custom.Profile = domain.ProfileCustom
+	custom.Custom = &domain.CustomPermissions{WritablePaths: []string{"/out"}}
+	req.Permissions = custom
+	_, out, err = a.Prepare(info, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := roots(out.(*parser)); slices.ContainsFunc(got, func(r string) bool { return filepath.Base(r) == ".git" }) {
+		t.Errorf("Prepare(custom) writable roots = %q, want no .git folder", got)
+	}
+
+	readOnly := perm
+	readOnly.Profile = domain.ProfileReadOnly
+	req.Permissions = readOnly
+	_, out, err = a.Prepare(info, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := roots(out.(*parser)); len(got) != 0 {
+		t.Errorf("Prepare(read_only) writable roots = %q, want none", got)
 	}
 }
 

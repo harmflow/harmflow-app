@@ -682,6 +682,16 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 			restrictions = append(restrictions, ports.Restriction{Name: "network", Enforced: true,
 				Text: domain.Text{Message: "Codex's sandbox blocks network access"}})
 		}
+		// The sandbox keeps the .git folder of a writable root read-only, so a session could neither fetch nor add a
+		// worktree in a repository's local path (harmflow-app#1128). Under workspace_write, the .git folder of each
+		// repository's local path is a writable root of its own; a custom profile's writable paths stay as they are.
+		if perm.Profile == domain.ProfileWorkspaceWrite {
+			for _, d := range req.AdditionalDirs {
+				if d != "" {
+					dirs = append(dirs, filepath.Join(d, ".git"))
+				}
+			}
+		}
 		if perm.Profile == domain.ProfileCustom {
 			dirs = append(dirs, perm.Custom.WritablePaths...)
 			if len(perm.Custom.AllowedTools) > 0 || len(perm.Custom.DeniedTools) > 0 {
