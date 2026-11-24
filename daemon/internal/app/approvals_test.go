@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -151,22 +152,37 @@ func TestApprovalWaitsForTheOwnersAnswer(t *testing.T) {
 // harmflow-app#465: no timeout accepts a request. One still unanswered when the execution reaches its time limit is
 // declined, and the execution says so.
 func TestApprovalDeclinedAtTheTimeLimit(t *testing.T) {
+	// The limit counts from the execution's start, before its harness starts and asks. On a loaded host, such as CI's
+	// race-detector run beside the integration suite, two seconds fired before request 3 was read; ten leave it pending
+	// first, which the test checks before it reads the decline.
+	const limitSeconds = 10
 	e := conversing(t, func(e *env) { e.timeoutUnit = time.Second })
 	e.claude.setScript(func(ports.RunRequest) string {
 		return `echo 'ASK 3 rm -rf /tmp/x'; read -r answer; echo "GOT $answer" >&2; sleep 30`
 	})
-	e.create("slow", "  execution:\n    timeoutMinutes: 2\n    cancelGraceSeconds: 1\n")
+	e.create("slow", fmt.Sprintf("  execution:\n    timeoutMinutes: %d\n    cancelGraceSeconds: 1\n", limitSeconds))
 	r, err := e.app.RunTask("slow")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !e.poll(limitSeconds*time.Second, func() bool {
+		return len(e.eventsOf(r.ExecutionID, domain.EventApprovalRequested)) == 1
+	}) {
+		t.Fatalf("approval.requested events of %s = %d within the %ds time limit, want request 3 pending before it fires",
+			r.ExecutionID, len(e.eventsOf(r.ExecutionID, domain.EventApprovalRequested)), limitSeconds)
 	}
 	x := e.waitWithin(30*time.Second, r.ExecutionID, domain.StatusFailed)
 	if x.ErrorKey != "execution_timed_out" {
 		t.Errorf("the execution failed with %q (%s), want execution_timed_out", x.ErrorKey, x.ErrorMessage)
 	}
+	asked := e.eventsOf(r.ExecutionID, domain.EventApprovalRequested)
 	answered := e.eventsOf(r.ExecutionID, domain.EventApprovalAnswered)
-	if len(answered) != 1 || answered[0].Payload["decision"] != "decline" || answered[0].Payload["by"] != "time_limit" ||
-		answered[0].MessageKey != "approval_declined_time_limit" {
-		t.Errorf("approval.answered %+v, want request 3 declined by the time limit, saying so", answered)
+	if len(answered) != 1 || answered[0].Payload["requestId"] != "3" || answered[0].Payload["decision"] != "decline" ||
+		answered[0].Payload["by"] != "time_limit" || answered[0].MessageKey != "approval_declined_time_limit" {
+		t.Fatalf("approval.answered %+v, want request 3 declined by the time limit, saying so", answered)
+	}
+	if asked[0].ID >= answered[0].ID {
+		t.Errorf("approval.requested is event %d and approval.answered event %d, want the request recorded first",
+			asked[0].ID, answered[0].ID)
 	}
 }
