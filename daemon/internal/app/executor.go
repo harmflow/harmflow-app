@@ -750,6 +750,12 @@ func (r *run) cancelRequested() bool {
 	return r.a.cancelRequestedLocked(r.h)
 }
 
+// timeLimitReached reports whether the execution whose context is ctx reached its time limit, and was not ended by a
+// cancel: the time limit then declines its approval requests.
+func (r *run) timeLimitReached(ctx context.Context) bool {
+	return errors.Is(ctx.Err(), context.DeadlineExceeded) && !r.cancelRequested()
+}
+
 // warn records a warning on the execution and emits it once, under the work item it names or, when it names none, the
 // execution's current one.
 func (r *run) warn(w domain.Warning, eventType string, emit bool) {
@@ -889,10 +895,11 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 	a.mu.Lock()
 	r.harnessName = ad.Name()
 	a.mu.Unlock()
-	// The reader calls back in order and finishes before the process counts as done.
+	// The reader calls back in order and finishes before the process counts as done. It reads on after the time limit,
+	// while the harness is being stopped, so each event comes with the execution's context.
 	proc, err := procutil.Start(inv, raw, func(line []byte) {
 		for _, he := range parser.Line(line) {
-			r.onHarnessEvent(he)
+			r.onHarnessEvent(ctx, he)
 		}
 	})
 	conv, _ := parser.(ports.Conversation)
@@ -950,13 +957,14 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 		r.conv = conv
 		a.mu.Unlock()
 		// A request still unanswered when the execution reaches its time limit is declined, and the execution says so;
-		// no other end of the attempt answers one, and nothing else does on the owner's behalf.
+		// no other end of the attempt answers one, and nothing else does on the owner's behalf. One that arrives later,
+		// while the harness is being stopped, is declined as it arrives (onApprovalRequested).
 		declined := make(chan struct{})
 		go func() {
 			defer close(declined)
 			select {
 			case <-ctx.Done():
-				if errors.Is(ctx.Err(), context.DeadlineExceeded) && !r.cancelRequested() {
+				if r.timeLimitReached(ctx) {
 					r.declinePending(conv)
 				}
 			case <-proc.Done():
@@ -1227,8 +1235,8 @@ func (r *run) env() []string {
 }
 
 // onHarnessEvent turns the adapter's observations into events, commands, and changed files. They are the harness's
-// text, redacted before any of it is kept or trimmed.
-func (r *run) onHarnessEvent(he ports.HarnessEvent) {
+// text, redacted before any of it is kept or trimmed. ctx is the execution's context.
+func (r *run) onHarnessEvent(ctx context.Context, he ports.HarnessEvent) {
 	eventlog.RedactFields(&he)
 	a := r.a
 	now := a.now()
@@ -1357,7 +1365,7 @@ func (r *run) onHarnessEvent(he ports.HarnessEvent) {
 		r.event(domain.Event{Type: domain.EventHarnessOutput, Severity: domain.SeverityWarning, Message: he.Message})
 	case ports.HarnessApprovalRequested:
 		if he.Approval != nil {
-			r.onApprovalRequested(*he.Approval)
+			r.onApprovalRequested(ctx, *he.Approval)
 		}
 	case ports.HarnessApprovalWithdrawn:
 		if he.Approval != nil {

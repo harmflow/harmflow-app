@@ -8170,7 +8170,7 @@ func TestPeriodicSaveSkipsAnUnchangedRecord(t *testing.T) {
 		{"a first tick, of a record never written", tick, 1},
 		{"a tick with no change", tick, 1},
 		{"a tick after the harness reported its usage", func() {
-			r.onHarnessEvent(ports.HarnessEvent{Kind: ports.HarnessUsage, Usage: domain.NotReported()})
+			r.onHarnessEvent(context.Background(), ports.HarnessEvent{Kind: ports.HarnessUsage, Usage: domain.NotReported()})
 			tick()
 		}, 2},
 		{"another tick with no change", tick, 2},

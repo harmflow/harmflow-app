@@ -186,3 +186,49 @@ func TestApprovalDeclinedAtTheTimeLimit(t *testing.T) {
 			asked[0].ID, answered[0].ID)
 	}
 }
+
+// harmflow-app#1150: a request that arrives once the execution reached its time limit, while its harness is being
+// stopped, is declined by the time limit as one pending at the limit is. It never waits for the owner: no request is
+// recorded, no step says it waits, and the owner gets no notice.
+func TestApprovalAfterTheTimeLimitIsDeclined(t *testing.T) {
+	// The harness asks from its SIGTERM trap, so its request comes after the limit however loaded the host is. The limit
+	// only gives it time to start and set the trap first, as in TestApprovalDeclinedAtTheTimeLimit; the grace period
+	// costs nothing once it reads its answer and exits.
+	const limitSeconds = 10
+	e := conversing(t, func(e *env) { e.timeoutUnit = time.Second })
+	e.claude.setScript(func(ports.RunRequest) string {
+		return `trap 'echo "ASK 4 rm -rf /tmp/y"; read -r answer; echo "GOT $answer" >&2; exit 0' TERM; sleep 60 & wait`
+	})
+	e.create("late", fmt.Sprintf("  execution:\n    timeoutMinutes: %d\n    cancelGraceSeconds: 10\n", limitSeconds))
+	r, err := e.app.RunTask("late")
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := e.waitWithin(40*time.Second, r.ExecutionID, domain.StatusFailed)
+	if x.ErrorKey != "execution_timed_out" {
+		t.Errorf("the execution failed with %q (%s), want execution_timed_out", x.ErrorKey, x.ErrorMessage)
+	}
+	answered := e.eventsOf(r.ExecutionID, domain.EventApprovalAnswered)
+	if len(answered) != 1 || answered[0].Payload["requestId"] != "4" ||
+		answered[0].Payload["command"] != "rm -rf /tmp/y" || answered[0].Payload["decision"] != "decline" ||
+		answered[0].Payload["by"] != "time_limit" || answered[0].MessageKey != "approval_declined_time_limit" {
+		t.Fatalf("approval.answered %+v, want request 4 declined by the time limit, saying so", answered)
+	}
+	if asked := e.eventsOf(r.ExecutionID, domain.EventApprovalRequested); len(asked) != 0 {
+		t.Errorf("approval.requested %+v, want none for a request that arrived after the time limit", asked)
+	}
+	events, _, err := e.app.ExecutionEvents(r.ExecutionID, 0, 0)
+	if err != nil {
+		t.Fatalf("ExecutionEvents(%s): %v", r.ExecutionID, err)
+	}
+	for _, ev := range events {
+		if ev.MessageKey == "step_waiting_approval" {
+			t.Errorf("event %d (%s) says the execution waits for the owner's approval, want no such step", ev.ID, ev.Type)
+		}
+	}
+	for _, n := range e.app.Notifications(false) {
+		if n.EventType == domain.EventApprovalRequested && n.ExecutionID == r.ExecutionID {
+			t.Errorf("notice %+v asks the owner to answer a request of an execution that is ending, want none", n)
+		}
+	}
+}

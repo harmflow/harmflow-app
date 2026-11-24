@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
@@ -25,8 +27,13 @@ func (r *run) harnessLabel() string {
 }
 
 // onApprovalRequested records a request that waits for the owner, says on the execution that it waits, and notifies
-// the owner.
-func (r *run) onApprovalRequested(q domain.ApprovalRequest) {
+// the owner. A request that arrives once the execution reached its time limit, while its harness is being stopped,
+// waits for no one: the time limit declines it, as it declines one pending at the limit.
+func (r *run) onApprovalRequested(ctx context.Context, q domain.ApprovalRequest) {
+	if r.timeLimitReached(ctx) {
+		r.declineLate(q)
+		return
+	}
 	what := q.Command
 	if what == "" {
 		what = string(q.Kind)
@@ -92,6 +99,21 @@ func (r *run) declinePending(conv ports.Conversation) {
 		if err := r.answerApproval(conv, q, domain.ApprovalDecline, approvalByTimeLimit); err != nil {
 			r.a.log.Printf("execution %s: declining approval %s at the time limit: %v", r.x.ID, q.ID, err)
 		}
+	}
+}
+
+// declineLate declines a request that arrived after the time limit, recording only its answer. It records no request:
+// that event is the owner's notice. When the declining goroutine answered it first, this answer fails and nothing more
+// is recorded; when the attempt's Conversation is not yet set, that goroutine declines it once it starts.
+func (r *run) declineLate(q domain.ApprovalRequest) {
+	r.a.mu.Lock()
+	conv := r.conv
+	r.a.mu.Unlock()
+	if conv == nil {
+		return
+	}
+	if err := r.answerApproval(conv, q, domain.ApprovalDecline, approvalByTimeLimit); err != nil {
+		r.a.log.Printf("execution %s: declining approval %s after the time limit: %v", r.x.ID, q.ID, err)
 	}
 }
 
