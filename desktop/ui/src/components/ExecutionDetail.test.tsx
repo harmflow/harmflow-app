@@ -187,6 +187,27 @@ describe("execution detail", () => {
     expect(chip?.textContent).not.toContain("Failed");
   });
 
+  it("advances a running command's Duration every second, and leaves a finished one's at its final value", async () => {
+    // The Duration reads Date.now(), so the clock is faked with the timers that tick it.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    vi.setSystemTime(new Date("2026-10-21T09:00:33Z"));
+    const running: Execution = {
+      ...base,
+      id: "exec-command-running",
+      commands: [
+        { id: "c1", command: "./gradlew test", status: "succeeded", exitCode: 0, startedAt: started, endedAt: "2026-10-21T09:00:08Z" },
+        { id: "c3", command: "./gradlew check", status: "running", startedAt: "2026-10-21T09:00:12Z" },
+      ],
+    };
+    await open(running, [], capture());
+    await choose("Commands");
+    const durations = () => [...host!.querySelectorAll(".table tbody tr")].map((row) => row.lastElementChild?.textContent);
+    expect(durations()).toEqual(["8s", "21s"]);
+
+    await act(() => vi.advanceTimersByTimeAsync(3000));
+    expect(durations()).toEqual(["8s", "24s"]);
+  });
+
   it("shows a call a later end corrects to declined as one declined line, with the first end's output", async () => {
     // Claude Code ends a refused call as failed while the session runs, and says it declined it at the session's end.
     const refused = "cd /tmp && ls missing 2>&1";

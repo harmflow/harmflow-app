@@ -1,9 +1,9 @@
 import { useTranslation } from "react-i18next";
 import type { Execution } from "../../api/types";
 import type { Tone } from "../../design/theme";
-import { formatDuration, formatTime, elapsedMs } from "../../lib/format";
+import { formatTime } from "../../lib/format";
 import type { IconName } from "../Icon";
-import { Chip, EmptyState } from "../ui";
+import { Chip, Elapsed, EmptyState } from "../ui";
 
 type CommandStatus = Execution["commands"][number]["status"];
 /** A command the harness declined never ran, so it reads apart from a failure. */
@@ -36,7 +36,7 @@ export function CommandList({ commands, locale }: { commands: Execution["command
               <td className="mono cell-wrap">{c.command}</td>
               <td className="mono">{c.exitCode ?? "—"}</td>
               <td className="mono">{formatTime(c.startedAt, locale)}</td>
-              <td className="mono">{c.startedAt ? formatDuration(elapsedMs(c.startedAt, c.endedAt), locale) : "—"}</td>
+              <td className="mono">{c.startedAt ? <Elapsed start={c.startedAt} end={c.endedAt} locale={locale} /> : "—"}</td>
             </tr>
           ))}
         </tbody>
