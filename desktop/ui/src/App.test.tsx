@@ -16,7 +16,8 @@
 // (harmflow-app#505). A first task saved from first use, drafted or imported, brings first use back to its last step,
 // whose button alone finishes onboarding and opens the Executions screen; one left unsaved brings it back to the
 // first-task step (harmflow-app#809). First use, walked from a fresh installation with the daemon stopped, offers each
-// of its steps and ends on the Executions screen with a first task (harmflow-app#626).
+// of its steps and ends on the Executions screen with a first task (harmflow-app#626). A sidebar widget whose setting
+// the daemon kept off stays hidden and unread when the app opens again (harmflow-app#1134).
 import { EditorView } from "@codemirror/view";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -25,7 +26,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root as ReactRoot } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { native } from "./api/native";
-import type { Harness, LocalizedText, Settings, Task, TaskSummary, Template, Tool } from "./api/types";
+import type { GitHubRateLimit, Harness, LocalizedText, Settings, SystemGauges, Task, TaskSummary, Template, Tool } from "./api/types";
 import { Root } from "./App";
 import { rootOptions } from "./components/ErrorBoundary";
 import { YamlEditor } from "./components/YamlEditor";
@@ -2412,6 +2413,89 @@ describe("first launch", () => {
     expect(welcome()).toBe("Welcome to HarmFlow");
     expect(i18n.language).toBe("en-US");
     expect(document.documentElement.lang).toBe("en-US");
+  });
+});
+
+// harmflow-app#1134: the user turned one sidebar widget off, the daemon kept it, and both restarted. The app opened
+// again holds no settings until the daemon answers them, takes the widget's setting from that answer, and never shows
+// or reads that widget; the other is shown and read, and Settings → General shows both as the daemon answered them.
+describe("sidebar widgets after a restart", () => {
+  const gauges: SystemGauges = { cpuPercent: 12, memoryUsedBytes: 2.1e9, memoryTotalBytes: 16e9, diskUsedBytes: 48e9, diskTotalBytes: 500e9 };
+  const limits: GitHubRateLimit = { rest: { limit: 2000, used: 500, resetAt: "2026-11-14T10:00:00Z" } };
+  // Each widget: its panel's title, the path it reads, its setting, its switch in General, and what its panel shows
+  // once read.
+  const widgets = {
+    System: {
+      title: "gauges-title",
+      path: "/system",
+      setting: "showSystemWidget",
+      toggle: "settings-system-widget",
+      label: "Show System widget",
+      shown: (panel: Element) => panel.querySelector(".gauge__text")?.textContent,
+      reading: "12%",
+    },
+    GitHub: {
+      title: "github-gauges-title",
+      path: "/github/rate-limit",
+      setting: "showGitHubWidget",
+      toggle: "settings-github-widget",
+      label: "Show GitHub widget",
+      shown: (panel: Element) => panel.querySelector(".gauge__label")?.textContent,
+      reading: "REST",
+    },
+  } as const;
+  const panel = (title: string) => host!.querySelector(`#${title}`)?.closest("section.gauges-panel") ?? null;
+  const reads = (path: string) => daemon.sent.filter((r) => r.method === "GET" && r.path === path).length;
+  const toggle = (id: string) => host!.querySelector<HTMLInputElement>(`input#${id}`)!;
+  /** Moves the gauges' clock by ms, letting each read it starts answer. */
+  const elapse = (ms: number) => act(async () => void (await vi.advanceTimersByTimeAsync(ms)));
+
+  beforeEach(() => {
+    // A restarted app holds nothing the daemon has not answered yet: no settings and no gauges.
+    patchStateForTests({ settings: undefined, system: undefined, github: undefined });
+    daemon.answers.set("/system", gauges);
+    daemon.answers.set("/github/rate-limit", limits);
+    // The gauges' clock is the sidebar's intervals; nothing else is faked.
+    vi.useFakeTimers({ toFake: ["setInterval"] });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    patchStateForTests({ github: undefined });
+  });
+
+  it.each([
+    ["System", "GitHub"],
+    ["GitHub", "System"],
+  ] as const)("keeps the %s widget hidden and unread when the daemon answers its setting off, the %s widget shown and read", async (off, on) => {
+    const [hidden, other] = [widgets[off], widgets[on]];
+    daemon.answers.set("/settings", { ...settings, [hidden.setting]: false, [other.setting]: true });
+
+    await launch();
+    expect(layout()).toBe("expanded");
+    // Until the daemon answers the settings, neither widget is read.
+    expect([reads(hidden.path), reads(other.path)]).toEqual([0, 0]);
+    // The start's first read of the settings, as startSync makes it.
+    await act(async () => void (await actions.refreshSettings()));
+    expect(getState().settings).toMatchObject({ [hidden.setting]: false, [other.setting]: true });
+
+    // Two ticks of the gauges' clock, which reads every 5 seconds.
+    await elapse(11000);
+    expect(panel(hidden.title)).toBeNull();
+    expect(reads(hidden.path)).toBe(0);
+    expect(other.shown(panel(other.title)!)).toBe(other.reading);
+    expect(reads(other.path)).toBe(3);
+
+    // Settings opens on General, through the sidebar, with both switches as the daemon answered them.
+    await act(async () => navButton("Settings").click());
+    expect(host!.querySelector(".settings__title")?.textContent).toBe("General");
+    expect(host!.querySelector(`label[for="${hidden.toggle}"]`)?.textContent).toBe(hidden.label);
+    expect(toggle(hidden.toggle).checked).toBe(false);
+    expect(host!.querySelector(`label[for="${other.toggle}"]`)?.textContent).toBe(other.label);
+    expect(toggle(other.toggle).checked).toBe(true);
+    // Nothing was saved: both settings are the daemon's own.
+    expect(daemon.sent.filter((r) => r.method === "PATCH")).toEqual([]);
+    expect(reads(hidden.path)).toBe(0);
   });
 });
 
