@@ -52,12 +52,13 @@ const (
 	keyEnter = "\r"
 )
 
-// SignIn implements ports.SignInDriver: it starts the detected claude on a terminal of its own in dir, with the
-// user's environment without CODEX_HOME, trusts dir when the CLI asks, runs /login, takes its first method, the Claude
-// account, and waits for the user to approve the sign-in in the browser the CLI opens. Once the CLI says the sign-in
-// succeeded, it ends the session without typing anything more: a key typed then could answer a question the CLI asks
-// next, such as whether to trust the settings an organization manages, which is the user's to answer. It types nothing
-// on a screen it does not recognize either, and returns it, its secrets masked.
+// SignIn implements ports.SignInDriver: it starts the installation's claude on a terminal of its own in dir, with the
+// user's environment without CODEX_HOME and with a custom entry's assignments, its CLAUDE_CONFIG_DIR included, trusts
+// dir when the CLI asks, runs /login, takes its first method, the Claude account, and waits for the user to approve
+// the sign-in in the browser the CLI opens. Once the CLI says the sign-in succeeded, it ends the session without typing
+// anything more: a key typed then could answer a question the CLI asks next, such as whether to trust the settings an
+// organization manages, which is the user's to answer. It types nothing on a screen it does not recognize either, and
+// returns it, its secrets masked.
 func (a *Adapter) SignIn(ctx context.Context, info ports.HarnessInfo, dir string) ports.SignInResult {
 	if info.Path == "" {
 		return ports.SignInResult{Outcome: ports.SignInEnded}
@@ -65,7 +66,11 @@ func (a *Adapter) SignIn(ctx context.Context, info ports.HarnessInfo, dir string
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return ports.SignInResult{Outcome: ports.SignInEnded, Err: err}
 	}
-	env := append(a.env(), "TERM=xterm-256color") // the last of a duplicate key wins
+	env := a.env()
+	if len(info.EntryEnv) > 0 {
+		env = ports.WithAssignments(env, info.EntryEnv)
+	}
+	env = append(env, "TERM=xterm-256color") // the last of a duplicate key wins
 	term, err := procutil.StartTerminal(ports.Invocation{Path: info.Path, Dir: dir, Env: env}, signInRows, signInCols)
 	if err != nil {
 		return ports.SignInResult{Outcome: ports.SignInEnded, Err: err}

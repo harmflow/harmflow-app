@@ -207,17 +207,19 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/Invalid" }
 
-  /harness-entries:
+  /harnesses/{harnessId}/installations:
+    parameters:
+      - $ref: "#/components/parameters/HarnessId"
     post:
       tags: [harnesses]
       operationId: addCustomEntry
-      summary: Add an installation from a command line
+      summary: Add an installation of the harness from a command line
       description: >-
         Reads the command line with no shell: zero or more NAME=value assignments, an executable (an absolute path or
         a name on the daemon's PATH), then arguments, with $HOME and ~ expanded and nothing else. A line with shell
-        syntax is refused, naming what it found. The harness is the one the executable's --version names; a line that
-        names neither harness is refused. Nothing is saved on a refusal. The entry's probes and attempts run with its
-        assignments added to their environment, and nothing else does.
+        syntax is refused, naming what it found. The executable's --version must name this harness; a line that names
+        neither harness, or names the other harness, is refused. Nothing is saved on a refusal. The entry's probes,
+        attempts, and sign-in run with its assignments added to their environment, and nothing else does.
       requestBody:
         required: true
         content:
@@ -225,18 +227,20 @@ paths:
             schema: { $ref: "#/components/schemas/CustomEntryInput" }
       responses:
         "201":
-          description: The entry's harness, detected again, the entry among its customEntries.
+          description: The harness, detected again, the entry among its customEntries.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Harness" }
+        "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/Invalid" }
 
-  /harness-entries/{entryId}:
+  /harnesses/{harnessId}/installations/{installationId}:
     parameters:
-      - name: entryId
+      - $ref: "#/components/parameters/HarnessId"
+      - name: installationId
         in: path
         required: true
-        description: The entry's installationId.
+        description: The installationId of a custom entry of the harness; a detected installation is not found.
         schema: { type: string }
     patch:
       tags: [harnesses]
@@ -279,15 +283,30 @@ paths:
     post:
       tags: [harnesses]
       operationId: signInHarness
-      summary: Sign the harness in again through its own sign-in and the browser
+      summary: Sign an installation of the harness in again through its own sign-in and the browser
       description: >-
         Starts the sign-in the harness's interactive session offers, which the user approves in the browser it opens,
-        even after one that did not sign the harness in. A sign-in already running is the one the request joins, never
-        a second. The events harness.sign_in_started, then harness.sign_in_completed, harness.sign_in_timed_out, or
-        harness.sign_in_failed, say how it goes.
+        even after one that did not sign the installation in. With no body, or no installationId, it signs in the
+        installation in use. With the installationId of an item of homes, it runs with that installation's own home;
+        with that of an item of customEntries, with the entry's NAME=value assignments added to its environment. A
+        sign-in never runs with the daemon's own environment for an installation that is not in use. Each installation
+        has a sign-in of its own: one already running for the same installation is the one the request joins, never a
+        second, and those of different installations run side by side. The events harness.sign_in_started, then
+        harness.sign_in_completed, harness.sign_in_timed_out, or harness.sign_in_failed, say how it goes; their payload
+        carries the installation's installationId and, for a custom entry, its entryName, never a value it assigns.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                installationId:
+                  description: The installation to sign in, an item of homes or of customEntries; absent for the one in use.
+                  type: string
       responses:
         "202":
-          description: The harness, its sign-in running.
+          description: The harness, the installation's sign-in running.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Harness" }
@@ -1340,6 +1359,7 @@ components:
         - custom_entry_name_empty
         - custom_entry_no_harness
         - custom_entry_not_found
+        - custom_entry_other_harness
         - agent_missing
         - skill_missing
         - parameter_required
@@ -1838,8 +1858,9 @@ components:
         diagnosticParams: { $ref: "#/components/schemas/MessageParams" }
         signIn:
           description: >-
-            The sign-in HarmFlow can run for the harness, which signIn starts: available, or running while one waits for
-            the user to approve it in the browser. Absent for a harness that has none.
+            The sign-in HarmFlow can run for the installation, which signIn starts: available, or running while one
+            waits for the user to approve it in the browser. Filled on the harness, for the installation in use, and on
+            each item of homes and of customEntries, for that installation. Absent for a harness that has none.
           type: string
           enum: [available, running]
         takesToken:

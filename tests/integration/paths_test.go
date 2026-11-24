@@ -53,7 +53,7 @@ func TestPathsInRequestsAreChecked(t *testing.T) {
 	}{
 		{"a shell as Codex", "PUT", "/harnesses/codex", map[string]any{"path": "/bin/sh"}, "harness_not_identified", "/path"},
 		// Whatever /bin/sh answers to --version, it names no harness, so a custom entry refuses it on every system.
-		{"a shell as a custom entry", "POST", "/harness-entries", map[string]any{"line": "CODEX_HOME=/tmp /bin/sh"},
+		{"a shell as a custom entry", "POST", "/harnesses/codex/installations", map[string]any{"line": "CODEX_HOME=/tmp /bin/sh"},
 			"custom_entry_no_harness", "/line"},
 		{"a workspace of /", "POST", "/tasks", map[string]any{"yaml": task("root", "p", "  workspace:\n    path: /\n")},
 			"path_forbidden_home", "/spec/workspace/path"},

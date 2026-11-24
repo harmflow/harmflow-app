@@ -154,7 +154,7 @@ func TestCustomEntryRefusalsSaveNothing(t *testing.T) {
 		{"no executable", "CODEX_HOME=/x /no/such/codex", "custom_entry_executable_missing"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			if _, err := e.app.AddCustomEntry(t.Context(), CustomEntryInput{Line: &c.line}); !refusedAt(err, "/line", c.key) {
+			if _, err := e.app.AddCustomEntry(t.Context(), domain.HarnessCodex, CustomEntryInput{Line: &c.line}); !refusedAt(err, "/line", c.key) {
 				t.Errorf("AddCustomEntry(%q) error = %v, want %s at /line", c.line, err, c.key)
 			}
 		})
@@ -172,7 +172,7 @@ func TestCustomEntriesRunWithTheirOwnHome(t *testing.T) {
 	homes := []string{"/accounts/personal", "/accounts/work"}
 	var ids []string
 	for i, home := range homes {
-		info, err := e.app.AddCustomEntry(t.Context(), CustomEntryInput{
+		info, err := e.app.AddCustomEntry(t.Context(), domain.HarnessCodex, CustomEntryInput{
 			Line: ptr("CODEX_HOME=" + home + " MARK=" + filepath.Base(home) + " " + codexBin)})
 		if err != nil || len(info.CustomEntries) != i+1 {
 			t.Fatalf("AddCustomEntry(%s) = %d entries, error %v; want %d entries", home, len(info.CustomEntries), err, i+1)
@@ -231,7 +231,7 @@ func TestCustomEntryIdentifierIsNeverGivenAgain(t *testing.T) {
 	e, codexBin, _ := newEntriesEnv(t)
 	add := func(home string) string {
 		t.Helper()
-		info, err := e.app.AddCustomEntry(t.Context(), CustomEntryInput{Line: ptr("CODEX_HOME=" + home + " " + codexBin)})
+		info, err := e.app.AddCustomEntry(t.Context(), domain.HarnessCodex, CustomEntryInput{Line: ptr("CODEX_HOME=" + home + " " + codexBin)})
 		if err != nil || len(info.CustomEntries) == 0 {
 			t.Fatalf("AddCustomEntry(%s) = %+v, %v; want the entry added", home, info.CustomEntries, err)
 		}
@@ -239,7 +239,7 @@ func TestCustomEntryIdentifierIsNeverGivenAgain(t *testing.T) {
 	}
 	remove := func(id string) {
 		t.Helper()
-		if _, err := e.app.RemoveCustomEntry(t.Context(), id); err != nil {
+		if _, err := e.app.RemoveCustomEntry(t.Context(), domain.HarnessCodex, id); err != nil {
 			t.Fatalf("RemoveCustomEntry(%s) error = %v, want none", id, err)
 		}
 	}
@@ -274,7 +274,7 @@ func TestCustomEntryShowsItsSkillsAndQuota(t *testing.T) {
 			return domain.Quota{Windows: []domain.QuotaWindow{{Name: "primary", UsedPercent: 40, ResetsAt: resets}}}, nil
 		}
 	})
-	info, err := e.app.AddCustomEntry(t.Context(), CustomEntryInput{Line: ptr("CODEX_HOME=/accounts/personal " + codexBin)})
+	info, err := e.app.AddCustomEntry(t.Context(), domain.HarnessCodex, CustomEntryInput{Line: ptr("CODEX_HOME=/accounts/personal " + codexBin)})
 	if err != nil || len(info.CustomEntries) != 1 {
 		t.Fatalf("AddCustomEntry(/accounts/personal) = %+v, %v; want one entry", info.CustomEntries, err)
 	}
@@ -313,7 +313,7 @@ func TestCustomEntryShowsItsSkillsAndQuota(t *testing.T) {
 // installations as they are, and a task that still names it fails validation at its profile's installation key.
 func TestCustomEntryIsKeptEditedAndRemoved(t *testing.T) {
 	e, codexBin, _ := newEntriesEnv(t)
-	info, err := e.app.AddCustomEntry(t.Context(), CustomEntryInput{Line: ptr("CODEX_HOME=/a " + codexBin),
+	info, err := e.app.AddCustomEntry(t.Context(), domain.HarnessCodex, CustomEntryInput{Line: ptr("CODEX_HOME=/a " + codexBin),
 		Name: ptr("Personal")})
 	if err != nil || len(info.CustomEntries) != 1 || info.CustomEntries[0].EntryName != "Personal" {
 		t.Fatalf("AddCustomEntry(named Personal) = %+v, %v; want one entry named Personal", info.CustomEntries, err)
@@ -332,18 +332,18 @@ func TestCustomEntryIsKeptEditedAndRemoved(t *testing.T) {
 			codex.CustomEntries, id)
 	}
 
-	info, err = e.app.UpdateCustomEntry(t.Context(), id, CustomEntryInput{Name: ptr("Work"),
+	info, err = e.app.UpdateCustomEntry(t.Context(), domain.HarnessCodex, id, CustomEntryInput{Name: ptr("Work"),
 		Line: ptr("CODEX_HOME=/b " + codexBin)})
 	if err != nil || len(info.CustomEntries) != 1 || info.CustomEntries[0].EntryName != "Work" ||
 		!slices.Equal(info.CustomEntries[0].EntryEnv, []string{"CODEX_HOME=/b"}) {
 		t.Errorf("UpdateCustomEntry(%s) = %+v, %v; want it named Work, with CODEX_HOME=/b", id, info.CustomEntries, err)
 	}
-	if _, err := e.app.UpdateCustomEntry(t.Context(), id, CustomEntryInput{Name: ptr(" ")}); !refusedAt(err, "/name",
+	if _, err := e.app.UpdateCustomEntry(t.Context(), domain.HarnessCodex, id, CustomEntryInput{Name: ptr(" ")}); !refusedAt(err, "/name",
 		"custom_entry_name_empty") {
 		t.Errorf("UpdateCustomEntry(an empty name) error = %v, want custom_entry_name_empty at /name", err)
 	}
 
-	info, err = e.app.RemoveCustomEntry(t.Context(), id)
+	info, err = e.app.RemoveCustomEntry(t.Context(), domain.HarnessCodex, id)
 	if err != nil || len(info.CustomEntries) != 0 || len(info.Homes) != 1 || info.Homes[0].InstallationID != "~/.codex" {
 		t.Fatalf("RemoveCustomEntry(%s) = entries %+v, homes %+v, %v; want no entry and ~/.codex as before", id,
 			info.CustomEntries, info.Homes, err)
@@ -352,7 +352,7 @@ func TestCustomEntryIsKeptEditedAndRemoved(t *testing.T) {
 	if !refusedAt(err, "/spec/harness/preferred/installation", "harness_installation_missing") {
 		t.Errorf("CreateTask(on the removed %s) error = %v, want harness_installation_missing at the key", id, err)
 	}
-	if _, err := e.app.RemoveCustomEntry(t.Context(), id); err == nil {
+	if _, err := e.app.RemoveCustomEntry(t.Context(), domain.HarnessCodex, id); err == nil {
 		t.Errorf("RemoveCustomEntry(%s) again error = nil, want not found", id)
 	}
 }
@@ -364,7 +364,7 @@ func TestSignedOutCustomEntryIsAReadinessMatter(t *testing.T) {
 	e.codex.mu.Lock()
 	e.codex.signedOut = map[string]bool{"/signed-out": true}
 	e.codex.mu.Unlock()
-	info, err := e.app.AddCustomEntry(t.Context(), CustomEntryInput{Line: ptr("CODEX_HOME=/signed-out " + codexBin)})
+	info, err := e.app.AddCustomEntry(t.Context(), domain.HarnessCodex, CustomEntryInput{Line: ptr("CODEX_HOME=/signed-out " + codexBin)})
 	if err != nil || len(info.CustomEntries) != 1 || info.CustomEntries[0].Authentication != "invalid" {
 		t.Fatalf("AddCustomEntry(signed out) = %+v, %v; want the entry listed, signed out", info.CustomEntries, err)
 	}
@@ -411,7 +411,7 @@ func TestCodexCustomEntryIsProbedWithItsOwnHome(t *testing.T) {
 			}
 		}
 	}
-	info, err := a.AddCustomEntry(t.Context(), CustomEntryInput{Line: ptr("CODEX_HOME=" + third + " MARK=1 " + bin)})
+	info, err := a.AddCustomEntry(t.Context(), domain.HarnessCodex, CustomEntryInput{Line: ptr("CODEX_HOME=" + third + " MARK=1 " + bin)})
 	if err != nil || len(info.CustomEntries) != 1 {
 		t.Fatalf("AddCustomEntry(%s) = %+v, %v; want one entry", third, info.CustomEntries, err)
 	}
@@ -449,7 +449,7 @@ func TestCodexCustomEntryIsProbedWithItsOwnHome(t *testing.T) {
 		t.Errorf("codex Prepare(the entry's attempt) gives the environment %q, want CODEX_HOME=%s and MARK=1", inv.Env, third)
 	}
 
-	info, err = a.AddCustomEntry(t.Context(), CustomEntryInput{Line: ptr("CODEX_HOME=" + fourth + " " + bin)})
+	info, err = a.AddCustomEntry(t.Context(), domain.HarnessCodex, CustomEntryInput{Line: ptr("CODEX_HOME=" + fourth + " " + bin)})
 	if err != nil || len(info.CustomEntries) != 2 || info.CustomEntries[1].Authentication != "invalid" ||
 		info.CustomEntries[1].Ready() {
 		t.Fatalf("AddCustomEntry(%s, signed out) = %+v, %v; want it listed, signed out and not ready", fourth,
@@ -464,7 +464,7 @@ func TestCodexCustomEntryIsProbedWithItsOwnHome(t *testing.T) {
 	if err := os.WriteFile(impostor, []byte("#!/bin/sh\necho 'some-other-tool 1.0'\n"), 0o700); err != nil {
 		t.Fatalf("WriteFile(%s) error = %v, want none", impostor, err)
 	}
-	if _, err := a.AddCustomEntry(t.Context(), CustomEntryInput{Line: ptr("CODEX_HOME=" + third + " " + impostor)}); !refusedAt(
+	if _, err := a.AddCustomEntry(t.Context(), domain.HarnessCodex, CustomEntryInput{Line: ptr("CODEX_HOME=" + third + " " + impostor)}); !refusedAt(
 		err, "/line", "custom_entry_no_harness") {
 		t.Errorf("AddCustomEntry(%s, whose --version names no harness) error = %v, want custom_entry_no_harness at /line",
 			impostor, err)

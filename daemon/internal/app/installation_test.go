@@ -427,10 +427,10 @@ func TestPreferredOnARemovedInstallationFailsOver(t *testing.T) {
 	}
 }
 
-// harmflow-app#475: the sign-in the daemon starts is the one of the installation in use, so an attempt that ends
-// signed out on another installation starts none, which would sign the wrong home in; one on the installation in use
-// still starts it.
-func TestSignedOutAttemptOnAnotherInstallationStartsNoSignIn(t *testing.T) {
+// harmflow-app#1136: an attempt that ends signed out on an installation that is not in use starts that installation's
+// own sign-in, with its own home, never the installation in use's, which would sign the wrong home in; one on the
+// installation in use starts the installation in use's.
+func TestSignedOutAttemptOnAnotherInstallationStartsItsOwnSignIn(t *testing.T) {
 	signer := newCodexSigningHarness(true)
 	signer.homes = []string{"~/.codex", "~/.codex-b"}
 	e := signInEnv(t, signer, 0)
@@ -443,10 +443,13 @@ func TestSignedOutAttemptOnAnotherInstallationStartsNoSignIn(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.wait(r.ExecutionID, domain.StatusFailed)
-	time.Sleep(200 * time.Millisecond) // a sign-in starts on a goroutine of its own
-	if n := signer.started(); n != 0 {
-		t.Errorf("%d sign-ins started after a signed-out attempt on ~/.codex-b, want none", n)
+	e.waitSignIns(signer, 1)
+	if inst := signer.signedInto()[0]; inst.InstallationID != "~/.codex-b" || inst.Home != "/homes/~/.codex-b" {
+		t.Errorf("the sign-in after a signed-out attempt on ~/.codex-b ran with installation %q, home %q; want ~/.codex-b's own",
+			inst.InstallationID, inst.Home)
 	}
+	signer.end <- ports.SignInResult{Outcome: ports.SignInSucceeded}
+	e.waitPublished(domain.EventHarnessSignInCompleted)
 
 	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: codexTaskYAML("in-use", "")}); err != nil {
 		t.Fatal(err)
@@ -455,9 +458,12 @@ func TestSignedOutAttemptOnAnotherInstallationStartsNoSignIn(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.wait(r.ExecutionID, domain.StatusFailed)
-	e.waitSignIns(signer, 1)
+	e.waitSignIns(signer, 2)
+	if inst := signer.signedInto()[1]; inst.InstallationID != "~/.codex" {
+		t.Errorf("the sign-in after a signed-out attempt on the installation in use ran with installation %q, want ~/.codex",
+			inst.InstallationID)
+	}
 	signer.end <- ports.SignInResult{Outcome: ports.SignInSucceeded}
-	e.waitPublished(domain.EventHarnessSignInCompleted)
 }
 
 // newHomesEnv starts an App on fake harnesses whose Codex lists two installations, ~/.codex, in use, and ~/.codex-b,

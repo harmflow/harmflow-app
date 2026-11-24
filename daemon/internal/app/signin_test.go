@@ -2,7 +2,12 @@ package app
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -22,9 +27,10 @@ type signingHarness struct {
 
 	mu       sync.Mutex
 	signedIn bool
-	signIns  int             // the sign-ins started
-	dirs     []string        // the folder of each
-	left     []time.Duration // the time each one's context had left when it started; 0 for one with no deadline
+	signIns  int                 // the sign-ins started
+	dirs     []string            // the folder of each
+	infos    []ports.HarnessInfo // the installation each signed in
+	left     []time.Duration     // the time each one's context had left when it started; 0 for one with no deadline
 }
 
 var _ ports.SignInDriver = (*signingHarness)(nil)
@@ -64,7 +70,9 @@ func (s *signingHarness) Detect(ctx context.Context, manual string) ports.Harnes
 	return info
 }
 
-func (s *signingHarness) SignIn(ctx context.Context, _ ports.HarnessInfo, dir string) ports.SignInResult {
+// SignIn signs in the installation it is given: a home or an entry's home the fake lists in signedOut, by its
+// identifier or its home, reads signed in from then on, and any other installation is the one in use.
+func (s *signingHarness) SignIn(ctx context.Context, info ports.HarnessInfo, dir string) ports.SignInResult {
 	var left time.Duration
 	if deadline, ok := ctx.Deadline(); ok {
 		left = time.Until(deadline)
@@ -72,14 +80,22 @@ func (s *signingHarness) SignIn(ctx context.Context, _ ports.HarnessInfo, dir st
 	s.mu.Lock()
 	s.signIns++
 	s.dirs = append(s.dirs, dir)
+	s.infos = append(s.infos, info)
 	s.left = append(s.left, left)
 	s.mu.Unlock()
 	select {
 	case res := <-s.end:
 		if res.Outcome == ports.SignInSucceeded {
-			s.mu.Lock()
-			s.signedIn = true
-			s.mu.Unlock()
+			s.fakeHarness.mu.Lock()
+			own := s.signedOut[info.InstallationID] || info.Home != "" && s.signedOut[info.Home]
+			delete(s.signedOut, info.InstallationID)
+			delete(s.signedOut, info.Home)
+			s.fakeHarness.mu.Unlock()
+			if !own {
+				s.mu.Lock()
+				s.signedIn = true
+				s.mu.Unlock()
+			}
 		}
 		return res
 	case <-ctx.Done():
@@ -91,6 +107,52 @@ func (s *signingHarness) started() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.signIns
+}
+
+// signedInto are the installations the sign-ins started for, in order.
+func (s *signingHarness) signedInto() []ports.HarnessInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.infos)
+}
+
+// entrySigner is a signingHarness that takes custom entries, as entryHarness does.
+type entrySigner struct{ *signingHarness }
+
+var (
+	_ ports.EntryProber       = entrySigner{}
+	_ ports.HarnessIdentifier = entrySigner{}
+)
+
+func (s entrySigner) Identify(ctx context.Context, path string) error {
+	return entryHarness{s.fakeHarness}.Identify(ctx, path)
+}
+
+func (s entrySigner) EntryExecutable(name string) string {
+	return entryHarness{s.fakeHarness}.EntryExecutable(name)
+}
+
+func (s entrySigner) ProbeEntry(ctx context.Context, path string, assignments []string) ports.HarnessInfo {
+	return entryHarness{s.fakeHarness}.ProbeEntry(ctx, path, assignments)
+}
+
+// homesSigningEnv starts a daemon whose Codex is a signingHarness, signed in where it is in use, with two homes,
+// ~/.codex, in use, and ~/.codex-b, and the homes listed in signedOut read signed out.
+func homesSigningEnv(t *testing.T, signedOut ...string) (*env, *signingHarness) {
+	t.Helper()
+	signer := newCodexSigningHarness(true)
+	signer.homes = []string{"~/.codex", "~/.codex-b"}
+	signer.signedOut = map[string]bool{}
+	for _, h := range signedOut {
+		signer.signedOut[h] = true
+	}
+	return signInEnv(t, signer, 0), signer
+}
+
+// homeNamed is the entry of Homes, or of CustomEntries, of the harness with the identifier.
+func homeNamed(info ports.HarnessInfo, id string) ports.HarnessInfo {
+	inst, _ := info.InstallationNamed(id)
+	return inst
 }
 
 // signInEnv starts a daemon whose harness of signer's ID, Claude Code or Codex, is signer.
@@ -188,7 +250,7 @@ func TestSignInTimesOutAndWaitsForTheButton(t *testing.T) {
 	if n := signer.started(); n != 1 {
 		t.Fatalf("%d sign-ins after the timeout and two checks, want the first alone", n)
 	}
-	got, err := e.app.SignIn(domain.HarnessClaudeCode)
+	got, err := e.app.SignIn(domain.HarnessClaudeCode, "")
 	if err != nil || got.SignIn != ports.SignInRunning {
 		t.Fatalf("SignIn by hand = %+v, %v; want its sign-in running", got, err)
 	}
@@ -229,8 +291,8 @@ func TestSignInRunsOneAtATime(t *testing.T) {
 	e := signInEnv(t, signer, 0)
 	e.waitSignIns(signer, 1)
 	e.app.RefreshHarnesses(t.Context())
-	e.app.signInWhenSignedOut(domain.HarnessClaudeCode)
-	if got, err := e.app.SignIn(domain.HarnessClaudeCode); err != nil || got.SignIn != ports.SignInRunning {
+	e.app.signInWhenSignedOut(domain.HarnessClaudeCode, "")
+	if got, err := e.app.SignIn(domain.HarnessClaudeCode, ""); err != nil || got.SignIn != ports.SignInRunning {
 		t.Errorf("SignIn by hand during a sign-in = %+v, %v; want the one running", got, err)
 	}
 	time.Sleep(200 * time.Millisecond)
@@ -404,5 +466,146 @@ func TestStopEndsASignIn(t *testing.T) {
 		if got := e.published(kind); len(got) > 0 {
 			t.Errorf("%s after the stop: %+v", kind, got)
 		}
+	}
+}
+
+// harmflow-app#1136: a sign-in by hand for a detected home that is not in use runs with that home, shows running on
+// that home alone, and once it signs the home in, its events name the installation; the installation in use is left
+// as it was.
+func TestSignInOfADetectedHomeRunsWithItsHome(t *testing.T) {
+	e, signer := homesSigningEnv(t)
+	if !e.poll(10*time.Second, func() bool { return len(e.harnessInfo(domain.HarnessCodex).Homes) == 2 }) {
+		t.Fatal("Codex never listed its two homes")
+	}
+	got, err := e.app.SignIn(domain.HarnessCodex, "~/.codex-b")
+	if err != nil || homeNamed(got, "~/.codex-b").SignIn != ports.SignInRunning || got.SignIn != ports.SignInAvailable ||
+		homeNamed(got, "~/.codex").SignIn != ports.SignInAvailable {
+		t.Fatalf("SignIn(codex, ~/.codex-b) = %+v, %v; want ~/.codex-b running, the installation in use available", got, err)
+	}
+	e.waitSignIns(signer, 1)
+	if inst := signer.signedInto()[0]; inst.InstallationID != "~/.codex-b" || inst.Home != "/homes/~/.codex-b" {
+		t.Errorf("the sign-in ran with installation %q, home %q; want ~/.codex-b, /homes/~/.codex-b", inst.InstallationID,
+			inst.Home)
+	}
+	if dir := signer.dirs[0]; dir == e.paths.Run+"/sign-in/"+domain.HarnessCodex {
+		t.Errorf("the sign-in of ~/.codex-b ran in %q, the folder of the installation in use's", dir)
+	}
+	started := e.waitPublished(domain.EventHarnessSignInStarted)
+	if started.Payload["installationId"] != "~/.codex-b" {
+		t.Errorf("%s payload %+v, want installationId ~/.codex-b", domain.EventHarnessSignInStarted, started.Payload)
+	}
+	signer.end <- ports.SignInResult{Outcome: ports.SignInSucceeded}
+	completed := e.waitPublished(domain.EventHarnessSignInCompleted)
+	if completed.Payload["installationId"] != "~/.codex-b" {
+		t.Errorf("%s payload %+v, want installationId ~/.codex-b", domain.EventHarnessSignInCompleted, completed.Payload)
+	}
+	if n := signer.started(); n != 1 {
+		t.Errorf("%d sign-ins started, want the one of ~/.codex-b alone", n)
+	}
+}
+
+// harmflow-app#1136: an installation the harness does not list is not found, and starts no sign-in.
+func TestSignInOfAnUnknownInstallationIsNotFound(t *testing.T) {
+	e, signer := homesSigningEnv(t)
+	if !e.poll(10*time.Second, func() bool { return len(e.harnessInfo(domain.HarnessCodex).Homes) == 2 }) {
+		t.Fatal("Codex never listed its two homes")
+	}
+	_, err := e.app.SignIn(domain.HarnessCodex, "~/.codex-none")
+	var appErr *Error
+	if !errors.As(err, &appErr) || appErr.Code != CodeNotFound {
+		t.Errorf("SignIn(codex, ~/.codex-none) error = %v, want %s", err, CodeNotFound)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if n := signer.started(); n != 0 {
+		t.Errorf("%d sign-ins started, want none", n)
+	}
+}
+
+// harmflow-app#1136: a detected home that reads signed out starts its own sign-in, with its own home, beside the
+// installation in use, which starts none; a second request for the same home joins it, and the sign-in of the
+// installation in use runs side by side with it. A home whose sign-in fails holds back only its own.
+func TestSignInsOfInstallationsRunSideBySide(t *testing.T) {
+	e, signer := homesSigningEnv(t, "~/.codex-b")
+	e.waitSignIns(signer, 1)
+	if inst := signer.signedInto()[0]; inst.InstallationID != "~/.codex-b" || inst.Home != "/homes/~/.codex-b" {
+		t.Fatalf("the sign-in started for installation %q, home %q; want ~/.codex-b's own", inst.InstallationID, inst.Home)
+	}
+	if got, err := e.app.SignIn(domain.HarnessCodex, "~/.codex-b"); err != nil ||
+		homeNamed(got, "~/.codex-b").SignIn != ports.SignInRunning {
+		t.Errorf("SignIn(codex, ~/.codex-b) during its sign-in = %+v, %v; want it joined, running", got, err)
+	}
+	if _, err := e.app.SignIn(domain.HarnessCodex, ""); err != nil {
+		t.Fatalf("SignIn(codex) error = %v, want none", err)
+	}
+	e.waitSignIns(signer, 2)
+	time.Sleep(200 * time.Millisecond)
+	if n := signer.started(); n != 2 {
+		t.Errorf("%d sign-ins started, want two: ~/.codex-b's and the installation in use's", n)
+	}
+	info := e.harnessInfo(domain.HarnessCodex)
+	if info.SignIn != ports.SignInRunning || homeNamed(info, "~/.codex-b").SignIn != ports.SignInRunning {
+		t.Errorf("Harnesses() sign-ins %q in use, %q on ~/.codex-b; want both running", info.SignIn,
+			homeNamed(info, "~/.codex-b").SignIn)
+	}
+	signer.end <- ports.SignInResult{Outcome: ports.SignInUnknownScreen}
+	signer.end <- ports.SignInResult{Outcome: ports.SignInSucceeded}
+	if !e.poll(10*time.Second, func() bool {
+		return len(e.published(domain.EventHarnessSignInFailed)) > 0 &&
+			len(e.published(domain.EventHarnessSignInCompleted)) > 0
+	}) {
+		t.Fatal("the two sign-ins never ended, one failed and one completed")
+	}
+	// Which of the two took which end does not matter: the one that failed holds back its own installation, and the
+	// other reads signed in, so a check starts neither again.
+	e.app.RefreshHarnesses(t.Context())
+	time.Sleep(200 * time.Millisecond)
+	if n := signer.started(); n != 2 {
+		t.Errorf("%d sign-ins after a check, want the two alone: a failed one holds back its own installation", n)
+	}
+}
+
+// harmflow-app#1136: a custom entry that reads signed out starts its own sign-in, run with the entry's assignments and
+// home, whose events and texts name the entry by its name, never by what it assigns; once it signs the entry in, the
+// entry reads signed in, and the installation in use is left as it was.
+func TestSignedOutCustomEntryStartsItsOwnSignIn(t *testing.T) {
+	signer := newCodexSigningHarness(true)
+	signer.homes = []string{"~/.codex"}
+	signer.signedOut = map[string]bool{"/entry-home": true}
+	bins := t.TempDir()
+	codexBin := filepath.Join(bins, "codex")
+	if err := os.WriteFile(codexBin, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(%s) error = %v, want none", codexBin, err)
+	}
+	e := newEnv(t, func(e *env) { e.signer, e.signInTimeout = entrySigner{signer}, 0 })
+	info, err := e.app.AddCustomEntry(t.Context(), domain.HarnessCodex, CustomEntryInput{
+		Line: ptr("CODEX_HOME=/entry-home SECRET_MARK=hidden " + codexBin), Name: ptr("Second account")})
+	if err != nil || len(info.CustomEntries) != 1 {
+		t.Fatalf("AddCustomEntry = %+v, %v; want one entry", info.CustomEntries, err)
+	}
+	id := info.CustomEntries[0].InstallationID
+	e.waitSignIns(signer, 1)
+	inst := signer.signedInto()[0]
+	if inst.InstallationID != id || inst.Home != "/entry-home" ||
+		!slices.Equal(inst.EntryEnv, []string{"CODEX_HOME=/entry-home", "SECRET_MARK=hidden"}) {
+		t.Errorf("the sign-in ran with installation %q, home %q, assignments %q; want %s with its own home and assignments",
+			inst.InstallationID, inst.Home, inst.EntryEnv, id)
+	}
+	started := e.waitPublished(domain.EventHarnessSignInStarted)
+	if started.Payload["installationId"] != id || started.Payload["entryName"] != "Second account" ||
+		started.Params["harness"] != "Second account" {
+		t.Errorf("%s = %+v, want the entry's identifier and name", domain.EventHarnessSignInStarted, started)
+	}
+	if strings.Contains(started.Message, "hidden") || strings.Contains(fmt.Sprint(started.Payload), "hidden") {
+		t.Errorf("%s = %+v holds a value the entry assigns", domain.EventHarnessSignInStarted, started)
+	}
+	signer.end <- ports.SignInResult{Outcome: ports.SignInSucceeded}
+	e.waitPublished(domain.EventHarnessSignInCompleted)
+	got := e.harnessInfo(domain.HarnessCodex)
+	if entry := homeNamed(got, id); entry.Authentication != "valid" || entry.SignIn != ports.SignInAvailable {
+		t.Errorf("after its sign-in, the entry reads authentication %q, sign-in %q; want valid, available",
+			entry.Authentication, entry.SignIn)
+	}
+	if n := signer.started(); n != 1 {
+		t.Errorf("%d sign-ins started, want the entry's alone", n)
 	}
 }

@@ -158,6 +158,9 @@ func (a *App) notifySignIn(e domain.Event) {
 	if ad, ok := a.adapters[e.Harness]; ok {
 		name = ad.Name()
 	}
+	if entry, ok := e.Payload["entryName"].(string); ok && entry != "" {
+		name = entry // a custom entry's sign-in names the entry, never what it assigns
+	}
 	n := Notification{ID: newNoticeID(), CreatedAt: a.now(), EventType: e.Type, Severity: "info",
 		Params: map[string]string{"harness": e.Harness, "harnessName": name}}
 	if e.Type != domain.EventHarnessSignInCompleted {

@@ -12,9 +12,9 @@ import (
 // harmflow-app#826: across the real daemon, two Codex homes the owner adds as custom entries from a command line are
 // installations of their own. The stand-in Codex, set by hand, finds the daemon user's .codex home; the first entry's
 // CODEX_HOME names a home signed in with ChatGPT, the second's one signed in with an API key, with other models. POST
-// /harness-entries lists each under Codex, beside the detected home, with its own sign-in and models and a default name
-// that holds no home. A task naming each entry runs at the same time as the other; each attempt's Codex process starts
-// with its own entry's home as CODEX_HOME, and records the entry's identifier and name, never its home.
+// /harnesses/codex/installations lists each under Codex, beside the detected home, with its own sign-in and models and
+// a default name that holds no home. A task naming each entry runs at the same time as the other; each attempt's Codex
+// process starts with its own entry's home as CODEX_HOME, and records the entry's identifier and name, never its home.
 func TestEachCustomEntryRunsWithItsOwnHome(t *testing.T) {
 	t.Parallel()
 	codex := standIn(t, "fake-codex", "codex")
@@ -47,15 +47,15 @@ func TestEachCustomEntryRunsWithItsOwnHome(t *testing.T) {
 	}
 	var h map[string]any
 	for _, home := range []string{personal, work} {
-		h = d.call("POST", "/harness-entries", map[string]any{"line": "CODEX_HOME=" + home + " " + codex.path}, 201)
+		h = d.call("POST", "/harnesses/codex/installations", map[string]any{"line": "CODEX_HOME=" + home + " " + codex.path}, 201)
 	}
 	want := []entry{{"custom-1", "Codex 2", "chatgpt", "default model-p", "ready"},
 		{"custom-2", "Codex 3", "api_key", "default model-w", "ready"}}
 	if got := read(h); !slices.Equal(got, want) {
-		t.Fatalf("POST /harness-entries twice lists the custom entries %+v, want %+v", got, want)
+		t.Fatalf("POST /harnesses/codex/installations twice lists the custom entries %+v, want %+v", got, want)
 	}
 	if homes, _ := h["homes"].([]any); len(homes) != 1 {
-		t.Errorf("POST /harness-entries lists %d detected homes, want the daemon user's .codex alone", len(homes))
+		t.Errorf("POST /harnesses/codex/installations lists %d detected homes, want the daemon user's .codex alone", len(homes))
 	}
 
 	// Both tasks run before either is awaited, since each Codex waits until the other execution has started too. That
@@ -94,4 +94,48 @@ func TestEachCustomEntryRunsWithItsOwnHome(t *testing.T) {
 			}
 		})
 	}
+}
+
+// harmflow-app#1136: managing custom entries lives under the harness. POST /harnesses/{harnessId}/installations adds
+// an entry and refuses with a 422 a line whose executable names the other harness; PATCH renames it; a sign-in for an
+// installation the harness does not list is a 404; DELETE removes it, and a detected home, or the entry once removed,
+// is no custom entry to remove.
+func TestCustomEntryRoutesLiveUnderTheHarness(t *testing.T) {
+	t.Parallel()
+	codex := standIn(t, "fake-codex", "codex")
+	user := resolvedTempDir(t)
+	detected := codexHomeAt(t, filepath.Join(user, ".codex"), "model-a", `{"type":"chatgpt","planType":"plus"}`)
+	personal := codexHomeAt(t, filepath.Join(resolvedTempDir(t), "personal"), "model-p",
+		`{"type":"chatgpt","planType":"pro"}`)
+	d := startDaemon(t, t.TempDir(), "HOME="+user, "CODEX_HOME="+detected)
+	d.setHarness("codex", codex.path)
+	line := "CODEX_HOME=" + personal + " " + codex.path
+
+	refused := d.call("POST", "/harnesses/claude-code/installations", map[string]any{"line": line}, 422)
+	if e, _ := refused["error"].(map[string]any); e["messageKey"] != "custom_entry_other_harness" {
+		t.Errorf("POST /harnesses/claude-code/installations with a Codex line = %v, want custom_entry_other_harness", refused)
+	}
+	h := d.call("POST", "/harnesses/codex/installations", map[string]any{"line": line}, 201)
+	entries, _ := h["customEntries"].([]any)
+	if len(entries) != 1 {
+		t.Fatalf("POST /harnesses/codex/installations lists the custom entries %v, want one", entries)
+	}
+	id := jsonString(entries[0].(map[string]any)["installationId"])
+	h = d.call("PATCH", "/harnesses/codex/installations/"+id, map[string]any{"name": "Personal"}, 200)
+	entries, _ = h["customEntries"].([]any)
+	if len(entries) != 1 || entries[0].(map[string]any)["entryName"] != "Personal" {
+		t.Errorf("PATCH /harnesses/codex/installations/%s lists the custom entries %v, want it named Personal", id, entries)
+	}
+	d.call("PATCH", "/harnesses/claude-code/installations/"+id, map[string]any{"name": "Elsewhere"}, 404)
+	d.call("POST", "/harnesses/codex/sign-in", map[string]any{"installationId": "custom-none"}, 404)
+	homes, _ := h["homes"].([]any)
+	if len(homes) != 1 {
+		t.Fatalf("Codex lists the detected homes %v, want the daemon user's .codex alone", homes)
+	}
+	d.call("DELETE", "/harnesses/codex/installations/"+jsonString(homes[0].(map[string]any)["installationId"]), nil, 404)
+	h = d.call("DELETE", "/harnesses/codex/installations/"+id, nil, 200)
+	if entries, _ := h["customEntries"].([]any); len(entries) != 0 {
+		t.Errorf("DELETE /harnesses/codex/installations/%s lists the custom entries %v, want none", id, entries)
+	}
+	d.call("DELETE", "/harnesses/codex/installations/"+id, nil, 404)
 }

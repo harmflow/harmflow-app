@@ -198,7 +198,9 @@ function HomeList({ harness }: { harness: Harness }) {
                 <Chip tone="success" icon="check">
                   {t("harness.inUse")}
                 </Chip>
-              ) : null}
+              ) : (
+                <InstallationSignIn harness={harness} inst={home} label={home.installationId ?? ""} />
+              )}
               <span className="muted">{installationDetails(t, home)}</span>
             </li>
           );
@@ -210,21 +212,56 @@ function HomeList({ harness }: { harness: Harness }) {
 }
 
 /**
+ * The Sign in action of an installation that is not in use, while it reads signed out: the daemon runs the harness's
+ * own sign-in with that installation's own environment, which the user approves in the browser, and the row shows it
+ * running while it runs. Nothing for an installation that reads signed in, or a harness HarmFlow cannot sign in.
+ */
+function InstallationSignIn({ harness, inst, label }: { harness: Harness; inst: Harness; label: string }) {
+  const { t } = useTranslation();
+  const [busy, setBusy] = useState(false);
+  if (!inst.signIn || (inst.authentication !== "invalid" && inst.signIn !== "running")) return null;
+  const signIn = async () => {
+    setBusy(true);
+    try {
+      await api.signInHarness(harness.id, inst.installationId);
+      await actions.refreshHarnesses();
+    } catch (err) {
+      toast(t("harness.signInFailed", { message: (err as Error).message }), "danger");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const running = inst.signIn === "running";
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      icon="key"
+      disabled={busy || running}
+      aria-label={t("harness.signInInstallation", { name: label })}
+      onClick={() => void signIn()}
+    >
+      {running ? t("harness.signingIn") : t("harness.signInShort")}
+    </Button>
+  );
+}
+
+/**
  * The installations the owner added from a command line: each by its name, the line it was added from, how ready it
- * is, and what its own probes read, with controls that rename it, give it another line, or remove it. A signed-out
- * entry is listed as not authenticated, never hidden.
+ * is, and what its own probes read, with controls that sign it in while it reads signed out, rename it, give it
+ * another line, or remove it. A signed-out entry is listed as not authenticated, never hidden.
  */
 function CustomEntryList({ harness }: { harness: Harness }) {
   return (
     <ul className="installations">
       {(harness.customEntries ?? []).map((entry) => (
-        <CustomEntryItem key={entry.installationId} entry={entry} />
+        <CustomEntryItem key={entry.installationId} harness={harness} entry={entry} />
       ))}
     </ul>
   );
 }
 
-function CustomEntryItem({ entry }: { entry: Harness }) {
+function CustomEntryItem({ harness, entry }: { harness: Harness; entry: Harness }) {
   const { t } = useTranslation();
   const id = entry.installationId ?? "";
   const [editing, setEditing] = useState(false);
@@ -250,12 +287,12 @@ function CustomEntryItem({ entry }: { entry: Harness }) {
     const change: { name?: string; line?: string } = {};
     if (name.trim() !== (entry.entryName ?? "")) change.name = name.trim();
     if (line.trim() !== (entry.entryLine ?? "")) change.line = line.trim();
-    void run(() => api.updateCustomEntry(id, change));
+    void run(() => api.updateCustomEntry(harness.id, id, change));
   };
   const remove = async () => {
     const title = t("harness.customEntryRemoveTitle", { name: entry.entryName ?? id });
     if (!(await native.confirm(t("harness.customEntryRemoveConfirm"), title, t("common.delete"), t("common.cancel")))) return;
-    await run(() => api.removeCustomEntry(id));
+    await run(() => api.removeCustomEntry(harness.id, id));
   };
 
   return (
@@ -293,6 +330,7 @@ function CustomEntryItem({ entry }: { entry: Harness }) {
         </Field>
       ) : (
         <span className="inline-actions">
+          <InstallationSignIn harness={harness} inst={entry} label={entry.entryName ?? id} />
           <Button
             size="sm"
             variant="ghost"
