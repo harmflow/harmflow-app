@@ -200,9 +200,9 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, 200, s.App.Harnesses())
 	})
 	h("PUT /api/v1/harnesses/{harnessId}", s.setHarnessPath)
-	h("POST /api/v1/harness-entries", s.addCustomEntry)
-	h("PATCH /api/v1/harness-entries/{entryId}", s.updateCustomEntry)
-	h("DELETE /api/v1/harness-entries/{entryId}", s.removeCustomEntry)
+	h("POST /api/v1/harnesses/{harnessId}/installations", s.addCustomEntry)
+	h("PATCH /api/v1/harnesses/{harnessId}/installations/{installationId}", s.updateCustomEntry)
+	h("DELETE /api/v1/harnesses/{harnessId}/installations/{installationId}", s.removeCustomEntry)
 	h("POST /api/v1/harnesses/{harnessId}/sign-in", s.signInHarness)
 	h("PUT /api/v1/harnesses/{harnessId}/token", s.setHarnessToken)
 	h("DELETE /api/v1/harnesses/{harnessId}/token", s.deleteHarnessToken)
@@ -455,15 +455,15 @@ func (s *Server) setHarnessPath(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, info)
 }
 
-// addCustomEntry adds an installation from a command line; its harness comes back detected again, the entry among its
-// customEntries.
+// addCustomEntry adds an installation of the harness from a command line; the harness comes back detected again, the
+// entry among its customEntries.
 func (s *Server) addCustomEntry(w http.ResponseWriter, r *http.Request) {
 	var body app.CustomEntryInput
 	if err := decode(r, &body); err != nil {
 		fail(w, err)
 		return
 	}
-	info, err := s.App.AddCustomEntry(r.Context(), body)
+	info, err := s.App.AddCustomEntry(r.Context(), r.PathValue("harnessId"), body)
 	if err != nil {
 		fail(w, err)
 		return
@@ -478,7 +478,7 @@ func (s *Server) updateCustomEntry(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	info, err := s.App.UpdateCustomEntry(r.Context(), r.PathValue("entryId"), body)
+	info, err := s.App.UpdateCustomEntry(r.Context(), r.PathValue("harnessId"), r.PathValue("installationId"), body)
 	if err != nil {
 		fail(w, err)
 		return
@@ -488,7 +488,7 @@ func (s *Server) updateCustomEntry(w http.ResponseWriter, r *http.Request) {
 
 // removeCustomEntry removes a custom entry; its harness comes back detected again.
 func (s *Server) removeCustomEntry(w http.ResponseWriter, r *http.Request) {
-	info, err := s.App.RemoveCustomEntry(r.Context(), r.PathValue("entryId"))
+	info, err := s.App.RemoveCustomEntry(r.Context(), r.PathValue("harnessId"), r.PathValue("installationId"))
 	if err != nil {
 		fail(w, err)
 		return
@@ -496,10 +496,17 @@ func (s *Server) removeCustomEntry(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, info)
 }
 
-// signInHarness starts a harness's sign-in, or joins the one that runs; the harness comes back with its sign-in
-// running.
+// signInHarness starts the sign-in of an installation of a harness, or joins the one that runs for it: the one in use
+// with no body, otherwise the one its installationId names. The harness comes back with that sign-in running.
 func (s *Server) signInHarness(w http.ResponseWriter, r *http.Request) {
-	info, err := s.App.SignIn(r.PathValue("harnessId"))
+	var body struct {
+		InstallationID string `json:"installationId"`
+	}
+	if err := decode(r, &body); err != nil {
+		fail(w, err)
+		return
+	}
+	info, err := s.App.SignIn(r.PathValue("harnessId"), body.InstallationID)
 	if err != nil {
 		fail(w, err)
 		return

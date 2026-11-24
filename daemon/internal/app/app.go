@@ -207,8 +207,9 @@ type App struct {
 	quotas        map[string]quotaReading
 	quotaFailures map[string]quotaFailure
 	quotaReads    map[string]*sync.Mutex
-	// signIns holds each harness's sign-in, by harness id; a.wg counts the ones that run.
-	signIns map[string]*signInState
+	// signIns holds the sign-in of each installation of a harness, by harness and installation; a.wg counts the ones
+	// that run.
+	signIns map[signInKey]*signInState
 	// tokens holds the record of each harness's long-lived token, by harness id; the token is in the credential store.
 	tokens map[string]*tokenRecord
 	// unavailableUntil is when the daemon last became available again, at its start or when the machine woke: a firing
@@ -329,7 +330,7 @@ func New(d Deps) (*App, error) {
 		applied: map[string][]string{}, accepting: true,
 		adapters: map[string]ports.HarnessAdapter{}, quotas: map[string]quotaReading{},
 		quotaFailures: map[string]quotaFailure{}, quotaReads: map[string]*sync.Mutex{},
-		signIns: map[string]*signInState{}, tokens: map[string]*tokenRecord{}, records: map[string]*recordLock{},
+		signIns: map[signInKey]*signInState{}, tokens: map[string]*tokenRecord{}, records: map[string]*recordLock{},
 		redetect: make(chan struct{}, 1), ShutdownRequested: make(chan struct{}), stopBegun: make(chan struct{}),
 	}
 	for _, h := range d.Harnesses {

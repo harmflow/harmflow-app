@@ -52,8 +52,31 @@ vi.mock("../api/transport", () => ({
         daemon.claude = { ...daemon.claude, token: undefined };
         return { status: 200, body: daemon.claude };
       }
-      // A custom entry's line with a pipe is refused as the daemon refuses it; any other is added to Codex.
-      if (method === "POST" && path === "/harness-entries") {
+      // A custom entry's line with a pipe is refused as the daemon refuses it under either harness; any other runs Codex,
+      // so Claude Code refuses it as the other harness's, and Codex adds it.
+      if (method === "POST" && path === "/harnesses/claude-code/installations" && !(body as { line: string }).line.includes("|")) {
+        return {
+          status: 422,
+          body: {
+            error: {
+              code: "validation_failed",
+              message: "the command line runs Codex, not Claude Code: add it under Codex",
+              messageKey: "custom_entry_other_harness",
+              params: { harness: "Claude Code", other: "Codex" },
+            },
+          },
+        };
+      }
+      // A sign-in for an installation leaves that installation's sign-in running.
+      if (method === "POST" && path === "/harnesses/codex/sign-in") {
+        const id = (body as { installationId?: string } | undefined)?.installationId;
+        daemon.codex = {
+          ...daemon.codex,
+          customEntries: daemon.codex.customEntries?.map((e) => (e.installationId === id ? { ...e, signIn: "running" } : e)),
+        };
+        return { status: 202, body: daemon.codex };
+      }
+      if (method === "POST" && /^\/harnesses\/(claude-code|codex)\/installations$/.test(path)) {
         const { line, name } = body as { line: string; name?: string };
         if (line.includes("|")) {
           return {
@@ -72,7 +95,7 @@ vi.mock("../api/transport", () => ({
         daemon.codex = { ...daemon.codex, customEntries: [...(daemon.codex.customEntries ?? []), entry] };
         return { status: 201, body: daemon.codex };
       }
-      if (method === "DELETE" && path === "/harness-entries/custom-1") {
+      if (method === "DELETE" && path === "/harnesses/codex/installations/custom-1") {
         daemon.codex = { ...daemon.codex, customEntries: [] };
         return { status: 200, body: daemon.codex };
       }
@@ -791,7 +814,7 @@ describe("custom entries", () => {
       await act(async () => button(i18n.t("harness.customEntryAddSubmit")).click());
       await settle();
       expect(daemon.requests.filter((r) => r.method !== "GET")).toStrictEqual([
-        { method: "POST", path: "/harness-entries", body: { line: "codex | tee log" } },
+        { method: "POST", path: "/harnesses/claude-code/installations", body: { line: "codex | tee log" } },
       ]);
       expect(host!.textContent).toContain("the command line holds a pipe, |, which is shell syntax");
       expect(host!.querySelector("#custom-entry-line")?.getAttribute("aria-invalid")).toBe("true");
@@ -804,7 +827,8 @@ describe("custom entries", () => {
       await act(async () => button(i18n.t("harness.customEntryAddSubmit")).click());
       await settle();
       expect(daemon.requests.filter((r) => r.method !== "GET")).toStrictEqual([
-        { method: "POST", path: "/harness-entries", body: { line: 'CODEX_HOME="$HOME/.codex-personal" codex' } },
+        { method: "POST", path: "/harnesses/claude-code/installations", body: { line: 'CODEX_HOME="$HOME/.codex-personal" codex' } },
+        { method: "POST", path: "/harnesses/codex/installations", body: { line: 'CODEX_HOME="$HOME/.codex-personal" codex' } },
       ]);
       expect(host!.querySelector(".custom-entry strong")?.textContent).toBe("Codex 2");
       // The form closed, its draft gone.
@@ -814,8 +838,39 @@ describe("custom entries", () => {
       vi.stubGlobal("confirm", () => true);
       await act(async () => host!.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t("harness.customEntryRemove", { name: "Codex 2" })}"]`)!.click());
       await settle();
-      expect(daemon.requests.filter((r) => r.method === "DELETE")).toStrictEqual([{ method: "DELETE", path: "/harness-entries/custom-1", body: undefined }]);
+      expect(daemon.requests.filter((r) => r.method === "DELETE")).toStrictEqual([
+        { method: "DELETE", path: "/harnesses/codex/installations/custom-1", body: undefined },
+      ]);
       expect(host!.querySelector(".custom-entry")).toBeNull();
+    });
+
+    // harmflow-app#1136: a signed-out entry's row offers Sign in, which signs that entry in, and shows it running.
+    it("signs a signed-out entry in by its installation, then shows it waiting for the browser", async () => {
+      daemon.claude = undefined;
+      const entry: Harness = {
+        ...codex,
+        installationId: "custom-1",
+        entryName: "Codex 2",
+        entryLine: "CODEX_HOME=/b codex",
+        pathSource: "custom",
+        authentication: "invalid",
+        readiness: "not_ready",
+        signIn: "available",
+      };
+      daemon.codex = { ...codex, customEntries: [entry] };
+      patchStateForTests({ harnesses: [daemon.codex] });
+      host = document.body.appendChild(document.createElement("div"));
+      root = createRoot(host);
+      await act(async () => root!.render(<Settings />));
+      const signIn = () => host!.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t("harness.signInInstallation", { name: "Codex 2" })}"]`);
+      expect(signIn()?.textContent).toBe(i18n.t("harness.signInShort"));
+      await act(async () => signIn()!.click());
+      await settle();
+      expect(daemon.requests.filter((r) => r.method === "POST")).toStrictEqual([
+        { method: "POST", path: "/harnesses/codex/sign-in", body: { installationId: "custom-1" } },
+      ]);
+      expect(signIn()?.textContent).toBe(i18n.t("harness.signingIn"));
+      expect(signIn()?.disabled).toBe(true);
     });
   });
 });

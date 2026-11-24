@@ -97,8 +97,9 @@ func (a *App) detectThenCheckTasks(ctx context.Context) {
 
 // detect revalidates one harness and stores what it found, including the resolved path, then announces it, so the
 // dashboard reads the inventory again. A detection whose ctx ended, or that ends once the daemon is stopping, is
-// neither stored nor announced: it was cut short, and the inventory keeps what it had. A harness that says it is
-// signed out starts its sign-in, unless one runs or one that failed holds it back.
+// neither stored nor announced: it was cut short, and the inventory keeps what it had. Each installation that says it
+// is signed out — the one in use, a home, or a custom entry — starts its own sign-in, unless one runs for it or one
+// that failed holds it back.
 func (a *App) detect(ctx context.Context, id string) ports.HarnessInfo {
 	ad := a.adapters[id]
 	a.mu.Lock()
@@ -127,9 +128,7 @@ func (a *App) detect(ctx context.Context, id string) ports.HarnessInfo {
 	a.mu.Unlock()
 	a.emit(domain.Event{Type: domain.EventHarnessChecked, Harness: id, Severity: domain.SeverityInfo,
 		Payload: map[string]any{"readiness": info.Readiness}})
-	if info.Authentication == "invalid" {
-		a.signInWhenSignedOut(id)
-	}
+	a.signInWhenAnySignedOut(id, info)
 	return info
 }
 

@@ -48,6 +48,8 @@ export class ApiError extends Error {
   readonly currentRevision?: string;
   /** The params of the daemon's text, such as the count of an executions_running refusal. */
   readonly params?: Record<string, string>;
+  /** The key of the daemon's text, such as custom_entry_other_harness. */
+  readonly messageKey?: string;
 
   constructor(status: number, body: unknown) {
     const err = (body as ApiErrorBody | null)?.error;
@@ -57,8 +59,12 @@ export class ApiError extends Error {
     this.validation = err?.validation;
     this.currentRevision = err?.currentRevision;
     this.params = err?.params;
+    this.messageKey = err?.messageKey;
   }
 }
+
+/** The harnesses that take custom entries, in the order the add form tries them. */
+const entryHarnesses: HarnessId[] = ["claude-code", "codex"];
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await transport.request(method, path, body);
@@ -106,21 +112,38 @@ export const api = {
   harnesses: () => call<Harness[]>("GET", "/harnesses"),
   refreshHarnesses: () => call<Harness[]>("POST", "/harnesses/refresh"),
   setHarnessPath: (id: HarnessId, path: string | null) => call<Harness>("PUT", `/harnesses/${id}`, { path }),
-  /** Starts the harness's own sign-in, which the user approves in the browser, or joins the one that runs. */
-  signInHarness: (id: HarnessId) => call<Harness>("POST", `/harnesses/${id}/sign-in`),
+  /**
+   * Starts the own sign-in of an installation of the harness, which the user approves in the browser, or joins the one
+   * that runs for it: the installation in use with no installationId, otherwise the item of homes or customEntries it
+   * names, which signs in with its own environment.
+   */
+  signInHarness: (id: HarnessId, installationId?: string) =>
+    call<Harness>("POST", `/harnesses/${id}/sign-in`, installationId ? { installationId } : undefined),
   /** Saves the harness's long-lived token in the credential store; the answer never carries it back. */
   setHarnessToken: (id: HarnessId, token: string) => call<Harness>("PUT", `/harnesses/${id}/token`, { token }),
   removeHarnessToken: (id: HarnessId) => call<Harness>("DELETE", `/harnesses/${id}/token`),
   /**
-   * Adds an installation from a command line, which the daemon reads with no shell and whose harness it identifies;
-   * the answer is that harness, the entry among its custom entries.
+   * Adds an installation from a command line, which the daemon reads with no shell and whose harness it identifies:
+   * under each harness in turn, until one does not answer that the line runs the other harness. The answer is that
+   * harness, the entry among its custom entries.
    */
-  addCustomEntry: (line: string, name?: string) => call<Harness>("POST", "/harness-entries", name ? { line, name } : { line }),
-  /** Renames a custom entry or gives it another command line; an absent field keeps what the entry had. */
-  updateCustomEntry: (id: string, change: { line?: string; name?: string }) =>
-    call<Harness>("PATCH", `/harness-entries/${encodeURIComponent(id)}`, change),
-  /** Removes a custom entry; the installations detection finds stay. */
-  removeCustomEntry: (id: string) => call<Harness>("DELETE", `/harness-entries/${encodeURIComponent(id)}`),
+  addCustomEntry: async (line: string, name?: string): Promise<Harness> => {
+    const body = name ? { line, name } : { line };
+    for (const [i, id] of entryHarnesses.entries()) {
+      try {
+        return await call<Harness>("POST", `/harnesses/${id}/installations`, body);
+      } catch (err) {
+        if (i === entryHarnesses.length - 1 || !(err instanceof ApiError) || err.messageKey !== "custom_entry_other_harness") throw err;
+      }
+    }
+    throw new ApiError(0, null);
+  },
+  /** Renames a custom entry of the harness or gives it another command line; an absent field keeps what it had. */
+  updateCustomEntry: (harness: HarnessId, id: string, change: { line?: string; name?: string }) =>
+    call<Harness>("PATCH", `/harnesses/${harness}/installations/${encodeURIComponent(id)}`, change),
+  /** Removes a custom entry of the harness; the installations detection finds stay. */
+  removeCustomEntry: (harness: HarnessId, id: string) =>
+    call<Harness>("DELETE", `/harnesses/${harness}/installations/${encodeURIComponent(id)}`),
   tools: () => call<Tool[]>("GET", "/tools"),
   /**
    * What a task can cite. Claude Code's and Codex's skills are the installation's, the same for every workspace; a

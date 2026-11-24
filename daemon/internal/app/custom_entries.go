@@ -286,17 +286,26 @@ type CustomEntryInput struct {
 	Name *string `json:"name"`
 }
 
-// AddCustomEntry adds an installation from a command line: it reads the line with no shell, checks its executable as a
-// path set by hand is checked, finds the harness whose --version the executable names, keeps the entry, and returns
-// that harness detected again, the entry among its CustomEntries. A line that does not read, or names neither harness,
-// saves nothing.
-func (a *App) AddCustomEntry(ctx context.Context, in CustomEntryInput) (ports.HarnessInfo, error) {
+// AddCustomEntry adds an installation of the harness id from a command line: it reads the line with no shell, checks
+// its executable as a path set by hand is checked, finds the harness whose --version the executable names, keeps the
+// entry, and returns that harness detected again, the entry among its CustomEntries. A line that does not read, names
+// neither harness, or names the other harness, saves nothing.
+func (a *App) AddCustomEntry(ctx context.Context, id string, in CustomEntryInput) (ports.HarnessInfo, error) {
+	ad, ok := a.adapters[id]
+	if !ok {
+		return ports.HarnessInfo{}, newError(CodeNotFound, domain.T("harness_not_found", "no harness {{harness}}", "harness", id))
+	}
 	if in.Line == nil {
 		return ports.HarnessInfo{}, entryInvalid("/line", domain.T("custom_entry_line_missing", "the command line is required"))
 	}
 	harness, err := a.identifyEntry(ctx, *in.Line)
 	if err != nil {
 		return ports.HarnessInfo{}, err
+	}
+	if harness != id {
+		return ports.HarnessInfo{}, entryInvalid("/line", domain.T("custom_entry_other_harness",
+			"the command line runs {{other}}, not {{harness}}: add it under {{other}}", "harness", ad.Name(),
+			"other", a.adapters[harness].Name()))
 	}
 	a.mu.Lock()
 	e := customEntry{ID: a.nextEntryIDLocked(), Harness: harness, Line: strings.TrimSpace(*in.Line)}
@@ -316,10 +325,11 @@ func (a *App) AddCustomEntry(ctx context.Context, in CustomEntryInput) (ports.Ha
 
 // UpdateCustomEntry renames a custom entry, gives it another command line, or both; a line is read and checked as
 // AddCustomEntry reads it, and one that names the other harness moves the entry there. Both harnesses are detected
-// again; the one the entry is in now is returned.
-func (a *App) UpdateCustomEntry(ctx context.Context, id string, in CustomEntryInput) (ports.HarnessInfo, error) {
+// again; the one the entry is in now is returned. An identifier that names no custom entry of the harness owner, such
+// as a home detection found, is not found.
+func (a *App) UpdateCustomEntry(ctx context.Context, owner, id string, in CustomEntryInput) (ports.HarnessInfo, error) {
 	a.mu.Lock()
-	i := slices.IndexFunc(a.customEntries, func(e customEntry) bool { return e.ID == id })
+	i := a.entryIndexLocked(owner, id)
 	a.mu.Unlock()
 	if i < 0 {
 		return ports.HarnessInfo{}, entryNotFound(id)
@@ -336,7 +346,7 @@ func (a *App) UpdateCustomEntry(ctx context.Context, id string, in CustomEntryIn
 		return ports.HarnessInfo{}, entryInvalid("/name", domain.T("custom_entry_name_empty", "the name cannot be empty"))
 	}
 	a.mu.Lock()
-	i = slices.IndexFunc(a.customEntries, func(e customEntry) bool { return e.ID == id })
+	i = a.entryIndexLocked(owner, id)
 	if i < 0 {
 		a.mu.Unlock()
 		return ports.HarnessInfo{}, entryNotFound(id)
@@ -365,11 +375,12 @@ func (a *App) UpdateCustomEntry(ctx context.Context, id string, in CustomEntryIn
 	return info, nil
 }
 
-// RemoveCustomEntry removes a custom entry and returns its harness detected again; the installations detection finds
-// stay as they are. A task that still names the entry fails validation from then on.
-func (a *App) RemoveCustomEntry(ctx context.Context, id string) (ports.HarnessInfo, error) {
+// RemoveCustomEntry removes a custom entry of the harness owner and returns its harness detected again; the
+// installations detection finds stay as they are, and an identifier of one of them is not found. A task that still
+// names the entry fails validation from then on.
+func (a *App) RemoveCustomEntry(ctx context.Context, owner, id string) (ports.HarnessInfo, error) {
 	a.mu.Lock()
-	i := slices.IndexFunc(a.customEntries, func(e customEntry) bool { return e.ID == id })
+	i := a.entryIndexLocked(owner, id)
 	if i < 0 {
 		a.mu.Unlock()
 		return ports.HarnessInfo{}, entryNotFound(id)
@@ -450,6 +461,12 @@ func (a *App) defaultEntryNameLocked(harness string) string {
 			return candidate
 		}
 	}
+}
+
+// entryIndexLocked is the index of the custom entry id of the harness owner, or -1 when the harness has none by that
+// identifier. a.mu is held.
+func (a *App) entryIndexLocked(owner, id string) int {
+	return slices.IndexFunc(a.customEntries, func(e customEntry) bool { return e.ID == id && e.Harness == owner })
 }
 
 func entryInvalid(path string, text domain.Text) error {

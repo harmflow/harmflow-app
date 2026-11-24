@@ -615,12 +615,12 @@ func (r *run) attempts(ctx context.Context, start func(harness string) error) (d
 				// The saved token the attempt ran with, which the harness rejected, is dropped, and a check on the harness's
 				// own sign-in decides whether its sign-in starts; a token saved while the attempt ran stays in use. Either way
 				// it runs for the next executions, beside this one, which fails over or fails as it would anyway. The sign-in
-				// the daemon starts is the installation in use's, so an attempt on another installation starts none: it would
-				// sign the wrong home in.
+				// the daemon starts is the attempt's installation's own, with that installation's environment, so an attempt
+				// on a home or a custom entry never signs the installation in use in.
 				if a.rejectToken(profile.Provider, r.ranWith) {
 					a.detect(ctx, profile.Provider)
-				} else if info.InstallationID == detected.InstallationID {
-					a.signInWhenSignedOut(profile.Provider)
+				} else {
+					a.signInWhenSignedOut(profile.Provider, info.InstallationID)
 				}
 			}
 			a.mu.Lock()
