@@ -204,9 +204,23 @@ func TestApprovalAfterTheTimeLimitIsDeclined(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	x := e.waitWithin(40*time.Second, r.ExecutionID, domain.StatusFailed)
-	if x.ErrorKey != "execution_timed_out" {
-		t.Errorf("the execution failed with %q (%s), want execution_timed_out", x.ErrorKey, x.ErrorMessage)
+	// A step from running to running writes no event, so the step is read from the execution while it runs. A request
+	// left waiting would show it for the whole grace period, while the stand-in waits for an answer.
+	var x ExecutionView
+	waited := false
+	e.poll(40*time.Second, func() bool {
+		x, _ = e.app.GetExecution(r.ExecutionID)
+		if x.CurrentStepKey == "step_waiting_approval" {
+			waited = true
+		}
+		return x.Status.IsTerminal()
+	})
+	if x.Status != domain.StatusFailed || x.ErrorKey != "execution_timed_out" {
+		t.Fatalf("execution %s is %s with %q (%s), want failed with execution_timed_out", r.ExecutionID, x.Status,
+			x.ErrorKey, x.ErrorMessage)
+	}
+	if waited {
+		t.Error("the execution's step said it waited for the owner's approval, want no such step after the time limit")
 	}
 	answered := e.eventsOf(r.ExecutionID, domain.EventApprovalAnswered)
 	if len(answered) != 1 || answered[0].Payload["requestId"] != "4" ||
@@ -216,15 +230,6 @@ func TestApprovalAfterTheTimeLimitIsDeclined(t *testing.T) {
 	}
 	if asked := e.eventsOf(r.ExecutionID, domain.EventApprovalRequested); len(asked) != 0 {
 		t.Errorf("approval.requested %+v, want none for a request that arrived after the time limit", asked)
-	}
-	events, _, err := e.app.ExecutionEvents(r.ExecutionID, 0, 0)
-	if err != nil {
-		t.Fatalf("ExecutionEvents(%s): %v", r.ExecutionID, err)
-	}
-	for _, ev := range events {
-		if ev.MessageKey == "step_waiting_approval" {
-			t.Errorf("event %d (%s) says the execution waits for the owner's approval, want no such step", ev.ID, ev.Type)
-		}
 	}
 	for _, n := range e.app.Notifications(false) {
 		if n.EventType == domain.EventApprovalRequested && n.ExecutionID == r.ExecutionID {
