@@ -195,7 +195,9 @@ func TestScreenTextAndMask(t *testing.T) {
 }
 
 // harmflow-app#543: an attempt that ends on the CLI's own words that it is signed out says so; one that ends on an
-// invalid API key, which a sign-in does not mend, does not.
+// invalid API key, or on managed settings that could not load, which a sign-in does not mend, does not.
+// harmflow-app#1154: the managed settings' text tells the user to run `claude auth login` too, beside checking the
+// network, so it would otherwise read signed out and reject a saved token the CLI still takes once the network is back.
 func TestFinishSaysSignedOut(t *testing.T) {
 	cases := []struct {
 		stderr string
@@ -204,6 +206,8 @@ func TestFinishSaysSignedOut(t *testing.T) {
 		{"Not logged in · Please run /login", true},
 		{"API Error: 401 OAuth token has expired", true},
 		{"Invalid API key · Fix external API key", false},
+		{"Your organization requires remote managed settings to load, but they could not be loaded. Run " +
+			"`claude auth login` to re-authenticate, check your network connection, or contact your administrator.", false},
 		{"the task failed", false},
 	}
 	for _, c := range cases {

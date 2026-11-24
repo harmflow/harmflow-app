@@ -1414,7 +1414,15 @@ func resultText(raw json.RawMessage) string {
 // are not: a sign-in fixes neither an invalid API key from the environment nor managed settings that could not load.
 const signedOutTexts = `please run /login|\bnot logged in\b|authentication_error|oauth token (has )?expired|api error:? 401|claude auth login|re-authenticate`
 
-var signedOut = regexp.MustCompile(`(?i)(` + signedOutTexts + `)`)
+// managedSettingsText is the CLI's text when the managed settings its organization requires could not load, as when the
+// network is down. It tells the user to run `claude auth login` beside checking the network, so it holds signed-out
+// words, yet it is no sign-out: the saved token still works once the settings load.
+const managedSettingsText = `managed settings .*could not be loaded`
+
+var (
+	signedOut       = regexp.MustCompile(`(?i)(` + signedOutTexts + `)`)
+	managedSettings = regexp.MustCompile(`(?i)` + managedSettingsText)
+)
 
 // patterns match the CLI's own texts, not words a task's error can hold too: a bare quota or "limit reached", or the
 // "not logged into" of another tool, ends the attempt as a task error (harmflow-app#213). A window's name may hold a
@@ -1423,7 +1431,7 @@ var signedOut = regexp.MustCompile(`(?i)(` + signedOutTexts + `)`)
 var patterns = classify.Patterns{
 	Quota:       regexp.MustCompile(`(?i)(usage limit|you(’|')ve hit your ([\w’'-]+ ){0,3}limit|out of (extra )?usage|credit balance (is )?too low|usage allocation (has been )?disabled by your admin|(weekly|session|5-hour|opus|sonnet)( weekly)? limit (has been )?reached|spending cap (has been )?reached)`),
 	RateLimit:   regexp.MustCompile(`(?i)(rate[ _-]?limit|too many requests|overloaded_error|api error:? (429|529))`),
-	Unavailable: regexp.MustCompile(`(?i)(invalid api key|` + signedOutTexts + `|managed settings .*could not be loaded)`),
+	Unavailable: regexp.MustCompile(`(?i)(invalid api key|` + signedOutTexts + `|` + managedSettingsText + `)`),
 	Network:     regexp.MustCompile(`(?i)(ECONNREFUSED|ENOTFOUND|ETIMEDOUT|ECONNRESET|network error|getaddrinfo|fetch failed|connection error)`),
 }
 
@@ -1484,7 +1492,8 @@ func (p *parser) Finish(exitCode int, stderrTail string, timedOut, cancelled boo
 			end.RetryAfter = d
 		}
 	}
-	end.SignedOut = end.Class == domain.ClassHarnessUnavailable && signedOut.MatchString(text)
+	end.SignedOut = end.Class == domain.ClassHarnessUnavailable && signedOut.MatchString(text) &&
+		!managedSettings.MatchString(text)
 	return end
 }
 
