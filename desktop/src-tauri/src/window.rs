@@ -95,7 +95,37 @@ pub fn exit_prevented(tray_enabled: bool, code: Option<i32>) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
+    use tauri::test::{mock_builder, mock_context, noop_assets, MockRuntime};
+    use tauri::{App, Listener, WebviewWindowBuilder};
+
     use super::*;
+
+    /// The app on Tauri's mock runtime, with its `main` window, as the tests of `registration.rs` build it.
+    fn app_with_main_window() -> App<MockRuntime> {
+        let app = mock_builder().build(mock_context(noop_assets())).expect("the app builds");
+        WebviewWindowBuilder::new(&app, MAIN, Default::default()).build().expect("the main window");
+        app
+    }
+
+    /// The payloads of the `harmflow://navigate` events the app sends from now on, in order.
+    fn navigations(app: &App<MockRuntime>) -> Arc<Mutex<Vec<serde_json::Value>>> {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let record = Arc::clone(&sent);
+        app.listen_any("harmflow://navigate", move |event| {
+            record.lock().unwrap().push(serde_json::from_str(event.payload()).expect("a JSON payload"));
+        });
+        sent
+    }
+
+    #[test]
+    fn showing_an_execution_sends_one_navigation_naming_it() {
+        let app = app_with_main_window();
+        let sent = navigations(&app);
+        show_execution(app.handle(), "exec-8f3a2c");
+        assert_eq!(*sent.lock().unwrap(), vec![serde_json::json!({ "executionId": "exec-8f3a2c" })]);
+    }
 
     #[test]
     fn with_the_tray_a_close_only_hides_the_window_and_the_app_stays() {
