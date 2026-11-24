@@ -195,6 +195,54 @@ func TestDetectRequiresTheAppServer(t *testing.T) {
 	}
 }
 
+// harmflow-app#1122: a Codex older than MinVersion is below the minimum and not ready, with a diagnostic naming the
+// minimum, though its top-level help lists the app server and its `exec --help` every flag the adapter once required;
+// from the minimum on, it reads ready. 0.8.0 is the first release with those flags, 0.43.0 the first whose output the
+// adapter reads, and 0.47.0 the last whose app server cannot read the quota.
+func TestDetectHoldsTheVersionFloor(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	cases := []struct {
+		version, wantSupport, wantReadiness, wantKey string
+	}{
+		{"0.8.0", "below_minimum", "not_ready", "harness_version_below_minimum"},
+		{"0.43.0", "below_minimum", "not_ready", "harness_version_below_minimum"},
+		{"0.47.0", "below_minimum", "not_ready", "harness_version_below_minimum"},
+		{MinVersion, "supported", "ready", ""},
+		{TestedUpTo, "supported", "ready", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.version, func(t *testing.T) {
+			path := standIn(t, `echo "codex-cli `+c.version+`"`, signedIn)
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("os.ReadFile(%s) = %v, want no error", path, err)
+			}
+			script := strings.Replace(string(data), "  login)",
+				`  exec) echo "--json  --sandbox  --cd  --skip-git-repo-check" ;;
+  login)`, 1)
+			if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+				t.Fatalf("os.WriteFile(%s) = %v, want no error", path, err)
+			}
+			info := (&Adapter{Home: t.TempDir()}).Detect(context.Background(), path)
+			if info.Version != c.version || info.VersionSupport != c.wantSupport || info.Readiness != c.wantReadiness ||
+				info.DiagnosticKey != c.wantKey || !info.Features["app-server"] {
+				t.Errorf("Detect: version %q, support %s, readiness %s, diagnostic %q (%s), app server %v; want %q, %s, %s, "+
+					"%q, true", info.Version, info.VersionSupport, info.Readiness, info.DiagnosticKey, info.Diagnostic,
+					info.Features["app-server"], c.version, c.wantSupport, c.wantReadiness, c.wantKey)
+			}
+			if c.wantKey == "" {
+				return
+			}
+			want := "Codex " + c.version + " is older than " + MinVersion + ", the oldest version line HarmFlow supports"
+			if info.Diagnostic != want || info.DiagnosticParams["minimum"] != MinVersion ||
+				info.DiagnosticParams["version"] != c.version {
+				t.Errorf("Detect: diagnostic %q, params %v; want %q, naming the minimum %s", info.Diagnostic,
+					info.DiagnosticParams, want, MinVersion)
+			}
+		})
+	}
+}
+
 // harmflow-app#465: with its help unread, Codex runs as if it had an app server, and the first attempt proves it; a
 // Codex whose help was read and lists none cannot run, since every attempt goes through the app server.
 func TestUnknownFlagsAreTakenAsThere(t *testing.T) {

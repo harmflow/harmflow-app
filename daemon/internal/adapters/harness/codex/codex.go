@@ -31,6 +31,10 @@ const (
 	ID = domain.HarnessCodex
 	// Name is the harness's display name.
 	Name = "Codex"
+	// MinVersion is the oldest release HarmFlow supports; an older CLI is not ready. It is the later of 0.43.0, the first
+	// release whose output has the thread and turn schema the adapter reads, and 0.48.0, the first whose app server
+	// answers account/rateLimits/read, the quota every attempt reads first.
+	MinVersion = "0.48.0"
 	// TestedUpTo is the newest version HarmFlow was tested with; a newer one runs as untested.
 	TestedUpTo = "0.163.0"
 )
@@ -271,6 +275,13 @@ func (a *Adapter) Detect(ctx context.Context, manualPath string) ports.HarnessIn
 		case info.Version == "":
 			// No number to check against the tested range; the help text passed, so it runs with a warning.
 			info.VersionSupport = "unknown"
+		case compareVersions(info.Version, MinVersion) < 0:
+			// An older release prints output the adapter cannot read, and its app server cannot read the quota: an
+			// exhausted quota there would end an attempt unclassified, or as a success.
+			info.VersionSupport = "below_minimum"
+			info.Readiness = "not_ready"
+			info.SetDiagnostic(domain.T("harness_version_below_minimum", "{{harness}} {{version}} is older than {{minimum}}, the oldest version line HarmFlow supports",
+				"harness", Name, "version", info.Version, "minimum", MinVersion))
 		case compareVersions(info.Version, TestedUpTo) > 0:
 			info.VersionSupport = "untested_newer"
 		}

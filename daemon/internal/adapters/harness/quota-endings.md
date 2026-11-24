@@ -12,7 +12,14 @@ shows is recorded as **not determined** and left to the real-CLI failover run (#
 ## Codex
 
 Releases covered: the tested release, the newest release when the study ran, and the first release whose `exec`
-offers `--json`, `--sandbox`, `--cd`, and `--skip-git-repo-check`, which is the floor the readiness check admits today.
+offers `--json`, `--sandbox`, `--cd`, and `--skip-git-repo-check`, which was the floor the readiness check admitted when
+the study ran.
+
+The floor is now 0.48.0, the adapter's `MinVersion` (#1122): a Codex older than it reads `below_minimum` and not
+ready. It is the later of two releases. 0.43.0 is the first whose output has the thread and turn schema the adapter
+reads (openai/codex commit 7fc3edf8). 0.48.0 is the first whose app server answers `account/rateLimits/read`, the quota
+read every attempt makes first. openai/codex#5302 (commit 5c680c6587e5) added it, and `rust-v0.48.0` is the first tag
+whose `codex-rs/app-server-protocol/src/protocol.rs` defines it; `rust-v0.47.0` does not.
 
 Every attempt runs through `codex app-server` (#465), so the adapter reads the app server's JSON-RPC notifications, not
 `exec --json`'s stream. The classification reads the ending's text alone: the app server ends when the adapter closes
@@ -20,7 +27,7 @@ its stdin, and its exit code says nothing of the quota. The exec column stays as
 
 | Release | App-server lines | Stream lines (`exec --json`) | Exit code of `exec` | Pre-attempt quota read | Source | Adapter's classification |
 |---|---|---|---|---|---|---|
-| 0.8.0 (first with the four flags) | None: no app server, so no attempt starts (`codex_app_server_missing`) | Old raw-event format, `{"id":…,"msg":{"type":"error","message":…}}`. No usage-limit error exists: a 429 is retried, then ends as `exceeded retry limit, last status: …` | 0 | None: no app server | openai/codex `rust-v0.8.0` (671f91d3ea7f): `codex-rs/core/src/error.rs`, `codex-rs/exec/src/lib.rs`, `codex-rs/exec/src/event_processor_with_json_output.rs` | **Not read.** The adapter parses neither the old format nor a success-coded failure: #1122. The current schema starts at 0.43.0 (commit 7fc3edf8). |
+| 0.8.0 (first with the four flags) | None: no app server, so no attempt starts (`codex_app_server_missing`) | Old raw-event format, `{"id":…,"msg":{"type":"error","message":…}}`. No usage-limit error exists: a 429 is retried, then ends as `exceeded retry limit, last status: …` | 0 | None: no app server | openai/codex `rust-v0.8.0` (671f91d3ea7f): `codex-rs/core/src/error.rs`, `codex-rs/exec/src/lib.rs`, `codex-rs/exec/src/event_processor_with_json_output.rs` | **Not ready.** The adapter parses neither the old format nor a success-coded failure, so since #1122 a release below the 0.48.0 floor reads `below_minimum` and runs no attempt. The current schema starts at 0.43.0 (commit 7fc3edf8). |
 | 0.163.0 (tested) | `{"method":"error","params":{"willRetry":false,"error":{"message":M}}}` then `{"method":"turn/completed","params":{"turn":{"status":"failed","error":{"message":M}}}}` | `{"type":"error","message":M}` then `{"type":"turn.failed","error":{"message":M}}`. M is one of the usage-limit texts below | 1 | App server `account/rateLimits/read`: `rateLimits` with `primary`/`secondary` windows (`usedPercent`, `resetsAt`) and `rateLimitReachedType` | `rust-v0.163.0` (83086188ae06): `codex-rs/protocol/src/error.rs`, `codex-rs/exec/src/exec_events.rs`, `codex-rs/exec/src/lib.rs`, `codex-rs/app-server-protocol/src/protocol/v2/account.rs` | Quota exhausted for every text below: each `You’ve hit your usage limit…` text, and, since #1120, the workspace-credit, spend-cap, and `Quota exceeded…` texts |
 | 0.171.0 (newest) | Not determined | Same as 0.163.0 | 1 | Same as 0.163.0 | `rust-v0.171.0` (ccf9be8cc458), same files | Same as 0.163.0 |
 
