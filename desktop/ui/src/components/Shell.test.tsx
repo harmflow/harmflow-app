@@ -4,7 +4,10 @@
 // daemon's local API. And the More actions menu's Stop daemon…, whose question names one running execution in the
 // singular and more in the plural. And the sidebar's gauges, read from /system, and GitHub's from /github/rate-limit,
 // only while the sidebar is expanded and each widget's setting is on. And the topbar's state of a daemon that runs but
-// does not answer, apart from a stopped one.
+// does not answer, apart from a stopped one. And, from the rules app.css writes, that a hidden widget leaves the
+// sidebar's foot no space or border.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -628,6 +631,48 @@ describe("the sidebar's gauges", () => {
       expect([reads(), githubReads()]).toEqual(before);
     });
 
+    it("finds a border, padding, or height on the foot and a margin on a widget's panel, naming the selector and the property", () => {
+      const sample = [
+        ".sidebar__foot { display: flex; gap: 8px; border-top: 1px solid var(--x); }",
+        '.app[data-sidebar="collapsed"] .sidebar__foot { padding-block: 4px; }',
+        "/* .sidebar__foot { min-height: 9px; } */",
+        ".sidebar__foot > .gauges-panel, .other { margin-top: 2px; color: var(--y); }",
+        ".gauges-panel__title { margin: 0; padding: 2px; }",
+        ".sidebar__foot .gauges { padding: 4px; border: 1px solid; }",
+        ".sidebar__foot { border-radius: 4px; }",
+        "@media (max-height: 600px) { .sidebar__foot { min-height: 40px; } }",
+      ].join("\n");
+      expect(footSpace(sample)).toEqual([
+        ".sidebar__foot: border-top",
+        '.app[data-sidebar="collapsed"] .sidebar__foot: padding-block',
+        ".sidebar__foot > .gauges-panel: margin-top",
+        "@media (max-height: 600px) .sidebar__foot: min-height",
+      ]);
+    });
+
+    it("leave no space or border by the stylesheet's rules: the foot spaces its children by its gap alone, and each widget's border and padding go with it", async () => {
+      // happy-dom applies no stylesheet and lays nothing out, so the rules are read as app.css writes them.
+      const css = readFileSync(join(__dirname, "..", "design", "app.css"), "utf8");
+      expect(footSpace(css)).toEqual([]);
+      const foot = declared(css, ".sidebar__foot");
+      expect(foot.get("display")).toBe("flex");
+      expect(foot.get("flex-direction")).toBe("column");
+      expect(foot.get("gap")).toBe("var(--hf-space-2)");
+      const box = declared(css, ".gauges");
+      expect(box.get("border")).toBe("1px solid var(--hf-color-border)");
+      expect(box.get("padding")).toBe("var(--hf-space-3)");
+
+      // The bordered box of each widget is inside the widget's own panel, which the foot holds and a hidden widget takes away.
+      await showSidebar(false);
+      const shown = host!.querySelector(".sidebar__foot")!;
+      const boxes = [...shown.querySelectorAll(".gauges")];
+      expect(boxes).toHaveLength(2);
+      for (const b of boxes) {
+        expect(b.parentElement?.matches("section.gauges-panel")).toBe(true);
+        expect(b.parentElement?.parentElement).toBe(shown);
+      }
+    });
+
     it.each([
       ["System", { showSystemWidget: false }, { showSystemWidget: true }],
       ["GitHub", { showGitHubWidget: false }, { showGitHubWidget: true }],
@@ -680,3 +725,61 @@ describe("the sidebar's gauges", () => {
     });
   });
 });
+
+type CssRule = { selectors: string[]; within: string | null; declarations: [string, string][] };
+
+/** The rules of a stylesheet, its comments stripped: each one's selectors, its declarations, and the at-rule it sits in. */
+function stylesheetRules(css: string): CssRule[] {
+  const rules: CssRule[] = [];
+  const open: string[] = [];
+  for (const [, text, brace] of css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]*)([{}])/g)) {
+    if (brace === "{") {
+      open.push(text.trim());
+      continue;
+    }
+    const head = open.pop();
+    if (head === undefined || head.startsWith("@")) continue;
+    const declarations = text.split(";").flatMap((d): [string, string][] => {
+      const colon = d.indexOf(":");
+      return colon > 0 ? [[d.slice(0, colon).trim(), d.slice(colon + 1).trim()]] : [];
+    });
+    rules.push({ selectors: head.split(",").map((s) => s.trim()), within: open.at(-1) ?? null, declarations });
+  }
+  return rules;
+}
+
+/** The declarations of the top-level rules written for exactly this selector, the later rule winning. */
+function declared(css: string, selector: string): Map<string, string> {
+  const rules = stylesheetRules(css).filter((r) => r.within === null && r.selectors.includes(selector));
+  return new Map(rules.flatMap((r) => r.declarations));
+}
+
+/** Whether a selector styles an element of this class: the class is in its last compound, the one it selects. */
+function selects(selector: string, className: string): boolean {
+  const subject = selector.split(/\s*[>+~]\s*|\s+/).at(-1) ?? "";
+  return new RegExp(`\\.${className}(?![\\w-])`).test(subject);
+}
+
+/** A property that gives the foot a border, padding, or height of its own. */
+const footOwn = (property: string) =>
+  (/^(?:border|padding)(?:-|$)/.test(property) && !/radius|collapse|spacing/.test(property)) ||
+  /^(?:min-)?(?:height|block-size)$/.test(property);
+
+/**
+ * What in a stylesheet would leave a bordered or empty space at the sidebar's foot with its widgets hidden, each as
+ * "<selector>: <property>": a border, padding, or height on the foot, or a margin on a widget's panel.
+ */
+function footSpace(css: string): string[] {
+  return stylesheetRules(css).flatMap(({ selectors, within, declarations }) =>
+    selectors.flatMap((selector) => {
+      const offends = selects(selector, "sidebar__foot")
+        ? footOwn
+        : selects(selector, "gauges-panel")
+          ? (property: string) => /^margin(?:-|$)/.test(property)
+          : null;
+      if (!offends) return [];
+      const where = within ? `${within} ${selector}` : selector;
+      return declarations.filter(([property]) => offends(property)).map(([property]) => `${where}: ${property}`);
+    }),
+  );
+}
