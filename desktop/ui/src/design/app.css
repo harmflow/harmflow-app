@@ -174,20 +174,13 @@ ol {
   padding: 0 var(--hf-space-2);
 }
 
+/* The wordmark, an image no typeface changes, over the tagline: no taller than the logo, so the navigation stays put
+   when the text goes */
 .brand__text {
   display: flex;
   flex-direction: column;
+  gap: var(--hf-space-1);
   min-width: 0;
-}
-
-/* No taller than the logo, so the navigation stays put when the text goes */
-.brand__name {
-  font-family: var(--hf-font-display);
-  font-variation-settings: var(--hf-font-display-settings);
-  font-size: var(--hf-font-size-xl);
-  font-weight: var(--hf-font-weight-bold);
-  letter-spacing: var(--hf-letter-spacing-tight);
-  line-height: var(--hf-line-height-tight);
 }
 
 .brand__tagline {

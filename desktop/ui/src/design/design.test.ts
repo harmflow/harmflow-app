@@ -1,6 +1,9 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { Wordmark } from "../components/Icon";
 import { esES } from "../i18n/es-ES";
 import { ptBR } from "../i18n/pt-BR";
 
@@ -582,5 +585,81 @@ describe("the wordmark and the lockup", () => {
     const path = join(iconSources, file);
     expect(existsSync(path), path).toBe(true);
     expect(fontReferences(file, readFileSync(path, "utf8")).map(describeLiteral), file).toEqual([]);
+  });
+});
+
+/** The attributes of an element's opening tag. */
+function attributes(tag: string): Record<string, string> {
+  return Object.fromEntries([...tag.matchAll(/([\w:-]+)="([^"]*)"/g)].map(([, name, value]) => [name, value]));
+}
+
+/** A color as it shows: a token of theme.css replaced by its value, in lower case. */
+function resolvedColor(color: string): string {
+  const token = /^var\((--hf-[\w-]+)\)$/.exec(color.trim())?.[1];
+  const value = token ? new RegExp(`${token}:\\s*([^;]+);`).exec(themeCss)?.[1] : color;
+  return (value ?? color).trim().toLowerCase();
+}
+
+/**
+ * What an SVG draws: its view box, and each path with its outline and its fill — a color, or the geometry and stops of
+ * the gradient it names, whatever that gradient's id.
+ */
+function drawing(svg: string) {
+  const gradients = new Map(
+    [...svg.matchAll(/<linearGradient\b([^>]*)>([\s\S]*?)<\/linearGradient>/g)].map(([, tag, body]) => {
+      const { id, gradientUnits, x1, y1, x2, y2 } = attributes(tag);
+      const stops = [...body.matchAll(/<stop\b([^>]*)>/g)].map(([, stop]) => {
+        const a = attributes(stop);
+        return [Number(a.offset), resolvedColor(a["stop-color"] ?? "")];
+      });
+      return [id, { gradientUnits, line: [x1, y1, x2, y2].map(Number), stops }];
+    }),
+  );
+  const fill = (value: string) => {
+    const id = /^url\(#([^)]+)\)$/.exec(value)?.[1];
+    return id ? (gradients.get(id) ?? `missing gradient ${id}`) : resolvedColor(value);
+  };
+  return {
+    viewBox: /<svg\b[^>]*\bviewBox="([^"]*)"/.exec(svg)?.[1].split(/\s+/).map(Number),
+    paths: [...svg.matchAll(/<path\b([^>]*?)\/?>/g)].map(([, tag]) => {
+      const a = attributes(tag);
+      return { d: a.d, fill: fill(a.fill ?? "") };
+    }),
+  };
+}
+
+describe("the wordmark the sidebar draws", () => {
+  const master = readFileSync(join(iconSources, "wordmark.svg"), "utf8");
+  const drawn = renderToStaticMarkup(createElement(Wordmark, { height: 14, label: "HarmFlow" }));
+
+  it("reads a drawing's paths, its tokens resolved and its gradients by their geometry, not their ids", () => {
+    const sample = (id: string, stop: string) =>
+      `<svg viewBox="0 0 10 2"><defs><linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="10" y2="0">` +
+      `<stop offset=".5" stop-color="${stop}"/></linearGradient></defs><path fill="var(--hf-color-logo-violet)" d="M0 0h1"/>` +
+      `<path fill="url(#${id})" d="M2 0h1"></path></svg>`;
+    expect(drawing(sample("a", "#8B5CF6"))).toEqual(drawing(sample("b", "var(--hf-color-logo-violet)")));
+    expect(drawing(sample("a", "#8b5cf6")).paths).toEqual([
+      { d: "M0 0h1", fill: "#8b5cf6" },
+      { d: "M2 0h1", fill: { gradientUnits: "userSpaceOnUse", line: [0, 0, 10, 0], stops: [[0.5, "#8b5cf6"]] } },
+    ]);
+    expect(drawing(sample("a", "#22d3ee"))).not.toEqual(drawing(sample("a", "#8b5cf6")));
+  });
+
+  it("draws the outlines and colors of wordmark.svg, the master", () => {
+    expect(drawing(master).paths).toHaveLength(2);
+    expect(drawing(drawn)).toEqual(drawing(master));
+  });
+
+  it("sizes it by its height, its width following the master's aspect ratio", () => {
+    const { width, height } = attributes(/<svg\b[^>]*>/.exec(drawn)![0]);
+    const [, , boxWidth, boxHeight] = drawing(master).viewBox!;
+    expect(Number(height)).toBe(14);
+    expect(Number(width) / Number(height)).toBeCloseTo(boxWidth / boxHeight, 6);
+  });
+
+  it("is an image named by its label, with no live text or font", () => {
+    const svg = attributes(/<svg\b[^>]*>/.exec(drawn)![0]);
+    expect([svg.role, svg["aria-label"]]).toEqual(["img", "HarmFlow"]);
+    expect(fontReferences("Wordmark", drawn).map(describeLiteral)).toEqual([]);
   });
 });

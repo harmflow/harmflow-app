@@ -9,7 +9,7 @@ import { formatBytes, formatNumber, formatTime } from "../lib/format";
 import { ariaKeys, shortcutText, type ShortcutId } from "../lib/shortcuts";
 import { dynamicText, useRegistered } from "../registrations";
 import { actions, every, useStore } from "../state/store";
-import { HarnessMark, Icon, Logo, type IconName } from "./Icon";
+import { HarnessMark, Icon, Logo, Wordmark, type IconName } from "./Icon";
 import { MarkAllRead, NotificationList } from "./NotificationList";
 import { toast } from "./toast";
 import { Banner, Button, Gauge, IconButton, cx } from "./ui";
@@ -161,7 +161,7 @@ export function Sidebar({
         <Logo size={38} />
         {collapsed ? null : (
           <div className="brand__text">
-            <span className="brand__name">{t("app.name")}</span>
+            <Wordmark height={14} label={t("app.name")} />
             <span className="brand__tagline">{t("app.tagline")}</span>
           </div>
         )}

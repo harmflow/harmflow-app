@@ -5,7 +5,7 @@
 // singular and more in the plural. And the sidebar's gauges, read from /system, and GitHub's from /github/rate-limit,
 // only while the sidebar is expanded and each widget's setting is on. And the topbar's state of a daemon that runs but
 // does not answer, apart from a stopped one. And, from the rules app.css writes, that a hidden widget leaves the
-// sidebar's foot no space or border.
+// sidebar's foot no space or border. And the sidebar's brand, whose name beside the mark no typeface choice changes.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { act, createElement } from "react";
@@ -13,6 +13,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { native, type DaemonStatus } from "../api/native";
 import type { GitHubRateLimit, Health, Settings, Stats, SystemGauges } from "../api/types";
+import { applyTypeface } from "../design/typeface";
 import i18n from "../i18n";
 import { formatTime } from "../lib/format";
 import { getState, patchStateForTests } from "../state/store";
@@ -723,6 +724,106 @@ describe("the sidebar's gauges", () => {
       expect([reads(), githubReads()]).toEqual([1, 0]);
       expect(githubPanel()).toBeNull();
     });
+  });
+});
+
+// harmflow-app#1156: the name beside the mark is the wordmark, an image the typeface choice cannot change, while the
+// tagline under it stays live text that follows the choice.
+describe("the sidebar's brand", () => {
+  const appCss = readFileSync(join(__dirname, "..", "design", "app.css"), "utf8");
+  const themeCss = readFileSync(join(__dirname, "..", "design", "theme.css"), "utf8");
+
+  afterEach(() => {
+    applyTypeface("harmflow");
+  });
+
+  /** Renders the sidebar in a root of its own, so that each typeface gets a whole first render, and returns its brand. */
+  async function showBrand(collapsed: boolean) {
+    act(() => root?.unmount());
+    host?.remove();
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(createElement(Sidebar, { screen: "overview", onNavigate: () => {}, collapsed, onToggle: () => {} })));
+    return host.querySelector(".brand")!;
+  }
+
+  /**
+   * What in the brand would set the name in a font, each as its text or its tag: live text outside the tagline, an
+   * element that sets text in an SVG, or a font on an element.
+   */
+  function setInFont(brand: Element): string[] {
+    const texts: string[] = [];
+    const walker = document.createTreeWalker(brand, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const text = node.textContent?.trim() ?? "";
+      if (text && !node.parentElement?.closest(".brand__tagline")) texts.push(text);
+    }
+    const fonts = [...brand.querySelectorAll("*")]
+      .filter((e) => ["text", "tspan", "foreignobject"].includes(e.localName.toLowerCase()) || e.hasAttribute("font-family") || /font/.test(e.getAttribute("style") ?? ""))
+      .map((e) => `<${e.localName}>`);
+    return [...texts, ...fonts];
+  }
+
+  /** A theme.css token's value, as a number, from a declaration that reads it. */
+  function tokenValue(value: string | undefined): number {
+    const token = /^var\((--hf-[\w-]+)\)$/.exec(value ?? "")?.[1];
+    expect(token, value).toBeDefined();
+    return parseFloat(new RegExp(`${token}:\\s*([^;]+);`).exec(themeCss)![1]);
+  }
+
+  it("finds a name set in a font, and lets the outlined wordmark and the tagline through", () => {
+    const brand = document.createElement("div");
+    brand.innerHTML = '<svg class="logo" aria-hidden="true"></svg><div class="brand__text"><span class="brand__name">HarmFlow</span><span class="brand__tagline">Agents at work</span></div>';
+    expect(setInFont(brand)).toEqual(["HarmFlow"]);
+    brand.innerHTML = '<svg role="img" aria-label="HarmFlow"><text font-family="Inter">HarmFlow</text></svg><span class="brand__tagline">Agents at work</span>';
+    expect(setInFont(brand)).toEqual(["HarmFlow", "<text>"]);
+    brand.innerHTML = '<svg role="img" aria-label="HarmFlow"><path d="M0 0h4v4H0z"></path></svg><span class="brand__tagline">Agents at work</span>';
+    expect(setInFont(brand)).toEqual([]);
+  });
+
+  it("draws the name beside the mark as the same outlined image under System and HarmFlow, read as the name", async () => {
+    const shown: string[] = [];
+    for (const typeface of ["system", "harmflow"] as const) {
+      applyTypeface(typeface);
+      expect(document.documentElement.dataset.typeface).toBe(typeface === "system" ? "system" : undefined);
+      const brand = await showBrand(false);
+      expect(setInFont(brand), typeface).toEqual([]);
+
+      const named = [...brand.querySelectorAll("[aria-label]")];
+      expect(named.map((e) => [e.localName, e.getAttribute("role"), e.getAttribute("aria-label")]), typeface).toEqual([["svg", "img", "HarmFlow"]]);
+      const name = named[0];
+      expect([...new Set([...name.querySelectorAll("*")].map((e) => e.localName.toLowerCase()))].sort()).toEqual(["defs", "lineargradient", "path", "stop"]);
+      expect(brand.querySelector(".brand__tagline")?.textContent).toBe(i18n.t("app.tagline"));
+
+      // The gradient's id is made per copy; the rest of the image is compared as drawn.
+      const id = name.querySelector("[id]")!.id;
+      shown.push(name.outerHTML.split(id).join("ID"));
+    }
+    expect(shown[0]).toBe(shown[1]);
+  });
+
+  it("keeps the brand row no taller than the mark, and shows the mark alone collapsed", async () => {
+    const brand = await showBrand(false);
+    const mark = Number(brand.querySelector("svg.logo")?.getAttribute("height"));
+    const wordmark = Number(brand.querySelector("svg.wordmark")?.getAttribute("height"));
+    expect(mark).toBe(38);
+    // The tagline's line box: its font size times the line height it inherits from the body.
+    const tagline = declared(appCss, ".brand__tagline");
+    expect(tagline.has("line-height")).toBe(false);
+    const taglineLine = tokenValue(tagline.get("font-size")) * tokenValue(declared(appCss, "body").get("line-height"));
+    expect(wordmark + tokenValue(declared(appCss, ".brand__text").get("gap")) + taglineLine).toBeLessThanOrEqual(mark);
+
+    const collapsed = await showBrand(true);
+    expect([...collapsed.children].map((c) => c.getAttribute("class"))).toEqual(["logo"]);
+  });
+
+  it("leaves the tagline in the body's font stack, which the typeface choice switches", () => {
+    const fonts = stylesheetRules(appCss).flatMap(({ selectors, declarations }) =>
+      selectors.filter((s) => selects(s, "brand__tagline")).flatMap((s) => declarations.filter(([p]) => /^font(?:-family|-variation-settings)?$/.test(p)).map(([p]) => `${s}: ${p}`)),
+    );
+    expect(fonts).toEqual([]);
+    expect(declared(appCss, "body").get("font-family")).toBe("var(--hf-font-sans)");
+    expect(themeCss).toMatch(/:root\[data-typeface="system"\]\s*{[^}]*--hf-font-sans:/);
   });
 });
 
