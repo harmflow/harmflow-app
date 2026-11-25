@@ -239,7 +239,8 @@ func Run(cfg Config, registrations ...Registration) error {
 		Tasks: tasks, Templates: templates, State: state, Executions: execs, Events: events, Validator: validator,
 		Harnesses: []ports.HarnessAdapter{
 			&claudecode.Adapter{Home: userHome, PathEnv: pathEnv, Env: harnessEnv,
-				GitHubToken: claudecode.GHAuthToken(pathEnv, harnessEnv)},
+				GitHubToken: claudecode.GHAuthToken(pathEnv, harnessEnv),
+				GitIdentity: claudecode.GlobalGitIdentity(pathEnv, harnessEnv)},
 			&codex.Adapter{Home: userHome, PathEnv: pathEnv, Env: harnessEnv, ClientVersion: cfg.Version},
 		},
 		Service:    service,
