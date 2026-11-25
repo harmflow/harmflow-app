@@ -1519,6 +1519,7 @@ components:
         - script_signaled
         - script_start_failed
         - script_write_failed
+        - git_config_write_failed
         - process_ended
         - process_left_ended
         - process_interrupted_ended

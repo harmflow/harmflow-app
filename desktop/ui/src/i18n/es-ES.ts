@@ -584,6 +584,7 @@ export const esES: Resources = {
     script_start_failed: "iniciando {{program}}: {{detail}}",
     task_path_refused: "se rechaza {{field}} de esta tarea: {{detail}}",
     script_write_failed: "escribiendo el script inline: {{detail}}",
+    git_config_write_failed: "escribiendo la configuración de git de la sesión: {{detail}}",
     process_ended: "se terminó {{executable}} (pid {{pid}}), que estaba fuera del grupo de procesos",
     process_left_ended: "se terminó {{executable}} (pid {{pid}}), que la herramienta de IA o el programa dejó en ejecución",
     process_interrupted_ended: "se terminó {{executable}} (pid {{pid}}), que la ejecución interrumpida dejó en marcha",

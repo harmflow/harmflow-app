@@ -781,6 +781,17 @@ func TestPreparePassesTheGitHubTokenMasked(t *testing.T) {
 		t.Error("Prepare with an execution folder it cannot write in = nil error, want one")
 	}
 
+	// A request with no environment of its own runs with the daemon's, which the token is added to.
+	t.Setenv("HARMFLOW_TEST_KEPT", "kept")
+	own, _, err := a.Prepare(sandboxedInfo, ports.RunRequest{WorkDir: t.TempDir(), Permissions: perm,
+		ExecutionDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(own.Env, "HARMFLOW_TEST_KEPT=kept") || !slices.Contains(own.Env, "GH_TOKEN="+token) {
+		t.Error("Prepare with no request environment lacks the daemon's variables or the token")
+	}
+
 	// Without a token: the sandbox stays on, with nothing masked and the same restrictions.
 	signedOut := &Adapter{Home: a.Home, GitHubToken: func() string { return "" }}
 	without, _, err := signedOut.Prepare(sandboxedInfo, ports.RunRequest{WorkDir: t.TempDir(), Permissions: perm,

@@ -243,6 +243,10 @@ func TestWorkspaceWriteRealClaudeCodeSandboxRefusesAShellWriteOutside(t *testing
 	}
 }
 
+// pushProbe is the branch TestRealClaudeCodeSandboxReadsAPrivateRepository's dry-run push names: git authenticates
+// for the push and sends nothing, so the branch is never made.
+const pushProbe = "harmflow-push-probe"
+
 // privateRepoEnv names the private repository, <owner>/<name>, that TestRealClaudeCodeSandboxReadsAPrivateRepository
 // reads.
 const privateRepoEnv = "HARMFLOW_TEST_PRIVATE_REPO"
@@ -256,13 +260,15 @@ const gitConfigProbe = `env | grep '^GIT_CONFIG_' | sort | ` +
 	`s/^(GIT_CONFIG_(VALUE_[0-9]+|PARAMETERS))=.+/\1 set/'`
 
 // A workspace_write task on the real Claude Code, at 2.1.309 or later, with the sandbox on, asks the session to read a
-// private repository with gh and with git over HTTPS, and to commit in a new repository the test makes. The daemon passes the
-// signed-in gh's token, masked, and the sandbox's proxy puts it in place on GitHub's hosts: both reads succeed, gh
-// naming the repository and git listing its HEAD (harmflow-app#1164). The commit is made as the identity of the
-// daemon's global git configuration, the test's own here, with no author the session supplies. The token is in no
-// output of the execution, no event, and no file of the daemon's home; the test counts it there and never prints it.
-// The session also runs gitConfigProbe, whose output the test logs, so that a failing git call shows what the shell
-// saw of its configuration. It needs the variables of the real Claude Code and the real gh, and privateRepoEnv.
+// private repository with gh and with git over HTTPS, to commit in a new repository the test makes, and to push that
+// commit with --dry-run, which authenticates as a push does and changes nothing. The daemon passes the signed-in gh's
+// token, masked, and the sandbox's proxy puts it in place on GitHub's hosts: gh names the repository, git lists its
+// HEAD, and the push is let through (harmflow-app#1164). The commit is made as the identity of the daemon's global git
+// configuration, the test's own here, with no author the session supplies. The token is in no output of the
+// execution, no event, and no file of the daemon's home; the test counts it there and never prints it. The session
+// also runs gitConfigProbe, whose output the test logs, so that a failing git call shows what the shell saw of its
+// configuration. It needs the variables of the real Claude Code and the real gh, privateRepoEnv, and a token that may
+// push to that repository.
 func TestRealClaudeCodeSandboxReadsAPrivateRepository(t *testing.T) {
 	h := claudeForTheSandbox(t)
 	gh := realGh(t)
@@ -291,18 +297,20 @@ func TestRealClaudeCodeSandboxReadsAPrivateRepository(t *testing.T) {
 	if out, err := exec.Command("git", "init", "-q", commit).CombinedOutput(); err != nil {
 		t.Fatalf("git init %s: %v: %s", commit, err, out)
 	}
-	prompt := "Run these four shell commands with the Bash tool, one at a time, exactly as written, and nothing else:\n\n" +
+	prompt := "Run these five shell commands with the Bash tool, one at a time, exactly as written, and nothing else:\n\n" +
 		"1. gh api repos/" + repo + " --jq .full_name\n" +
 		"2. git ls-remote https://github.com/" + repo + ".git HEAD\n" +
 		"3. " + gitConfigProbe + "\n" +
 		"4. git -C " + commit + " commit -q --allow-empty -m probe && " +
-		"git -C " + commit + " log -1 --format='%an <%ae>'\n\n" +
+		"git -C " + commit + " log -1 --format='%an <%ae>'\n" +
+		"5. git -C " + commit + " push --dry-run --porcelain https://github.com/" + repo + ".git HEAD:refs/heads/" + pushProbe +
+		"\n\n" +
 		"Then report, for each, its exit status and its output."
 	r := runWithPermissions(t, h, map[string]any{"profile": "workspace_write", "restrictToWorkspace": true}, w, prompt)
 
 	t.Logf("Claude Code %v", r.harness["version"])
 	basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
-	var api, remote, authored bool
+	var api, remote, authored, pushed bool
 	for _, c := range r.calls {
 		if c.tool == "Bash" && strings.Contains(c.command, "GIT_CONFIG_") {
 			if strings.Contains(c.output, token) || strings.Contains(c.output, basic) {
@@ -317,6 +325,8 @@ func TestRealClaudeCodeSandboxReadsAPrivateRepository(t *testing.T) {
 			api = true
 		case strings.Contains(c.command, "ls-remote") && regexp.MustCompile(`\b[0-9a-f]{40}\s+HEAD\b`).MatchString(c.output):
 			remote = true
+		case strings.Contains(c.command, "push --dry-run") && strings.Contains(c.output, "refs/heads/"+pushProbe):
+			pushed = true
 		case strings.Contains(c.command, "log -1"):
 			authored = strings.TrimSpace(c.output) == author
 			t.Logf("the commit's author: %q", strings.TrimSpace(c.output))
@@ -327,6 +337,9 @@ func TestRealClaudeCodeSandboxReadsAPrivateRepository(t *testing.T) {
 	}
 	if !remote {
 		t.Errorf("no git ls-remote call listed the HEAD of %s inside the sandbox", repo)
+	}
+	if !pushed {
+		t.Errorf("no git push --dry-run call to %s was let through inside the sandbox", repo)
 	}
 	if !authored {
 		t.Errorf("no commit inside the sandbox was made as %q, the daemon's git identity", author)

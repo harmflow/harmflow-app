@@ -582,6 +582,7 @@ export const ptBR: Resources = {
     script_start_failed: "iniciando {{program}}: {{detail}}",
     task_path_refused: "{{field}} desta tarefa foi recusado: {{detail}}",
     script_write_failed: "gravando o script inline: {{detail}}",
+    git_config_write_failed: "gravando a configuração do git da sessão: {{detail}}",
     process_ended: "{{executable}} (pid {{pid}}), que estava fora do grupo de processos, foi encerrado",
     process_left_ended: "{{executable}} (pid {{pid}}), que a ferramenta de IA ou o programa deixou em execução, foi encerrado",
     process_interrupted_ended: "{{executable}} (pid {{pid}}), que a execução interrompida deixou rodando, foi encerrado",

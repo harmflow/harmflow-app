@@ -777,7 +777,8 @@ type gitIdentity struct{ name, email string }
 func withGitHubToken(env []string, dir, token string, id gitIdentity) ([]string, error) {
 	path := filepath.Join(dir, gitConfigFile)
 	if err := os.WriteFile(path, []byte(gitConfig(id)), 0o600); err != nil {
-		return nil, fmt.Errorf("write the session's git configuration: %w", err)
+		return nil, domain.TextErr("git_config_write_failed", "writing the session's git configuration: {{detail}}",
+			"detail", err.Error())
 	}
 	if env == nil {
 		env = os.Environ()
