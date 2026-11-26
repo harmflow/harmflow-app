@@ -17,8 +17,8 @@
 </p>
 
 <p align="center">
-  <img alt="Go 1.24"
-       src="https://img.shields.io/badge/Go-1.24-00ADD8?style=flat-square&logo=go&logoColor=white&labelColor=0b1020">
+  <img alt="Go 1.26"
+       src="https://img.shields.io/badge/Go-1.26-00ADD8?style=flat-square&logo=go&logoColor=white&labelColor=0b1020">
   <img alt="Tauri 2"
        src="https://img.shields.io/badge/Tauri-2-24C8DB?style=flat-square&logo=tauri&logoColor=white&labelColor=0b1020">
   <img alt="Rust stable"
@@ -98,7 +98,7 @@
 
 | You need | Version | For |
 |---|---|---|
-| Go | 1.24 | the daemon |
+| Go | 1.26 | the daemon |
 | Node with pnpm | 26 · 10 | the interface |
 | Rust | stable | the desktop shell |
 | Claude Code or Codex | signed in | running tasks |
