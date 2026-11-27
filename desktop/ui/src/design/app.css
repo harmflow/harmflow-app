@@ -1263,6 +1263,11 @@ body:has([aria-modal="true"]) .tooltip {
   color: var(--hf-color-codex);
 }
 
+.harness--antigravity-cli .harness-mark,
+.harness-row__mark.harness--antigravity-cli {
+  color: var(--hf-color-antigravity);
+}
+
 .harness__model {
   padding: 0 var(--hf-space-1-5);
   border-radius: var(--hf-radius-sm);

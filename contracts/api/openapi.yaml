@@ -1195,7 +1195,7 @@ components:
       name: harnessId
       in: path
       required: true
-      schema: { type: string, enum: [claude-code, codex] }
+      schema: { type: string, enum: [claude-code, codex, antigravity-cli] }
 
   responses:
     Unauthorized:
@@ -1326,6 +1326,8 @@ components:
         - claude_effort_invalid
         - codex_model_unknown
         - codex_effort_invalid
+        - antigravity_model_unknown
+        - antigravity_effort_invalid
         - codex_profile_unchecked
         - harness_not_detected
         - harness_not_ready
@@ -1395,6 +1397,10 @@ components:
         - restriction_codex_read_paths
         - restriction_codex_program_lists
         - restriction_codex_read_only
+        - restriction_antigravity_tool_lists
+        - restriction_antigravity_read_paths
+        - restriction_antigravity_workspace
+        - restriction_antigravity_network
         - restriction_script_unenforced
         - script_leftovers_ended
         - harness_version_untested
@@ -1508,6 +1514,7 @@ components:
         - harness_manual_path_invalid
         - claude_not_found
         - codex_not_found
+        - antigravity_not_found
         - git_not_found
         - gh_not_found
         - command_failed
@@ -1516,6 +1523,7 @@ components:
         - codex_app_server_help_timed_out
         - harness_version_below_minimum
         - claude_not_signed_in
+        - antigravity_not_signed_in
         - quota_report_unrecognized
         - not_signed_in
         - authentication_unverified
@@ -1737,7 +1745,7 @@ components:
       type: object
       required: [id, name, detected, readiness, authentication, models, efforts, lastCheckedAt, installations]
       properties:
-        id: { type: string, enum: [claude-code, codex] }
+        id: { type: string, enum: [claude-code, codex, antigravity-cli] }
         name: { type: string }
         detected: { type: boolean }
         path: { type: string, description: The resolved absolute path. }
@@ -2040,7 +2048,7 @@ components:
           description: >-
             The harness its tasks run on, the provider of its preferred profile; claude-code when it names none.
           type: string
-          enum: [claude-code, codex]
+          enum: [claude-code, codex, antigravity-cli]
         harnessReady: { type: boolean, description: Whether that harness is ready. }
         missing:
           description: >-

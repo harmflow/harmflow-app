@@ -365,6 +365,8 @@ export const enUS = {
     claude_effort_invalid: 'Claude Code {{version}} does not accept the effort "{{effort}}"; it accepts {{efforts}}',
     codex_model_unknown: 'Codex {{version}} does not offer the model "{{model}}"; it offers {{models}}',
     codex_effort_invalid: 'Codex model "{{model}}" does not accept the effort "{{effort}}"; it accepts {{efforts}}',
+    antigravity_model_unknown: 'the Antigravity CLI does not offer the model "{{model}}"; use default or a model `agy models` lists',
+    antigravity_effort_invalid: 'the Antigravity CLI does not accept the effort "{{effort}}"; it accepts {{efforts}}',
     codex_profile_unchecked: "Codex's list of models could not be read, so the model and effort were not checked",
     harness_not_detected: "{{harness}} was not detected on this machine",
     harness_not_ready: "{{harness}} is not ready: {{detail}}",
@@ -456,6 +458,14 @@ export const enUS = {
       "Codex's sandbox does not limit the programs its shell starts; the custom program lists are not enforced",
     restriction_codex_read_only:
       "Codex's managed requirements do not allow its read-only sandbox with approvals off, or could not be read, so Codex may approve a change to a file of the workspace; the session may change files in its workspace",
+    restriction_antigravity_tool_lists:
+      "the Antigravity CLI does not take a per-tool allow or deny list; the custom tool lists are not enforced",
+    restriction_antigravity_read_paths:
+      "the Antigravity CLI does not limit what the session reads; the custom read paths are not enforced",
+    restriction_antigravity_workspace:
+      "the Antigravity CLI does not keep the commands it runs in the workspace; restrictToWorkspace is not enforced for them",
+    restriction_antigravity_network:
+      "the Antigravity CLI does not keep the commands it runs off the network; network: deny is not enforced for them",
     harness_version_untested: "{{harness}} {{version}} is newer than the versions HarmFlow was tested with",
     harness_version_unknown: "{{harness}} reported no version number, so HarmFlow cannot tell whether it was tested with it",
     quota_unread: "{{harness}}'s quota could not be read, so the attempt started without that check: {{detail}}",
@@ -576,6 +586,7 @@ export const enUS = {
     harness_manual_path_invalid: "the path set by hand does not exist or is not a file",
     claude_not_found: "claude was not found on PATH or in the usual install locations",
     codex_not_found: "codex was not found on PATH, in Codex.app, or in the usual install locations",
+    antigravity_not_found: "agy was not found on PATH or in the usual install locations",
     git_not_found: "git was not found",
     gh_not_found: "the GitHub CLI (gh) was not found; the GitHub task type needs it",
     command_failed: "{{command}} failed: {{detail}}",
@@ -585,6 +596,7 @@ export const enUS = {
       "the {{harness}} --help check timed out, so whether it has an app server is unknown; the first call to the app server proves it",
     harness_version_below_minimum: "{{harness}} {{version}} is older than {{minimum}}, the oldest version line HarmFlow supports",
     claude_not_signed_in: "Claude Code is not signed in; run `claude` in a terminal and sign in",
+    antigravity_not_signed_in: "the Antigravity CLI is not signed in; run `agy` in a terminal and sign in with a personal Google account",
     quota_report_unrecognized: "{{harness}}'s usage report names no plan window HarmFlow can read",
     not_signed_in: "{{name}} is not signed in; run `{{command}}` in a terminal",
     authentication_unverified: "authentication could not be verified",
@@ -1030,7 +1042,7 @@ export const enUS = {
     },
   },
   harness: {
-    names: { "claude-code": "Claude Code", codex: "Codex" },
+    names: { "claude-code": "Claude Code", codex: "Codex", "antigravity-cli": "Antigravity CLI" },
     scriptLabel: "Program",
     effort: "Effort: {{value}}",
     configuredModel: "Configured model: {{value}}. The harness did not report the model it used.",

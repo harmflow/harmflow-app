@@ -23,6 +23,7 @@ import (
 
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/eventlog"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/fsstore"
+	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/antigravitycli"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/claudecode"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/codex"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/httpapi"
@@ -241,6 +242,7 @@ func Run(cfg Config, registrations ...Registration) error {
 			&claudecode.Adapter{Home: userHome, PathEnv: pathEnv, Env: harnessEnv,
 				GitHubToken: claudecode.GHAuthToken(pathEnv, harnessEnv)},
 			&codex.Adapter{Home: userHome, PathEnv: pathEnv, Env: harnessEnv, ClientVersion: cfg.Version},
+			&antigravitycli.Adapter{Home: userHome, PathEnv: pathEnv, Env: harnessEnv, SignedIn: antigravitySignIn()},
 		},
 		Service:    service,
 		System:     system,

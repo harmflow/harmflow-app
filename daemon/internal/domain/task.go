@@ -28,10 +28,11 @@ const (
 	SystemWindows = "windows"
 )
 
-// Harness providers of the MVP.
+// Harness providers: the MVP's two, and the Antigravity CLI, which counts for no MVP claim.
 const (
-	HarnessClaudeCode = "claude-code"
-	HarnessCodex      = "codex"
+	HarnessClaudeCode     = "claude-code"
+	HarnessCodex          = "codex"
+	HarnessAntigravityCLI = "antigravity-cli"
 )
 
 // DefaultModel and DefaultEffort leave the harness's own default in place.

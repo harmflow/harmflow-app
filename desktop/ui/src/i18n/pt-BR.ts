@@ -370,6 +370,8 @@ export const ptBR: Resources = {
       'o Claude Code {{version}} não aceita o esforço "{{effort}}"; ele aceita {{efforts}}',
     codex_model_unknown: 'o Codex {{version}} não oferece o modelo "{{model}}"; ele oferece {{models}}',
     codex_effort_invalid: 'o modelo do Codex "{{model}}" não aceita o esforço "{{effort}}"; ele aceita {{efforts}}',
+    antigravity_model_unknown: 'o Antigravity CLI não oferece o modelo "{{model}}"; use default ou um modelo que `agy models` lista',
+    antigravity_effort_invalid: 'o Antigravity CLI não aceita o esforço "{{effort}}"; ele aceita {{efforts}}',
     codex_profile_unchecked:
       "a lista de modelos do Codex não pôde ser lida, então o modelo e o esforço não foram verificados",
     harness_not_detected: "{{harness}} não foi detectado nesta máquina",
@@ -465,6 +467,14 @@ export const ptBR: Resources = {
       "o sandbox do Codex não limita os programas que o seu shell inicia; as listas de programas personalizadas não são aplicadas",
     restriction_codex_read_only:
       "os requisitos gerenciados do Codex não permitem o sandbox somente leitura com as aprovações desligadas, ou não puderam ser lidos, então o Codex pode aprovar uma alteração em um arquivo do workspace; a sessão pode alterar arquivos do seu workspace",
+    restriction_antigravity_tool_lists:
+      "o Antigravity CLI não aceita lista de ferramentas permitidas ou negadas; as listas personalizadas não são aplicadas",
+    restriction_antigravity_read_paths:
+      "o Antigravity CLI não limita o que a sessão lê; os caminhos de leitura personalizados não são aplicados",
+    restriction_antigravity_workspace:
+      "o Antigravity CLI não mantém no workspace os comandos que executa; restrictToWorkspace não é aplicado a eles",
+    restriction_antigravity_network:
+      "o Antigravity CLI não mantém fora da rede os comandos que executa; network: deny não é aplicado a eles",
     harness_version_untested: "{{harness}} {{version}} é mais novo que as versões com que o HarmFlow foi testado",
     harness_version_unknown: "{{harness}} não informou um número de versão, então o HarmFlow não sabe se foi testado com ela",
     quota_unread: "não foi possível ler a cota do {{harness}}, então a tentativa começou sem essa verificação: {{detail}}",
@@ -588,6 +598,7 @@ export const ptBR: Resources = {
     harness_manual_path_invalid: "o caminho definido manualmente não existe ou não é um arquivo",
     claude_not_found: "claude não foi encontrado no PATH nem nos locais de instalação habituais",
     codex_not_found: "codex não foi encontrado no PATH, no Codex.app nem nos locais de instalação habituais",
+    antigravity_not_found: "agy não foi encontrado no PATH nem nos locais de instalação habituais",
     git_not_found: "o git não foi encontrado",
     gh_not_found: "a CLI do GitHub (gh) não foi encontrada; o tipo de tarefa GitHub precisa dela",
     command_failed: "{{command}} falhou: {{detail}}",
@@ -598,6 +609,7 @@ export const ptBR: Resources = {
       "a verificação de --help do {{harness}} esgotou o tempo, então não se sabe se ele tem um app server; a primeira chamada ao app server o comprova",
     harness_version_below_minimum: "o {{harness}} {{version}} é anterior à {{minimum}}, a linha de versões mais antiga que o HarmFlow suporta",
     claude_not_signed_in: "o Claude Code não está conectado; execute `claude` em um terminal e entre na conta",
+    antigravity_not_signed_in: "o Antigravity CLI não está conectado; execute `agy` em um terminal e entre com uma conta pessoal do Google",
     quota_report_unrecognized: "o relatório de uso do {{harness}} não traz nenhuma janela do plano que o HarmFlow consiga ler",
     not_signed_in: "{{name}} não está conectado; execute `{{command}}` em um terminal",
     authentication_unverified: "não foi possível verificar a autenticação",
@@ -1057,7 +1069,7 @@ export const ptBR: Resources = {
     },
   },
   harness: {
-    names: { "claude-code": "Claude Code", codex: "Codex" },
+    names: { "claude-code": "Claude Code", codex: "Codex", "antigravity-cli": "Antigravity CLI" },
     scriptLabel: "Programa",
     effort: "Esforço: {{value}}",
     configuredModel: "Modelo configurado: {{value}}. O harness não informou o modelo que usou.",

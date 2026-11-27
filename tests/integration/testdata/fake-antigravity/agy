@@ -1,0 +1,73 @@
+#!/bin/bash
+# A stand-in for the Antigravity CLI that speaks its stream-json format, as the CLI 1.5.3 writes it. It is named agy, as
+# the daemon identifies the CLI by its executable's name and a version-shaped --version output, and it prints its help
+# to stderr, as the CLI does. It reads its one user message from stdin, as a run sends it. The prompt picks the scenario,
+# by a variable of its own so that a task can fail over between it and another stand-in: AGY=ok (default), AGY=quota,
+# AGY=ratelimit, AGY=signedout, AGY=ineligible (an account the CLI will not serve), AGY=network, AGY=denied (an action
+# headless mode refused, which ends the run with no answer and exit 0), or AGY=error (a task error).
+# It writes the arguments it was started with, one per line, to agy-args in its working directory, and refuses to run
+# when a credential variable reaches it or its self-update is left on.
+case "$1" in
+  --version) echo "1.5.3"; exit 0 ;;
+  --help) cat >&2 <<'HELP'
+Usage of agy:
+  --add-dir  --effort  --input-format  --mode  --model  --output-format  --print  --sandbox  --settings
+HELP
+    exit 0 ;;
+esac
+printf '%s\n' "$@" > agy-args
+if [ -n "$GEMINI_API_KEY$AGY_ADC_AUTH" ] || [ "$AGY_CLI_DISABLE_AUTO_UPDATE" != "true" ]; then
+  echo "error: the stand-in got a credential variable or its self-update on" >&2
+  exit 3
+fi
+message=$(cat)
+scenario=ok
+case "$message" in
+  *AGY=quota*) scenario=quota ;;
+  *AGY=ratelimit*) scenario=ratelimit ;;
+  *AGY=signedout*) scenario=signedout ;;
+  *AGY=ineligible*) scenario=ineligible ;;
+  *AGY=network*) scenario=network ;;
+  *AGY=denied*) scenario=denied ;;
+  *AGY=error*) scenario=error ;;
+esac
+result() { # status, response, error
+  printf '{"event":"result","result":{"conversation_id":"agy-conversation-1","status":"%s","response":"%s","error":"%s","duration_seconds":1,"num_turns":1}}\n' "$1" "$2" "$3"
+}
+case "$scenario" in
+  signedout)
+    result ERROR "" "authentication required"
+    echo "error: authentication required: You are not logged into Antigravity." >&2
+    exit 1 ;;
+  ineligible)
+    result ERROR "" "Eligibility check failed: Your current account is not eligible for Antigravity. Try signing in with another personal Google account."
+    echo "error: Eligibility check failed: Your current account is not eligible for Antigravity. Try signing in with another personal Google account." >&2
+    exit 1 ;;
+esac
+echo '{"event":"init","conversation_id":"agy-conversation-1","init":{"cwd":"'"$PWD"'","tools":["run_command","write_file"],"permission_mode":"request-review","model":"gemini-3.8-flash-medium"}}'
+echo '{"event":"step_update","step_update":{"conversation_id":"agy-conversation-1","step_index":0,"state":"DONE","step_type":"user_input"}}'
+case "$scenario" in
+  quota)
+    result ERROR "" "You have exhausted your weekly quota for Gemini Flash."
+    exit 1 ;;
+  ratelimit)
+    result ERROR "" "429 Too Many Requests"
+    exit 1 ;;
+  network)
+    result ERROR "" "dial tcp: lookup antigravity.google: no such host"
+    exit 1 ;;
+  denied)
+    result SUCCESS "" ""
+    echo 'jetski: no output produced — a tool required the "command" permission that headless mode cannot prompt for, so it was auto-denied.' >&2
+    exit 0 ;;
+  error)
+    echo '{"event":"step_update","step_update":{"conversation_id":"agy-conversation-1","step_index":1,"state":"DONE","step_type":"agent_response","text_delta":"The tests failed."}}'
+    result ERROR "" "the tests failed"
+    exit 1 ;;
+esac
+echo '{"event":"step_update","step_update":{"conversation_id":"agy-conversation-1","step_index":1,"state":"DONE","step_type":"agent_response","text_delta":"Working on it."}}'
+echo '{"event":"step_update","step_update":{"conversation_id":"agy-conversation-1","step_index":2,"state":"ACTIVE","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"CommandLine":"ls"}}}}'
+echo '{"event":"step_update","step_update":{"conversation_id":"agy-conversation-1","step_index":2,"state":"DONE","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"CommandLine":"ls"},"output":"Command exited with code 0.\n\nREADME.md"}}}'
+echo '{"event":"step_update","step_update":{"conversation_id":"agy-conversation-1","step_index":3,"state":"DONE","step_type":"agent_response","text_delta":"Done."}}'
+result SUCCESS "Working on it.\\n\\nDone." ""
+exit 0
