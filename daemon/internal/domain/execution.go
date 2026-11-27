@@ -95,9 +95,10 @@ const (
 
 // Attempt is one harness process. Model and Effort are what the harness reported using, empty when it reported
 // nothing; the configured ones, default when the task set none, are kept apart and never stand in for them.
-// Installation and InstallationHome name the installation of the harness the attempt ran on, empty for a harness
-// whose installations are its binaries alone. InstallationName is the name of a custom entry the owner added from a
-// command line, whose home the record leaves out, since it is one of the entry's assignments.
+// Installation and InstallationName are the identifier and the name of the installation of the harness the attempt ran
+// on: a custom entry's own name, and for any other installation its identifier, which is the harness's own for a
+// harness whose installations are its binaries alone. InstallationHome is the home of a detected installation; the
+// record leaves a custom entry's out, since it is one of the entry's assignments.
 type Attempt struct {
 	Number           int               `json:"number"`
 	Harness          string            `json:"harness"`

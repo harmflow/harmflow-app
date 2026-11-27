@@ -1487,11 +1487,11 @@ export interface components {
             /** @description Empty for a script task's attempt, which runs a program instead of a harness. */
             harness: string;
             harnessVersion?: string;
-            /** @description The installation of the harness the attempt ran on, as a task's harness profile names it; absent for a harness whose installations are its binaries alone. */
+            /** @description The identifier of the installation of the harness the attempt ran on: as a task's harness profile names it, or, for a harness whose installations are its binaries alone, the harness's own identifier, which the attempt alone records. */
             installation?: string;
-            /** @description The home of that installation, which the attempt ran with; never anything read from it. */
+            /** @description The home of that installation, which the attempt ran with; never anything read from it, and absent for a custom entry. */
             installationHome?: string;
-            /** @description The name of the custom entry the attempt ran on, whose home is left out, since it is one of the entry's assignments; absent for any other installation. */
+            /** @description The name of that installation: a custom entry's own name, whose home is left out, since it is one of the entry's assignments; for any other installation, its identifier. */
             installationName?: string;
             /** @description The model the harness reported using; absent when it reported none. */
             model?: string;

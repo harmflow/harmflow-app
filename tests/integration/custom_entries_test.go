@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -93,6 +94,57 @@ func TestEachCustomEntryRunsWithItsOwnHome(t *testing.T) {
 				t.Errorf("os.ReadFile(execution %s's codex-home) = %s, want %s alone", id, started, homeOf[e.id])
 			}
 		})
+	}
+}
+
+// harmflow-app#1176: across the real daemon, an execution's first attempt runs on a custom entry of the stand-in Codex
+// named Personal, whose line carries CODEX_HOME and a marker assignment, and exhausts its quota; the second fails over
+// to the stand-in Claude Code. Through the local API, each attempt's record carries the identifier and the name of the
+// installation it ran on, claude-code for the second, and neither the marker's value nor the entry's home.
+func TestEachAttemptRecordsItsInstallationByName(t *testing.T) {
+	t.Parallel()
+	codex := standIn(t, "fake-codex", "codex")
+	user := resolvedTempDir(t)
+	detected := codexHomeAt(t, filepath.Join(user, ".codex"), "model-a", `{"type":"chatgpt","planType":"plus"}`)
+	personal := codexHomeAt(t, filepath.Join(resolvedTempDir(t), "personal"), "model-p",
+		`{"type":"chatgpt","planType":"pro"}`)
+	d := startDaemon(t, t.TempDir(), "HOME="+user, "CODEX_HOME="+detected)
+	d.setHarness("codex", codex.path)
+	const mark = "mark-value-7f3c91"
+	h := d.call("POST", "/harnesses/codex/installations",
+		map[string]any{"line": "CODEX_HOME=" + personal + " HARMFLOW_TEST_MARK=" + mark + " " + codex.path}, 201)
+	entries, _ := h["customEntries"].([]any)
+	if len(entries) != 1 {
+		t.Fatalf("POST /harnesses/codex/installations lists the custom entries %v, want one", entries)
+	}
+	id := jsonString(entries[0].(map[string]any)["installationId"])
+	d.call("PATCH", "/harnesses/codex/installations/"+id, map[string]any{"name": "Personal"}, 200)
+
+	doc := strings.Replace(task("named", "CODEX=quota", "      installation: \""+id+"\"\n"+
+		"    fallback:\n      candidates:\n        - provider: claude-code\n"), "provider: claude-code", "provider: codex", 1)
+	d.call("POST", "/tasks", map[string]any{"yaml": doc}, 201)
+	x := d.waitEnd(d.call("POST", "/tasks/named/run", nil, 202)["executionId"].(string), 2*time.Minute)
+	attempts, _ := x["attempts"].([]any)
+	if x["status"] != "completed" || len(attempts) != 2 {
+		t.Fatalf("the execution ended %v with the attempts %v, error %v; want completed in two attempts", x["status"],
+			attempts, x["errorMessage"])
+	}
+	type installation struct{ harness, id, name, home string }
+	want := []installation{{"codex", id, "Personal", ""}, {"claude-code", "claude-code", "claude-code", ""}}
+	for i, a := range attempts {
+		a := a.(map[string]any)
+		got := installation{jsonString(a["harness"]), jsonString(a["installation"]), jsonString(a["installationName"]),
+			jsonString(a["installationHome"])}
+		if got != want[i] {
+			t.Errorf("the execution's attempt %d records %+v, want %+v", i+1, got, want[i])
+		}
+	}
+	record, err := json.Marshal(x)
+	if err != nil {
+		t.Fatalf("json.Marshal(the execution) error = %v, want none", err)
+	}
+	if strings.Contains(string(record), mark) || strings.Contains(string(record), personal) {
+		t.Errorf("GET /executions/%v holds the marker's value or the entry's home, want neither: %s", x["id"], record)
 	}
 }
 

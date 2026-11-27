@@ -71,6 +71,9 @@ type run struct {
 	conv ports.Conversation
 	// harnessName is the running attempt's harness, as the step names it while no request waits.
 	harnessName string
+	// installation is the identifier detection gives the running attempt's installation, empty for a harness whose
+	// installations are its binaries alone, whatever the attempt records; guarded by the App's mutex.
+	installation string
 	// selected holds every work item the session selected, in order, each with what the ledger held for it before;
 	// guarded by the App's mutex.
 	selected []selection
@@ -807,10 +810,20 @@ func (r *run) runAttempt(ctx context.Context, ad ports.HarnessAdapter, info port
 	at := domain.Attempt{Number: n, Harness: p.Provider, HarnessVersion: info.Version, Installation: info.InstallationID,
 		InstallationHome: info.Home, ConfiguredModel: p.Model, ConfiguredEffort: p.Effort, StartedAt: now,
 		Outcome: domain.AttemptRunning}
-	if info.Custom() {
+	switch {
+	case info.Custom():
 		// A custom entry's home is one of its assignments, whose values the record never holds: its name says which.
 		at.InstallationName, at.InstallationHome = info.EntryName, ""
+	case at.Installation != "":
+		// Any other installation is named by its identifier, from what detection gives, never from an assignment.
+		at.InstallationName = at.Installation
+	case p.Provider != "":
+		// The installation in use of a harness whose installations are its binaries alone, found or set by hand, has one
+		// fixed identifier, the harness's own, recorded on the attempt alone: a profile's installation key is unchanged.
+		at.Installation, at.InstallationName, at.InstallationHome = p.Provider, p.Provider, ""
 	}
+	// The quota a running attempt reports is its installation's as detection names it, the key its check reads.
+	r.installation = info.InstallationID
 	// Every attempt gets the whole cap, as the task set it when the execution started; a harness that cannot stop an
 	// attempt by cost runs it with none.
 	capUSD, capped := r.def.AttemptCostCap()

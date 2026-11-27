@@ -515,6 +515,49 @@ func TestFallbackRunsOnTheInstallationItNames(t *testing.T) {
 	}
 }
 
+// harmflow-app#1176: every attempt records the installation it ran on by its identifier and its name. Claude Code's
+// installation in use, whether detection found its binary or its path was set by hand, is claude-code, named
+// claude-code, with no home; a detected Codex home is named by its identifier and keeps its home.
+func TestEachAttemptRecordsItsInstallationAndItsName(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		path string // Claude Code's path set by hand, "" for the one detection found
+	}{
+		{"detected", ""},
+		{"set by hand", "/bin/sh"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newHomesEnv(t)
+			if c.path != "" {
+				if _, err := e.app.SetHarnessPath(t.Context(), domain.HarnessClaudeCode, &c.path); err != nil {
+					t.Fatalf("SetHarnessPath(claude-code, %q) error = %v, want none", c.path, err)
+				}
+			}
+			if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: taskYAML("recorded", codexFallback)}); err != nil {
+				t.Fatalf("CreateTask(recorded) error = %v, want none", err)
+			}
+			r, err := e.app.RunTask("recorded")
+			if err != nil {
+				t.Fatal(err)
+			}
+			x := e.wait(r.ExecutionID, domain.StatusCompleted)
+			if len(x.Attempts) != 2 {
+				t.Fatalf("RunTask(recorded) gives the attempts %+v, want two", x.Attempts)
+			}
+			type installation struct{ harness, id, name, home string }
+			want := []installation{
+				{domain.HarnessClaudeCode, "claude-code", "claude-code", ""},
+				{domain.HarnessCodex, "~/.codex", "~/.codex", "/homes/~/.codex"},
+			}
+			for i, at := range x.Attempts {
+				if got := (installation{at.Harness, at.Installation, at.InstallationName, at.InstallationHome}); got != want[i] {
+					t.Errorf("RunTask(recorded) attempt %d records %+v, want %+v", at.Number, got, want[i])
+				}
+			}
+		})
+	}
+}
+
 // goneCandidate is a fallback candidate on Codex's ~/.codex-b, the installation runRemoved removes once the task is
 // saved, and missingInstallation is what the execution says of it.
 const (

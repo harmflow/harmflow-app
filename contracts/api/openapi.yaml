@@ -2279,9 +2279,9 @@ components:
         number: { type: integer }
         harness: { type: string, description: "Empty for a script task's attempt, which runs a program instead of a harness." }
         harnessVersion: { type: string }
-        installation: { type: string, description: "The installation of the harness the attempt ran on, as a task's harness profile names it; absent for a harness whose installations are its binaries alone." }
-        installationHome: { type: string, description: "The home of that installation, which the attempt ran with; never anything read from it." }
-        installationName: { type: string, description: "The name of the custom entry the attempt ran on, whose home is left out, since it is one of the entry's assignments; absent for any other installation." }
+        installation: { type: string, description: "The identifier of the installation of the harness the attempt ran on: as a task's harness profile names it, or, for a harness whose installations are its binaries alone, the harness's own identifier, which the attempt alone records." }
+        installationHome: { type: string, description: "The home of that installation, which the attempt ran with; never anything read from it, and absent for a custom entry." }
+        installationName: { type: string, description: "The name of that installation: a custom entry's own name, whose home is left out, since it is one of the entry's assignments; for any other installation, its identifier." }
         model: { type: string, description: "The model the harness reported using; absent when it reported none." }
         effort: { type: string, description: "The effort the harness reported using; absent when it reported none." }
         configuredModel: { type: string, description: "The model the task asked for, default when it set none. Never the one used." }
