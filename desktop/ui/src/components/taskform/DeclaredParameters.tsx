@@ -2,6 +2,7 @@
 // declares any, each parameter a field of its type with its description and its default.
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { Catalog, ParameterDeclaration } from "../../api/types";
 import { getIn, linesToList, listToLines, type Doc, type Path } from "../../lib/taskForm";
 import { Field, FieldGroup, NumberInput, TextArea, TextInput, Toggle } from "../ui";
@@ -66,7 +67,7 @@ export function DeclaredParameters({
   );
 }
 
-/** One declared parameter as a field of its type; an object is a YAML field, written in YAML's JSON form. */
+/** One declared parameter as a field of its type; an object is a YAML field, in block form or JSON form alike. */
 function ParameterField({
   declaration: d,
   value,
@@ -128,7 +129,10 @@ function ParameterField({
   }
 }
 
-/** An object parameter's YAML field: its text is kept while it does not parse, and its value written once it does. */
+/**
+ * An object parameter's YAML field: its text is kept while it does not parse, and its value written once it does. A
+ * value set elsewhere shows as the parser writes it, in block form.
+ */
 function ObjectField({
   label,
   hint,
@@ -143,18 +147,18 @@ function ObjectField({
   onChange: (v: unknown) => void;
 }) {
   const { t } = useTranslation();
-  const [text, setText] = useState(() => (value === undefined ? "" : JSON.stringify(value, null, 2)));
+  const [text, setText] = useState(() => yamlText(value));
   const [unreadable, setUnreadable] = useState(false);
   useEffect(() => {
     // A value changed elsewhere, as in the YAML editor, replaces the text unless the text already reads as it.
     setText((current) => {
       try {
-        if (current.trim() !== "" && JSON.stringify(JSON.parse(current)) === JSON.stringify(value)) return current;
+        if (current.trim() !== "" && JSON.stringify(parseYaml(current)) === JSON.stringify(value)) return current;
       } catch {
         // the text does not parse yet: the value it would write has not changed
         return current;
       }
-      return value === undefined ? "" : JSON.stringify(value, null, 2);
+      return yamlText(value);
     });
   }, [value]);
   const edit = (next: string) => {
@@ -165,7 +169,7 @@ function ObjectField({
       return;
     }
     try {
-      onChange(JSON.parse(next));
+      onChange(parseYaml(next));
       setUnreadable(false);
     } catch {
       setUnreadable(true);
@@ -176,6 +180,11 @@ function ObjectField({
       <TextArea className="mono" rows={5} value={text} onChange={(e) => edit(e.target.value)} />
     </Field>
   );
+}
+
+/** An object parameter's value as its field shows it: empty when unset, otherwise YAML in block form. */
+function yamlText(value: unknown): string {
+  return value === undefined ? "" : stringifyYaml(value);
 }
 
 /** A default or a value as the form shows it. */

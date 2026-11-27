@@ -1434,7 +1434,7 @@ export const ptBR: Resources = {
         skill: "Skill {{name}}",
         agent: "Agente {{name}}",
       },
-      parameterUnreadable: "Ainda não é YAML válido em JSON; o último valor válido é mantido",
+      parameterUnreadable: "Ainda não é YAML válido; o último valor válido é mantido",
       programKind: "O que executa",
       programCommand: "Um programa",
       programInline: "Um script inline",

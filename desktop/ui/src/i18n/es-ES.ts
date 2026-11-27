@@ -1432,7 +1432,7 @@ export const esES: Resources = {
         skill: "Skill {{name}}",
         agent: "Agente {{name}}",
       },
-      parameterUnreadable: "Todavía no es YAML válido en JSON; se mantiene el último valor válido",
+      parameterUnreadable: "Todavía no es YAML válido; se mantiene el último valor válido",
       programKind: "Qué ejecuta",
       programCommand: "Un programa",
       programInline: "Un script inline",

@@ -1407,7 +1407,7 @@ export const enUS = {
         skill: "Skill {{name}}",
         agent: "Agent {{name}}",
       },
-      parameterUnreadable: "Not valid YAML in its JSON form yet; the last valid value is kept",
+      parameterUnreadable: "Not valid YAML yet; the last valid value is kept",
       programKind: "What it runs",
       programCommand: "A program",
       programInline: "An inline script",
