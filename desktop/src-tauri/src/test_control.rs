@@ -11,6 +11,7 @@
 //! does and reads it as macOS shows it, and reads which windows of the system's alert process macOS shows
 //! (harmflow-app#903). A test of what else the shell does adds its own command here.
 
+use std::ffi::CStr;
 use std::io::{BufRead, Write};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
@@ -18,13 +19,18 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use block2::RcBlock;
+use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{sel, AllocAnyThread, MainThreadMarker};
-use objc2_app_kit::{NSApplication, NSBitmapImageRep, NSEventModifierFlags, NSEventTrackingRunLoopMode, NSImage, NSMenu};
+use objc2_app_kit::{
+    NSApplication, NSBitmapImageRep, NSEvent, NSEventModifierFlags, NSEventTrackingRunLoopMode, NSEventType, NSImage,
+    NSMenu, NSStatusItem, NSView,
+};
 use objc2_core_graphics::{kCGNullWindowID, CGWindowListCopyWindowInfo, CGWindowListOption};
 use objc2_foundation::{ns_string, NSArray, NSData, NSDictionary, NSNumber, NSObjectNSDelayedPerforming, NSRunLoop, NSString};
 use serde_json::{json, Value};
 use tauri::menu::MenuItemKind;
+use tauri::tray::TrayIcon;
 use tauri::{AppHandle, Manager, Runtime};
 
 use crate::state::AppState;
@@ -213,8 +219,8 @@ fn shown_tray<R: Runtime>(app: &AppHandle<R>) -> Value {
 /// An item of a menu as macOS shows it: its text, whether it is enabled, and whether it is a separator.
 type Shown = (String, bool, bool);
 
-/// The tray's menu as macOS shows it. The command opens it as a click on the tray's status item opens it — tray-icon
-/// sets the menu on the item only while a click opens it, and `show_menu` takes the same steps as its click — reads the
+/// The tray's menu as macOS shows it. The command opens it as a click on the tray's status item opens it — it hands
+/// the mouse-down to the view tray-icon puts over the item's button to take its clicks (`tray_click`) — reads the
 /// items from the item's `NSMenu` while macOS tracks it, and closes it. Each item is named by the id Tauri gave it, from
 /// the menu the tray holds (`tray::HeldMenu`), matched by position as `app_menu` matches the app menu's; its text, its
 /// enabled state, the separators, and the order are those macOS shows, not what `tray::menu_entries` asked for.
@@ -231,34 +237,35 @@ fn tray_menu<R: Runtime>(app: &AppHandle<R>) -> Value {
         // of the run loop, as a click's does.
         let open = RcBlock::new(move || {
             let tx = tx.clone();
-            let failed = tx.clone();
-            let opened = tray.with_inner_tray_icon(move |inner| {
-                let mtm = MainThreadMarker::new().expect("the run loop's block runs on the main thread");
-                let Some(item) = inner.ns_status_item() else {
-                    let _ = tx.send(Err("macOS shows no status item for the tray".into()));
+            let mtm = MainThreadMarker::new().expect("the run loop's block runs on the main thread");
+            let click = match tray_click(&tray, mtm) {
+                Ok(click) => click,
+                Err(err) => {
+                    let _ = tx.send(Err(err));
                     return;
-                };
-                // macOS runs the run loop in its event-tracking mode while the menu is open: the block reads the menu
-                // then, and closes it, which ends the click.
-                let read = RcBlock::new(move || {
-                    let shown = item.menu(mtm).map(|menu| {
-                        let shown = shown_menu(&menu);
-                        menu.cancelTracking();
-                        shown
-                    });
-                    let _ = tx.send(shown.ok_or_else(|| "the tray's status item holds no menu while it is open".into()));
-                });
-                // SAFETY: the mode is AppKit's constant, and the main run loop runs the block on the main thread, where
-                // it was made.
-                unsafe {
-                    let modes = NSArray::from_slice(&[NSEventTrackingRunLoopMode]);
-                    NSRunLoop::mainRunLoop().performInModes_block(&modes, &read);
                 }
-                inner.show_menu();
+            };
+            let item = click.item.clone();
+            // macOS runs the run loop in its event-tracking mode while the menu is open: the block reads the menu
+            // then, and closes it, which ends the click.
+            let read = RcBlock::new(move || {
+                let shown = item.menu(mtm).map(|menu| {
+                    let shown = shown_menu(&menu);
+                    menu.cancelTracking();
+                    shown
+                });
+                let _ = tx.send(shown.ok_or_else(|| "the tray's status item holds no menu while it is open".into()));
             });
-            if let Err(err) = opened {
-                let _ = failed.send(Err(err.to_string()));
+            // SAFETY: the mode is AppKit's constant, and the main run loop runs the block on the main thread, where
+            // it was made.
+            unsafe {
+                let modes = NSArray::from_slice(&[NSEventTrackingRunLoopMode]);
+                NSRunLoop::mainRunLoop().performInModes_block(&modes, &read);
             }
+            // Outside `with_inner_tray_icon`, which borrows the tray icon for as long as its closure runs: the open
+            // menu runs the run loop, where the tray's `render` may set a new menu, and that borrows the tray icon
+            // mutably (harmflow-app#1175). tray-icon's click takes the menu out of its own borrow before it opens it.
+            click.target.mouseDown(&click.event);
         });
         // SAFETY: as above, with Foundation's constant.
         unsafe {
@@ -297,6 +304,58 @@ fn tray_menu_ids<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<String>, String> 
     let menu = held.0.lock().map_err(|e| e.to_string())?.clone().ok_or("the tray holds no menu")?;
     let items = menu.items().map_err(|e| e.to_string())?;
     Ok(items.iter().map(|item| item.id().as_ref().to_string()).collect())
+}
+
+/// The class of the view tray-icon puts over the status item's button, which takes the item's clicks and opens the
+/// menu on a left one (`show_menu_on_left_click`). It is tray-icon's own, not part of its interface: a newer tray-icon
+/// may name it otherwise, and `tray_click` then answers that it found none.
+const TRAY_TARGET: &CStr = c"TaoTrayTarget";
+
+/// A click on the tray's status item, ready to send: the item, the view that takes its clicks, and a left mouse-down
+/// at the view's center.
+struct Click {
+    item: Retained<NSStatusItem>,
+    target: Retained<NSView>,
+    event: Retained<NSEvent>,
+}
+
+/// The click a user makes on the tray's status item. Only the status item comes from `with_inner_tray_icon`, whose
+/// borrow of the tray icon ends with its closure; the click is sent after it, so nothing holds that borrow while the
+/// menu is open.
+fn tray_click<R: Runtime>(tray: &TrayIcon<R>, mtm: MainThreadMarker) -> Result<Click, String> {
+    struct OnMain(Option<Retained<NSStatusItem>>);
+    // SAFETY: `tray_click` runs on the main thread, where `with_inner_tray_icon` runs its closure at once rather than
+    // sending it there, so the status item never leaves the main thread.
+    unsafe impl Send for OnMain {}
+    let item = tray
+        .with_inner_tray_icon(|inner| OnMain(inner.ns_status_item()))
+        .map_err(|err| err.to_string())?
+        .0
+        .ok_or("macOS shows no status item for the tray")?;
+    let button = item.button(mtm).ok_or("the tray's status item has no button")?;
+    let target = button
+        .subviews()
+        .iter()
+        .find(|view| view.class().name() == TRAY_TARGET)
+        .ok_or("the tray's status item has no view that takes its clicks")?;
+    let window = target.window().ok_or("the tray's status item is in no window")?;
+    let bounds = target.bounds();
+    let mut center = bounds.origin;
+    center.x += bounds.size.width / 2.0;
+    center.y += bounds.size.height / 2.0;
+    let event = NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
+        NSEventType::LeftMouseDown,
+        target.convertPoint_toView(center, None),
+        NSEventModifierFlags::empty(),
+        0.0,
+        window.windowNumber(),
+        None,
+        0,
+        1,
+        1.0,
+    )
+    .ok_or("macOS made no mouse-down event")?;
+    Ok(Click { item, target, event })
 }
 
 /// Each item of `menu` as macOS shows it, in order.
