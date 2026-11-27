@@ -43,11 +43,11 @@ func TestCheck(t *testing.T) {
 				"desktop/ui/src/lib/daemonText.test.ts", "desktop/ui/src/components/ui.tsx",
 				"desktop/ui/src/screens/ImportDialog.tsx", "desktop/ui/src/screens/ImportDialog.test.tsx",
 				"desktop/ui/src/screens/screens.test.tsx", "packaging/macos/update-app.sh",
-				"packaging/macos/update-app-test.sh", "skills/hf-github-worktree/SKILL.md", "agents/hf-reviewer.md",
+				"packaging/macos/update-app-test.sh", "skills/hf-review-notes/SKILL.md", "agents/hf-reviewer.md",
 			},
 			contents: files{
-				"skills/hf-github-worktree/SKILL.md": skill("hf-github-worktree"),
-				"agents/hf-reviewer.md":              skill(`"hf-reviewer"`),
+				"skills/hf-review-notes/SKILL.md": skill("hf-review-notes"),
+				"agents/hf-reviewer.md":           skill(`"hf-reviewer"`),
 			},
 		},
 		{
@@ -128,10 +128,10 @@ func TestCheck(t *testing.T) {
 		},
 		{
 			name:     "a skill that declares another name",
-			paths:    []string{"skills/hf-github-worktree/SKILL.md"},
-			contents: files{"skills/hf-github-worktree/SKILL.md": skill("hf-worktree")},
-			want: []string{"skills/hf-github-worktree/SKILL.md: " +
-				"declares name: hf-worktree; want name: hf-github-worktree, the name of its folder"},
+			paths:    []string{"skills/hf-review-notes/SKILL.md"},
+			contents: files{"skills/hf-review-notes/SKILL.md": skill("hf-worktree")},
+			want: []string{"skills/hf-review-notes/SKILL.md: " +
+				"declares name: hf-worktree; want name: hf-review-notes, the name of its folder"},
 		},
 		{
 			name:     "a skill with no name in its header",

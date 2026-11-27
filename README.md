@@ -79,9 +79,8 @@
   </tr>
   <tr>
     <td width="33%" valign="top">
-      <code>04</code> <a href="agents"><b>agents/</b></a> · <a href="skills"><b>skills/</b></a><br>
-      The built-in agent and skills of the issue implementer, which a new GitHub task selects by default, prefixed
-      <code>hf-</code>.
+      <code>04</code> <a href="templates"><b>templates/</b></a><br>
+      The built-in task templates, the starting points of a new task of each type, prefixed <code>hf-</code>.
     </td>
     <td width="33%" valign="top">
       <code>05</code> <a href="packaging"><b>packaging/</b></a><br>
@@ -177,15 +176,13 @@ metadata:
   name: Implement ready issues
 spec:
   type: github                                # works GitHub repositories; or general, or script
-  prompt: |                                   # the agent hf-github-issue-implementer, copied and customized
+  prompt: |                                   # the task's own: what it does in its repositories
     You implement GitHub issues for a HarmFlow task, unattended. …
-
-    ## This task
 
     - **Eligible issues:** open issues labeled `ready-for-agent`.
     - **Work branch:** `harmflow/<issue-number>-<short-slug>`.
     - …
-  skills: [hf-github-issue-queue, hf-github-worktree, hf-github-draft-pr]
+  skills: [issue-queue, draft-pr]             # the user's own skills, in the harness's configuration
   schedule:
     cron: "0 2 * * 1-5"                       # weeknights at 02:00
     missedRun: {policy: run_on_resume}        # asleep at 02:00? run on wake
@@ -199,12 +196,12 @@ spec:
       - {name: acme/api, localPath: ~/code/acme/api}
 ```
 
-A GitHub task does in its repositories what its prompt, agents, and skills say: this one implements issues with the
-built-in issue implementer, which never merges.
+A GitHub task does in its repositories what its prompt, agents, and skills say: HarmFlow ships no agent or skill for
+it, and its built-in template starts a GitHub task with none, for the task to bring its own.
 
 A repository's `baseBranch` is `main` unless it names another, and any branch is accepted. GitHub links a pull
 request's `Closes #<n>` to its issue only when the pull request goes into the repository's default branch. With
-another base branch, the built-in skills find a pull request's issue by the number its work branch carries, 42 in
+another base branch, a task's skills find a pull request's issue by the number its work branch carries, 42 in
 `harmflow/42-retry-limit`, and GitHub does not close the issue when the pull request merges: the issue is closed by
 hand, or when that branch reaches the default one.
 

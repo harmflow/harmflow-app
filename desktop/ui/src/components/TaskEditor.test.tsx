@@ -728,7 +728,7 @@ describe("task editor catalog", () => {
     const NOTES = "/Users/dev/release-notes";
     const skill = (name: string, source: CatalogEntry["source"]): CatalogEntry => ({ name, kind: "skill", source, harnesses: ["claude-code"] });
     const listing = (...skills: CatalogEntry[]): Catalog => ({ agents: [], skills, problems: [], taskTypes: [] });
-    const builtin = skill("hf-github-worktree", "builtin");
+    const builtin = skill("hf-review-notes", "builtin");
     const pluginSkill = skill("pdf:pdf", "user");
     /** The installation's skills, which the daemon lists for every workspace. */
     const installation = listing(builtin, pluginSkill);
@@ -800,17 +800,17 @@ describe("task editor catalog", () => {
     it("offers a plugin's skill and not one only the workspace holds, and marks a cited workspace skill not found", async () => {
       await openTask(workspaceTask(NOTES), installation, installation);
       expect(catalogs()).toEqual([catalogPath(NOTES)]);
-      expect(suggestions()).toEqual(["hf-github-worktree", "pdf:pdf"]);
+      expect(suggestions()).toEqual(["hf-review-notes", "pdf:pdf"]);
 
       await type(skills().querySelector("input")!, "pdf:pdf");
       expect(chips()).toEqual([{ name: "pdf:pdf", source: "Yours", missing: false }]);
-      expect(suggestions()).toEqual(["hf-github-worktree"]);
+      expect(suggestions()).toEqual(["hf-review-notes"]);
       close();
 
       await openTask(workspaceTask(NOTES, ["release-notes"]), installation, installation);
       expect(catalogs()).toEqual([catalogPath(NOTES)]);
       expect(chips()).toEqual([{ name: "release-notes", source: "Not found", missing: true }]);
-      expect(suggestions()).toEqual(["hf-github-worktree", "pdf:pdf"]);
+      expect(suggestions()).toEqual(["hf-review-notes", "pdf:pdf"]);
     });
   });
 });

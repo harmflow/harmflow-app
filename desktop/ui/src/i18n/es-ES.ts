@@ -1688,7 +1688,7 @@ export const esES: Resources = {
         local: "Las tareas, el estado y los logs se quedan en esta máquina.",
         permissions:
           "Cada tarea declara qué puede tocar su sesión; HarmFlow lo aplica mediante los controles de la propia herramienta de IA y avisa cuando una restricción no se puede aplicar.",
-        github: "El trabajo en GitHub usa tu sesión de gh y Git. El implementador de issues integrado nunca hace merge de un pull request.",
+        github: "El trabajo en GitHub usa tu sesión de gh y Git. Lo que una tarea de GitHub hace allí es lo que dicen su prompt, sus agentes y sus skills.",
         api: "El panel habla con el daemon mediante una API local autenticada.",
       },
     },

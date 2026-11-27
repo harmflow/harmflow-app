@@ -44,13 +44,13 @@ func (w *workspaces) git(args ...string) string {
 	return string(out)
 }
 
-// worktree adds a linked worktree on its own branch at <workspace>/<task>/<name>, as hf-github-worktree §2 does.
+// worktree adds a linked worktree on its own branch at <workspace>/<task>/<name>, as a GitHub task's session does.
 func (w *workspaces) worktree(task, name string) string {
 	w.t.Helper()
 	return w.worktreeIn(filepath.Join(w.app.d.Paths.Workspace, task), name)
 }
 
-// worktreeIn adds a linked worktree on its own branch at <dir>/<name>, as hf-github-worktree §2 does in a task's
+// worktreeIn adds a linked worktree on its own branch at <dir>/<name>, as a GitHub task's session does in a task's
 // custom workspace dir.
 func (w *workspaces) worktreeIn(dir, name string) string {
 	w.t.Helper()
@@ -238,7 +238,7 @@ func TestCleanRemovesTheWorktreeOfAClosedItem(t *testing.T) {
 	}
 }
 
-// An execution that finds no eligible work still reports the items whose worktrees hf-github-worktree §3 removed, with
+// An execution that finds no eligible work still reports the items whose worktrees its session removed, with
 // outcome closed and no work_item.selected line. The ledger reads them closed, so the clean-up agrees with the session:
 // it removes such a worktree had the session left it, and keeps the draft's and the failed item's.
 func TestCleanAgreesWithANoWorkExecutionThatClosedAnItem(t *testing.T) {

@@ -351,7 +351,7 @@ spec:
   type: github
   prompt: Implement the oldest eligible issue.
   agents: [issue-reviewer]
-  skills: [hf-github-issue-queue, hf-github-draft-pr]
+  skills: [hf-issue-notes, hf-pr-notes]
   workspace:
     path: ~/work
   schedule:
@@ -748,7 +748,7 @@ func TestValidIdentifier(t *testing.T) {
 		t.Fatalf("New() = %v, want no error", err)
 	}
 	for name, want := range map[string]bool{
-		"my-skill": true, "hf-github-worktree": true, "imagegen": true, "a": true, strings.Repeat("a", 64): true,
+		"my-skill": true, "hf-review-notes": true, "imagegen": true, "a": true, strings.Repeat("a", 64): true,
 		"pdf:pdf": false, "My-Skill": false, "-skill": false, "skill-": false, "": false, strings.Repeat("a", 65): false,
 	} {
 		if got := v.ValidIdentifier(name); got != want {
@@ -768,9 +768,9 @@ func TestValidSkillName(t *testing.T) {
 	long := strings.Repeat("a", 64)
 	spaced := strings.Repeat("a", 31) + " " + strings.Repeat("a", 32)
 	for name, want := range map[string]bool{
-		"my-skill": true, "hf-github-worktree": true, "a": true, long: true,
+		"my-skill": true, "hf-review-notes": true, "a": true, long: true,
 		"pdf:pdf": true, "presentations:Presentations": true, "spreadsheets:excel-live-control": true,
-		"documents:documents": true, long + ":" + long: true, "harmflow:hf-github-draft-pr": true,
+		"documents:documents": true, long + ":" + long: true, "harmflow:hf-pr-notes": true,
 		"pdf:my skill": true, "pdf:Fill Forms": true, "my plugin:x": true, "pdf:a\tb": true, spaced + ":" + spaced: true,
 		"My-Skill": false, "-skill": false, "": false, strings.Repeat("a", 65): false, "my skill": false,
 		"My Skill": false, "pdf:": false, ":pdf": false, ":": false, "a:b:c": false, "pdf:Fill Forms:x": false,

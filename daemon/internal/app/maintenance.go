@@ -104,7 +104,7 @@ type CleanResult struct {
 }
 
 // CleanWorkspaces removes the worktrees no longer needed, in the daemon's workspace and in each custom workspace an
-// execution recorded. A worktree is tied to its work item through the path hf-github-worktree §2 gives it,
+// execution recorded. A worktree is tied to its work item through the path a GitHub task's session gives it,
 // <workspace>/<repo-name>-<issue-number>, or the worktreePath a report named; it is removed only when that item reads
 // closed in the ledger, or when the item's last execution was cancelled, failed (a timeout included), or interrupted
 // and its log has expired. Every other worktree is kept: those of running tasks, of completed and needs_attention
@@ -202,7 +202,7 @@ type worktreeFate struct {
 }
 
 // worktreeFatesLocked decides, from the ledger, the fate of each worktree HarmFlow can tie to a work item, keyed by
-// worktreeKey. The path hf-github-worktree §2 derives from an item decides first; a worktreePath a report named
+// worktreeKey. The path worktreeName derives from an item decides first; a worktreePath a report named
 // only adds a path no item derives. Where two claims meet, keeping wins. A running task keeps its items' worktrees,
 // wherever its workspace is: its session may be reusing one.
 func (a *App) worktreeFatesLocked() map[string]worktreeFate {
@@ -284,7 +284,7 @@ func fateOf(item *domain.WorkItem, x *domain.ExecutionSummary) worktreeFate {
 // githubItemKey is a GitHub work item's key, OWNER/REPO#N.
 var githubItemKey = regexp.MustCompile(`^[\w.-]+/([\w.-]+)#([1-9][0-9]*)$`)
 
-// worktreeName is the directory hf-github-worktree §2 gives a work item's worktree, <repo-name>-<issue-number>;
+// worktreeName is the directory a GitHub task's session gives a work item's worktree, <repo-name>-<issue-number>;
 // false for a key that names no GitHub issue.
 func worktreeName(key string) (string, bool) {
 	m := githubItemKey.FindStringSubmatch(key)

@@ -14,7 +14,8 @@ import (
 // A saved Claude Code task that cites a user's agent, a user's skill, and a built-in skill runs with its prompt on
 // stdin and no main agent, whether the prompt is the copy of a user's agent or the task's own. The user's items are
 // left to Claude Code, which loads them by name from the configuration directory validation read: none is defined for
-// the session or copied into the execution's plugin. The built-in skill is in that plugin.
+// the session or copied into the execution's plugin. The built-in skill, from a built-ins folder of the test's own
+// since HarmFlow ships no skill, is in that plugin.
 func TestCitedItemsReachClaudeCodeByName(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -33,7 +34,10 @@ func TestCitedItemsReachClaudeCodeByName(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	d := startDaemon(t, home, "CLAUDE_CONFIG_DIR="+claudeConfig)
+	builtins := t.TempDir()
+	writeTemp(t, filepath.Join(builtins, "skills", builtinSkill, "SKILL.md"),
+		"---\nname: "+builtinSkill+"\ndescription: Notes a pull request.\n---\nNote the pull request.\n")
+	d := startDaemonWith(t, home, daemonOptions{builtins: builtins}, "CLAUDE_CONFIG_DIR="+claudeConfig)
 	d.call("PUT", "/harnesses/claude-code", map[string]any{"path": recordingStandIn(t, "fake-claude", "claude")}, 200)
 	copied, _ := d.userItem("agent", "reviewer")["copy"].(map[string]any)
 	if copied == nil {
@@ -58,7 +62,7 @@ func TestCitedItemsReachClaudeCodeByName(t *testing.T) {
 				"type":    "general",
 				"prompt":  c.prompt,
 				"agents":  []any{"tester"},
-				"skills":  []any{"review-notes", "hf-github-draft-pr"},
+				"skills":  []any{"review-notes", builtinSkill},
 				"harness": map[string]any{"preferred": map[string]any{"provider": "claude-code"}},
 			}
 			metadata := map[string]any{"id": c.id, "name": "Task " + c.id}
@@ -261,12 +265,15 @@ func (d *daemon) userItem(kind, name string) map[string]any {
 	return nil
 }
 
-// checkPlugin fails the test unless the execution's plugin folder holds the built-in skill hf-github-draft-pr and
-// nothing named for one of the user's items.
+// builtinSkill is the built-in skill TestCitedItemsReachClaudeCodeByName writes into its own built-ins folder.
+const builtinSkill = "hf-pr-notes"
+
+// checkPlugin fails the test unless the execution's plugin folder holds the built-in skill builtinSkill and nothing
+// named for one of the user's items.
 func checkPlugin(t *testing.T, dir string) {
 	t.Helper()
-	if _, err := os.Stat(filepath.Join(dir, "skills", "hf-github-draft-pr", "SKILL.md")); err != nil {
-		t.Errorf("the plugin %s holds no built-in skill hf-github-draft-pr: %v", dir, err)
+	if _, err := os.Stat(filepath.Join(dir, "skills", builtinSkill, "SKILL.md")); err != nil {
+		t.Errorf("the plugin %s holds no built-in skill %s: %v", dir, builtinSkill, err)
 	}
 	user := []string{"review-notes", "reviewer", "tester"}
 	err := filepath.WalkDir(dir, func(path string, e fs.DirEntry, err error) error {

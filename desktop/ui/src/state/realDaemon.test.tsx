@@ -88,13 +88,16 @@ beforeAll(async () => {
   await i18n.changeLanguage("en-US");
   elsewhere = await startDaemon();
   // As itest › TestFormDocumentIsTheFile sets the daemon up: Codex's models cache, so that the preferred harness's model
-  // and effort are ones it checks, and the form's task's subagent in the test's own configuration of each harness.
+  // and effort are ones it checks, and the form's task's subagent and skill in the test's own configuration of each
+  // harness.
   daemon = await startDaemon((home) => {
     const codexHome = join(home, "codex");
     const claudeConfig = join(home, "claude");
     for (const dir of [codexHome, claudeConfig]) {
       mkdirSync(join(dir, "agents"), { recursive: true });
       writeFileSync(join(dir, "agents", "issue-reviewer.md"), "---\nname: issue-reviewer\ndescription: Reviews an issue.\n---\nReview the issue.\n");
+      mkdirSync(join(dir, "skills", "review-notes"), { recursive: true });
+      writeFileSync(join(dir, "skills", "review-notes", "SKILL.md"), "---\nname: review-notes\ndescription: Notes a review.\n---\nNote the review.\n");
     }
     writeFileSync(
       join(codexHome, "models_cache.json"),
@@ -346,12 +349,11 @@ describe("the task form and the Tasks screen against the real daemon", () => {
     });
 
     await mount({ kind: "new", template: "hf-github-issues" });
-    // The daemon's draft of the GitHub template: the built-in agent's copy, its skills, and one repository row.
-    await shown("the template's draft in the form", () => field("Name") && control("Name").value === "Implement GitHub issues");
+    // The daemon's draft of the GitHub template: no agent, prompt, or skills, and one repository row.
+    await shown("the template's draft in the form", () => field("Name") && control("Name").value === "Blank GitHub task");
 
-    // General. The template's agent is cleared first: its copy is the draft's, and the document has no origin. The name
-    // writes an identifier of its own until the identifier is typed.
-    await enter(host!.querySelector<HTMLSelectElement>('select[aria-label="Agent"]')!, "");
+    // General. The template selects no agent, so the document has no origin. The name writes an identifier of its own
+    // until the identifier is typed.
     await enter(control("Name"), "Every section");
     expect(control("Identifier").value).toBe("every-section");
     await enter(control("Identifier"), "complete");
@@ -359,11 +361,13 @@ describe("the task form and the Tasks screen against the real daemon", () => {
     expect(toggle("Enabled").checked).toBe(true);
     await click(toggle("Enabled"));
 
-    // Prompt. The template already lists the three skills, which the fixture lists in the same order.
+    // Prompt. The template lists no skill: the fixture's one is the user's.
     await enter(control<HTMLTextAreaElement>("Prompt"), "Implement the oldest issue labelled ready-for-agent.");
     await enter(control("Other agents (subagents)"), "issue-reviewer");
     expect(chips("Other agents (subagents)")).toEqual(["issue-reviewer"]);
-    expect(chips("Skills")).toEqual(["hf-github-issue-queue", "hf-github-worktree", "hf-github-draft-pr"]);
+    expect(chips("Skills")).toEqual([]);
+    await enter(control("Skills"), "review-notes");
+    expect(chips("Skills")).toEqual(["review-notes"]);
     await enter(control("Workspace"), "~/harmflow-work");
 
     // The GitHub type: the template's repository row, then the queue and delivery.
@@ -549,7 +553,7 @@ describe("a user's agent selected in the task form against the real daemon", () 
     "name: change-reviewer",
     "description: Reviews a change.",
     "model: sonnet",
-    "skills: hf-github-draft-pr",
+    "skills: review-notes",
     "tools: Read, Grep",
     "---",
     "Review the change, and say what it breaks.",
@@ -581,7 +585,7 @@ describe("a user's agent selected in the task form against the real daemon", () 
       prompt: "Review the change, and say what it breaks.",
       description: "Reviews a change.",
       model: "sonnet",
-      skills: ["hf-github-draft-pr"],
+      skills: ["review-notes"],
       omittedFields: ["tools"],
     });
     expect(copied.modelHarnesses).toContain("claude-code");
@@ -604,7 +608,7 @@ describe("a user's agent selected in the task form against the real daemon", () 
       expect(control<HTMLTextAreaElement>("Prompt").value).toBe(copied.prompt);
       expect(control<HTMLTextAreaElement>("Description").value).toBe("Reviews a change.");
       expect(profiles()[0]!.model.value).toBe("sonnet");
-      expect(chips("Skills")).toEqual(["hf-github-draft-pr"]);
+      expect(chips("Skills")).toEqual(["review-notes"]);
       expect(host!.querySelector(".agent-left-out")?.textContent).toContain("Not copied from the agent: tools.");
 
       // Saved: the file holds the copy and the agent's name and hash as its origin, and nothing of its tools.
@@ -619,7 +623,7 @@ describe("a user's agent selected in the task form against the real daemon", () 
           type: "general",
           prompt: copied.prompt,
           harness: { preferred: { provider: "claude-code", model: "sonnet" } },
-          skills: ["hf-github-draft-pr"],
+          skills: ["review-notes"],
           origin: { agent: "change-reviewer", hash: copied.hash },
         },
       });
@@ -680,7 +684,7 @@ describe("a user's agent selected in the task form against the real daemon", () 
       await shown("the new copy in the file", () => readFileSync(file, "utf8").includes("Run its tests."));
       expect(await documentOf(readFileSync(file, "utf8"))).toMatchObject({
         metadata: { description: "Reviews a change." },
-        spec: { prompt: changed.prompt, skills: ["hf-github-draft-pr"], origin: { agent: "change-reviewer", hash: changed.hash } },
+        spec: { prompt: changed.prompt, skills: ["review-notes"], origin: { agent: "change-reviewer", hash: changed.hash } },
       });
     } finally {
       Reflect.deleteProperty(window, "confirm");

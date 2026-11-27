@@ -2252,7 +2252,7 @@ describe("first use", () => {
     expect([...host!.querySelectorAll(".onboarding__points li")].map((li) => li.textContent)).toEqual([
       "Tasks, state, and logs stay on this machine.",
       "Each task declares what its session may touch; HarmFlow applies it through the AI tool's own controls and warns when a restriction can't be enforced.",
-      "GitHub work uses your own gh and Git sign-in. The built-in issue implementer never merges a pull request.",
+      "GitHub work uses your own gh and Git sign-in. What a GitHub task does there is what its prompt, agents, and skills say.",
       "The dashboard talks to the daemon over an authenticated local API.",
     ]);
 

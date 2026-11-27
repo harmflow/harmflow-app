@@ -38,7 +38,7 @@ func TestValidateTemplate(t *testing.T) {
 		name, spec, key, path string
 	}{
 		{"a type alone", "  type: general\n", "", ""},
-		{"a GitHub template with neither prompt nor repository name", "  type: github\n  selectedAgent: hf-github-issue-implementer\n" +
+		{"a GitHub template with neither prompt nor repository name", "  type: github\n  selectedAgent: hf-planner\n" +
 			"  harness:\n    preferred:\n      model: opus\n  github:\n    repositories:\n      - baseBranch: main\n", "", ""},
 		{"a script template with no program", "  type: script\n  script: {}\n", "", ""},
 		{"an inline script with no source", "  type: script\n  script:\n    inline:\n      interpreter: [/bin/sh]\n", "", ""},

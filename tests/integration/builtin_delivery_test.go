@@ -11,16 +11,17 @@ import (
 	"testing"
 )
 
-// A task that cites a built-in skill runs once on Claude Code and once on Codex, each with a user's configuration that
-// already holds files. Each harness is handed the skill as a copy in the execution's directory, equal to the built-in's
-// source, and nothing it receives names the daemon's built-ins directory. Every file of both configurations keeps its
-// bytes, from before the daemon starts to after it stops, and none is added or removed.
+// A task that cites a built-in skill, from a built-ins folder of the test's own since HarmFlow ships no skill, runs
+// once on Claude Code and once on Codex, each with a user's configuration that already holds files. Each harness is
+// handed the skill as a copy in the execution's directory, equal to the built-in's source, and nothing it receives
+// names the daemon's built-ins directory. Every file of both configurations keeps its bytes, from before the daemon
+// starts to after it stops, and none is added or removed.
 //
 // A sign-in check of a real CLI would write into the configuration too, so the daemon never runs one: its first
 // detection checks the stand-ins, set by hand before it starts.
 func TestBuiltinSkillReachesEachHarnessWithoutChangingItsConfiguration(t *testing.T) {
 	t.Parallel()
-	const skill = "hf-github-draft-pr"
+	const skill = "hf-pr-notes"
 	home := t.TempDir()
 	// The user's configuration of each harness is the test's own, as in TestFormDocumentIsTheFile: Claude Code's in
 	// CLAUDE_CONFIG_DIR, Codex's in the daemon's CODEX_HOME, <home>/codex.
@@ -58,14 +59,13 @@ func TestBuiltinSkillReachesEachHarnessWithoutChangingItsConfiguration(t *testin
 		t.Fatal(err)
 	}
 	before := configEntries(t, home, claudeConfig, codexHome)
-	source, err := os.ReadFile(filepath.Join(repoRoot(), "skills", skill, "SKILL.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The daemon runs with --builtins naming the repository's root.
-	builtins := repoRoot() + string(filepath.Separator)
+	// The daemon runs with --builtins naming a folder of the test's own, which holds the built-in skill.
+	root := t.TempDir()
+	source := []byte("---\nname: " + skill + "\ndescription: Notes a pull request.\n---\nNote the pull request.\n")
+	writeTemp(t, filepath.Join(root, "skills", skill, "SKILL.md"), string(source))
+	builtins := root + string(filepath.Separator)
 
-	d := startDaemon(t, home, "CLAUDE_CONFIG_DIR="+claudeConfig)
+	d := startDaemonWith(t, home, daemonOptions{builtins: root}, "CLAUDE_CONFIG_DIR="+claudeConfig)
 	// startDaemon pointed the daemon at the stand-ins that record nothing.
 	for id, path := range standIns {
 		d.call("PUT", "/harnesses/"+id, map[string]any{"path": path}, 200)

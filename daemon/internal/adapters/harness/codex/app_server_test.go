@@ -114,7 +114,7 @@ func TestSkillsFromTheAppServer(t *testing.T) {
 		`{"name":"my-skill","description":"Again","enabled":true,"path":"/elsewhere/my-skill/SKILL.md","scope":"repo"},` +
 		`{"name":"off","description":"d","enabled":false,"path":"/x/off/SKILL.md","scope":"user"},` +
 		`{"name":"pdf:pdf","description":"d","enabled":true,"path":"/x/pdf/SKILL.md","scope":"user"},` +
-		`{"name":"hf-github-worktree","description":"d","enabled":true,"path":"/x/hf/SKILL.md","scope":"user"},` +
+		`{"name":"hf-review-notes","description":"d","enabled":true,"path":"/x/hf/SKILL.md","scope":"user"},` +
 		`{"name":"imagegen","description":"System.","enabled":true,"path":"/sys/imagegen/SKILL.md","scope":"system"}],` +
 		`"errors":[{"path":"/x/broken/SKILL.md","message":"invalid front matter"}]}]}`
 	path, received := appServerStandIn(t, answer(result))
@@ -130,7 +130,7 @@ func TestSkillsFromTheAppServer(t *testing.T) {
 	for _, it := range items {
 		names = append(names, it.Name)
 	}
-	if want := []string{"my-skill", "pdf:pdf", "hf-github-worktree", "imagegen"}; !slices.Equal(names, want) {
+	if want := []string{"my-skill", "pdf:pdf", "hf-review-notes", "imagegen"}; !slices.Equal(names, want) {
 		t.Errorf("UserItems(skill) = %q, want %q", names, want)
 	}
 	wantProblems := []ports.DiscoveryError{{Path: "/x/broken/SKILL.md", Message: "invalid front matter"}}
@@ -143,7 +143,7 @@ func TestSkillsFromTheAppServer(t *testing.T) {
 		t.Errorf("UserItem(my-skill) = %+v, %v, %v, %v; want %s, described Mine., one discovery error", it, found,
 			problems, err, filepath.Dir(mine))
 	}
-	for _, name := range []string{"pdf:pdf", "hf-github-worktree"} {
+	for _, name := range []string{"pdf:pdf", "hf-review-notes"} {
 		if _, found, _, err := a.UserItem(context.Background(), info, "skill", name, workspace, nil); !found || err != nil {
 			t.Errorf("UserItem(%s) found %v, err %v; want found", name, found, err)
 		}

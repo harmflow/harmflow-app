@@ -238,7 +238,7 @@ describe("task form document", () => {
   // through its control. The catalog's entries let a whole name typed in a picker add the chip.
   const catalog: Catalog = {
     agents: [entry("issue-reviewer", "agent", "user")],
-    skills: ["hf-github-issue-queue", "hf-github-worktree", "hf-github-draft-pr"].map((name) => entry(name, "skill", "builtin")),
+    skills: [entry("review-notes", "skill", "user")],
     problems: [],
     taskTypes: [],
   };
@@ -318,7 +318,7 @@ describe("task form document", () => {
     // Prompt.
     await enter(control<HTMLTextAreaElement>("Prompt"), "Implement the oldest issue labelled ready-for-agent.");
     await enter(control("Other agents (subagents)"), "issue-reviewer");
-    for (const skill of ["hf-github-issue-queue", "hf-github-worktree", "hf-github-draft-pr"]) await enter(control("Skills"), skill);
+    await enter(control("Skills"), "review-notes");
     await enter(control("Workspace"), "~/harmflow-work");
 
     // The GitHub type: the template's repository row, then the queue and delivery.
@@ -425,7 +425,7 @@ describe("task form document", () => {
       prompt: [
         "Implement the oldest issue labelled ready-for-agent.",
         ["issue-reviewer"],
-        ["hf-github-issue-queue", "hf-github-worktree", "hf-github-draft-pr"],
+        ["review-notes"],
         "~/harmflow-work",
       ],
       repository: ["harmflow/example", "${FORM_REPO}", "develop"],

@@ -627,8 +627,8 @@ func newEnv(t *testing.T, configure ...func(*env)) *env {
 func openEnv(t *testing.T, home string, configure ...func(*env)) *env {
 	t.Helper()
 	builtins := t.TempDir()
-	_ = os.MkdirAll(filepath.Join(builtins, "skills", "hf-github-draft-pr"), 0o700)
-	_ = os.WriteFile(filepath.Join(builtins, "skills", "hf-github-draft-pr", "SKILL.md"), []byte("---\nname: hf-github-draft-pr\ndescription: d\n---\n"), 0o600)
+	_ = os.MkdirAll(filepath.Join(builtins, "skills", "hf-pr-notes"), 0o700)
+	_ = os.WriteFile(filepath.Join(builtins, "skills", "hf-pr-notes", "SKILL.md"), []byte("---\nname: hf-pr-notes\ndescription: d\n---\n"), 0o600)
 	_ = os.MkdirAll(filepath.Join(builtins, "agents"), 0o700)
 	e := &env{t: t, clock: &fakeClock{now: time.Date(2026, 10, 20, 8, 0, 0, 0, time.UTC)}, wake: &fakeWake{},
 		home: home, paths: NewPaths(home, t.TempDir(), builtins), claude: &fakeHarness{id: domain.HarnessClaudeCode},
@@ -2732,7 +2732,7 @@ func TestFailoverToClaudeCodeKeepsTheRestriction(t *testing.T) {
 // the summary of the first attempt.
 func TestFailoverKeepsTheWorkspaceAndInput(t *testing.T) {
 	e := newEnv(t)
-	e.create("handover", codexFallback+"  agents: [user-agent]\n  skills: [user-skill, hf-github-draft-pr]\n")
+	e.create("handover", codexFallback+"  agents: [user-agent]\n  skills: [user-skill, hf-pr-notes]\n")
 	var q requests
 	e.claude.setScript(func(req ports.RunRequest) string {
 		q.add(req)
@@ -2766,12 +2766,12 @@ func TestFailoverKeepsTheWorkspaceAndInput(t *testing.T) {
 		}
 		return out
 	}
-	builtin := filepath.Join(e.app.d.Paths.Builtins, "skills", "hf-github-draft-pr")
+	builtin := filepath.Join(e.app.d.Paths.Builtins, "skills", "hf-pr-notes")
 	if got, want := items(second.Agents), []string{"agent user-agent /codex/agents/user-agent"}; !slices.Equal(got, want) {
 		t.Errorf("the second attempt's agents %q, want %q", got, want)
 	}
 	if got, want := items(second.Skills), []string{"skill user-skill /codex/skills/user-skill",
-		"skill hf-github-draft-pr " + builtin}; !slices.Equal(got, want) {
+		"skill hf-pr-notes " + builtin}; !slices.Equal(got, want) {
 		t.Errorf("the second attempt's skills %q, want %q", got, want)
 	}
 	if want := "The previous attempt ran on claude-code and ended: quota exhausted. Its last message: Wrote notes.txt"; !strings.Contains(second.Context, want) {
@@ -6281,7 +6281,7 @@ func TestInvalidEditKeepsTheValidFile(t *testing.T) {
 func TestMissingSkillOnlyWarnsAtEveryEntryPoint(t *testing.T) {
 	e := newEnv(t)
 	ctx := t.Context()
-	skills := "  skills: [hf-github-draft-pr, user-skill, nowhere-skill]\n"
+	skills := "  skills: [hf-pr-notes, user-skill, nowhere-skill]\n"
 	warns := func(what string, warnings []domain.Warning) {
 		t.Helper()
 		var named []string
@@ -6668,10 +6668,9 @@ func firstRepositoryName(block any) any {
 	return valueAt(repos[0], "name")
 }
 
-// A GitHub task need not select the built-in issue implementer, and the rule against merging is the implementer's, not
-// the type's: a GitHub task with no agent or skill whose own prompt merges validates and runs, its repositories in its
-// session's context.
-func TestGitHubTaskWithoutTheImplementerRuns(t *testing.T) {
+// A GitHub task selects no agent, and no rule against merging is the type's: a GitHub task with no agent or skill whose
+// own prompt merges validates and runs, its repositories in its session's context.
+func TestGitHubTaskWithoutAnAgentRuns(t *testing.T) {
 	e := newEnv(t)
 	repo := mkdir(t, filepath.Join(e.app.Paths().UserHome, "repo"))
 	const prompt = "Merge each approved pull request of octo/repo whose checks passed."
@@ -6879,7 +6878,7 @@ func TestDuplicate(t *testing.T) {
 // it leaves out.
 func TestCatalogCarriesTheAgentCopy(t *testing.T) {
 	e := newEnv(t)
-	agent := "---\nname: hf-reviewer\ndescription: Reviews a change\nmodel: sonnet\ntools: Read\nskills: [hf-github-draft-pr]\n---\nYou review."
+	agent := "---\nname: hf-reviewer\ndescription: Reviews a change\nmodel: sonnet\ntools: Read\nskills: [hf-pr-notes]\n---\nYou review."
 	if err := os.WriteFile(filepath.Join(e.app.d.Paths.Builtins, "agents", "hf-reviewer.md"), []byte(agent), 0o600); err != nil {
 		t.Fatalf("os.WriteFile(hf-reviewer.md) = %v, want no error", err)
 	}
@@ -6894,10 +6893,10 @@ func TestCatalogCarriesTheAgentCopy(t *testing.T) {
 	}
 	c := entry.Copy
 	if c.Prompt != "You review." || c.Description != "Reviews a change" || c.Model != "sonnet" ||
-		!slices.Equal(c.Skills, []string{"hf-github-draft-pr"}) || !slices.Equal(c.OmittedFields, []string{"tools"}) ||
+		!slices.Equal(c.Skills, []string{"hf-pr-notes"}) || !slices.Equal(c.OmittedFields, []string{"tools"}) ||
 		!strings.HasPrefix(c.Hash, "sha256:") {
 		t.Errorf("Catalog() copy of hf-reviewer = %+v, want prompt %q, description %q, model %q, skills "+
-			"[hf-github-draft-pr], omitted fields [tools], and a sha256 hash", c, "You review.", "Reviews a change", "sonnet")
+			"[hf-pr-notes], omitted fields [tools], and a sha256 hash", c, "You review.", "Reviews a change", "sonnet")
 	}
 	if want := []string{domain.HarnessClaudeCode, domain.HarnessCodex}; !slices.Equal(c.ModelHarnesses, want) {
 		t.Errorf("Catalog() copy of hf-reviewer: model harnesses = %v, want %v", c.ModelHarnesses, want)

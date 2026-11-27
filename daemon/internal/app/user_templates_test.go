@@ -31,7 +31,7 @@ spec:
   origin:
     agent: hf-notes-writer
     hash: sha256:` + "5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e" + `
-  skills: [hf-github-draft-pr]
+  skills: [hf-pr-notes]
   schedule:
     cron: "0 9 * * 1"
   harness:
@@ -124,7 +124,7 @@ func TestSaveTaskAsTemplate(t *testing.T) {
 	}
 	file := readFile(t, tp.Path)
 	for _, want := range []string{"kind: TaskTemplate", "id: weekly-notes", "prompt: Sum up the week's notes.",
-		"# The prompt, customized from the agent's.", "cron: \"0 9 * * 1\"", "skills: [hf-github-draft-pr]"} {
+		"# The prompt, customized from the agent's.", "cron: \"0 9 * * 1\"", "skills: [hf-pr-notes]"} {
 		if !strings.Contains(file, want) {
 			t.Errorf("the template file lacks %q:\n%s", want, file)
 		}
@@ -157,7 +157,7 @@ func TestSaveTaskAsTemplate(t *testing.T) {
 		t.Errorf("DraftTask(weekly-notes) metadata = %v, want the template's name and an identifier from it", md)
 	}
 	if spec["enabled"] != true || spec["prompt"] != "Sum up the week's notes." || spec["origin"] != nil ||
-		!reflect.DeepEqual(spec["skills"], []any{"hf-github-draft-pr"}) ||
+		!reflect.DeepEqual(spec["skills"], []any{"hf-pr-notes"}) ||
 		!reflect.DeepEqual(spec["schedule"], map[string]any{"cron": "0 9 * * 1"}) {
 		t.Errorf("DraftTask(weekly-notes) spec = %v, want the task's fields with no origin", spec)
 	}
