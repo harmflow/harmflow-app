@@ -1,5 +1,6 @@
 // The dashboard's entry file: its registration point. `main.tsx` renders the dashboard through it with nothing
-// registered; another build renders it with registrations, each adding screens, Settings sections, and their texts.
+// registered; another build renders it with registrations, each adding screens, Settings sections, a docked panel,
+// topbar buttons, keyboard shortcuts, template catalog actions, and their texts.
 // Changing what it exports, or the shape of a registration, is a breaking change.
 import { StrictMode } from "react";
 import { createRoot, type Root as ReactRoot } from "react-dom/client";
@@ -14,7 +15,17 @@ import "./design/app.css";
 
 applyStoredTypeface();
 
-export type { RegisteredScreen, RegisteredSettingsSection, Registration, SettingsGroup } from "./registrations";
+export type {
+  RegisteredCatalogAction,
+  RegisteredPanel,
+  RegisteredScreen,
+  RegisteredSettingsSection,
+  RegisteredShortcut,
+  RegisteredTopbarButton,
+  Registration,
+  SettingsGroup,
+} from "./registrations";
+export type { Chord } from "./lib/shortcuts";
 
 /** Throws the failure it is given while rendering, so the root boundary shows it as it shows any other. */
 function Failed({ error }: { error: unknown }): never {

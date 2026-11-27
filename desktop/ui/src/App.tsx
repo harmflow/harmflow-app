@@ -7,7 +7,7 @@ import { Header, NAV, Sidebar, type ScreenRoute } from "./components/Shell";
 import type { LeaveCheck } from "./components/TaskEditor";
 import { Toasts } from "./components/toast";
 import { applyLanguage } from "./i18n";
-import { matches, matching } from "./lib/shortcuts";
+import { matches, matching, pressesChord } from "./lib/shortcuts";
 import { storeZoom, storedZoom, zoomKey, zoomed } from "./lib/zoom";
 import { ExecutionsScreen } from "./screens/ExecutionsScreen";
 import { HistoryScreen } from "./screens/HistoryScreen";
@@ -82,6 +82,8 @@ export function App() {
   const [firstUse, setFirstUse] = useState<FirstUse | undefined>(undefined);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(wasSidebarCollapsed);
   const [executionsAsideHidden, setExecutionsAsideHidden] = useState(wasExecutionsAsideHidden);
+  // The key of the registered panel docked at the right, if one is open; none at launch.
+  const [openPanel, setOpenPanel] = useState<string | null>(null);
   const [zoom, setZoom] = useState(storedZoom);
   const zoomApplied = useRef<Promise<void>>(Promise.resolve());
 
@@ -239,6 +241,9 @@ export function App() {
   const daemonDown = !onboarding && native.available && daemonRunning === false && !restarting;
   const shell = !onboarding && !daemonDown;
   const RegisteredScreen = registered.screens.find((s) => s.route === screen)?.component;
+  const RegisteredPanel = registered.panels.find((p) => p.key === openPanel)?.component;
+  // A registered button or shortcut opens the panel it names, or closes it when it is the one open.
+  const togglePanel = (key: string) => setOpenPanel((open) => (open === key ? null : key));
 
   // A target from the tray or a notice shows its execution. A screen from the app menu (⌘,), or the Help menu's
   // Keyboard Shortcuts with its Settings section, acts where ⌘N does: in
@@ -265,23 +270,28 @@ export function App() {
   // shows the Executions screen's aside, and ⌘1 to ⌘5 open the sidebar's items in its order, as a click on each does,
   // from any focus, a text field or the YAML editor included. ⌘E acts on the Executions screen alone: elsewhere it is
   // left to the system and the saved state stays as it was. The onboarding and daemon-down screens have no shell, and a
-  // modal dialog, the picker included, keeps the keyboard. The keys are the shortcut table's.
+  // modal dialog, the picker included, keeps the keyboard. The keys are the shortcut table's, and a registered
+  // shortcut's, which acts under the same conditions; `register` has refused one whose keys the table takes.
   useEffect(() => {
     if (!shell) return;
     const onKey = (e: KeyboardEvent) => {
       const item = NAV.find((nav) => matches(e, nav.shortcut));
       const key = matching(e, screen === "executions" ? ["toggleSidebar", "newTask", "toggleExecutionsAside"] : ["toggleSidebar", "newTask"]);
-      if (!key && !item) return;
+      const added = key || item ? undefined : registered.shortcuts.find((s) => pressesChord(e, s.chord));
+      if (!key && !item && !added) return;
       if (document.querySelector('[aria-modal="true"]')) return;
       e.preventDefault();
-      if (item) navigateRef.current(item.key);
+      if (added) {
+        if (added.panel !== undefined) togglePanel(added.panel);
+        added.onPress?.();
+      } else if (item) navigateRef.current(item.key);
       else if (key === "toggleSidebar") setSidebarCollapsed((collapsed) => !collapsed);
       else if (key === "toggleExecutionsAside") setExecutionsAsideHidden((hidden) => !hidden);
       else setPicker(true);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [shell, screen]);
+  }, [shell, screen, registered]);
 
   // ⌘+, ⌘−, and ⌘0 zoom the dashboard everywhere, from any focus: unlike ⌘B, on the onboarding and daemon-down
   // screens too, and over an open dialog.
@@ -335,7 +345,11 @@ export function App() {
   }
 
   return (
-    <div className={native.available ? "app app--tauri" : "app"} data-sidebar={sidebarCollapsed ? "collapsed" : "expanded"}>
+    <div
+      className={native.available ? "app app--tauri" : "app"}
+      data-sidebar={sidebarCollapsed ? "collapsed" : "expanded"}
+      data-panel={RegisteredPanel ? "open" : undefined}
+    >
       <div className="app__backdrop" aria-hidden="true" />
       <Sidebar screen={screen} onNavigate={navigate} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
       <main className="app__content">
@@ -345,6 +359,8 @@ export function App() {
           onNewTask={() => setPicker(true)}
           onNavigate={navigate}
           onOpenExecution={openExecution}
+          openPanel={openPanel}
+          onTogglePanel={togglePanel}
         />
         <ScreenBoundary key={screen}>
           {screen === "executions" ? (
@@ -387,6 +403,14 @@ export function App() {
           {RegisteredScreen ? <RegisteredScreen /> : null}
         </ScreenBoundary>
       </main>
+      {/* Outside the screen's boundary, so the panel stays open, and keeps its state, from one screen to the next. */}
+      {RegisteredPanel ? (
+        <aside className="app__panel" aria-label={dynamicText(t, `panels.${openPanel}`)}>
+          <ScreenBoundary>
+            <RegisteredPanel onClose={() => setOpenPanel(null)} />
+          </ScreenBoundary>
+        </aside>
+      ) : null}
       {picker ? (
         <TemplatePicker
           onClose={() => setPicker(false)}

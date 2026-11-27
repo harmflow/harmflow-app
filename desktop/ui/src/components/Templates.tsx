@@ -17,6 +17,7 @@ import {
   templateSources,
   templateTypes,
 } from "../lib/templates";
+import { dynamicText, useRegistered } from "../registrations";
 import { actions, useStore } from "../state/store";
 import { Icon } from "./Icon";
 import { toast } from "./toast";
@@ -26,9 +27,18 @@ import { Banner, Button, Chip, Field, Modal, Select, TextArea, TextInput, cx } f
  * The catalog of the templates the daemon offers, named and described in the interface's language, with their type
  * and source, and what each needs that this machine lacks: a search over the names and descriptions, and filters by
  * source and by type. A template that needs something can still be picked. A template file that fails validation is
- * listed below them with its errors, and cannot be picked.
+ * listed below them with its errors, and cannot be picked. The actions registrations add come first, above the search;
+ * `onAction` follows any of them.
  */
-export function TemplateButtons({ onPick, disabled }: { onPick: (template: string) => void; disabled?: boolean }) {
+export function TemplateButtons({
+  onPick,
+  disabled,
+  onAction,
+}: {
+  onPick: (template: string) => void;
+  disabled?: boolean;
+  onAction?: () => void;
+}) {
   const { t, i18n } = useTranslation();
   const all = useStore((s) => s.templates);
   const templates = offeredTemplates(all);
@@ -36,9 +46,11 @@ export function TemplateButtons({ onPick, disabled }: { onPick: (template: strin
   const [query, setQuery] = useState("");
   const [source, setSource] = useState("");
   const [type, setType] = useState("");
+  const registeredActions = <CatalogActions disabled={disabled} onAction={onAction} />;
   if (!templates.length)
     return (
       <div className="template-catalog">
+        {registeredActions}
         <p className="muted">{t("tasks.templates.none")}</p>
         <InvalidTemplates templates={invalid} />
       </div>
@@ -46,6 +58,7 @@ export function TemplateButtons({ onPick, disabled }: { onPick: (template: strin
   const shown = filterTemplates(templates, { query, source, type }, i18n.language);
   return (
     <div className="template-catalog">
+      {registeredActions}
       <div className="filters">
         <TextInput
           type="search"
@@ -112,6 +125,30 @@ export function TemplateButtons({ onPick, disabled }: { onPick: (template: strin
   );
 }
 
+/** The catalog actions registrations add, in their order; nothing when none is registered. */
+function CatalogActions({ disabled, onAction }: { disabled?: boolean; onAction?: () => void }) {
+  const { t } = useTranslation();
+  const { catalogActions } = useRegistered();
+  if (!catalogActions.length) return null;
+  return (
+    <div className="template-catalog__actions">
+      {catalogActions.map((action) => (
+        <Button
+          key={action.key}
+          icon={action.icon}
+          disabled={disabled}
+          onClick={() => {
+            action.onClick();
+            onAction?.();
+          }}
+        >
+          {dynamicText(t, `catalog.${action.key}`)}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
 /**
  * The template files that fail validation, each named by its file with the daemon's errors and, when it gives them, their
  * line and column. Neither the search nor the filters hide them, and none can be picked.
@@ -148,7 +185,7 @@ export function TemplatePicker({ onPick, onClose }: { onPick: (template: string)
   const { t } = useTranslation();
   return (
     <Modal title={t("tasks.templates.title")} onClose={onClose}>
-      <TemplateButtons onPick={onPick} />
+      <TemplateButtons onPick={onPick} onAction={onClose} />
     </Modal>
   );
 }

@@ -80,6 +80,46 @@ export function matches(e: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "
   return shortcut.chords.some((chord) => pressed(e, chord));
 }
 
+/** Whether the event presses the chord, a registered shortcut's, which never repeats as a held key. */
+export function pressesChord(e: Parameters<typeof matches>[0], chord: Chord): boolean {
+  return !e.repeat && pressed(e, chord);
+}
+
+/** Whether one press could be read as either chord: the same key, either case, with ⌘ alike and Shift alike or "any". */
+export function chordsMeet(a: Chord, b: Chord): boolean {
+  const shiftA = a.shift ?? false;
+  const shiftB = b.shift ?? false;
+  const shift = shiftA === "any" || shiftB === "any" || shiftA === shiftB;
+  return a.key.toLowerCase() === b.key.toLowerCase() && (a.meta ?? false) === (b.meta ?? false) && shift;
+}
+
+/** The shortcut of the table whose chords meet the chord, if one does. */
+export function shortcutMeeting(chord: Chord): ShortcutId | undefined {
+  return (Object.keys(SHORTCUTS) as ShortcutId[]).find((id) => (SHORTCUTS[id].chords as readonly Chord[]).some((c) => chordsMeet(c, chord)));
+}
+
+/**
+ * The macOS edit and window chords a field or the window answers as every app's do: select all, copy, paste, cut,
+ * undo and redo, close, hide, minimize, and quit. No registered shortcut takes them, since the shell would swallow them
+ * from any focus.
+ */
+export const SYSTEM_CHORDS: readonly Chord[] = [
+  { key: "a", meta: true },
+  { key: "c", meta: true },
+  { key: "v", meta: true },
+  { key: "x", meta: true },
+  { key: "z", meta: true, shift: "any" },
+  { key: "w", meta: true },
+  { key: "h", meta: true },
+  { key: "m", meta: true },
+  { key: "q", meta: true },
+];
+
+/** The macOS edit or window chord that meets the chord, if one does. */
+export function systemChordMeeting(chord: Chord): Chord | undefined {
+  return SYSTEM_CHORDS.find((system) => chordsMeet(system, chord));
+}
+
 /** The first of the shortcuts the event presses, or null. */
 export function matching<Id extends ShortcutId>(e: Parameters<typeof matches>[0], ids: readonly Id[]): Id | null {
   return ids.find((id) => matches(e, id)) ?? null;

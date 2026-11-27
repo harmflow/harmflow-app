@@ -37,7 +37,12 @@ func isolate(t *testing.T) string {
 // stops it when the test ends.
 func start(t *testing.T, registrations ...Registration) *running {
 	t.Helper()
-	home := isolate(t)
+	return startAt(t, isolate(t), registrations...)
+}
+
+// startAt is start on home, a data directory isolate gave, which the test may have filled beforehand.
+func startAt(t *testing.T, home string, registrations ...Registration) *running {
+	t.Helper()
 	r := &running{home: home, done: make(chan error, 1)}
 	go func() { r.done <- Run(Config{Home: home, Version: "test"}, registrations...) }()
 	deadline := time.Now().Add(20 * time.Second)
