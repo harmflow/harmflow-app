@@ -50,8 +50,8 @@ type initSkills struct {
 // is not on it. Each CLI's list is kept until ReloadUserItems, since reading it starts a session that takes seconds;
 // one that failed is not kept. A second lookup shares the listing already running, and a lookup whose context ends
 // returns while the listing goes on for the others; the last one to leave stops it. A CLI that was not detected cannot
-// answer, which is an error, never an empty list. A listed skill of the user's own carries its folder, for what its
-// SKILL.md declares (userSkillPath).
+// answer, which is an error, never an empty list. A listed skill of the user's own, or of an installed plugin, carries
+// its folder, for what its SKILL.md declares (userSkillPath, pluginSkillPath).
 func (a *Adapter) installedSkills(ctx context.Context, info ports.HarnessInfo) ([]ports.ResolvedItem, error) {
 	if !info.Detected || info.Path == "" {
 		return nil, domain.TextErr("harness_not_detected", "{{harness}} was not detected on this machine", "harness", Name)
@@ -109,11 +109,22 @@ func (a *Adapter) runListing(ctx context.Context, info ports.HarnessInfo, key st
 	defer l.cancel()
 	names, err := a.listSkills(ctx, info)
 	if err == nil {
+		var plugins map[string]string // read for the first plugin's skill listed, and once
 		slices.Sort(names)
 		for _, n := range slices.Compact(names) {
-			if n != "" {
-				l.items = append(l.items, ports.ResolvedItem{Name: n, Kind: "skill", Path: a.userSkillPath(info, n)})
+			if n == "" {
+				continue
 			}
+			path := ""
+			if plugin, skill, ok := strings.Cut(n, ":"); ok {
+				if plugins == nil {
+					plugins = a.installedPlugins(info)
+				}
+				path = pluginSkillPath(plugins, plugin, skill)
+			} else {
+				path = a.userSkillPath(info, n)
+			}
+			l.items = append(l.items, ports.ResolvedItem{Name: n, Kind: "skill", Path: path})
 		}
 	}
 	l.err = err
@@ -132,13 +143,76 @@ func (a *Adapter) runListing(ctx context.Context, info ports.HarnessInfo, key st
 }
 
 // userSkillPath is the folder of a skill the list names, when it is the user's own, in the configuration directory's
-// skills folder, so that what its SKILL.md declares can be read; "" for a skill bundled with Claude Code or a plugin's,
-// whose file HarmFlow does not look for.
+// skills folder, so that what its SKILL.md declares can be read; "" for a skill bundled with Claude Code, whose file
+// HarmFlow does not look for, or a plugin's (pluginSkillPath).
 func (a *Adapter) userSkillPath(info ports.HarnessInfo, name string) string {
 	if strings.ContainsAny(name, `:/\`) || name == "." || name == ".." {
 		return ""
 	}
-	dir := filepath.Join(a.configDirOf(info), "skills", name)
+	return skillDir(filepath.Join(a.configDirOf(info), "skills", name))
+}
+
+// pluginsRecord is the file where Claude Code records the plugins installed, under its configuration directory.
+const pluginsRecord = "plugins/installed_plugins.json"
+
+// installedPluginsFile is Claude Code's record of the plugins installed, as Claude Code 2.1.309 writes it: each plugin,
+// keyed <plugin>@<marketplace>, with each installation of it, its scope, its folder, and the project of a project or
+// local installation.
+type installedPluginsFile struct {
+	Plugins map[string][]struct {
+		Scope       string `json:"scope"`
+		InstallPath string `json:"installPath"`
+		ProjectPath string `json:"projectPath"`
+	} `json:"plugins"`
+}
+
+// installedPlugins is the folder of each plugin the installation's record holds, by the plugin's name, among the
+// installations that apply to the folder the listing runs in, the home folder, as Claude Code loads them there: a user
+// one, and a project or local one of that folder. A plugin with more than one that applies, from one marketplace or
+// several, is there with no folder, since HarmFlow cannot tell which one Claude Code loads. A record that cannot be
+// read gives no plugin; the map is never nil, so the listing reads the record once.
+func (a *Adapter) installedPlugins(info ports.HarnessInfo) map[string]string {
+	plugins := map[string]string{}
+	data, err := os.ReadFile(filepath.Join(a.configDirOf(info), pluginsRecord))
+	if err != nil {
+		return plugins
+	}
+	var record installedPluginsFile
+	if json.Unmarshal(data, &record) != nil {
+		return plugins
+	}
+	home := filepath.Clean(a.Home)
+	seen := map[string]bool{}
+	for key, installs := range record.Plugins {
+		name, _, _ := strings.Cut(key, "@")
+		for _, in := range installs {
+			ofHome := in.ProjectPath != "" && filepath.Clean(in.ProjectPath) == home
+			if in.Scope != "user" && !((in.Scope == "project" || in.Scope == "local") && ofHome) {
+				continue
+			}
+			if seen[name] {
+				plugins[name] = ""
+				continue
+			}
+			seen[name], plugins[name] = true, in.InstallPath
+		}
+	}
+	return plugins
+}
+
+// pluginSkillPath is the folder of a plugin's skill the list names as <plugin>:<skill>, in the folder plugins gives the
+// plugin, so that what its SKILL.md declares can be read; "" when the plugin has no single folder there, or the skill's
+// SKILL.md is not in it.
+func pluginSkillPath(plugins map[string]string, plugin, skill string) string {
+	root := plugins[plugin]
+	if root == "" || !filepath.IsAbs(root) || strings.ContainsAny(skill, `:/\`) || skill == "" || skill == "." || skill == ".." {
+		return ""
+	}
+	return skillDir(filepath.Join(root, "skills", skill))
+}
+
+// skillDir is dir when it holds a SKILL.md file, "" otherwise.
+func skillDir(dir string) string {
 	if st, err := os.Stat(filepath.Join(dir, "SKILL.md")); err != nil || st.IsDir() {
 		return ""
 	}

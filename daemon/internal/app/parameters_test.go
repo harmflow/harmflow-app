@@ -353,13 +353,198 @@ func TestCatalogOffersDeclaredParameters(t *testing.T) {
 	}
 }
 
+// pdfSkill is a plugin's skill that declares parameters as a user's skill would: a required text and a number with a
+// default.
+const pdfSkill = "---\nname: pdf\ndescription: Reads PDFs\nparameters:\n" +
+	"  - {name: owner, type: text, description: Who owns the document, required: true}\n" +
+	"  - {name: limit, type: number, description: How many pages, default: 3}\n---\n\nRead the PDF.\n"
+
+// pluginEnv is an env whose Claude Code is the real adapter on a stand-in CLI that lists pdf:pdf, the skill pdf of a
+// plugin pdf that Claude Code's record of the plugins installed holds for the user. The skill's SKILL.md, which the
+// returned skillFile names, holds skill, and is not written when skill is empty. Each session of an execution copies
+// its context.json to the returned context and succeeds.
+func pluginEnv(t *testing.T, skill string) (e *env, skillFile, context string) {
+	t.Helper()
+	context = filepath.Join(t.TempDir(), "context.json")
+	e = newClaudeEnvOn(t, claudeListing(`case "$*" in
+    "-p /usage") echo 'Current session: 4% used' ;;
+    *--permission-mode*) cp "$HARMFLOW_EXECUTION_DIR/context.json" '`+context+`'
+      echo '{"type":"result","subtype":"success","is_error":false,"result":"done"}' ;;
+    *) echo '{"type":"system","subtype":"init","skills":["simplify","pdf:pdf"]}' ;;
+  esac`), 0)
+	plugin := t.TempDir()
+	record := `{"version":2,"plugins":{"pdf@market":[{"scope":"user","installPath":"` + plugin + `","version":"1.0.0"}]}}`
+	writeFile(t, filepath.Join(os.Getenv("CLAUDE_CONFIG_DIR"), "plugins", "installed_plugins.json"), record)
+	skillFile = filepath.Join(plugin, "skills", "pdf", "SKILL.md")
+	if skill != "" {
+		writeFile(t, skillFile, skill)
+	}
+	return e, skillFile, context
+}
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// hasUnverified reports whether issues hold the warning that pdf:pdf's values are passed through unchecked.
+func hasUnverified(issues []schemaIssue) bool {
+	return slices.ContainsFunc(issues, func(is schemaIssue) bool { return is.Key == "parameters_unverified" })
+}
+
+// A skill of an installed plugin declares its parameters as a user's skill does: the catalog offers them, a missing
+// required value and a value of the wrong type are refused, each naming the parameter and the skill, with no warning
+// that the values are unchecked, and an execution's context.json carries the values with the default of the one left
+// unset.
+func TestPluginSkillDeclaresParameters(t *testing.T) {
+	e, _, context := pluginEnv(t, pdfSkill)
+	ctx := t.Context()
+
+	var offered []string
+	for _, entry := range e.app.Catalog(ctx, "", "").Skills {
+		if entry.Name == "pdf:pdf" && entry.Parameters != nil {
+			offered = []string{}
+			for _, d := range *entry.Parameters {
+				offered = append(offered, d.Name+":"+d.Type)
+			}
+		}
+	}
+	if want := []string{"owner:text", "limit:number"}; !slices.Equal(offered, want) {
+		t.Errorf("Catalog pdf:pdf parameters = %q, want %q", offered, want)
+	}
+
+	for _, c := range []struct {
+		name, values, key, path string
+	}{
+		{"no owner", "{limit: 2}", "parameter_required", "/spec/parameters/skills/pdf:pdf/owner"},
+		{"a limit in words", "{owner: ana, limit: three}", "parameter_wrong_type", "/spec/parameters/skills/pdf:pdf/limit"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			doc := taskYAML("checked-"+strings.ReplaceAll(c.key, "_", "-"), "  skills: [pdf:pdf]\n  parameters:\n    skills:\n      pdf:pdf: "+c.values+"\n")
+			_, err := e.app.CreateTask(ctx, TaskInput{YAML: doc})
+			var ae *Error
+			if !errors.As(err, &ae) || ae.Validation == nil || !slices.ContainsFunc(ae.Validation.Errors, func(is schemaIssue) bool {
+				return is.Key == c.key && is.Path == c.path && strings.Contains(is.Message, `"`+lastSegment(c.path)+`"`) &&
+					strings.Contains(is.Message, `"pdf:pdf"`)
+			}) {
+				t.Errorf("CreateTask(%s) = %v, want %s at %s, naming the parameter and its skill", c.name, err, c.key, c.path)
+			}
+			if ae != nil && ae.Validation != nil && hasUnverified(ae.Validation.Warnings) {
+				t.Errorf("CreateTask(%s) warnings = %+v, want no parameters_unverified", c.name, ae.Validation.Warnings)
+			}
+		})
+	}
+
+	e.create("pdf", "  skills: [pdf:pdf]\n  parameters:\n    skills:\n      pdf:pdf: {owner: ana}\n")
+	if r := e.app.Validate(ctx, TaskInput{YAML: taskYAML("pdf", "  skills: [pdf:pdf]\n  parameters:\n    skills:\n"+
+		"      pdf:pdf: {owner: ana}\n")}); !r.Valid || hasUnverified(r.Warnings) {
+		t.Errorf("Validate(pdf) = valid %v, warnings %+v; want valid, with no parameters_unverified", r.Valid, r.Warnings)
+	}
+	r, err := e.app.RunTask("pdf")
+	if err != nil {
+		t.Fatalf("RunTask(pdf) = %v", err)
+	}
+	e.wait(r.ExecutionID, domain.StatusCompleted)
+	got := valueAt(e.readContextFile(context), "task", "declaredParameters", "skills", "pdf:pdf")
+	if want := map[string]any{"owner": "ana", "limit": 3}; !jsonEqual(got, want) {
+		t.Errorf("context.json's values of pdf:pdf = %v, want %v", got, want)
+	}
+}
+
+// A value whose declaration the plugin's skill dropped warns, naming the parameter and the skill, is left out of the
+// execution's context.json, and is dropped on the next save.
+func TestPluginSkillUndeclaredParameterWarnsAndIsDropped(t *testing.T) {
+	e, skillFile, context := pluginEnv(t, pdfSkill)
+	ctx := t.Context()
+	doc := taskYAML("pdf", "  skills: [pdf:pdf]\n  parameters:\n    skills:\n      pdf:pdf: {owner: ana, limit: 5}\n")
+	if _, err := e.app.CreateTask(ctx, TaskInput{YAML: doc}); err != nil {
+		t.Fatalf("CreateTask(pdf) = %v", err)
+	}
+	writeFile(t, skillFile, "---\nname: pdf\nparameters:\n  - {name: owner, type: text, required: true}\n---\n\nRead the PDF.\n")
+
+	undeclared := func(is schemaIssue) bool {
+		return is.Key == "parameter_undeclared" && is.Path == "/spec/parameters/skills/pdf:pdf/limit" &&
+			strings.Contains(is.Message, `"limit"`) && strings.Contains(is.Message, `"pdf:pdf"`)
+	}
+	if r := e.app.Validate(ctx, TaskInput{YAML: doc}); !r.Valid || !slices.ContainsFunc(r.Warnings, undeclared) {
+		t.Errorf("Validate(pdf) = valid %v, warnings %+v; want valid, warning of limit", r.Valid, r.Warnings)
+	}
+
+	run, err := e.app.RunTask("pdf")
+	if err != nil {
+		t.Fatalf("RunTask(pdf) = %v", err)
+	}
+	x := e.wait(run.ExecutionID, domain.StatusCompleted)
+	if !slices.ContainsFunc(x.Warnings, func(w domain.Warning) bool {
+		return w.Text.Key == "parameter_undeclared" && w.Text.Params["name"] == "limit" && w.Text.Params["item"] == "pdf:pdf"
+	}) {
+		t.Errorf("the execution's warnings = %+v, want one of limit and pdf:pdf", x.Warnings)
+	}
+	got := valueAt(e.readContextFile(context), "task", "declaredParameters", "skills", "pdf:pdf")
+	if want := map[string]any{"owner": "ana"}; !jsonEqual(got, want) {
+		t.Errorf("context.json's values of pdf:pdf = %v, want %v", got, want)
+	}
+
+	view, _ := e.app.GetTask("pdf")
+	saved, err := e.app.UpdateTask(ctx, "pdf", TaskInput{YAML: doc, BaseRevision: view.Revision})
+	if err != nil {
+		t.Fatalf("UpdateTask(pdf) = %v", err)
+	}
+	if data, _ := os.ReadFile(saved.Path); strings.Contains(string(data), "limit") || !strings.Contains(string(data), "owner: ana") {
+		t.Errorf("the saved file =\n%s\nwant limit dropped and the owner kept", data)
+	}
+}
+
+// A plugin's skill whose SKILL.md cannot be found runs as before: its values pass through as the task gives them,
+// behind the warning that they are unchecked.
+func TestPluginSkillWithNoFilePassesValuesThrough(t *testing.T) {
+	e, _, context := pluginEnv(t, "")
+	ctx := t.Context()
+	doc := taskYAML("pdf", "  skills: [pdf:pdf]\n  parameters:\n    skills:\n      pdf:pdf: {limit: three}\n")
+	r := e.app.Validate(ctx, TaskInput{YAML: doc})
+	if !r.Valid || !slices.ContainsFunc(r.Warnings, func(is schemaIssue) bool {
+		return is.Key == "parameters_unverified" && is.Path == "/spec/parameters/skills/pdf:pdf"
+	}) {
+		t.Errorf("Validate(pdf) = valid %v, errors %+v, warnings %+v; want valid, with parameters_unverified on pdf:pdf",
+			r.Valid, r.Errors, r.Warnings)
+	}
+	for _, entry := range e.app.Catalog(ctx, "", "").Skills {
+		if entry.Name == "pdf:pdf" && entry.Parameters != nil {
+			t.Errorf("Catalog pdf:pdf parameters = %+v, want none known", *entry.Parameters)
+		}
+	}
+
+	if _, err := e.app.CreateTask(ctx, TaskInput{YAML: doc}); err != nil {
+		t.Fatalf("CreateTask(pdf) = %v", err)
+	}
+	run, err := e.app.RunTask("pdf")
+	if err != nil {
+		t.Fatalf("RunTask(pdf) = %v", err)
+	}
+	e.wait(run.ExecutionID, domain.StatusCompleted)
+	got := valueAt(e.readContextFile(context), "task", "declaredParameters", "skills", "pdf:pdf")
+	if want := map[string]any{"limit": "three"}; !jsonEqual(got, want) {
+		t.Errorf("context.json's values of pdf:pdf = %v, want %v, as the task gives them", got, want)
+	}
+}
+
 // readContextOf reads the context.json of the first request's execution, and checks it against its schema.
 func (e *env) readContextOf(sent []ports.RunRequest) map[string]any {
 	e.t.Helper()
 	if len(sent) == 0 {
 		e.t.Fatal("no request reached the harness")
 	}
-	path := filepath.Join(sent[0].ExecutionDir, "context.json")
+	return e.readContextFile(filepath.Join(sent[0].ExecutionDir, "context.json"))
+}
+
+// readContextFile reads the context.json at path, and checks it against its schema.
+func (e *env) readContextFile(path string) map[string]any {
+	e.t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		e.t.Fatalf("os.ReadFile(%s) = %v", path, err)
