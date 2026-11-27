@@ -318,6 +318,115 @@ func TestTaskOnARemovedInstallationDoesNotStart(t *testing.T) {
 	}
 }
 
+// newGoneHomeEnv starts an App on fake harnesses whose Codex lists two installations, ~/.codex, in use, and ~/.codex-b,
+// saves a task as the YAML gives it while both are listed, then removes ~/.codex-b from what Codex's Detect lists.
+// Detection has not run since: the caller runs it when its case needs the inventory to read the removal.
+func newGoneHomeEnv(t *testing.T, yaml string) *env {
+	t.Helper()
+	e := newEnv(t, func(e *env) { e.codex.homes = []string{"~/.codex", "~/.codex-b"} })
+	e.app.RefreshHarnesses(t.Context())
+	if _, err := e.app.CreateTask(t.Context(), TaskInput{YAML: yaml}); err != nil {
+		t.Fatalf("CreateTask(on ~/.codex-b, both homes listed) error = %v, want none", err)
+	}
+	e.codex.mu.Lock()
+	e.codex.homes = []string{"~/.codex"}
+	e.codex.mu.Unlock()
+	return e
+}
+
+// goneProfile is the preferred profile's installation key on ~/.codex-b, the home newGoneHomeEnv removes, and
+// goneInstallationPath is where validation says it is missing.
+const (
+	goneProfile          = "      installation: \"~/.codex-b\"\n"
+	goneInstallationPath = "/spec/harness/preferred/installation"
+)
+
+// namesGoneHome reports whether a validation issue is at the preferred profile's installation key and names ~/.codex-b.
+func namesGoneHome(is schema.Issue) bool {
+	return is.Path == goneInstallationPath && strings.Contains(is.Message, "~/.codex-b")
+}
+
+// harmflow-app#1173: a duplicate of a task saved on ~/.codex-b before that home went is refused at the preferred
+// profile's installation key, naming ~/.codex-b, and no copy is saved.
+func TestDuplicateOnARemovedInstallationFails(t *testing.T) {
+	e := newGoneHomeEnv(t, codexTaskYAML("gone", goneProfile))
+	e.app.detect(t.Context(), domain.HarnessCodex)
+	_, err := e.app.DuplicateTask(t.Context(), "gone")
+	if !refusedAt(err, goneInstallationPath, "harness_installation_missing") {
+		t.Errorf("DuplicateTask(gone) error = %v, want harness_installation_missing at %s", err, goneInstallationPath)
+	}
+	var refused *Error
+	if errors.As(err, &refused) && refused.Validation != nil &&
+		!slices.ContainsFunc(refused.Validation.Errors, namesGoneHome) {
+		t.Errorf("DuplicateTask(gone) errors = %+v, want the one at %s to name ~/.codex-b", refused.Validation.Errors,
+			goneInstallationPath)
+	}
+	for _, task := range e.app.ListTasks() {
+		if task.ID != "gone" {
+			t.Errorf("ListTasks() holds %s, want no copy of the refused duplicate", task.ID)
+		}
+	}
+}
+
+// harmflow-app#1173: a task file on ~/.codex-b, loaded as the daemon loads its files at start, is invalid once the
+// check after detection runs without that home, at the preferred profile's installation key, naming ~/.codex-b, and
+// keeps its last valid definition.
+func TestLoadedTaskOnARemovedInstallationFailsTheCheck(t *testing.T) {
+	e := newGoneHomeEnv(t, codexTaskYAML("loaded", goneProfile))
+	if err := e.app.loadTasks(t.Context()); err != nil {
+		t.Fatalf("loadTasks() error = %v, want none", err)
+	}
+	e.app.detect(t.Context(), domain.HarnessCodex)
+	e.app.checkTasks(t.Context())
+	e.app.mu.Lock()
+	entry := e.app.tasks["loaded"]
+	invalid, doc := entry.invalid, entry.doc
+	e.app.mu.Unlock()
+	if invalid == nil || !slices.ContainsFunc(invalid.Errors, func(is schema.Issue) bool {
+		return is.Params["detailKey"] == "harness_installation_missing" && namesGoneHome(is)
+	}) {
+		t.Errorf("checkTasks() without ~/.codex-b left the task saved on it with errors %+v, want "+
+			"harness_installation_missing at %s naming ~/.codex-b", invalid, goneInstallationPath)
+	}
+	if p := doc.Spec.Harness.Preferred; doc.Metadata.ID != "loaded" || p.Provider != domain.HarnessCodex ||
+		p.Installation != "~/.codex-b" {
+		t.Errorf("checkTasks() left the task's definition %+v, want its last valid one, on Codex's ~/.codex-b", doc)
+	}
+}
+
+// harmflow-app#1173: a task whose preferred Codex profile names ~/.codex-b, removed after the task was saved, fails
+// over to its Claude Code candidate: no attempt is prepared on Codex, the one attempt runs on Claude Code and
+// completes, and a harness.unavailable event of the execution, from Codex, names the missing installation.
+func TestPreferredOnARemovedInstallationFailsOver(t *testing.T) {
+	e := newGoneHomeEnv(t, codexTaskYAML("removed", goneProfile+
+		"    fallback:\n      candidates:\n        - provider: claude-code\n"))
+	r, err := e.app.RunTask("removed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := e.wait(r.ExecutionID, domain.StatusCompleted)
+	if len(x.Attempts) != 1 || x.Attempts[0].Harness != domain.HarnessClaudeCode ||
+		x.Attempts[0].Outcome != domain.AttemptSucceeded {
+		t.Errorf("attempts %+v, want one, on Claude Code, succeeded", x.Attempts)
+	}
+	if got := e.codexHomes(); len(got) != 0 {
+		t.Errorf("Codex prepared attempts with the homes %q, want none", got)
+	}
+	var got []string // each harness.unavailable event of the execution, as its harness and its message
+	named := false
+	for _, ev := range e.published(domain.EventHarnessUnavailable) {
+		if ev.ExecutionID != r.ExecutionID {
+			continue
+		}
+		got = append(got, ev.Harness+": "+ev.Message)
+		named = named || ev.Harness == domain.HarnessCodex && strings.Contains(ev.Message, missingInstallation)
+	}
+	if !named {
+		t.Errorf("the execution's %s events = %q, want one from %s naming %s", domain.EventHarnessUnavailable, got,
+			domain.HarnessCodex, missingInstallation)
+	}
+}
+
 // harmflow-app#475: the sign-in the daemon starts is the one of the installation in use, so an attempt that ends
 // signed out on another installation starts none, which would sign the wrong home in; one on the installation in use
 // still starts it.
