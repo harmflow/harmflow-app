@@ -270,7 +270,8 @@ export function commitsDiffer(appCommit?: string, daemonCommit?: string): boolea
 /**
  * The topbar. When the daemon's version differs from the window's, a warning names both, whatever the commits say.
  * When the window and the daemon come from different commits, a banner below it names both and offers to restart the
- * daemon on the window's build; only that click restarts it.
+ * daemon on the window's build; only that click restarts it. The buttons registrations add follow New task, each
+ * pressed while the panel it opens is open.
  */
 export function Header({
   screen,
@@ -278,6 +279,8 @@ export function Header({
   onNewTask,
   onNavigate,
   onOpenExecution,
+  openPanel = null,
+  onTogglePanel,
 }: {
   screen: ScreenRoute;
   /** What the breadcrumb adds after the screen's own: Settings' open section. */
@@ -285,8 +288,12 @@ export function Header({
   onNewTask: () => void;
   onNavigate: (s: ScreenRoute) => void;
   onOpenExecution: (id: string) => void;
+  /** The key of the registered panel open, if one is. */
+  openPanel?: string | null;
+  onTogglePanel?: (key: string) => void;
 }) {
   const { t, i18n } = useTranslation();
+  const registered = useRegistered();
   const connection = useStore((s) => s.connection);
   const lastUpdate = useStore((s) => s.lastUpdate);
   const health = useStore((s) => s.health);
@@ -340,6 +347,25 @@ export function Header({
         >
           {t("header.newTask")}
         </Button>
+        {registered.topbarButtons.map((button) => {
+          const label = dynamicText(t, `topbar.${button.key}`);
+          return (
+            <Button
+              key={button.key}
+              variant="secondary"
+              size="lg"
+              icon={button.icon}
+              className="topbar__registered"
+              aria-pressed={button.panel !== undefined ? openPanel === button.panel : undefined}
+              onClick={() => {
+                if (button.panel !== undefined) onTogglePanel?.(button.panel);
+                button.onClick?.();
+              }}
+            >
+              {label}
+            </Button>
+          );
+        })}
         <NotificationBell onOpenExecution={onOpenExecution} />
         <MoreMenu onNavigate={onNavigate} />
       </div>

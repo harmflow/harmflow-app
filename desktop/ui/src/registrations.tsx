@@ -5,6 +5,7 @@ import { createContext, useContext, type ComponentType } from "react";
 import type { IconName } from "./components/Icon";
 import { NAV } from "./components/Shell";
 import { LANGUAGES, resources, type Language } from "./i18n";
+import { chordsMeet, keycaps, shortcutMeeting, systemChordMeeting, type Chord } from "./lib/shortcuts";
 import { SECTION_GROUPS, isSettingsSection } from "./screens/SettingsScreen";
 
 /** A group of Settings' section list, which a registered section joins at its end. */
@@ -30,6 +31,50 @@ export interface RegisteredSettingsSection {
 }
 
 /**
+ * A panel a registration docks at the right of the window, beside whichever screen is open, which keeps the rest of the
+ * width. One panel is open at a time, and none at launch: a registered topbar button or shortcut that names its key
+ * opens it, and closes it when it is the one open; `onClose`, given to its component, closes it too. It stays open from
+ * one screen to the next. `panels.<key>` names it to assistive technology.
+ */
+export interface RegisteredPanel {
+  key: string;
+  component: ComponentType<{ onClose: () => void }>;
+}
+
+/**
+ * A button a registration adds to the topbar, before the notifications: it opens or closes the registered panel that
+ * `panel` names, and calls `onClick`; it has one of the two at least. `topbar.<key>` is its label.
+ */
+export interface RegisteredTopbarButton {
+  key: string;
+  icon: IconName;
+  panel?: string;
+  onClick?: () => void;
+}
+
+/**
+ * A keyboard shortcut a registration adds: a chord with ⌘ and one key, in lower case, that no built-in shortcut, no
+ * macOS edit or window shortcut (⌘A, ⌘C, ⌘V, ⌘X, ⌘Z, ⇧⌘Z, ⌘W, ⌘H, ⌘M, ⌘Q), and no other registration takes. It acts as ⌘B and ⌘N do, from any focus in the dashboard, and never on the onboarding or
+ * daemon-down screens or under a modal dialog: it opens or closes the registered panel that `panel` names, and calls
+ * `onPress`; it has one of the two at least.
+ */
+export interface RegisteredShortcut {
+  chord: Chord;
+  panel?: string;
+  onPress?: () => void;
+}
+
+/**
+ * An action a registration adds to the template catalog, above its templates, wherever the catalog shows. In the New
+ * task dialog, the dialog closes once `onClick` returns. `catalog.<key>` is its label.
+ */
+export interface RegisteredCatalogAction {
+  key: string;
+  icon: IconName;
+  onClick: () => void;
+}
+
+/**
  * What one registration adds to the dashboard. Every field is optional, and so is every field added later. `strings`
  * holds texts per language, added to the dashboard's own translations, so a registered screen or section switches
  * language with the rest of the interface. Each key of `strings` is a plain key, with no `.` or `:`, and none can be
@@ -39,6 +84,10 @@ export interface RegisteredSettingsSection {
 export interface Registration {
   screens?: readonly RegisteredScreen[];
   settingsSections?: readonly RegisteredSettingsSection[];
+  panels?: readonly RegisteredPanel[];
+  topbarButtons?: readonly RegisteredTopbarButton[];
+  shortcuts?: readonly RegisteredShortcut[];
+  catalogActions?: readonly RegisteredCatalogAction[];
   strings?: Partial<Record<Language, Record<string, unknown>>>;
 }
 
@@ -46,10 +95,14 @@ export interface Registration {
 export interface Registered {
   screens: readonly RegisteredScreen[];
   settingsSections: readonly RegisteredSettingsSection[];
+  panels: readonly RegisteredPanel[];
+  topbarButtons: readonly RegisteredTopbarButton[];
+  shortcuts: readonly RegisteredShortcut[];
+  catalogActions: readonly RegisteredCatalogAction[];
 }
 
 /** What the shell reads when nothing is registered. */
-export const NOTHING_REGISTERED: Registered = { screens: [], settingsSections: [] };
+export const NOTHING_REGISTERED: Registered = { screens: [], settingsSections: [], panels: [], topbarButtons: [], shortcuts: [], catalogActions: [] };
 
 // A route or a section's key is one key of its texts' keys, such as `nav.<route>`, so it holds no dot and no space, and
 // no `_`, which i18next reads as the start of a plural's or a context's suffix.
@@ -68,7 +121,11 @@ const isKey = (key: string) => KEY.test(key) && !RESERVED.has(key);
  * Merges the registrations and checks them, before anything renders: a route or a key that is not a plain key, that a
  * built-in screen or section already has, or that two registrations share, throws, and so does a group or a language
  * the dashboard does not have, or a text whose key is not a plain key or that could be read in place of one of the
- * dashboard's own (`clash`). Nothing is added to the translations unless every registration passes.
+ * dashboard's own (`clash`). So does a panel's, a topbar button's, or a catalog action's key that is not a plain key or
+ * that two registrations share, a button or a shortcut that names no registered panel and has no handler, and a
+ * shortcut without ⌘ or whose keys a built-in shortcut, a macOS edit or window shortcut, or another registration's
+ * already takes. Nothing is added to the
+ * translations unless every registration passes.
  */
 export function register(given: readonly Registration[]): Registered {
   // The checks and the merge below read one copy of each registration, so nothing can show the checks one text and the
@@ -93,6 +150,43 @@ export function register(given: readonly Registration[]): Registered {
     if (!groups.has(group)) throw new Error(`The registered Settings section "${key}" joins no group of Settings: "${group}"`);
     keys.add(key);
   }
+  const panels = registrations.flatMap((r) => r.panels ?? []);
+  const panelKeys = new Set<string>();
+  for (const { key } of panels) {
+    if (!isKey(key)) throw new Error(`A registered panel's key is not a key: "${key}"`);
+    if (panelKeys.has(key)) throw new Error(`Two registered panels take the key "${key}"`);
+    panelKeys.add(key);
+  }
+  const topbarButtons = registrations.flatMap((r) => r.topbarButtons ?? []);
+  const buttonKeys = new Set<string>();
+  for (const { key, panel, onClick } of topbarButtons) {
+    if (!isKey(key)) throw new Error(`A registered topbar button's key is not a key: "${key}"`);
+    if (buttonKeys.has(key)) throw new Error(`Two registered topbar buttons take the key "${key}"`);
+    if (panel === undefined && onClick === undefined) throw new Error(`The registered topbar button "${key}" opens no panel and has no onClick`);
+    if (panel !== undefined && !panelKeys.has(panel)) throw new Error(`The registered topbar button "${key}" opens no registered panel: "${panel}"`);
+    buttonKeys.add(key);
+  }
+  const shortcuts = registrations.flatMap((r) => r.shortcuts ?? []);
+  for (const [index, { chord, panel, onPress }] of shortcuts.entries()) {
+    const name = typeof chord.key === "string" ? keycaps(chord).join("") : String(chord.key);
+    if (typeof chord.key !== "string" || chord.key.length !== 1 || chord.key.trim() === "" || chord.key !== chord.key.toLowerCase()) {
+      throw new Error(`A registered shortcut's key is not one key in lower case: "${String(chord.key)}"`);
+    }
+    if (chord.meta !== true) throw new Error(`A registered shortcut is not pressed with ⌘: "${name}"`);
+    const builtin = shortcutMeeting(chord);
+    if (builtin) throw new Error(`A registered shortcut takes the keys of a built-in shortcut: "${name}" (${builtin})`);
+    if (systemChordMeeting(chord)) throw new Error(`A registered shortcut takes the keys of a macOS edit or window shortcut: "${name}"`);
+    if (shortcuts.slice(0, index).some((other) => chordsMeet(other.chord, chord))) throw new Error(`Two registered shortcuts take the keys "${name}"`);
+    if (panel === undefined && onPress === undefined) throw new Error(`The registered shortcut "${name}" opens no panel and has no onPress`);
+    if (panel !== undefined && !panelKeys.has(panel)) throw new Error(`The registered shortcut "${name}" opens no registered panel: "${panel}"`);
+  }
+  const catalogActions = registrations.flatMap((r) => r.catalogActions ?? []);
+  const actionKeys = new Set<string>();
+  for (const { key } of catalogActions) {
+    if (!isKey(key)) throw new Error(`A registered catalog action's key is not a key: "${key}"`);
+    if (actionKeys.has(key)) throw new Error(`Two registered catalog actions take the key "${key}"`);
+    actionKeys.add(key);
+  }
   for (const registration of registrations) {
     for (const [language, strings] of Object.entries(registration.strings ?? {})) {
       if (!(LANGUAGES as readonly string[]).includes(language)) throw new Error(`Registered strings for a language the dashboard does not have: "${language}"`);
@@ -106,17 +200,17 @@ export function register(given: readonly Registration[]): Registered {
       if (strings) join(resources[language as Language].translation as unknown as Strings, strings);
     }
   }
-  return { screens, settingsSections };
+  return { screens, settingsSections, panels, topbarButtons, shortcuts, catalogActions };
 }
 
 /**
- * A registration read once: its screens and sections as new arrays of new records, each field read once, and its
- * strings as a structured clone. `Array.from` builds the arrays, so a list's own `map` or species cannot hand back an
- * object that reads differently later. Strings that are not plain data, such as a proxy or a function, throw, as any
- * other failed check does.
+ * A registration read once: its screens, sections, panels, buttons, shortcuts, and catalog actions as new arrays of new
+ * records, each field read once, a shortcut's chord too, and its strings as a structured clone. `Array.from` builds the
+ * arrays, so a list's own `map` or species cannot hand back an object that reads differently later. Strings that are
+ * not plain data, such as a proxy or a function, throw, as any other failed check does.
  */
 function copied(registration: Registration): Registration {
-  const { screens, settingsSections, strings } = registration;
+  const { screens, settingsSections, panels, topbarButtons, shortcuts, catalogActions, strings } = registration;
   let texts: Registration["strings"];
   try {
     texts = strings === undefined ? undefined : structuredClone(strings);
@@ -126,6 +220,10 @@ function copied(registration: Registration): Registration {
   return {
     screens: screens === undefined ? undefined : Array.from(screens, (screen) => ({ ...screen })),
     settingsSections: settingsSections === undefined ? undefined : Array.from(settingsSections, (section) => ({ ...section })),
+    panels: panels === undefined ? undefined : Array.from(panels, (panel) => ({ ...panel })),
+    topbarButtons: topbarButtons === undefined ? undefined : Array.from(topbarButtons, (button) => ({ ...button })),
+    shortcuts: shortcuts === undefined ? undefined : Array.from(shortcuts, ({ chord, ...shortcut }) => ({ ...shortcut, chord: { ...chord } })),
+    catalogActions: catalogActions === undefined ? undefined : Array.from(catalogActions, (action) => ({ ...action })),
     strings: texts,
   };
 }

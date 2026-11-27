@@ -75,6 +75,8 @@ type Daemon struct {
 	routes []httpapi.Route
 	// started is set once Run has called every registration; Handle adds no route from then on.
 	started atomic.Bool
+	// sessions are the session directories open now, which Run removes as it stops.
+	sessions sessionDirs
 }
 
 // Paths are the directories of one installation.
@@ -95,6 +97,9 @@ type Paths struct {
 	Workspace string
 	// Runs holds what each execution leaves for the harness it runs.
 	Runs string
+	// Sessions holds the directories of the sessions a registration opens with NewSessionDir, apart from Workspace: no
+	// task's workspace is ever under it. The daemon removes what it holds at every start, after a crash as after a stop.
+	Sessions string
 	// Run holds the files of the running daemon: its lock, and RuntimeFile.
 	Run string
 	// Builtins is the directory of the built-in agents, skills, and task templates; empty when none was found.
@@ -112,8 +117,8 @@ type Event = domain.Event
 func (d *Daemon) Paths() Paths {
 	p := d.app.Paths()
 	return Paths{Home: p.Home, Tasks: p.Tasks, Templates: p.Templates, State: p.State, Executions: p.Executions, Logs: p.Logs,
-		Workspace: p.Workspace, Runs: p.Runs, Run: p.Run, Builtins: p.Builtins, RuntimeFile: p.RuntimeFile,
-		UserHome: p.UserHome}
+		Workspace: p.Workspace, Runs: p.Runs, Sessions: sessionsDir(p.Home), Run: p.Run, Builtins: p.Builtins,
+		RuntimeFile: p.RuntimeFile, UserHome: p.UserHome}
 }
 
 // Version is the daemon's version, Config.Version.
@@ -169,6 +174,11 @@ func Run(cfg Config, registrations ...Registration) error {
 		return err
 	}
 	defer lock.Close() // closing releases the flock; the process is exiting either way
+	// Only the daemon that holds the lock opens session directories, so any found now were left by one that crashed.
+	// The daemon runs without them, so a leftover it cannot remove is logged and the start goes on.
+	if err := os.RemoveAll(sessionsDir(paths.Home)); err != nil {
+		logger.Printf("removing the session directories left by an earlier daemon: %v", err)
+	}
 
 	pathEnv := userPath(userHome)
 	harnessEnv := withPath(os.Environ(), pathEnv)
@@ -256,7 +266,9 @@ func Run(cfg Config, registrations ...Registration) error {
 	}
 	// The registrations run before the local API listens and before the use cases start, so one that fails leaves
 	// nothing running.
-	d := &Daemon{app: a}
+	d := &Daemon{app: a, sessions: sessionDirs{root: sessionsDir(paths.Home)}}
+	// Deferred, so every way out of Run removes the session directories still open: none outlives the daemon's stop.
+	defer d.sessions.removeAll(logger)
 	for i, register := range registrations {
 		if err := register(d); err != nil {
 			return fmt.Errorf("registration %d of %d: %w", i+1, len(registrations), err)

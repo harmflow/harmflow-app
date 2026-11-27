@@ -138,6 +138,22 @@ ol {
   overflow: hidden;
 }
 
+/* A registered panel, docked at the right while open: the screen keeps the rest of the width. */
+.app[data-panel="open"] {
+  grid-template-columns: var(--hf-sidebar-width) minmax(0, 1fr) var(--hf-aside-width);
+}
+
+.app__panel {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: auto;
+  background: var(--hf-color-sidebar);
+  border-left: 1px solid var(--hf-color-border);
+}
+
 /* ---------- Sidebar ---------- */
 
 .sidebar {
@@ -3696,6 +3712,13 @@ button.list-row--error:hover {
   display: flex;
   flex-direction: column;
   gap: var(--hf-space-3);
+}
+
+/* The actions registrations add, in a row above the search. */
+.template-catalog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--hf-space-2);
 }
 
 .template__meta {
