@@ -1913,8 +1913,8 @@ components:
         parameters:
           description: >-
             The parameters it declares in its front matter, which a task that cites it gives values for under
-            spec.parameters. Absent when its file cannot be read, as for a plugin's skill, so its parameters are not
-            known; an empty list when it declares none.
+            spec.parameters. Absent when its file cannot be read, as for a plugin's skill whose SKILL.md cannot be
+            found, so its parameters are not known; an empty list when it declares none.
           type: array
           items:
             $ref: "#/components/schemas/ParameterDeclaration"

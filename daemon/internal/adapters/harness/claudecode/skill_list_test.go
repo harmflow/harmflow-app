@@ -3,6 +3,7 @@ package claudecode
 import (
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -117,6 +118,64 @@ touch "$MARKER"
 	time.Sleep(1500 * time.Millisecond)
 	if _, err := os.Stat(marker); err == nil {
 		t.Errorf("the listing session wrote %s after its init line, want it stopped there", marker)
+	}
+}
+
+// A listed plugin's skill carries the folder of its SKILL.md in the plugin's folder, as Claude Code's record of the
+// plugins installed gives it, when exactly one installation of the plugin applies to the home folder the listing runs
+// in: a user one, or a project or local one of that folder. With another folder's installation alone, two that apply,
+// a record that cannot be read, or no SKILL.md, it carries none, as before. A plugin the list does not name is not
+// looked up.
+func TestPluginSkillCarriesItsFolder(t *testing.T) {
+	home := t.TempDir()
+	install := func(scope, project string) string {
+		return `{"scope":"` + scope + `","installPath":"<plugins>/pdf","version":"1.0.0","projectPath":"` + project + `"}`
+	}
+	for _, c := range []struct {
+		name, record string
+		skillFile    bool
+		want         bool
+	}{
+		{"user", `{"version":2,"plugins":{"pdf@market":[` + install("user", "") + `]}}`, true, true},
+		{"local of the home folder", `{"version":2,"plugins":{"pdf@market":[` + install("local", home) + `]}}`, true, true},
+		{"project of the home folder and another folder's",
+			`{"version":2,"plugins":{"pdf@market":[` + install("project", home) + `,` + install("local", "/elsewhere") + `]}}`,
+			true, true},
+		{"another folder's alone", `{"version":2,"plugins":{"pdf@market":[` + install("project", "/elsewhere") + `]}}`, true, false},
+		{"two that apply", `{"version":2,"plugins":{"pdf@market":[` + install("user", "") + `],"pdf@other":[` +
+			install("user", "") + `]}}`, true, false},
+		{"unreadable record", `{"version":2,"plugins":`, true, false},
+		{"no record", "", true, false},
+		{"no SKILL.md", `{"version":2,"plugins":{"pdf@market":[` + install("user", "") + `]}}`, false, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			config, plugins := t.TempDir(), t.TempDir()
+			t.Setenv("CLAUDE_CONFIG_DIR", config)
+			writeSettings(t, filepath.Join(config, pluginsRecord), strings.ReplaceAll(c.record, "<plugins>", plugins))
+			skill := filepath.Join(plugins, "pdf", "skills", "pdf")
+			if c.skillFile {
+				writeSettings(t, filepath.Join(skill, "SKILL.md"), "---\nname: pdf\n---\n")
+			}
+			writeSettings(t, filepath.Join(plugins, "pdf", "skills", "unlisted", "SKILL.md"), "---\nname: unlisted\n---\n")
+			path, _ := listingClaude(t, `echo '{"type":"system","subtype":"init","skills":["simplify","pdf:pdf","pdf:gone"]}'`)
+			a := &Adapter{Home: home, Env: []string{"PATH=/usr/bin:/bin", "LOG=" + filepath.Join(t.TempDir(), "runs.log")}}
+			info := ports.HarnessInfo{Detected: true, Path: path}
+			want := ""
+			if c.want {
+				want = skill
+			}
+			items, _, err := a.UserItems(t.Context(), info, "skill", t.TempDir(), nil)
+			if err != nil {
+				t.Fatalf("UserItems(skill) error %v, want none", err)
+			}
+			got := map[string]string{}
+			for _, it := range items {
+				got[it.Name] = it.Path
+			}
+			if wantAll := map[string]string{"pdf:gone": "", "pdf:pdf": want, "simplify": ""}; !maps.Equal(got, wantAll) {
+				t.Errorf("UserItems(skill) paths = %q, want %q", got, wantAll)
+			}
+		})
 	}
 }
 

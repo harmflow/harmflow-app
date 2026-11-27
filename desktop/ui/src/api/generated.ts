@@ -1219,7 +1219,7 @@ export interface components {
             /** @description The harnesses that can load it. */
             harnesses: string[];
             copy?: components["schemas"]["AgentCopy"];
-            /** @description The parameters it declares in its front matter, which a task that cites it gives values for under spec.parameters. Absent when its file cannot be read, as for a plugin's skill, so its parameters are not known; an empty list when it declares none. */
+            /** @description The parameters it declares in its front matter, which a task that cites it gives values for under spec.parameters. Absent when its file cannot be read, as for a plugin's skill whose SKILL.md cannot be found, so its parameters are not known; an empty list when it declares none. */
             parameters?: components["schemas"]["ParameterDeclaration"][];
         };
         /** @description One parameter a skill or an agent declares, as its front matter writes it. */

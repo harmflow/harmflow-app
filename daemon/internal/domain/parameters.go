@@ -70,7 +70,8 @@ func cloneValues(m map[string]map[string]any) map[string]map[string]any {
 }
 
 // ItemParameters is what a cited skill or agent declares, as the harness that runs the task finds it. Known is false
-// when the harness gives no file to read the declaration from, as for a plugin's skill: its values cannot be checked.
+// when the harness gives no file to read the declaration from, as for a plugin's skill whose SKILL.md it cannot find:
+// its values cannot be checked.
 type ItemParameters struct {
 	Kind         string
 	Name         string
