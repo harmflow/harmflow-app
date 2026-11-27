@@ -187,7 +187,7 @@ func (r *run) onQuota(q domain.Quota) {
 	r.a.mu.Lock()
 	key := ""
 	if at := r.x.CurrentAttempt(); at != nil && at.Harness != "" {
-		key = quotaKey(at.Harness, at.Installation)
+		key = quotaKey(at.Harness, r.installation)
 	}
 	r.a.mu.Unlock()
 	if key != "" {

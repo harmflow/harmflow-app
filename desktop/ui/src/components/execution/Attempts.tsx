@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import type { Execution } from "../../api/types";
+import type { Attempt, Execution } from "../../api/types";
 import { fieldText } from "../../lib/daemonText";
 import { formatDateTime } from "../../lib/format";
 import { HarnessLabel } from "../Shell";
@@ -30,19 +30,10 @@ export function Attempts({ detail, locale }: { detail?: Execution; locale: strin
               [t("executions.detail.model"), <UsedValue used={a.model} configured={a.configuredModel} />],
               [t("executions.detail.effort"), <UsedValue used={a.effort} configured={a.configuredEffort} />],
               [t("executions.detail.harnessVersion"), a.harnessVersion ? <span className="mono">{a.harnessVersion}</span> : null],
-              // The installation the attempt ran on: a custom entry by its name and identifier, never an assignment's
-              // value, so never a home even if a record held one; any other by its identifier and its home's path,
-              // never anything read from it.
-              [
-                t("executions.detail.installation"),
-                a.installation ? (
-                  <span>
-                    {a.installationName ? <strong>{a.installationName} </strong> : null}
-                    <span className="mono">{a.installation}</span>
-                    {a.installationHome && !a.installationName ? <span className="mono muted"> · {a.installationHome}</span> : null}
-                  </span>
-                ) : null,
-              ],
+              // The installation the attempt ran on, by its name: a custom entry by its name and identifier, never an
+              // assignment's value, so never a home even if a record held one; any other, named by its identifier, with
+              // its home's path, never anything read from it. A record older than the name gives the identifier alone.
+              [t("executions.detail.installation"), a.installation ? <InstallationValue attempt={a} /> : null],
               [t("executions.detail.reason"), fieldText(a.reason, a.reasonKey, a.reasonParams) ?? null],
               [t("executions.detail.started"), formatDateTime(a.startedAt, locale)],
               [t("executions.detail.duration"), <Elapsed start={a.startedAt} end={a.endedAt} locale={locale} />],
@@ -60,6 +51,19 @@ export function Attempts({ detail, locale }: { detail?: Execution; locale: strin
         </li>
       ))}
     </ol>
+  );
+}
+
+/** The installation an attempt ran on: its name, then its identifier when the name differs, or else its home's path. */
+function InstallationValue({ attempt: a }: { attempt: Attempt }) {
+  const name = a.installationName || a.installation;
+  const custom = name !== a.installation;
+  return (
+    <span>
+      <strong>{name}</strong>
+      {custom ? <span className="mono"> {a.installation}</span> : null}
+      {a.installationHome && !custom ? <span className="mono muted"> · {a.installationHome}</span> : null}
+    </span>
   );
 }
 
