@@ -220,6 +220,41 @@ func TestReadQuotaOfACustomEntryRunsWithItsAssignments(t *testing.T) {
 	}
 }
 
+// harmflow-app#1136: the sign-in of a custom entry starts claude with the entry's assignments added to the daemon's
+// environment, each winning over a variable of the same name, the CLAUDE_CONFIG_DIR they set included, so the sign-in
+// lands in the entry's configuration directory; the daemon's CODEX_HOME is left out, as for the installation in use.
+func TestSignInOfACustomEntryRunsWithItsAssignments(t *testing.T) {
+	path := filepath.Join(tempDir(t), "claude")
+	// The stand-in writes the environment it was started with into the file ENV_OUT names, one assignment a line, and
+	// ends before any screen of the sign-in.
+	if err := os.WriteFile(path, []byte("#!/bin/bash\nenv > \"$ENV_OUT\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	inUse, entryDir, out := tempDir(t), tempDir(t), filepath.Join(tempDir(t), "env")
+	a := &Adapter{Home: tempDir(t), Env: []string{"PATH=/usr/bin:/bin", "ENV_OUT=" + out,
+		"CLAUDE_CONFIG_DIR=" + inUse, "CODEX_HOME=" + tempDir(t), "ENTRY_MARK=off"}}
+	assignments := []string{"CLAUDE_CONFIG_DIR=" + entryDir, "ENTRY_MARK=on"}
+	info := ports.HarnessInfo{ID: ID, Path: path, Detected: true, Home: entryDir, EntryEnv: slices.Clone(assignments)}
+	if res := a.SignIn(t.Context(), info, filepath.Join(tempDir(t), "sign-in")); res.Outcome != ports.SignInEnded {
+		t.Fatalf("SignIn(assignments %q) = %+v, want %s once the stand-in exits", assignments, res, ports.SignInEnded)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%s) = %v, want the environment the stand-in was started with", out, err)
+	}
+	env := map[string][]string{} // the values the environment gives each name, so a name given twice shows twice
+	for line := range strings.SplitSeq(strings.TrimSuffix(string(data), "\n"), "\n") {
+		if name, value, ok := strings.Cut(line, "="); ok {
+			env[name] = append(env[name], value)
+		}
+	}
+	for name, want := range map[string][]string{"CLAUDE_CONFIG_DIR": {entryDir}, "ENTRY_MARK": {"on"}, "CODEX_HOME": nil} {
+		if !slices.Equal(env[name], want) {
+			t.Errorf("SignIn(assignments %q) started claude with %s = %q, want %q", assignments, name, env[name], want)
+		}
+	}
+}
+
 // harmflow-app#826: the user settings a run's restrictions are checked against are the installation's own: a custom
 // entry with a CLAUDE_CONFIG_DIR of its own has its allow rules read from that directory's settings.json, never from
 // the configuration directory in use, and the plain installation keeps reading the one in use.
