@@ -815,6 +815,90 @@ describe("task editor catalog", () => {
   });
 });
 
+// The YAML tab shows the values the form set for the parameters the task's skills and agent declare, each under its own
+// skill or agent: the tab sends the form's document to the daemon and shows the YAML it writes back, which the stand-in
+// writes in JSON form. That the daemon writes those values under spec.parameters is app ›
+// TestDeclaredParametersAreSavedPerItem's.
+describe("task editor declared parameters", () => {
+  const catalog: Catalog = {
+    agents: [
+      { name: "reviewer", kind: "agent", source: "user", harnesses: ["claude-code"],
+        parameters: [{ name: "strict", type: "boolean", description: "Refuse on any finding", required: false }] },
+    ],
+    skills: [
+      { name: "release-notes", kind: "skill", source: "user", harnesses: ["claude-code"], parameters: [
+        { name: "owner", type: "text", description: "Who owns the repository", required: true },
+        { name: "limit", type: "number", description: "How many changes", default: 3, required: false },
+      ] },
+      { name: "digest", kind: "skill", source: "user", harnesses: ["claude-code"],
+        parameters: [{ name: "owner", type: "text", description: "Who reads it", required: false }] },
+    ],
+    problems: [],
+    taskTypes: [],
+  };
+  const notes: Doc = {
+    apiVersion: "harmflow/v1alpha1",
+    kind: "Task",
+    metadata: { id: "notes", name: "Release notes" },
+    spec: {
+      type: "general",
+      prompt: "Write the release notes.",
+      harness: { preferred: { provider: "claude-code" } },
+      skills: ["release-notes", "digest"],
+      agents: ["reviewer"],
+    },
+  };
+  const stored: Task = {
+    id: "notes",
+    name: "Release notes",
+    type: "general",
+    enabled: true,
+    revision: "r1",
+    harness: "claude-code",
+    warnings: [],
+    document: notes,
+    effective: notes,
+    yaml: JSON.stringify(notes, null, 2) + "\n",
+    path: "notes.yaml",
+    validation: { valid: true, errors: [], warnings: [] },
+  };
+
+  /** Opens the editor on the stored task, the stand-in giving the catalog and writing each document it validates. */
+  async function openNotes() {
+    patchStateForTests({ catalog });
+    daemon.routes.set("GET /catalog?task=notes", () => ({ status: 200, body: catalog }));
+    daemon.routes.set("POST /tasks/validate", (input) => {
+      const document = (input as TaskInput).document ?? (JSON.parse((input as TaskInput).yaml ?? "null") as Doc);
+      const yaml = JSON.stringify(document, null, 2) + "\n";
+      return { status: 200, body: { valid: true, errors: [], warnings: [], document, effective: document, yaml } };
+    });
+    host = document.body.appendChild(document.createElement("div"));
+    root = createRoot(host);
+    await act(async () => root!.render(<TaskEditor mode="edit" task={stored} onClose={() => {}} onSaved={vi.fn()} />));
+    await settle();
+  }
+
+  afterEach(() => patchStateForTests({ catalog: undefined }));
+
+  it("shows the values the form set under spec.parameters, each under its own skill or agent", async () => {
+    await openNotes();
+    const section = host!.querySelector("#section-parameters")!;
+    expect([...section.querySelectorAll(".field__label")].map((l) => l.textContent)).toEqual(["owner *", "limit", "owner", "strict"]);
+    const [releaseOwner, digestOwner] = section.querySelectorAll<HTMLInputElement>('input[type="text"]');
+    await type(releaseOwner, "ana");
+    await type(section.querySelector<HTMLInputElement>('input[type="number"]')!, "5");
+    await type(digestOwner, "bia");
+    await click(section.querySelector<HTMLInputElement>('input[type="checkbox"]')!);
+
+    await click(tab("YAML"));
+    const parameters = { skills: { "release-notes": { owner: "ana", limit: 5 }, digest: { owner: "bia" } }, agents: { reviewer: { strict: true } } };
+    expect(sent("POST", "/tasks/validate")).toContainEqual({ document: { ...notes, spec: { ...(notes.spec as Doc), parameters } } });
+    expect(openTab()).toBe("YAML");
+    const shown = JSON.parse(yamlText()) as { spec: { parameters?: unknown } };
+    expect(shown.spec.parameters).toEqual(parameters);
+  });
+});
+
 describe("task editor ⌘S", () => {
   it("updates an existing task from a text field of the form, as Save does, with the revision of the last save", async () => {
     await open("edit");

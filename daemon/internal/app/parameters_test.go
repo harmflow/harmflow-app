@@ -1,16 +1,21 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/claudecode"
+	"github.com/harmflow/harmflow-app/daemon/internal/adapters/harness/codex"
 	"github.com/harmflow/harmflow-app/daemon/internal/adapters/schema"
 	"github.com/harmflow/harmflow-app/daemon/internal/domain"
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
@@ -89,6 +94,26 @@ func TestDeclaredParametersAreSavedPerItem(t *testing.T) {
 		t.Errorf("the saved file's spec.parameters = %+v, want no default written", p)
 	}
 
+	// The task editor's YAML tab shows the YAML validation writes for the form's document: each value under its own
+	// skill or agent.
+	var plain any
+	if err := yaml.Unmarshal([]byte(doc), &plain); err != nil {
+		t.Fatal(err)
+	}
+	form, err := json.Marshal(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := e.app.Validate(t.Context(), TaskInput{Document: form})
+	var shown struct {
+		Spec struct {
+			Parameters domain.DeclaredParameters `yaml:"parameters"`
+		} `yaml:"spec"`
+	}
+	if err := yaml.Unmarshal([]byte(r.YAML), &shown); err != nil || !reflect.DeepEqual(shown.Spec.Parameters, p) {
+		t.Errorf("Validate(the form's document) YAML =\n%s\n(%v), want spec.parameters %+v", r.YAML, err, p)
+	}
+
 	// A task file with no spec.parameters loads and runs as before.
 	e.create("plain", "")
 	if r, err := e.app.RunTask("plain"); err != nil {
@@ -106,7 +131,7 @@ func TestDeclaredParametersAreValidated(t *testing.T) {
 	e.declaringBuiltins()
 	cites := "  skills: [hf-release-notes, hf-queues]\n"
 	queues := "      hf-queues:\n        repositories: {octo/repo: {public: true}}\n"
-	for _, c := range []struct {
+	cases := []struct {
 		name, parameters, key, path string
 	}{
 		{"no owner", "  parameters:\n    skills:\n" + queues, "parameter_required", "/spec/parameters/skills/hf-release-notes/owner"},
@@ -115,52 +140,308 @@ func TestDeclaredParametersAreValidated(t *testing.T) {
 		{"repositories its schema rejects", "  parameters:\n    skills:\n      hf-release-notes: {owner: ana}\n" +
 			"      hf-queues:\n        repositories: {octo/repo: {public: maybe}}\n",
 			"parameter_schema_mismatch", "/spec/parameters/skills/hf-queues/repositories"},
-	} {
+	}
+	// names says whether an issue is the case's error, naming the parameter and its skill: as validation gives it, or
+	// as the detail of a task file's error.
+	names := func(key, path string) func(schemaIssue) bool {
+		return func(is schemaIssue) bool {
+			return (is.Key == key || is.Params["detailKey"] == key) && is.Path == path &&
+				strings.Contains(is.Message, `"`+lastSegment(path)+`"`) && strings.Contains(is.Message, "hf-")
+		}
+	}
+
+	// A valid saved task that every refused update below starts from; its limit is not the default.
+	keptParams := "  parameters:\n    skills:\n      hf-release-notes: {owner: ana, limit: 5}\n" + queues
+	kept, err := e.app.CreateTask(t.Context(), TaskInput{YAML: taskYAML("kept", cites+keptParams)})
+	if err != nil {
+		t.Fatalf("CreateTask(kept) = %v", err)
+	}
+	keptFile, err := os.ReadFile(kept.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			doc := taskYAML("checked", cites+c.parameters)
 			refused := func(how string, err error) {
 				t.Helper()
 				var ae *Error
-				if !errors.As(err, &ae) || ae.Validation == nil || !slices.ContainsFunc(ae.Validation.Errors, func(is schemaIssue) bool {
-					return is.Key == c.key && is.Path == c.path && strings.Contains(is.Message, `"`+lastSegment(c.path)+`"`) &&
-						strings.Contains(is.Message, "hf-")
-				}) {
+				if !errors.As(err, &ae) || ae.Validation == nil || !slices.ContainsFunc(ae.Validation.Errors, names(c.key, c.path)) {
 					t.Errorf("%s = %v, want %s at %s, naming the parameter and its skill", how, err, c.key, c.path)
 				}
 			}
-			_, err := e.app.CreateTask(t.Context(), TaskInput{YAML: doc})
-			refused("CreateTask(yaml)", err)
+			for _, id := range []string{"checked", "kept"} {
+				doc := taskYAML(id, cites+c.parameters)
+				var plain any
+				if err := yaml.Unmarshal([]byte(doc), &plain); err != nil {
+					t.Fatal(err)
+				}
+				form, err := json.Marshal(plain)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if id == "checked" {
+					_, err = e.app.CreateTask(t.Context(), TaskInput{YAML: doc})
+					refused("CreateTask(yaml)", err)
+					_, err = e.app.CreateTask(t.Context(), TaskInput{Document: form})
+					refused("CreateTask(document)", err)
+					continue
+				}
+				_, err = e.app.UpdateTask(t.Context(), id, TaskInput{YAML: doc, BaseRevision: kept.Revision})
+				refused("UpdateTask(kept, yaml)", err)
+				_, err = e.app.UpdateTask(t.Context(), id, TaskInput{Document: form, BaseRevision: kept.Revision})
+				refused("UpdateTask(kept, document)", err)
+			}
 
-			var plain any
-			if err := yaml.Unmarshal([]byte(doc), &plain); err != nil {
-				t.Fatal(err)
+			// The refused updates leave the earlier valid definition, on disk and as the daemon reads it.
+			if data, err := os.ReadFile(kept.Path); err != nil || string(data) != string(keptFile) {
+				t.Errorf("the task file after refused updates =\n%s\n(%v), want the earlier valid one\n%s", data, err, keptFile)
 			}
-			form, err := json.Marshal(plain)
+			view, err := e.app.GetTask("kept")
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("GetTask(kept) = %v", err)
 			}
-			_, err = e.app.CreateTask(t.Context(), TaskInput{Document: form})
-			refused("CreateTask(document)", err)
+			if view.Invalid || view.Revision != kept.Revision || view.YAML != string(keptFile) {
+				t.Errorf("GetTask(kept) after refused updates = invalid %v, revision %s, YAML\n%s\nwant valid at %s, the earlier YAML",
+					view.Invalid, view.Revision, view.YAML, kept.Revision)
+			}
+			want := map[string]any{"owner": "ana", "limit": 5}
+			if got := valueAt(view.Document, "spec", "parameters", "skills", "hf-release-notes"); !jsonEqual(got, want) {
+				t.Errorf("GetTask(kept) values of hf-release-notes = %v, want %v", got, want)
+			}
 		})
 	}
 
-	// A file written with a text editor over a valid task loads as invalid, and its last valid version is kept.
+	// A run of the task the updates were refused for starts from its earlier valid definition.
+	var q requests
+	e.claude.setScript(func(req ports.RunRequest) string { q.add(req); return "echo 'END ok'" })
+	r, err := e.app.RunTask("kept")
+	if err != nil {
+		t.Fatalf("RunTask(kept) after refused updates = %v, want it started", err)
+	}
+	e.wait(r.ExecutionID, domain.StatusCompleted)
+	ctx := e.readContextOf(q.all())
+	if got, want := valueAt(ctx, "task", "declaredParameters", "skills", "hf-release-notes"),
+		map[string]any{"owner": "ana", "limit": 5}; !jsonEqual(got, want) {
+		t.Errorf("context.json's values of hf-release-notes after refused updates = %v, want %v", got, want)
+	}
+
+	// A file written with a text editor over a valid task, with each case in turn, loads as invalid with the case's
+	// error, its last valid version is kept, and the task does not run.
 	good := taskYAML("edited", cites+"  parameters:\n    skills:\n      hf-release-notes: {owner: ana}\n"+queues)
 	v, err := e.app.CreateTask(t.Context(), TaskInput{YAML: good})
 	if err != nil {
 		t.Fatalf("CreateTask(edited) = %v", err)
 	}
-	bad := strings.Replace(good, "{owner: ana}", "{owner: ana, limit: three}", 1)
-	if err := os.WriteFile(v.Path, []byte(bad), 0o600); err != nil {
+	for _, c := range cases {
+		t.Run("edited with "+c.name, func(t *testing.T) {
+			if err := os.WriteFile(v.Path, []byte(taskYAML("edited", cites+c.parameters)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			e.app.scanTaskFiles(t.Context())
+			edited, err := e.app.GetTask("edited")
+			if err != nil {
+				t.Fatalf("GetTask(edited) = %v", err)
+			}
+			if !edited.Invalid || edited.Validation == nil || !slices.ContainsFunc(edited.Validation.Errors, names(c.key, c.path)) {
+				t.Errorf("GetTask(edited) after an outside edit = invalid %v, validation %+v; want invalid, %s at %s naming "+
+					"the parameter and its skill", edited.Invalid, edited.Validation, c.key, c.path)
+			}
+			want := map[string]any{"owner": "ana"}
+			if got := valueAt(edited.Effective, "spec", "parameters", "skills", "hf-release-notes"); !jsonEqual(got, want) {
+				t.Errorf("GetTask(edited) effective values of hf-release-notes = %v, want the last valid %v", got, want)
+			}
+			if _, err := e.app.RunTask("edited"); err == nil {
+				t.Error("RunTask(edited) = no error, want an invalid task refused")
+			}
+		})
+	}
+}
+
+// lookupHarness is a fake harness whose user's agents and skills of the kinds it names are the ones a real adapter of
+// the same harness finds, with info as that adapter's detection: the daemon reads their declarations from the file the
+// real lookup gives, and the session still runs on the fake.
+type lookupHarness struct {
+	*fakeHarness
+	real  ports.HarnessAdapter
+	info  ports.HarnessInfo
+	kinds []string
+}
+
+var _ ports.HarnessAdapter = lookupHarness{}
+
+func (h lookupHarness) UserItem(ctx context.Context, info ports.HarnessInfo, kind, name, workspace string, added []string) (ports.ResolvedItem, bool, []ports.DiscoveryError, error) {
+	if !slices.Contains(h.kinds, kind) {
+		return h.fakeHarness.UserItem(ctx, info, kind, name, workspace, added)
+	}
+	return h.real.UserItem(ctx, h.info, kind, name, workspace, added)
+}
+
+func (h lookupHarness) UserItems(ctx context.Context, info ports.HarnessInfo, kind, workspace string, added []string) ([]ports.ResolvedItem, []ports.DiscoveryError, error) {
+	if !slices.Contains(h.kinds, kind) {
+		return h.fakeHarness.UserItems(ctx, info, kind, workspace, added)
+	}
+	return h.real.UserItems(ctx, h.info, kind, workspace, added)
+}
+
+// offered is what the catalog offers for the agent or skill of that name, each parameter as name:type; nil when it
+// offers no parameters for it.
+func offered(c Catalog, kind, name string) []string {
+	entries := c.Skills
+	if kind == "agent" {
+		entries = c.Agents
+	}
+	for _, entry := range entries {
+		if entry.Name != name || entry.Parameters == nil {
+			continue
+		}
+		out := []string{}
+		for _, d := range *entry.Parameters {
+			out = append(out, d.Name+":"+d.Type)
+		}
+		return out
+	}
+	return nil
+}
+
+// refusedNaming checks that err refuses a save with key at path, its message naming the parameter and the item.
+func refusedNaming(t *testing.T, how string, err error, key, path, item string) {
+	t.Helper()
+	var ae *Error
+	if !errors.As(err, &ae) || ae.Validation == nil || !slices.ContainsFunc(ae.Validation.Errors, func(is schemaIssue) bool {
+		return is.Key == key && is.Path == path && strings.Contains(is.Message, `"`+lastSegment(path)+`"`) &&
+			strings.Contains(is.Message, `"`+item+`"`)
+	}) {
+		t.Errorf("%s = %v, want %s at %s, naming the parameter and %s", how, err, key, path, item)
+	}
+}
+
+const reviewerDeclaring = "---\nname: reviewer\ndescription: Reviews\nparameters:\n" +
+	"  - {name: strict, type: boolean, description: Refuse on any finding}\n---\n\nReview.\n"
+
+// A user's agent declares its parameters in the front matter of the Markdown file its harness's lookup finds: in a
+// Claude Code configuration directory, and in a Codex home's agents folder. The catalog offers them, a task citing the
+// agent saves its value under the agent, a value of the wrong type is refused naming the parameter and the agent, and
+// the execution's context.json carries the value.
+func TestUsersAgentDeclaresParametersThroughItsHarness(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		codex bool
+	}{{"Claude Code", false}, {"Codex", true}} {
+		t.Run(c.name, func(t *testing.T) {
+			folder := t.TempDir()
+			var configure func(*env)
+			if c.codex {
+				t.Setenv("CODEX_HOME", folder)
+				cx := &codex.Adapter{Home: t.TempDir(), KnownLocations: []string{}}
+				t.Cleanup(cx.Close)
+				configure = func(e *env) { e.signer = lookupHarness{fakeHarness: e.codex, real: cx, kinds: []string{"agent"}} }
+			} else {
+				t.Setenv("CLAUDE_CONFIG_DIR", folder)
+				cc := &claudecode.Adapter{Home: t.TempDir(), PathEnv: t.TempDir(), KnownLocations: []string{}}
+				configure = func(e *env) { e.signer = lookupHarness{fakeHarness: e.claude, real: cc, kinds: []string{"agent"}} }
+			}
+			writeFile(t, filepath.Join(folder, "agents", "reviewer.md"), reviewerDeclaring)
+			e := newEnv(t, configure)
+			h, task := e.claude, taskYAML
+			if c.codex {
+				h, task = e.codex, codexTaskYAML
+			}
+			ctx := t.Context()
+
+			if got, want := offered(e.app.Catalog(ctx, "", ""), "agent", "reviewer"), []string{"strict:boolean"}; !slices.Equal(got, want) {
+				t.Errorf("Catalog reviewer parameters = %q, want %q", got, want)
+			}
+
+			v, err := e.app.CreateTask(ctx, TaskInput{YAML: task("review",
+				"  agents: [reviewer]\n  parameters:\n    agents:\n      reviewer: {strict: true}\n")})
+			if err != nil {
+				t.Fatalf("CreateTask(review) = %v, want it saved", err)
+			}
+			data, err := os.ReadFile(v.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var file struct {
+				Spec struct {
+					Parameters domain.DeclaredParameters `yaml:"parameters"`
+				} `yaml:"spec"`
+			}
+			if err := yaml.Unmarshal(data, &file); err != nil {
+				t.Fatal(err)
+			}
+			if got := file.Spec.Parameters.Agents["reviewer"]["strict"]; got != true {
+				t.Errorf("the saved file's spec.parameters.agents.reviewer.strict = %v, want true", got)
+			}
+
+			_, err = e.app.CreateTask(ctx, TaskInput{YAML: task("maybe",
+				"  agents: [reviewer]\n  parameters:\n    agents:\n      reviewer: {strict: maybe}\n")})
+			refusedNaming(t, "CreateTask(maybe)", err, "parameter_wrong_type", "/spec/parameters/agents/reviewer/strict", "reviewer")
+
+			var q requests
+			h.setScript(func(req ports.RunRequest) string { q.add(req); return "echo 'END ok'" })
+			r, err := e.app.RunTask("review")
+			if err != nil {
+				t.Fatalf("RunTask(review) = %v", err)
+			}
+			e.wait(r.ExecutionID, domain.StatusCompleted)
+			got := valueAt(e.readContextOf(q.all()), "task", "declaredParameters", "agents", "reviewer")
+			if want := map[string]any{"strict": true}; !jsonEqual(got, want) {
+				t.Errorf("context.json task.declaredParameters.agents.reviewer = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+const releaseNotesDeclaring = "---\nname: release-notes\ndescription: Writes release notes\nparameters:\n" +
+	"  - {name: owner, type: text, description: Who owns the repository, required: true}\n" +
+	"  - {name: limit, type: number, description: How many changes, default: 3}\n---\n\nWrite the notes.\n"
+
+// A Codex user's skill declares its parameters in the front matter of the SKILL.md Codex's skill list reports. The
+// catalog offers them, a task with no required owner is refused naming the parameter and the skill, and an execution
+// with the owner set carries the limit's default in its context.json.
+func TestCodexUsersSkillDeclaresParametersThroughItsSkillList(t *testing.T) {
+	skill := filepath.Join(t.TempDir(), "skills", "release-notes", "SKILL.md")
+	writeFile(t, skill, releaseNotesDeclaring)
+	bin := filepath.Join(t.TempDir(), "codex")
+	received := filepath.Join(t.TempDir(), "received.jsonl")
+	if err := os.WriteFile(bin, []byte(skillListCodex(received, listAnswer([]string{"release-notes", skill}, ""))), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	e.app.scanTaskFiles(t.Context())
-	edited, _ := e.app.GetTask("edited")
-	if !edited.Invalid {
-		t.Errorf("GetTask(edited) after an outside edit with a limit in words = %+v, want it invalid", edited)
+	t.Setenv("CODEX_HOME", t.TempDir())
+	cx := &codex.Adapter{Home: t.TempDir(), KnownLocations: []string{}, ProbeTimeout: time.Minute}
+	t.Cleanup(cx.Close)
+	info := cx.Detect(context.Background(), bin)
+	if !info.Ready() {
+		t.Fatalf("Detect(%s) = %+v, want the stand-in Codex ready", bin, info)
 	}
-	if _, err := e.app.RunTask("edited"); err == nil {
-		t.Error("RunTask(edited) = no error, want an invalid task refused")
+	e := newEnv(t, func(e *env) {
+		e.signer = lookupHarness{fakeHarness: e.codex, real: cx, info: info, kinds: []string{"skill"}}
+	})
+	ctx := t.Context()
+
+	if got, want := offered(e.app.Catalog(ctx, "", ""), "skill", "release-notes"), []string{"owner:text", "limit:number"}; !slices.Equal(got, want) {
+		t.Errorf("Catalog release-notes parameters = %q, want %q", got, want)
+	}
+
+	_, err := e.app.CreateTask(ctx, TaskInput{YAML: codexTaskYAML("unowned",
+		"  skills: [release-notes]\n  parameters:\n    skills:\n      release-notes: {limit: 5}\n")})
+	refusedNaming(t, "CreateTask(unowned)", err, "parameter_required", "/spec/parameters/skills/release-notes/owner", "release-notes")
+
+	if _, err := e.app.CreateTask(ctx, TaskInput{YAML: codexTaskYAML("owned",
+		"  skills: [release-notes]\n  parameters:\n    skills:\n      release-notes: {owner: ana}\n")}); err != nil {
+		t.Fatalf("CreateTask(owned) = %v, want it saved", err)
+	}
+	var q requests
+	e.codex.setScript(func(req ports.RunRequest) string { q.add(req); return "echo 'END ok'" })
+	r, err := e.app.RunTask("owned")
+	if err != nil {
+		t.Fatalf("RunTask(owned) = %v", err)
+	}
+	e.wait(r.ExecutionID, domain.StatusCompleted)
+	got := valueAt(e.readContextOf(q.all()), "task", "declaredParameters", "skills", "release-notes")
+	if want := map[string]any{"owner": "ana", "limit": 3}; !jsonEqual(got, want) {
+		t.Errorf("context.json task.declaredParameters.skills.release-notes = %v, want %v", got, want)
 	}
 }
 
