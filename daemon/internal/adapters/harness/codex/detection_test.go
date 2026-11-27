@@ -15,6 +15,12 @@ import (
 	"github.com/harmflow/harmflow-app/daemon/internal/ports"
 )
 
+// standInListTimeout bounds each call detection makes to a stand-in app server. harmflow-app#1162: one second was
+// missed on a loaded Mac, where the stand-in, a shell script, answered late and the tests read
+// codex_app_server_timed_out; ten seconds holds there and under -race. A case whose stand-in never answers waits it out
+// once. Detection's own limit for a real app server, defaultListTimeout, stays as it is.
+const standInListTimeout = 10 * time.Second
+
 // tempDir is a temporary directory by its real path: on macOS the temporary directories are under /var, a symlink to
 // /private/var.
 func tempDir(t *testing.T) string {
@@ -152,7 +158,7 @@ func TestDetectReportsRequirementsThatOverrideASetting(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			path, _ := appServerStandInWith(t, answer(`{"data":[]}`), c.onRequirements)
 			a := appServerAdapter(t)
-			a.listTimeout = time.Second
+			a.listTimeout = standInListTimeout
 			info := a.Detect(context.Background(), path)
 			if info.Readiness != "ready" || info.DiagnosticKey != c.wantKey || !maps.Equal(info.DiagnosticParams, c.wantParams) {
 				t.Errorf("Detect(%s) readiness %s, diagnostic %q %v (%s); want ready, diagnostic %q %v", c.name,
@@ -205,7 +211,7 @@ func TestDetectReadsTheAccountAndItsManagedRequirements(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			path, received := appServerStandInAnswering(t, answer(`{"data":[]}`), c.onRequirements, c.onAccount)
 			a := appServerAdapter(t)
-			a.listTimeout = time.Second
+			a.listTimeout = standInListTimeout
 			info := a.Detect(context.Background(), path)
 			if info.Readiness != "ready" || info.DiagnosticKey != "" {
 				t.Errorf("Detect(%s) readiness %s, diagnostic %q (%s); want ready, no diagnostic", c.name, info.Readiness,
@@ -246,7 +252,7 @@ func TestDetectWithRequirementsItCannotRead(t *testing.T) {
 	path, _ := appServerStandInWith(t, answer(`{"data":[]}`),
 		`printf '{"id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"`)
 	a := appServerAdapter(t)
-	a.listTimeout = time.Second
+	a.listTimeout = standInListTimeout
 	info := a.Detect(context.Background(), path)
 	if info.Readiness != "ready" || info.ManagedRequirements != nil || info.Account == nil || info.Account.Plan != "plus" {
 		t.Errorf("Detect readiness %s, managed requirements %+v, account %+v; want ready, requirements unknown, the "+
