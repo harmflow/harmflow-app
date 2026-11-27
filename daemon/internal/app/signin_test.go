@@ -523,7 +523,7 @@ func TestSignInOfAnUnknownInstallationIsNotFound(t *testing.T) {
 
 // harmflow-app#1136: a detected home that reads signed out starts its own sign-in, with its own home, beside the
 // installation in use, which starts none; a second request for the same home joins it, and the sign-in of the
-// installation in use runs side by side with it. A home whose sign-in fails holds back only its own.
+// installation in use runs side by side with it, each ending on its own.
 func TestSignInsOfInstallationsRunSideBySide(t *testing.T) {
 	e, signer := homesSigningEnv(t, "~/.codex-b")
 	e.waitSignIns(signer, 1)
@@ -547,21 +547,51 @@ func TestSignInsOfInstallationsRunSideBySide(t *testing.T) {
 		t.Errorf("Harnesses() sign-ins %q in use, %q on ~/.codex-b; want both running", info.SignIn,
 			homeNamed(info, "~/.codex-b").SignIn)
 	}
-	signer.end <- ports.SignInResult{Outcome: ports.SignInUnknownScreen}
 	signer.end <- ports.SignInResult{Outcome: ports.SignInSucceeded}
-	if !e.poll(10*time.Second, func() bool {
-		return len(e.published(domain.EventHarnessSignInFailed)) > 0 &&
-			len(e.published(domain.EventHarnessSignInCompleted)) > 0
-	}) {
-		t.Fatal("the two sign-ins never ended, one failed and one completed")
+	signer.end <- ports.SignInResult{Outcome: ports.SignInSucceeded}
+	if !e.poll(10*time.Second, func() bool { return len(e.published(domain.EventHarnessSignInCompleted)) == 2 }) {
+		t.Fatalf("%d %s events, want one for each of the two sign-ins", len(e.published(domain.EventHarnessSignInCompleted)),
+			domain.EventHarnessSignInCompleted)
 	}
-	// Which of the two took which end does not matter: the one that failed holds back its own installation, and the
-	// other reads signed in, so a check starts neither again.
+}
+
+// harmflow-app#1136: a sign-in that ends without signing its installation in holds back that installation alone. The
+// sign-in of ~/.codex-b, a detected home that is not in use, stops at a screen the adapter does not recognize; once the
+// installation in use reads signed out too, a check starts the installation in use's sign-in, and ~/.codex-b's does not
+// start again, though it still reads signed out.
+func TestAFailedSignInHoldsBackOnlyItsOwnInstallation(t *testing.T) {
+	e, signer := homesSigningEnv(t, "~/.codex-b")
+	e.waitSignIns(signer, 1)
+	if inst := signer.signedInto()[0]; inst.InstallationID != "~/.codex-b" {
+		t.Fatalf("the first sign-in started for installation %q, want ~/.codex-b", inst.InstallationID)
+	}
+	signer.end <- ports.SignInResult{Outcome: ports.SignInUnknownScreen}
+	failed := e.waitPublished(domain.EventHarnessSignInFailed)
+	if failed.Payload["installationId"] != "~/.codex-b" {
+		t.Errorf("%s payload %+v, want installationId ~/.codex-b", domain.EventHarnessSignInFailed, failed.Payload)
+	}
+
+	signer.mu.Lock()
+	signer.signedIn = false
+	signer.mu.Unlock()
 	e.app.RefreshHarnesses(t.Context())
+	e.waitSignIns(signer, 2)
+	inUse := e.harnessInfo(domain.HarnessCodex)
+	if inst := signer.signedInto()[1]; inst.InstallationID != inUse.InstallationID {
+		t.Errorf("the sign-in after the check started for installation %q, want the one in use, %q", inst.InstallationID,
+			inUse.InstallationID)
+	}
 	time.Sleep(200 * time.Millisecond)
 	if n := signer.started(); n != 2 {
-		t.Errorf("%d sign-ins after a check, want the two alone: a failed one holds back its own installation", n)
+		t.Errorf("%d sign-ins started after the check, want two: ~/.codex-b's held back after it failed", n)
 	}
+	home := homeNamed(inUse, "~/.codex-b")
+	if inUse.SignIn != ports.SignInRunning || home.SignIn != ports.SignInAvailable || home.Authentication != "invalid" {
+		t.Errorf("Harnesses() sign-in %q in use; ~/.codex-b sign-in %q, authentication %q; want running, and available "+
+			"and invalid", inUse.SignIn, home.SignIn, home.Authentication)
+	}
+	signer.end <- ports.SignInResult{Outcome: ports.SignInSucceeded}
+	e.waitPublished(domain.EventHarnessSignInCompleted)
 }
 
 // harmflow-app#1136: a custom entry that reads signed out starts its own sign-in, run with the entry's assignments and

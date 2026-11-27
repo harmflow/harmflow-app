@@ -425,6 +425,111 @@ func TestCodexSignInThroughTheBrowser(t *testing.T) {
 	noLeakInHome(t, homeFiles(t, home), map[string]string{"the sign-in URL's state": codex.state})
 }
 
+// installationIn is the item of the harness's homes or customEntries, as list names, whose installationId is id, and
+// nil when it lists none.
+func installationIn(h map[string]any, list, id string) map[string]any {
+	items, _ := h[list].([]any)
+	for _, item := range items {
+		if m, _ := item.(map[string]any); m["installationId"] == id {
+			return m
+		}
+	}
+	return nil
+}
+
+// harmflow-app#1136: across the real daemon, an installation of Codex that is not the one in use signs in with its own
+// home, never the home in use. The home in use is signed in. A custom entry added as CODEX_HOME=<an empty home> <the
+// stand-in>, or the daemon user's empty .codex detected beside the home in use, reads signed out until its own sign-in
+// is approved in the browser: POST /harnesses/codex/sign-in with its installationId starts it, or joins the one
+// detection started. One `codex login` runs, its sign-in's file lands in that installation's home, the installation
+// then reads signed in, and the home in use's file is unchanged.
+func TestCodexInstallationNotInUseSignsInWithItsOwnHome(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name string
+		list string // where GET /harnesses lists the installation under Codex
+		// start starts the daemon with the home in use as its CODEX_HOME and sets the stand-in, with the installation
+		// whose sign-in the test runs, and returns that installation's identifier and its empty home.
+		start func(t *testing.T, codex signInStandIn, inUse string) (d *daemon, id, home string)
+	}{
+		{"a custom entry", "customEntries", func(t *testing.T, codex signInStandIn, inUse string) (*daemon, string, string) {
+			home := filepath.Join(resolvedTempDir(t), "entry-home")
+			if err := os.MkdirAll(home, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			// The daemon user's folder holds no .codex, so the home in use is the one home detection finds.
+			d := startDaemon(t, t.TempDir(), "HOME="+resolvedTempDir(t), "CODEX_HOME="+inUse)
+			d.setHarness("codex", codex.path)
+			h := d.call("POST", "/harnesses/codex/installations",
+				map[string]any{"line": "CODEX_HOME=" + home + " " + codex.path}, 201)
+			entries, _ := h["customEntries"].([]any)
+			if len(entries) != 1 {
+				t.Fatalf("POST /harnesses/codex/installations lists the custom entries %v, want one", entries)
+			}
+			return d, jsonString(entries[0].(map[string]any)["installationId"]), home
+		}},
+		{"a detected home not in use", "homes", func(t *testing.T, codex signInStandIn, inUse string) (*daemon, string, string) {
+			user := resolvedTempDir(t)
+			home := filepath.Join(user, ".codex")
+			if err := os.MkdirAll(home, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			d := startDaemon(t, t.TempDir(), "HOME="+user, "CODEX_HOME="+inUse)
+			d.setHarness("codex", codex.path)
+			return d, "~/.codex", home
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			codex, inUse := newCodexSignInStandIn(t)
+			const inUseSignIn = `{"auth_mode":"chatgpt","in_use":true}`
+			if err := os.WriteFile(filepath.Join(inUse, "auth.json"), []byte(inUseSignIn), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			d, id, home := c.start(t, codex, inUse)
+			h := d.harness("codex")
+			if inst := installationIn(h, c.list, id); h["authentication"] != "valid" || inst == nil ||
+				inst["authentication"] != "invalid" {
+				t.Fatalf("GET /harnesses: Codex in use reads authentication %v, %s %s %v; want the one in use valid and "+
+					"%s invalid", h["authentication"], c.list, id, inst, id)
+			}
+
+			h = d.call("POST", "/harnesses/codex/sign-in", map[string]any{"installationId": id}, 202)
+			if inst := installationIn(h, c.list, id); inst == nil || inst["signIn"] != "running" || h["signIn"] != "available" {
+				t.Errorf("POST /harnesses/codex/sign-in for %s = %s %v, the one in use's sign-in %v; want %s's running "+
+					"alone", id, c.list, inst, h["signIn"], id)
+			}
+			for deadline := time.Now().Add(30 * time.Second); codex.started(t) == 0 && time.Now().Before(deadline); {
+				time.Sleep(100 * time.Millisecond)
+			}
+			if inst := installationIn(d.harness("codex"), c.list, id); inst == nil || inst["authentication"] != "invalid" {
+				t.Errorf("GET /harnesses before the sign-in is approved: %s %v, want it still signed out", id, inst)
+			}
+			if _, err := os.Stat(filepath.Join(home, "auth.json")); !os.IsNotExist(err) {
+				t.Errorf("os.Stat(%s's auth.json) before the sign-in is approved = %v, want no such file", id, err)
+			}
+
+			codex.write(t, codex.approved)
+			d.waitHarness("codex", 60*time.Second, func(h map[string]any) bool {
+				inst := installationIn(h, c.list, id)
+				return inst != nil && inst["authentication"] == "valid" && inst["signIn"] == "available"
+			})
+			if n := codex.started(t); n != 1 {
+				t.Errorf("%d sign-ins ran, want %s's alone", n, id)
+			}
+			if got, err := os.ReadFile(filepath.Join(home, "auth.json")); err != nil || string(got) != codex.secret {
+				t.Errorf("os.ReadFile(%s's auth.json) = %q, %v; want the sign-in's file %q", id, got, err, codex.secret)
+			}
+			if got, err := os.ReadFile(filepath.Join(inUse, "auth.json")); err != nil || string(got) != inUseSignIn {
+				t.Errorf("os.ReadFile(the home in use's auth.json) = %q, %v; want %q, unchanged", got, err, inUseSignIn)
+			}
+			if got := d.noticeTypes(); !containsAll(got, "harness.sign_in_started", "harness.sign_in_completed") {
+				t.Errorf("notices %v, want the sign-in's start and its end", got)
+			}
+		})
+	}
+}
+
 // harmflow-app#876: a Codex sign-in leaves Codex's credential where Codex keeps it, as a Claude Code one does. The
 // stand-in writes a random credential of the test's own into its Codex home once the user approves; once the harness
 // reads ready, neither GET /harnesses nor any file under the daemon's home holds it or a piece of it of eight
