@@ -1,6 +1,6 @@
 [package]
 name = "harmflow-desktop"
-version = "0.1.0"
+version = "0.2.0"
 description = "HarmFlow desktop: the dashboard and tray of the HarmFlow daemon"
 edition = "2021"
 rust-version = "1.80"
