@@ -44,8 +44,8 @@ func withBuiltinAgent(name, content string) func(*env) {
 	}
 }
 
-// withShippedTemplates copies this checkout's built-in templates, and the built-in agent the GitHub one selects, into
-// the env's built-ins, as a build of HarmFlow ships them.
+// withShippedTemplates copies this checkout's built-in templates into the env's built-ins, as a build of HarmFlow ships
+// them.
 func withShippedTemplates(e *env) {
 	root := filepath.Join("..", "..", "..")
 	files := map[string]string{}
@@ -61,11 +61,6 @@ func withShippedTemplates(e *env) {
 		files[f.Name()] = string(data)
 	}
 	withTemplates(files)(e)
-	agent, err := os.ReadFile(filepath.Join(root, "agents", "hf-github-issue-implementer.md"))
-	if err != nil {
-		e.t.Fatal(err)
-	}
-	withBuiltinAgent("hf-github-issue-implementer", string(agent))(e)
 }
 
 // appError is err as an *Error with that code and key, or a failure naming what was called.
@@ -204,7 +199,7 @@ func TestBuiltinTemplatesAreReadOnly(t *testing.T) {
 	}
 }
 
-const reviewer = "---\nname: hf-reviewer\ndescription: Reviews a change\nmodel: sonnet\nskills: [hf-github-draft-pr, hf-x, hf-x]\n---\nYou review."
+const reviewer = "---\nname: hf-reviewer\ndescription: Reviews a change\nmodel: sonnet\nskills: [hf-pr-notes, hf-x, hf-x]\n---\nYou review."
 
 // A template that selects an agent starts the task as that agent's copy, as selecting it in the editor makes it: its
 // instructions, description, model, skills, and origin. The fields the template sets itself keep its values: its
@@ -226,7 +221,7 @@ func TestDraftTaskCopiesTheSelectedAgent(t *testing.T) {
 	want := map[string]any{"apiVersion": "harmflow/v1alpha1", "kind": "Task",
 		"metadata": map[string]any{"id": "meeting-notes", "name": "Meeting notes", "description": "Reviews a change"},
 		"spec": map[string]any{"enabled": true, "type": "general", "prompt": "You review.",
-			"skills":  []any{"hf-github-draft-pr", "hf-x"},
+			"skills":  []any{"hf-pr-notes", "hf-x"},
 			"harness": map[string]any{"preferred": map[string]any{"provider": "claude-code", "model": "sonnet"}},
 			"origin":  map[string]any{"agent": "hf-reviewer", "hash": hash}}}
 	if hash == "" || !reflect.DeepEqual(plain, want) {
@@ -378,33 +373,27 @@ func TestSlugify(t *testing.T) {
 	}
 }
 
-// A new task from the built-in GitHub template selects the built-in implementer, whose copy becomes its prompt, with
-// the implementer as its origin; the implementer is no subagent of the task, and no other built-in template selects an
-// agent.
-func TestGitHubTypeSelectsTheImplementer(t *testing.T) {
+// The built-in GitHub template is a generic starting point: no built-in template selects an agent, and a new task from
+// the GitHub one, changing nothing, has no prompt, agents, skills, or origin, since a GitHub task brings its own.
+func TestGitHubTemplateSelectsNoAgent(t *testing.T) {
 	e := newEnv(t, withShippedTemplates)
+	github := ""
 	for _, tp := range e.app.Templates(t.Context()) {
-		want := ""
+		if tp.SelectedAgent != "" {
+			t.Errorf("Templates() %s of type %s selects %q, want no agent", tp.ID, tp.Type, tp.SelectedAgent)
+		}
 		if tp.Type == domain.TypeGitHub {
-			want = "hf-github-issue-implementer"
-		}
-		if tp.SelectedAgent != want {
-			t.Errorf("Templates() %s of type %s selects %q, want %q", tp.ID, tp.Type, tp.SelectedAgent, want)
+			github = tp.ID
 		}
 	}
-	var copied *AgentCopy
-	for _, a := range e.app.Catalog(t.Context(), "", "").Agents {
-		if a.Name == "hf-github-issue-implementer" {
-			copied = a.Copy
+	if github == "" {
+		t.Fatal("Templates() has no template of the GitHub type")
+	}
+	spec := draft(t, e, github, "en-US")["spec"].(map[string]any)
+	for _, field := range []string{"prompt", "agents", "skills", "origin"} {
+		if v, ok := spec[field]; ok {
+			t.Errorf("DraftTask(%s) spec sets %s = %v, want it unset", github, field, v)
 		}
-	}
-	if copied == nil {
-		t.Fatal("Catalog() has no copy of hf-github-issue-implementer")
-	}
-	spec := draft(t, e, "hf-github-issues", "en-US")["spec"].(map[string]any)
-	if spec["prompt"] != copied.Prompt || !reflect.DeepEqual(spec["origin"],
-		map[string]any{"agent": "hf-github-issue-implementer", "hash": copied.Hash}) || spec["agents"] != nil {
-		t.Errorf("DraftTask(hf-github-issues) spec = %v, want the implementer's copy, as its origin, and no subagent", spec)
 	}
 }
 
@@ -414,24 +403,13 @@ func TestGitHubTypeSelectsTheImplementer(t *testing.T) {
 // the editor asks for as it asked for the placeholder.
 func TestBuiltinTemplatesBuildThePickersDocuments(t *testing.T) {
 	e := newEnv(t, withShippedTemplates)
-	var implementer *AgentCopy
-	for _, a := range e.app.Catalog(t.Context(), "", "").Agents {
-		if a.Name == "hf-github-issue-implementer" {
-			implementer = a.Copy
-		}
-	}
-	if implementer == nil {
-		t.Fatal("Catalog() has no copy of hf-github-issue-implementer")
-	}
 	claude := map[string]any{"preferred": map[string]any{"provider": "claude-code"}}
 	cases := []struct {
 		template, name string
 		spec           map[string]any
 	}{
 		{"hf-general", "General task", map[string]any{"enabled": true, "type": "general", "harness": claude}},
-		{"hf-github-issues", "Implement GitHub issues", map[string]any{"enabled": true, "type": "github",
-			"prompt": implementer.Prompt, "origin": map[string]any{"agent": "hf-github-issue-implementer", "hash": implementer.Hash},
-			"skills":  []any{"hf-github-issue-queue", "hf-github-worktree", "hf-github-draft-pr"},
+		{"hf-github-issues", "Blank GitHub task", map[string]any{"enabled": true, "type": "github",
 			"harness": claude, "github": map[string]any{"repositories": []any{map[string]any{"baseBranch": "main"}}}}},
 		{"hf-script", "Script task", map[string]any{"enabled": true, "type": "script", "script": map[string]any{}}},
 	}

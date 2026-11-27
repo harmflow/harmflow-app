@@ -173,7 +173,7 @@ describe("task form installation", () => {
   const catalog: Catalog = {
     agents: [],
     skills: [
-      { name: "hf-github-draft-pr", kind: "skill", source: "builtin", harnesses: ["claude-code", "codex"] },
+      { name: "hf-pr-notes", kind: "skill", source: "builtin", harnesses: ["claude-code", "codex"] },
       { name: "review-notes", kind: "skill", source: "user", harnesses: ["claude-code"] },
       { name: "triage", kind: "skill", source: "user", harnesses: ["codex"] },
     ],
@@ -235,14 +235,14 @@ describe("task form installation", () => {
           ?.querySelector("datalist"),
       );
     await openForm(withProfiles({ provider: "codex" }));
-    expect(skills()).toStrictEqual(["hf-github-draft-pr", "triage"]);
+    expect(skills()).toStrictEqual(["hf-pr-notes", "triage"]);
 
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(installation(0), "~/.codex");
       installation(0)!.dispatchEvent(new Event("change", { bubbles: true }));
     });
     await settle();
-    expect(skills()).toStrictEqual(["hf-github-draft-pr", "pdf"]);
+    expect(skills()).toStrictEqual(["hf-pr-notes", "pdf"]);
 
     const provider = fieldOf(0, "AI tool")!.querySelector("select")!;
     await act(async () => {
@@ -250,7 +250,7 @@ describe("task form installation", () => {
       provider.dispatchEvent(new Event("change", { bubbles: true }));
     });
     await settle();
-    expect(skills()).toStrictEqual(["hf-github-draft-pr", "review-notes", "triage"]);
+    expect(skills()).toStrictEqual(["hf-pr-notes", "review-notes", "triage"]);
   });
 
   // harmflow-app#1030: a fallback candidate offers the installations of the harness it chose, as the preferred profile

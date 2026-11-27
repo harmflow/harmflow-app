@@ -5,9 +5,9 @@
     local HTTP and SSE API on the loopback, with a bearer token. The daemon is written in Go as domain, use cases,
     ports, and adapters, among them Claude Code, Codex, HTTP and SSE, the Keychain, YAML, JSON, JSONL, and launchd. It
     starts the harness the user installed and signed in to, Claude Code or Codex, which reports its progress back. The
-    built-in agents and skills are given to the harness per task. The daemon keeps tasks, state, event logs, and
-    execution directories in its data directory with atomic writes. The contracts, an OpenAPI file and JSON Schemas,
-    are the single source of every name, and make generate copies them into the daemon and the desktop.</desc>
+    built-in task templates give the daemon the starting point of a new task. The daemon keeps tasks, state, event
+    logs, and execution directories in its data directory with atomic writes. The contracts, an OpenAPI file and JSON
+    Schemas, are the single source of every name, and make generate copies them into the daemon and the desktop.</desc>
 
   <style>
     .sans  { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif; }
@@ -180,14 +180,13 @@
     <rect class="path" x="780" y="520" width="59" height="28" rx="6"/>
     <text x="790" y="539" class="mono patht">runs/</text>
 
-    <!-- Built-in agent and skills -->
-    <path class="wire slow" stroke="#e040fb" d="M1100 464V428" marker-end="url(#arrow-magenta)"/>
-    <text x="1116" y="450" class="mono wnote">per task</text>
+    <!-- Built-in task templates -->
+    <path class="wire slow" stroke="#e040fb" d="M964 520H930V404H896" marker-end="url(#arrow-magenta)"/>
 
     <rect class="card" x="970" y="470" width="260" height="100" rx="12"/>
     <text x="994" y="502" class="mono label" fill="#e040fb">BUILT-INS</text>
-    <text x="994" y="532" class="mono" font-size="16" fill="#eef4ff">agents/ · skills/</text>
-    <text x="994" y="556" class="mono wnote">hf-* agent &amp; skills</text>
+    <text x="994" y="532" class="mono" font-size="16" fill="#eef4ff">templates/</text>
+    <text x="994" y="556" class="mono wnote">hf-* task templates</text>
 
     <text x="74" y="508" class="mono note">// HarmFlow implements</text>
     <text x="74" y="532" class="mono note">// no task behavior:</text>

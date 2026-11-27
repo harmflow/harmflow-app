@@ -3,6 +3,7 @@
 package templates
 
 import (
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -133,28 +134,26 @@ func TestTemplateTextsStayInTheirFiles(t *testing.T) {
 }
 
 // No built-in template's identifier is the name of a built-in agent or skill, so that a name says which it is, and the
-// rule above tells a template's identifier from an agent's in the source.
+// rule above tells a template's identifier from an agent's in the source. A checkout with no agents/ or skills/ folder
+// ships no built-in of that kind.
 func TestTemplateIdentifiersAreNoAgentOrSkill(t *testing.T) {
 	root := repoRoot()
 	builtins := map[string]string{}
 	agents, err := os.ReadDir(filepath.Join(root, "agents"))
-	if err != nil {
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal(err)
 	}
 	for _, e := range agents {
 		builtins[strings.TrimSuffix(e.Name(), ".md")] = "agents/" + e.Name()
 	}
 	skills, err := os.ReadDir(filepath.Join(root, "skills"))
-	if err != nil {
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal(err)
 	}
 	for _, e := range skills {
 		if e.IsDir() {
 			builtins[e.Name()] = "skills/" + e.Name()
 		}
-	}
-	if len(builtins) == 0 {
-		t.Fatal("agents/ and skills/ hold no built-in")
 	}
 	for _, x := range texts(t) {
 		if x.what == "identifier" && builtins[x.value] != "" {

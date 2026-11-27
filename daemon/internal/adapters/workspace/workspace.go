@@ -1,5 +1,5 @@
 // Package workspace reads which files an attempt changed in its execution's workspace, from the workspace itself: Git
-// for each repository at the workspace's root or directly under it, where the built-in skills create a work item's
+// for each repository at the workspace's root or directly under it, where a GitHub task's session creates a work item's
 // worktree, and a scan of modification times for the rest. It lists paths with their status and reads no file's
 // content. It also names what each of those repositories has checked out.
 package workspace

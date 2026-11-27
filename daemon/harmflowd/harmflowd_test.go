@@ -47,8 +47,8 @@ func TestAcquireLockReportsOtherFailures(t *testing.T) {
 	}
 }
 
-// The built-ins directory is the one whose skills/ holds an hf- skill or whose agents/ holds an hf- agent, either one
-// alone; any other directory named skills or agents is not it.
+// The built-ins directory is the one whose templates/ holds an hf- template, whose skills/ holds an hf- skill, or whose
+// agents/ holds an hf- agent, any one alone; any other directory named templates, skills, or agents is not it.
 func TestHoldsBuiltins(t *testing.T) {
 	cases := []struct {
 		name string
@@ -56,9 +56,13 @@ func TestHoldsBuiltins(t *testing.T) {
 		file string
 		want bool
 	}{
-		{"a built-in skill", []string{"skills/hf-github-worktree"}, "", true},
-		{"a built-in agent", []string{"agents"}, "agents/hf-github-issue-implementer.md", true},
-		{"empty skills and agents directories", []string{"skills", "agents"}, "", false},
+		{"a built-in template alone", []string{"templates"}, "templates/hf-general.yaml", true},
+		{"a built-in skill", []string{"skills/hf-notes"}, "", true},
+		{"a built-in agent", []string{"agents"}, "agents/hf-reviewer.md", true},
+		{"empty templates, skills, and agents directories", []string{"templates", "skills", "agents"}, "", false},
+		{"only the user's templates", []string{"templates"}, "templates/meeting-notes.yaml", false},
+		{"a folder with the prefix in templates", []string{"templates/hf-general"}, "", false},
+		{"a template that is not YAML", []string{"templates"}, "templates/hf-general.md", false},
 		{"only the user's skills", []string{"skills/review-notes", "skills/harmflow-github-worktree"}, "", false},
 		{"only the user's agents", []string{"agents"}, "agents/reviewer.md", false},
 		{"a file with the prefix in skills", []string{"skills"}, "skills/hf-notes.md", false},

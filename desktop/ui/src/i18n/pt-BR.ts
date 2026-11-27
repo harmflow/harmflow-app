@@ -1685,7 +1685,7 @@ export const ptBR: Resources = {
         local: "Tarefas, estado e logs ficam nesta máquina.",
         permissions:
           "Cada tarefa declara o que sua sessão pode tocar; o HarmFlow aplica isso pelos controles da própria ferramenta de IA e avisa quando uma restrição não pode ser aplicada.",
-        github: "O trabalho no GitHub usa o seu login do gh e do Git. O implementador de issues embutido nunca faz merge de um pull request.",
+        github: "O trabalho no GitHub usa o seu login do gh e do Git. O que uma tarefa do GitHub faz lá é o que dizem o seu prompt, os seus agentes e as suas skills.",
         api: "O painel fala com o daemon por uma API local autenticada.",
       },
     },

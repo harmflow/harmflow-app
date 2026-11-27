@@ -1789,15 +1789,21 @@ func TestFormDocumentIsTheFile(t *testing.T) {
 		{"slug":"gpt-5.6-terra","supported_reasoning_levels":[{"effort":"low"},{"effort":"high"}]}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// The task's subagent is the user's, in the test's own configuration of each harness, so the form covers a user's
-	// agent beside the built-in skills.
+	// The task's subagent and skill are the user's, in the test's own configuration of each harness, so the form covers a
+	// user's agent and skill.
 	claudeConfig := filepath.Join(home, "claude")
 	for _, dir := range []string{claudeConfig, codexHome} {
-		if err := os.MkdirAll(filepath.Join(dir, "agents"), 0o700); err != nil {
-			t.Fatal(err)
+		for _, sub := range []string{"agents", filepath.Join("skills", "review-notes")} {
+			if err := os.MkdirAll(filepath.Join(dir, sub), 0o700); err != nil {
+				t.Fatal(err)
+			}
 		}
 		if err := os.WriteFile(filepath.Join(dir, "agents", "issue-reviewer.md"),
 			[]byte("---\nname: issue-reviewer\ndescription: Reviews an issue.\n---\nReview the issue.\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "skills", "review-notes", "SKILL.md"),
+			[]byte("---\nname: review-notes\ndescription: Notes a review.\n---\nNote the review.\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -2001,79 +2007,42 @@ func policyWarning(warnings any, field, value string) map[string]any {
 	return nil
 }
 
-// A new GitHub task, from the built-in template of the GitHub type, selects the built-in issue implementer of this
-// checkout, an agent and not a skill: it is copied whole, with no field left out, it brings the built-in skills it
-// uses, and the task the template builds, with the implementer's copy as its prompt and the agent as its origin, is
-// valid once its repository is set.
-func TestGitHubTypeSelectsTheBuiltinImplementer(t *testing.T) {
+// The built-in template of the GitHub type, in this checkout, is a generic starting point: it selects no agent, and
+// the task it builds, changing nothing, has no prompt, agents, skills, or origin, since a GitHub task brings its own.
+// The catalog lists no built-in agent or skill.
+func TestGitHubTemplateSelectsNoAgent(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	d := startDaemon(t, home)
-	var selected, template string
+	var template string
 	for _, tp := range d.list("/templates") {
 		if tp["type"] == "github" {
-			selected, _ = tp["selectedAgent"].(string)
 			template, _ = tp["id"].(string)
-		}
-	}
-	if selected != "hf-github-issue-implementer" {
-		t.Fatalf("GET /templates: the GitHub type's template selects %q, want hf-github-issue-implementer", selected)
-	}
-	catalog := d.call("GET", "/catalog", nil, 200)
-	copied := d.builtinAgentCopy(selected)
-	builtinSkills := map[string]bool{}
-	for _, x := range catalog["skills"].([]any) {
-		if s := x.(map[string]any); s["source"] == "builtin" {
-			builtinSkills[s["name"].(string)] = true
-		}
-	}
-	if builtinSkills[selected] {
-		t.Errorf("GET /catalog lists %s as a built-in skill too", selected)
-	}
-	skills, _ := copied["skills"].([]any)
-	if want := []any{"hf-github-issue-queue", "hf-github-worktree", "hf-github-draft-pr"}; !reflect.DeepEqual(skills, want) {
-		t.Errorf("the copy of %s brings the skills %v, want %v", selected, skills, want)
-	}
-	for _, s := range skills {
-		if !builtinSkills[s.(string)] {
-			t.Errorf("the copy of %s brings %v, which is no built-in skill", selected, s)
-		}
-	}
-	if omitted, _ := copied["omittedFields"].([]any); len(omitted) != 0 {
-		t.Errorf("the copy of %s leaves out %v, want nothing", selected, omitted)
-	}
-	prompt, _ := copied["prompt"].(string)
-	if !strings.Contains(prompt, "\n## This task\n") {
-		t.Errorf("the copy of %s has no This task section to customize:\n%s", selected, prompt)
-	}
-
-	repo := t.TempDir()
-	d.call("PATCH", "/settings", map[string]any{"allowedFolders": []any{repo}}, 200)
-	doc := d.call("POST", "/templates/"+template+"/draft", map[string]any{"language": "en-US"}, 200)["document"].(map[string]any)
-	spec := doc["spec"].(map[string]any)
-	if spec["prompt"] != prompt || !reflect.DeepEqual(spec["origin"], map[string]any{"agent": selected, "hash": copied["hash"]}) ||
-		!reflect.DeepEqual(spec["skills"], skills) || doc["metadata"].(map[string]any)["description"] != copied["description"] {
-		t.Errorf("POST /templates/%s/draft = %v, want the copy of %s, with the agent as its origin", template, doc, selected)
-	}
-	spec["github"].(map[string]any)["repositories"].([]any)[0].(map[string]any)["name"] = "harmflow/example"
-	spec["github"].(map[string]any)["repositories"].([]any)[0].(map[string]any)["localPath"] = repo
-	if v := d.call("POST", "/tasks/validate", map[string]any{"document": doc}, 200); v["valid"] != true {
-		t.Errorf("a task made of the copy of %s fails validation: %v", selected, v["errors"])
-	}
-}
-
-// builtinAgentCopy is what selecting the built-in agent copies into a task, as GET /catalog gives it.
-func (d *daemon) builtinAgentCopy(name string) map[string]any {
-	d.t.Helper()
-	for _, x := range d.call("GET", "/catalog", nil, 200)["agents"].([]any) {
-		if a := x.(map[string]any); a["name"] == name && a["source"] == "builtin" {
-			if c, ok := a["copy"].(map[string]any); ok {
-				return c
+			if selected, _ := tp["selectedAgent"].(string); selected != "" {
+				t.Errorf("GET /templates: the GitHub type's template selects %q, want no agent", selected)
 			}
 		}
 	}
-	d.t.Fatalf("GET /catalog lists no built-in agent %s with a copy", name)
-	return nil
+	if template == "" {
+		t.Fatal("GET /templates lists no template of the GitHub type")
+	}
+	catalog := d.call("GET", "/catalog", nil, 200)
+	for _, kind := range []string{"agents", "skills"} {
+		list, _ := catalog[kind].([]any)
+		for _, x := range list {
+			if e := x.(map[string]any); e["source"] == "builtin" {
+				t.Errorf("GET /catalog lists the built-in %s %v, want none", kind, e["name"])
+			}
+		}
+	}
+
+	doc := d.call("POST", "/templates/"+template+"/draft", map[string]any{"language": "en-US"}, 200)["document"].(map[string]any)
+	spec := doc["spec"].(map[string]any)
+	for _, field := range []string{"prompt", "agents", "skills", "origin"} {
+		if v, ok := spec[field]; ok {
+			t.Errorf("POST /templates/%s/draft sets %s = %v, want it unset", template, field, v)
+		}
+	}
 }
 
 // One file that breaks a schema rule is refused the same way by the form, the YAML editor's create and save, and

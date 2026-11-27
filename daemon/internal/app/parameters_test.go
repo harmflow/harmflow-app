@@ -564,7 +564,7 @@ func TestContextWithNoDeclaredValues(t *testing.T) {
 	e := newEnv(t)
 	var q requests
 	e.claude.setScript(func(req ports.RunRequest) string { q.add(req); return "echo 'END ok'" })
-	e.create("bare", "  skills: [hf-github-draft-pr]\n")
+	e.create("bare", "  skills: [hf-pr-notes]\n")
 	r, err := e.app.RunTask("bare")
 	if err != nil {
 		t.Fatal(err)
@@ -572,7 +572,7 @@ func TestContextWithNoDeclaredValues(t *testing.T) {
 	e.wait(r.ExecutionID, domain.StatusCompleted)
 	sent := q.all()
 	ctx := e.readContextOf(sent)
-	want := map[string]any{"skills": map[string]any{"hf-github-draft-pr": map[string]any{}}, "agents": map[string]any{}}
+	want := map[string]any{"skills": map[string]any{"hf-pr-notes": map[string]any{}}, "agents": map[string]any{}}
 	if got := valueAt(ctx, "task", "declaredParameters"); !jsonEqual(got, want) {
 		t.Errorf("context.json task.declaredParameters = %v, want %v", got, want)
 	}
@@ -622,11 +622,11 @@ func TestCatalogOffersDeclaredParameters(t *testing.T) {
 		params[entry.Name] = names
 	}
 	for name, want := range map[string][]string{
-		"hf-release-notes":   {"owner:text", "limit:number"},
-		"hf-queues":          {"repositories:object"},
-		"hf-reviewer":        {"strict:boolean"},
-		"hf-odd":             {"note:text"},
-		"hf-github-draft-pr": {},
+		"hf-release-notes": {"owner:text", "limit:number"},
+		"hf-queues":        {"repositories:object"},
+		"hf-reviewer":      {"strict:boolean"},
+		"hf-odd":           {"note:text"},
+		"hf-pr-notes":      {},
 	} {
 		if got := params[name]; !slices.Equal(got, want) || got == nil {
 			t.Errorf("Catalog %s parameters = %q, want %q", name, got, want)

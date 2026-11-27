@@ -11,7 +11,7 @@
     "type": "github",
     "prompt": "Implement the oldest issue labelled ready-for-agent.",
     "agents": ["issue-reviewer"],
-    "skills": ["hf-github-issue-queue", "hf-github-worktree", "hf-github-draft-pr"],
+    "skills": ["review-notes"],
     "workspace": {
       "path": "~/harmflow-work"
     },

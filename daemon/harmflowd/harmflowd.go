@@ -438,7 +438,7 @@ func signInTimeout(logger *log.Logger) time.Duration {
 }
 
 // findBuiltins locates the built-in agents, skills, and task templates: inside the app bundle, next to the binary, or
-// in a checkout. The templates sit beside the agents and skills, which tell the directory apart.
+// in a checkout. Its built-in templates, skills, or agents tell the directory apart (holdsBuiltins).
 func findBuiltins(flagValue string) string {
 	if flagValue != "" {
 		return flagValue
@@ -470,10 +470,15 @@ func findBuiltins(flagValue string) string {
 	return ""
 }
 
-// holdsBuiltins reports whether dir has a built-in skill in its skills/ directory, a folder, or a built-in agent in its
-// agents/ directory, a Markdown file, which tells the built-ins apart from any other directory named skills or agents.
+// holdsBuiltins reports whether dir has a built-in task template in its templates/ directory, a YAML file, a built-in
+// skill in its skills/ directory, a folder, or a built-in agent in its agents/ directory, a Markdown file, which tells
+// the built-ins apart from any other directory named templates, skills, or agents. The templates come first: the
+// built-ins ship templates even when they ship no skill or agent.
 func holdsBuiltins(dir string) bool {
-	return holdsBuiltin(filepath.Join(dir, "skills"), func(e os.DirEntry) bool { return e.IsDir() }) ||
+	return holdsBuiltin(filepath.Join(dir, "templates"), func(e os.DirEntry) bool {
+		return !e.IsDir() && strings.HasSuffix(e.Name(), ".yaml")
+	}) ||
+		holdsBuiltin(filepath.Join(dir, "skills"), func(e os.DirEntry) bool { return e.IsDir() }) ||
 		holdsBuiltin(filepath.Join(dir, "agents"), func(e os.DirEntry) bool {
 			return !e.IsDir() && strings.HasSuffix(e.Name(), ".md")
 		})

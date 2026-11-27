@@ -3,21 +3,16 @@ kind: TaskTemplate
 metadata:
   id: hf-github-issues
   name:
-    pt-BR: Implementar issues do GitHub
-    en-US: Implement GitHub issues
-    es-ES: Implementar issues de GitHub
+    pt-BR: Tarefa do GitHub em branco
+    en-US: Blank GitHub task
+    es-ES: Tarea de GitHub en blanco
   description:
-    pt-BR: Seleciona issues, implementa num worktree, executa os testes e abre um pull request em rascunho.
-    en-US: Selects issues, implements them in a worktree, runs the tests, and opens a draft pull request.
-    es-ES: Selecciona issues, las implementa en un worktree, ejecuta las pruebas y abre un pull request en borrador.
+    pt-BR: Trabalha repositórios do GitHub com o prompt, os agentes e as skills que a tarefa traz.
+    en-US: Works GitHub repositories with the prompt, agents, and skills the task brings.
+    es-ES: Trabaja repositorios de GitHub con el prompt, los agentes y las skills que trae la tarea.
 spec:
   type: github
-  # The task starts as the built-in agent's copy, which is its prompt.
-  selectedAgent: hf-github-issue-implementer
-  skills:
-    - hf-github-issue-queue
-    - hf-github-worktree
-    - hf-github-draft-pr
+  # The task brings its own prompt, agents, and skills: the template selects no agent.
   harness:
     preferred:
       provider: claude-code
