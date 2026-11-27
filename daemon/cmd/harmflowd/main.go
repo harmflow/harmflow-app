@@ -16,7 +16,7 @@ import (
 )
 
 // Version is set at build time; desktop and daemon always ship at the same version.
-var Version = "0.1.0"
+var Version = "0.2.0"
 
 // Revision is the full commit make built the daemon from, set at build time: make reads it from git also in a git
 // worktree, where go build stamps none.

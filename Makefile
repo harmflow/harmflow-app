@@ -1,7 +1,7 @@
 # Task runner for the harmflow-app monorepo. Run `make help` for the list.
 
 SHELL := /bin/bash
-VERSION := 0.1.0
+VERSION := 0.2.0
 # The full commit a build comes from, whether its tree has uncommitted changes, and both empty outside a checkout. The
 # daemon gets them here because go build stamps none in a git worktree, and makes its short commit from them, so the
 # one Settings → About shows is a prefix of the one each execution's record names; the interface reads its own commit
