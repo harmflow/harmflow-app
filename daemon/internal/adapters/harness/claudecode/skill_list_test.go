@@ -267,6 +267,16 @@ func TestSkillListRunsWithTheSessionEnvironment(t *testing.T) {
 	}
 }
 
+// endedBound bounds a listing whose stand-in ends on its own, which never waits for it unless the test fails.
+// harmflow-app#1195: three seconds was missed on a loaded Mac, where the stand-in, a shell script, took longer than that
+// to start, and the lookup read claude_skill_list_timed_out instead of the stand-in's own failure.
+const endedBound = 30 * time.Second
+
+// timedOutBound bounds the listing whose stand-in never prints its init line, which waits it out every time. It leaves
+// a stand-in that starts late on a loaded Mac the time to log its run. The adapter's own limit for a real Claude Code,
+// defaultSkillListTimeout, stays as it is.
+const timedOutBound = 10 * time.Second
+
 // When Claude Code cannot answer — not detected, ending before its init line with its error or silently, printing an
 // init line with no skill list, or reaching the timeout — the lookup fails with an error, never an empty list, and
 // nothing is kept, so the next lookup asks again.
@@ -274,17 +284,19 @@ func TestSkillListThatClaudeCodeCannotGive(t *testing.T) {
 	for _, c := range []struct {
 		name, body, wantKey, wantDetail string
 		detected                        bool
+		timeout                         time.Duration
 	}{
-		{"not detected", "", "harness_not_detected", "", false},
-		{"a failing CLI", "echo 'Not logged in' >&2\nexit 1", "command_failed", "Not logged in", true},
-		{"a silent exit", "exit 3", "harness_exit_code", "", true},
-		{"no skill list", `echo '{"type":"system","subtype":"init","model":"x"}'`, "claude_skill_list_unrecognized", "", true},
-		{"no init line in time", "sleep 30", "claude_skill_list_timed_out", "", true},
+		{"not detected", "", "harness_not_detected", "", false, endedBound},
+		{"a failing CLI", "echo 'Not logged in' >&2\nexit 1", "command_failed", "Not logged in", true, endedBound},
+		{"a silent exit", "exit 3", "harness_exit_code", "", true, endedBound},
+		{"no skill list", `echo '{"type":"system","subtype":"init","model":"x"}'`, "claude_skill_list_unrecognized", "",
+			true, endedBound},
+		{"no init line in time", "sleep 60", "claude_skill_list_timed_out", "", true, timedOutBound},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			path, log := listingClaude(t, c.body)
 			a := &Adapter{Home: t.TempDir(), Env: []string{"PATH=/usr/bin:/bin", "LOG=" + log},
-				SkillListTimeout: 3 * time.Second}
+				SkillListTimeout: c.timeout}
 			info := ports.HarnessInfo{Detected: c.detected, Path: path}
 			for i := range 2 {
 				items, _, err := a.UserItems(t.Context(), info, "skill", t.TempDir(), nil)
