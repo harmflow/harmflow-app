@@ -516,6 +516,71 @@ func builtinSkillLoads(t *testing.T, h realHarness, declaring bool) {
 	m.check(t)
 	// A write when the daemon stops is caught too.
 	d.stop()
+	configUnchanged(t, h, before)
+}
+
+// A Claude Code task cites a user's agent whose front matter declares a parameter, and its prompt asks the session to
+// delegate to the agent by name and says nothing else of it. The real Claude Code still loads the agent, and the value
+// the task gives the parameter reaches the session in context.json, where the agent's instructions read it.
+func TestDeclaringAgentLoadsInARealClaudeCode(t *testing.T) {
+	declaringAgentLoads(t, realClaudeHarness(t, realClaude(t)))
+}
+
+// declaringAgentLoads runs a task citing a user's agent on the real harness h. The agent is written into the user's
+// configuration of h, under a name unique to the run, as TestCitedUserItemsReachARealClaudeCode writes its agents, and
+// removed when the test ends. Its front matter declares a required text parameter, which the task gives the content of
+// a marker as its value, and its instructions tell the session to write, at the marker's path in the workspace, the
+// value context.json gives it. The session must follow the agent, and the files of the user's configuration must be as
+// they were before the daemon started, with the agent the test wrote, as builtinSkillLoads checks them.
+func declaringAgentLoads(t *testing.T, h realHarness) {
+	t.Helper()
+	work, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent := "declaring-" + runSuffix()
+	m := newMarker(work, agent)
+	instructions := fmt.Sprintf("Read the file context.json in the execution directory HarmFlow names, the folder the "+
+		"environment variable HARMFLOW_EXECUTION_DIR holds. Write a file at %s that holds the value of "+
+		"task.declaredParameters.agents.%s.marker in it, exactly, and nothing else.", m.path, agent)
+	writeTemp(t, filepath.Join(h.config, "agents", agent+".md"), itemFile(agent, "Writes a marker file.", instructions,
+		"parameters:", "  - {name: marker, type: text, description: The line the marker holds, required: true}"))
+	// Before the daemon starts, so that what its detection of the harness writes is caught too.
+	before := snapshotConfig(t, h)
+
+	d := startDaemon(t, t.TempDir(), h.env...)
+	d.call("PUT", "/harnesses/"+h.id, map[string]any{"path": h.path}, 200)
+	d.call("PATCH", "/settings", map[string]any{"allowedFolders": []any{work}}, 200)
+	id := "declaring-agent-" + h.id
+	doc := map[string]any{"apiVersion": "harmflow/v1alpha1", "kind": "Task",
+		"metadata": map[string]any{"id": id, "name": "Declaring agent on " + h.id},
+		"spec": map[string]any{
+			"type":       "general",
+			"prompt":     fmt.Sprintf("Delegate to the %s agent, by name. Do what it says, and nothing else.", agent),
+			"agents":     []any{agent},
+			"parameters": map[string]any{"agents": map[string]any{agent: map[string]any{"marker": m.content}}},
+			"harness":    map[string]any{"preferred": h.preferred},
+			"workspace":  map[string]any{"path": work},
+			"execution":  map[string]any{"timeoutMinutes": 5},
+		}}
+	d.call("POST", "/tasks", map[string]any{"document": doc}, 201)
+	run := d.call("POST", "/tasks/"+id+"/run", nil, 202)["executionId"].(string)
+	// Longer than the task's timeout, so that the execution's own end says why a session ran too long.
+	x := d.waitEnd(run, 6*time.Minute)
+
+	if x["status"] != "completed" {
+		t.Errorf("execution %s = %v (%v), want completed", run, x["status"], x["errorMessage"])
+	}
+	m.check(t)
+	// A write when the daemon stops is caught too.
+	d.stop()
+	configUnchanged(t, h, before)
+}
+
+// configUnchanged fails the test unless the files of the user's configuration of h are as snapshotConfig read them in
+// before: none added, none removed, each with its bytes.
+func configUnchanged(t *testing.T, h realHarness, before map[string]string) {
+	t.Helper()
 	after := snapshotConfig(t, h)
 	for entry, was := range before {
 		switch now, ok := after[entry]; {
@@ -621,9 +686,14 @@ func citingPrompt(agent, skill string) string {
 // user's own names them with it, so that none takes the place of one of the user's.
 func runSuffix() string { return strconv.FormatInt(time.Now().UnixNano(), 36) }
 
-// itemFile is an agent's or a skill's Markdown file, with the front matter that names and describes it.
-func itemFile(name, description, body string) string {
-	return fmt.Sprintf("---\nname: %s\ndescription: %s\n---\n%s\n", name, description, body)
+// itemFile is an agent's or a skill's Markdown file, with the front matter that names and describes it, followed by
+// the lines of front matter more, such as a parameters list.
+func itemFile(name, description, body string, more ...string) string {
+	var front strings.Builder
+	for _, line := range more {
+		front.WriteString(line + "\n")
+	}
+	return fmt.Sprintf("---\nname: %s\ndescription: %s\n%s---\n%s\n", name, description, front.String(), body)
 }
 
 // writeTemp writes a file, with the folders it lacks, and removes them when the test ends, so that what a test writes
