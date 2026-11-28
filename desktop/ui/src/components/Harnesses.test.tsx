@@ -67,12 +67,14 @@ vi.mock("../api/transport", () => ({
           },
         };
       }
-      // A sign-in for an installation leaves that installation's sign-in running.
+      // A sign-in for an installation leaves that installation's sign-in running, a detected home's or a custom entry's.
       if (method === "POST" && path === "/harnesses/codex/sign-in") {
         const id = (body as { installationId?: string } | undefined)?.installationId;
+        const running = (e: Harness): Harness => (e.installationId === id ? { ...e, signIn: "running" } : e);
         daemon.codex = {
           ...daemon.codex,
-          customEntries: daemon.codex.customEntries?.map((e) => (e.installationId === id ? { ...e, signIn: "running" } : e)),
+          homes: daemon.codex.homes?.map(running),
+          customEntries: daemon.codex.customEntries?.map(running),
         };
         return { status: 202, body: daemon.codex };
       }
@@ -727,6 +729,40 @@ describe("HarnessInventory of Codex homes", () => {
         { method: "PUT", path: "/harnesses/codex", body: { path: "/Users/someone/.codex-c" } },
       ]);
       expect(fields()).toStrictEqual(before);
+    });
+
+    // harmflow-app#1198: a detected home that is not in use offers Sign in on its row while it reads signed out, which
+    // signs that home in by its installation and shows it running; the home in use has the harness's own button.
+    const signIn = (id: string) =>
+      host!.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t("harness.signInInstallation", { name: id })}"]`);
+    const rowOf = (id: string) =>
+      [...host!.querySelectorAll<HTMLElement>(".installations__item")].find((r) => r.querySelector(".mono")?.textContent === id)!;
+    const inUse = { installationId: "~/.codex", authentication: "valid", readiness: "ready" } as const;
+
+    it("signs a signed-out home that is not in use in by its installation, then shows it waiting for the browser", async () => {
+      daemon.claude = undefined;
+      await open({ ...inUse, homes: [signedIn, { ...signedOut, signIn: "available" }] });
+      expect(signIn("~/.codex-b")?.textContent).toBe(i18n.t("harness.signInShort"));
+      expect(rowOf("~/.codex-b").contains(signIn("~/.codex-b"))).toBe(true);
+      expect(rowOf("~/.codex").querySelector("button")).toBeNull();
+      expect(rowOf("~/.codex").textContent).toContain(i18n.t("harness.inUse"));
+
+      await act(async () => signIn("~/.codex-b")!.click());
+      await settle();
+      expect(daemon.requests.filter((r) => r.method !== "GET")).toStrictEqual([
+        { method: "POST", path: "/harnesses/codex/sign-in", body: { installationId: "~/.codex-b" } },
+      ]);
+      expect(signIn("~/.codex-b")?.textContent).toBe(i18n.t("harness.signingIn"));
+      expect(signIn("~/.codex-b")?.disabled).toBe(true);
+    });
+
+    it("offers no Sign in on a home that is not in use and reads signed in", async () => {
+      daemon.claude = undefined;
+      await open({ ...inUse, homes: [signedIn, { ...signedOut, authentication: "valid", readiness: "ready", signIn: "available" }] });
+      expect(rowOf("~/.codex-b")).toBeDefined();
+      expect(signIn("~/.codex-b")).toBeNull();
+      expect(rowOf("~/.codex-b").querySelector("button")).toBeNull();
+      expect(rowOf("~/.codex").querySelector("button")).toBeNull();
     });
   });
 });
