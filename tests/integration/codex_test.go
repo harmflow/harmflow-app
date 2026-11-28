@@ -102,6 +102,14 @@ func TestDeclaringSkillLoadsInARealCodex(t *testing.T) {
 	builtinSkillLoads(t, realCodexHarness(t, realCodex(t)), true)
 }
 
+// A Codex task cites a user's agent of the Codex home whose front matter declares a parameter, and its prompt asks the
+// session to delegate to the agent by name and says nothing else of it. The real Codex still loads the agent, written
+// as TestCitedUserItemsReachARealCodex writes its agent, and the value the task gives the parameter reaches the session
+// in context.json, where the agent's instructions read it.
+func TestDeclaringAgentLoadsInARealCodex(t *testing.T) {
+	declaringAgentLoads(t, realCodexHarness(t, realCodex(t)))
+}
+
 // realCodexHarness is the installed Codex at path, run with the user's own Codex home.
 func realCodexHarness(t *testing.T, path string) realHarness {
 	t.Helper()
