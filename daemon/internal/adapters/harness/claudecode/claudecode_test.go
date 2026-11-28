@@ -8,9 +8,9 @@ import (
 	"io/fs"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"runtime"
 	"slices"
 	"strconv"
@@ -681,13 +681,14 @@ func TestPrepareLeavesTheSandboxOffBelowItsMinimum(t *testing.T) {
 	}
 }
 
-// harmflow-app#1025: a sandboxed session gets the user's GitHub token, read outside the sandbox, in the environment
-// alone: in GH_TOKEN for gh, and in a Basic authorization header on github.com for git over HTTPS, which replaces the
-// user's credential helper and git configuration. --settings masks both, each on its own host, the header's through a
-// pattern that denies the variable when it finds nothing, and holds no token; no argument does, and no file Prepare
-// writes in the execution's folder. The header follows the git configuration entries the environment already counts.
-// Without a token, the sandbox stays on with no masked variable and no new warning;
-// a validation, which starts no session, reads none, and neither does a session denied the network.
+// harmflow-app#1025, harmflow-app#1164: a sandboxed session gets the user's GitHub token, read outside the sandbox,
+// in the environment alone: in GH_TOKEN for gh, and as a Basic credential for git over HTTPS on github.com, in a
+// variable outside GIT_, since Claude Code writes its own GIT_CONFIG_ entries over a session's. A git configuration in
+// the execution's folder, set as the global one in place of the user's, answers git with that variable and carries the
+// user's commit identity alone. --settings masks both variables, each on its own host, and holds no token; no argument
+// does, and no file Prepare writes in the execution's folder. Without a token, the sandbox stays on with no masked
+// variable and no new warning; a validation, which starts no session, reads none, and neither does a session denied
+// the network.
 func TestPreparePassesTheGitHubTokenMasked(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 	const token = "ghs_FakeTokenForTheTest0123456789"
@@ -703,25 +704,33 @@ func TestPreparePassesTheGitHubTokenMasked(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reads := 0
-	a := &Adapter{Home: t.TempDir(), GitHubToken: func() string { reads++; return token }}
+	reads, identities := 0, 0
+	a := &Adapter{Home: t.TempDir(), GitHubToken: func() string { reads++; return token },
+		GitIdentity: func() (string, string) { identities++; return "Ada Lovelace", "ada@example.test" }}
 	exec := t.TempDir()
+	inherited := []string{"PATH=/bin", "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=safe.directory", "GIT_CONFIG_VALUE_0=/srv/repo"}
 	inv, _, err := a.Prepare(sandboxedInfo, ports.RunRequest{WorkDir: t.TempDir(), Permissions: perm, ExecutionDir: exec,
-		Env: []string{"PATH=/bin"}, Prompt: "hi",
+		Env: inherited, Prompt: "hi",
 		Skills: []ports.ResolvedItem{{Name: "hf-skill", Path: builtin, Builtin: true}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reads != 1 {
-		t.Errorf("Prepare read the token %d times, want once", reads)
+	if reads != 1 || identities != 1 {
+		t.Errorf("Prepare read the token %d times and the identity %d times, want each once", reads, identities)
 	}
-	for _, want := range []string{"GH_TOKEN=" + token, "GIT_CONFIG_COUNT=2",
-		"GIT_CONFIG_KEY_0=http.https://github.com/.extraHeader", "GIT_CONFIG_VALUE_0=Authorization: Basic " + basic,
-		"GIT_CONFIG_KEY_1=credential.helper", "GIT_CONFIG_VALUE_1=", "GIT_CONFIG_GLOBAL=/dev/null",
+	config := filepath.Join(exec, gitConfigFile)
+	for _, want := range []string{"GH_TOKEN=" + token, gitBasicVar + "=" + basic, "GIT_CONFIG_GLOBAL=" + config,
 		"GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0"} {
 		if !slices.Contains(inv.Env, want) {
 			t.Errorf("Prepare env lacks %q", strings.SplitN(want, "=", 2)[0])
 		}
+	}
+	// The environment's own git configuration entries are left as they are: the token is not among them.
+	if got := slices.DeleteFunc(slices.Clone(inv.Env), func(kv string) bool {
+		return !strings.HasPrefix(kv, "GIT_CONFIG_") || strings.HasPrefix(kv, "GIT_CONFIG_GLOBAL=") ||
+			strings.HasPrefix(kv, "GIT_CONFIG_NOSYSTEM=")
+	}); !slices.Equal(got, inherited[1:]) {
+		t.Errorf("Prepare env's GIT_CONFIG_ entries = %q, want the request's %q", got, inherited[1:])
 	}
 	for _, arg := range inv.Args {
 		if strings.Contains(arg, token) || strings.Contains(arg, basic) {
@@ -740,60 +749,47 @@ func TestPreparePassesTheGitHubTokenMasked(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	data, err := os.ReadFile(config)
+	if err != nil {
+		t.Fatalf("Prepare wrote no git configuration: %v", err)
+	}
+	if want := gitConfig(gitIdentity{"Ada Lovelace", "ada@example.test"}); string(data) != want {
+		t.Errorf("git configuration = %q, want %q", data, want)
+	}
 	sandbox, _ := sandboxOf(t, inv.Args)
 	network, _ := sandbox["network"].(map[string]any)
 	if _, ok := network["tlsTerminate"]; !ok {
 		t.Errorf("sandbox.network = %v, want tlsTerminate, which masking needs", network)
 	}
-	masks := map[string]map[string]any{}
 	credentials, _ := sandbox["credentials"].(map[string]any)
 	entries, _ := credentials["envVars"].([]any)
-	for _, e := range entries {
-		entry, _ := e.(map[string]any)
-		name, _ := entry["name"].(string)
-		masks[name] = entry
-	}
-	for name, want := range map[string]map[string]any{
-		"GH_TOKEN":     {"name": "GH_TOKEN", "mode": "mask", "injectHosts": []any{"api.github.com"}},
-		"GITHUB_TOKEN": {"name": "GITHUB_TOKEN", "mode": "deny"},
-		"GIT_CONFIG_VALUE_0": {"name": "GIT_CONFIG_VALUE_0", "mode": "mask", "extract": `Basic (\S+)`,
-			"injectHosts": []any{"github.com"}, "onExtractNoMatch": "deny"},
-	} {
-		if !reflect.DeepEqual(masks[name], want) {
-			t.Errorf("sandbox.credentials entry %s = %v, want %v", name, masks[name], want)
-		}
+	if want := []any{
+		map[string]any{"name": "GITHUB_TOKEN", "mode": "deny"},
+		map[string]any{"name": "GH_TOKEN", "mode": "mask", "injectHosts": []any{"api.github.com"}},
+		map[string]any{"name": gitBasicVar, "mode": "mask", "injectHosts": []any{"github.com"}},
+	}; !reflect.DeepEqual(entries, want) {
+		t.Errorf("sandbox.credentials.envVars = %v, want %v", entries, want)
 	}
 	if r, _ := restriction(inv.Restrictions, "restrictToWorkspace"); !r.Enforced {
 		t.Errorf("restrictToWorkspace = %+v, want enforced", r)
 	}
-	if header, ok := envValue(inv.Env, "GIT_CONFIG_VALUE_0"); !ok || !regexp.MustCompile(`Basic (\S+)`).MatchString(header) {
-		t.Errorf("GIT_CONFIG_VALUE_0 (found %v) does not match the pattern its mask extracts with", ok)
+
+	// An execution's folder Prepare cannot write in fails the attempt rather than leave git without the token.
+	blocked := filepath.Join(t.TempDir(), "missing")
+	if _, _, err := a.Prepare(sandboxedInfo, ports.RunRequest{WorkDir: t.TempDir(), Permissions: perm,
+		ExecutionDir: blocked, Env: []string{"PATH=/bin"}}); err == nil {
+		t.Error("Prepare with an execution folder it cannot write in = nil error, want one")
 	}
 
-	// Git configuration entries the environment already counts stay as they are: the header and the credential helper
-	// follow them, and the mask names the header's variable at its index.
-	inherited, _, err := a.Prepare(sandboxedInfo, ports.RunRequest{WorkDir: t.TempDir(), Permissions: perm,
-		ExecutionDir: t.TempDir(), Env: []string{"PATH=/bin", "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=safe.directory",
-			"GIT_CONFIG_VALUE_0=/srv/repo"}})
+	// A request with no environment of its own runs with the daemon's, which the token is added to.
+	t.Setenv("HARMFLOW_TEST_KEPT", "kept")
+	own, _, err := a.Prepare(sandboxedInfo, ports.RunRequest{WorkDir: t.TempDir(), Permissions: perm,
+		ExecutionDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, want := range map[string]string{"GIT_CONFIG_COUNT": "3", "GIT_CONFIG_KEY_0": "safe.directory",
-		"GIT_CONFIG_VALUE_0": "/srv/repo", "GIT_CONFIG_KEY_1": "http.https://github.com/.extraHeader",
-		"GIT_CONFIG_VALUE_1": "Authorization: Basic " + basic, "GIT_CONFIG_KEY_2": "credential.helper",
-		"GIT_CONFIG_VALUE_2": ""} {
-		if got, _ := envValue(inherited.Env, name); got != want {
-			t.Errorf("with an inherited entry, %s is not the one expected", name)
-		}
-	}
-	sandbox, _ = sandboxOf(t, inherited.Args)
-	credentials, _ = sandbox["credentials"].(map[string]any)
-	entries, _ = credentials["envVars"].([]any)
-	if !slices.ContainsFunc(entries, func(e any) bool {
-		entry, _ := e.(map[string]any)
-		return entry["name"] == "GIT_CONFIG_VALUE_1" && entry["extract"] == `Basic (\S+)`
-	}) {
-		t.Errorf("with an inherited entry, sandbox.credentials = %v, want GIT_CONFIG_VALUE_1 masked", credentials)
+	if !slices.Contains(own.Env, "HARMFLOW_TEST_KEPT=kept") || !slices.Contains(own.Env, "GH_TOKEN="+token) {
+		t.Error("Prepare with no request environment lacks the daemon's variables or the token")
 	}
 
 	// Without a token: the sandbox stays on, with nothing masked and the same restrictions.
@@ -851,6 +847,90 @@ func TestPreparePassesTheGitHubTokenMasked(t *testing.T) {
 	if want := []any{map[string]any{"name": "GITHUB_TOKEN", "mode": "deny"}}; !reflect.DeepEqual(entries, want) ||
 		network["tlsTerminate"] != nil {
 		t.Errorf("sandbox with the network denied = %v, want only GITHUB_TOKEN denied and no tlsTerminate", sandbox)
+	}
+}
+
+// harmflow-app#1164: git reads the configuration withGitHubToken writes as meant. Its credential helpers for
+// https://github.com are reset to one, which answers get with the Basic credential in gitBasicVar as a pre-encoded
+// authtype and credential, and answers nothing else, nor anything when the variable is empty. The identity comes
+// through with its quotes and backslashes, and a value that spans lines is left out. The helper runs as git runs a
+// "!" helper, through sh with the action appended, so the check holds whatever git's version.
+func TestGitConfigAnswersGitWithTheMaskedCredential(t *testing.T) {
+	config := filepath.Join(t.TempDir(), gitConfigFile)
+	name := `Ada "The Countess" Lovelace\`
+	if err := os.WriteFile(config, []byte(gitConfig(gitIdentity{name, "ada@example.test"})), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	get := func(args ...string) []string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"config", "--file", config}, args...)...).Output()
+		if err != nil {
+			t.Fatalf("git config %q: %v", args, err)
+		}
+		return strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
+	}
+	if got := get("--get", "user.name"); !slices.Equal(got, []string{name}) {
+		t.Errorf("user.name = %q, want %q", got, name)
+	}
+	if got := get("--get", "user.email"); !slices.Equal(got, []string{"ada@example.test"}) {
+		t.Errorf("user.email = %q, want ada@example.test", got)
+	}
+	helpers := get("--get-all", "credential.https://github.com.helper")
+	if len(helpers) != 2 || helpers[0] != "" || !strings.HasPrefix(helpers[1], "!") {
+		t.Fatalf("credential.https://github.com.helper = %q, want a reset, then one shell helper", helpers)
+	}
+	run := func(action, basic string) string {
+		t.Helper()
+		cmd := exec.Command("sh", "-c", strings.TrimPrefix(helpers[1], "!")+" "+action)
+		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), gitBasicVar + "=" + basic}
+		out, _ := cmd.Output() // a helper that answers nothing may exit non-zero, which git ignores
+		return string(out)
+	}
+	// The sandbox's placeholder stands for the value; a low-entropy word keeps the secret scan quiet.
+	const placeholder = "the-placeholder"
+	if got, want := run("get", placeholder),
+		"capability[]=authtype\nauthtype=Basic\ncredential="+placeholder+"\n"; got != want {
+		t.Errorf("helper get = %q, want %q", got, want)
+	}
+	for _, c := range [][2]string{{"store", placeholder}, {"erase", placeholder}, {"get", ""}} {
+		if got := run(c[0], c[1]); got != "" {
+			t.Errorf("helper %s with %s=%q = %q, want nothing", c[0], gitBasicVar, c[1], got)
+		}
+	}
+
+	if got := gitConfig(gitIdentity{"Ada\nLovelace", ""}); strings.Contains(got, "[user]") {
+		t.Errorf("gitConfig with a name on two lines and no email = %q, want no user section", got)
+	}
+}
+
+// harmflow-app#1164: GlobalGitIdentity reads user.name and user.email from the user's global git configuration, the
+// one GIT_CONFIG_GLOBAL names here, following its includes; each is empty when that configuration does not set it,
+// and both when git is not on the path.
+func TestGlobalGitIdentityReadsTheUsersGlobalConfiguration(t *testing.T) {
+	dir := t.TempDir()
+	included := filepath.Join(dir, "identity")
+	global := filepath.Join(dir, "global")
+	if err := os.WriteFile(included, []byte("[user]\n\tname = Ada Lovelace\n\temail = ada@example.test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte("[include]\n\tpath = "+included+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "GIT_CONFIG_GLOBAL=" + global, "GIT_CONFIG_NOSYSTEM=1"}
+	if name, email := GlobalGitIdentity(os.Getenv("PATH"), env)(); name != "Ada Lovelace" || email != "ada@example.test" {
+		t.Errorf("GlobalGitIdentity() = %q, %q, want Ada Lovelace, ada@example.test", name, email)
+	}
+
+	empty := filepath.Join(dir, "empty")
+	if err := os.WriteFile(empty, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env[2] = "GIT_CONFIG_GLOBAL=" + empty
+	if name, email := GlobalGitIdentity(os.Getenv("PATH"), env)(); name != "" || email != "" {
+		t.Errorf("GlobalGitIdentity() with nothing set = %q, %q, want both empty", name, email)
+	}
+	if name, email := GlobalGitIdentity(t.TempDir(), env)(); name != "" || email != "" {
+		t.Errorf("GlobalGitIdentity() with no git on the path = %q, %q, want both empty", name, email)
 	}
 }
 

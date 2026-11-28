@@ -570,6 +570,7 @@ export const enUS = {
     script_start_failed: "starting {{program}}: {{detail}}",
     task_path_refused: "{{field}} of this task is refused: {{detail}}",
     script_write_failed: "writing the inline script: {{detail}}",
+    git_config_write_failed: "writing the session's git configuration: {{detail}}",
     process_ended: "ended {{executable}} (pid {{pid}}), which ran outside the process group",
     process_left_ended: "ended {{executable}} (pid {{pid}}), which the AI tool or program left running",
     process_interrupted_ended: "ended {{executable}} (pid {{pid}}), which the interrupted execution left running",

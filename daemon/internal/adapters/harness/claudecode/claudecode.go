@@ -63,6 +63,10 @@ type Adapter struct {
 	// GitHubToken gives the user's GitHub token, read outside the sandbox when a sandboxed session is prepared, empty
 	// for none; nil gives none. The daemon sets GHAuthToken.
 	GitHubToken func() string
+	// GitIdentity gives the user's own commit identity, user.name and user.email, read when a sandboxed session gets
+	// a GitHub token and the git configuration that carries it replaces the user's; empty for one not set, nil for
+	// none. The daemon sets GlobalGitIdentity.
+	GitIdentity func() (name, email string)
 
 	mu           sync.Mutex
 	skills       map[string][]ports.ResolvedItem // the installed skills by CLI path, kept until ReloadUserItems
@@ -154,7 +158,7 @@ func (a *Adapter) EntryExecutable(name string) string {
 func (a *Adapter) ProbeEntry(ctx context.Context, path string, assignments []string) ports.HarnessInfo {
 	entry := &Adapter{Home: a.Home, PathEnv: a.PathEnv, Env: ports.WithAssignments(a.Env, assignments),
 		KnownLocations: []string{}, SkillListTimeout: a.SkillListTimeout, GitHubToken: a.GitHubToken,
-		helpTimeout: a.helpTimeout, quotaTimeout: a.quotaTimeout, entryConfigDir: a.configDir()}
+		GitIdentity: a.GitIdentity, helpTimeout: a.helpTimeout, quotaTimeout: a.quotaTimeout, entryConfigDir: a.configDir()}
 	if d, ok := ports.AssignmentValue(assignments, "CLAUDE_CONFIG_DIR"); ok && d != "" {
 		entry.entryConfigDir = d
 	}
@@ -582,14 +586,23 @@ func (a *Adapter) Prepare(info ports.HarnessInfo, req ports.RunRequest) (ports.I
 		}
 		// Claude Code's sandbox confines the shell. The user's settings sources stay loaded, so the session keeps the
 		// agents, skills, and MCP servers a task cites; what they add to the sandbox is reported. A validation reads no
-		// token, since no session starts, and neither does a session denied the network, which reaches no GitHub host.
+		// token, since no session starts, and neither does a session denied the network, which reaches no GitHub host,
+		// nor one without an execution's folder, where git's configuration for the token goes.
 		token := ""
-		if !req.PolicyCheck && network && a.GitHubToken != nil {
+		if !req.PolicyCheck && network && req.ExecutionDir != "" && a.GitHubToken != nil {
 			token = a.GitHubToken()
 		}
-		var header string
-		env, header = withGitHubToken(env, token)
-		args = append(args, "--settings", sandboxSettings(network, header))
+		if token != "" {
+			var id gitIdentity
+			if a.GitIdentity != nil {
+				id.name, id.email = a.GitIdentity()
+			}
+			var err error
+			if env, err = withGitHubToken(env, req.ExecutionDir, token, id); err != nil {
+				return ports.Invocation{}, nil, err
+			}
+		}
+		args = append(args, "--settings", sandboxSettings(network, token != ""))
 		restrictions = append(restrictions, a.sandboxRestrictions(info, req, network)...)
 	}
 	if req.ExecutionDir != "" {
@@ -716,25 +729,24 @@ const (
 // sandboxSettings are the --settings of a sandboxed session: the sandbox on, with no way for the model to run a
 // command outside it and no start without it, and a strict network allowlist: GitHub's hosts when the task allows the
 // network, no host when it denies it. The sandbox refuses a bare "*" in its allowlist, so no setting opens every host,
-// and a host outside the list is refused rather than asked for. With a GitHub token, the variables withGitHubToken sets
-// are masked: shell commands see only a placeholder, which the sandbox's proxy replaces with the token on GitHub's
-// hosts alone, and a pattern that finds nothing to mask denies the variable rather than passing it through. header is
-// the variable withGitHubToken put the authorization header in, empty for no token. Each injected host must be in the
-// allowlist, so a token goes only with the network allowed. GITHUB_TOKEN, which the daemon does not set, is hidden from
-// shell commands. Each entry names its variable and its mode, the fields Claude Code's settings schema requires: an
-// entry it cannot read makes it skip the whole of --settings, the sandbox included. The settings hold no token.
-func sandboxSettings(network bool, header string) string {
+// and a host outside the list is refused rather than asked for. With a GitHub token, which withGitHubToken has put in
+// the environment, its two variables are masked: shell commands see only a placeholder, which the sandbox's proxy
+// replaces with the real value on one GitHub host each, GH_TOKEN on the API's and gitBasicVar on git's. Each injected
+// host must be in the allowlist, so a token goes only with the network allowed. GITHUB_TOKEN, which the daemon does not
+// set, is hidden from shell commands. Each entry names its variable and its mode, the fields Claude Code's settings
+// schema requires: an entry it cannot read makes it skip the whole of --settings, the sandbox included. The settings
+// hold no token.
+func sandboxSettings(network, token bool) string {
 	net := map[string]any{"allowedDomains": []string{}, "strictAllowlist": true}
 	if network {
 		net["allowedDomains"] = []string{githubGitHost, githubAPIHost}
 	}
 	envVars := []map[string]any{{"name": "GITHUB_TOKEN", "mode": "deny"}}
-	if header != "" && network {
+	if token && network {
 		net["tlsTerminate"] = map[string]any{}
 		envVars = append(envVars,
 			map[string]any{"name": "GH_TOKEN", "mode": "mask", "injectHosts": []string{githubAPIHost}},
-			map[string]any{"name": header, "mode": "mask", "extract": `Basic (\S+)`,
-				"injectHosts": []string{githubGitHost}, "onExtractNoMatch": "deny"})
+			map[string]any{"name": gitBasicVar, "mode": "mask", "injectHosts": []string{githubGitHost}})
 	}
 	settings := map[string]any{"sandbox": map[string]any{
 		"enabled": true, "autoAllowBashIfSandboxed": true, "allowUnsandboxedCommands": false, "failIfUnavailable": true,
@@ -744,46 +756,95 @@ func sandboxSettings(network bool, header string) string {
 	return string(js)
 }
 
-// withGitHubToken is env with the GitHub token for gh, in GH_TOKEN, and for git over HTTPS, as a Basic authorization
-// header on github.com that replaces the user's credential helper and git configuration, in a copy, with the name of
-// the variable that holds the header, the one sandboxSettings masks; env itself and no name when token is empty. The
-// two entries follow the GIT_CONFIG entries env already counts, so that they neither replace nor drop one of the
-// user's. A nil env is the daemon's own, which the token is added to.
-func withGitHubToken(env []string, token string) ([]string, string) {
-	if token == "" {
-		return env, ""
+// gitBasicVar holds the Basic credential of git over HTTPS on github.com, the base64 of x-access-token:<token>, for
+// the credential helper of gitConfigFile. Its name is outside GIT_ on purpose: Claude Code writes git configuration
+// entries of its own into the shell's environment, from GIT_CONFIG_KEY_0 on, over the ones a session is given, so a
+// masked GIT_CONFIG_VALUE_<n> reaches the shell holding another value, or not at all.
+const gitBasicVar = "HARMFLOW_GITHUB_BASIC"
+
+// gitConfigFile is the name, in the execution's folder, of the git configuration withGitHubToken writes.
+const gitConfigFile = "gitconfig"
+
+// gitIdentity is a commit identity, as git's user.name and user.email give it; either may be empty.
+type gitIdentity struct{ name, email string }
+
+// withGitHubToken is env, in a copy, with the GitHub token for gh, in GH_TOKEN, and for git over HTTPS on github.com,
+// in gitBasicVar, which the credential helper of a git configuration it writes in dir answers with. That configuration
+// is the global one, GIT_CONFIG_GLOBAL, in place of the user's, and the system's is left out: no credential helper of
+// the user's runs, and none of the user's rewrites sends a GitHub URL past the sandbox's proxy. Of the user's
+// configuration it keeps only id, the commit identity. The file holds no token. A nil env is the daemon's own, which
+// the token is added to.
+func withGitHubToken(env []string, dir, token string, id gitIdentity) ([]string, error) {
+	path := filepath.Join(dir, gitConfigFile)
+	if err := os.WriteFile(path, []byte(gitConfig(id)), 0o600); err != nil {
+		return nil, domain.TextErr("git_config_write_failed", "writing the session's git configuration: {{detail}}",
+			"detail", err.Error())
 	}
 	if env == nil {
 		env = os.Environ()
 	}
-	first := inheritedGitConfigCount(env)
-	header := fmt.Sprintf("GIT_CONFIG_VALUE_%d", first)
 	basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
 	return append(slices.Clone(env),
 		"GH_TOKEN="+token,
-		fmt.Sprintf("GIT_CONFIG_COUNT=%d", first+2),
-		fmt.Sprintf("GIT_CONFIG_KEY_%d=http.https://%s/.extraHeader", first, githubGitHost),
-		header+"=Authorization: Basic "+basic,
-		fmt.Sprintf("GIT_CONFIG_KEY_%d=credential.helper", first+1),
-		fmt.Sprintf("GIT_CONFIG_VALUE_%d=", first+1),
-		"GIT_CONFIG_GLOBAL=/dev/null",
+		gitBasicVar+"="+basic,
+		"GIT_CONFIG_GLOBAL="+path,
 		"GIT_CONFIG_NOSYSTEM=1",
-		"GIT_TERMINAL_PROMPT=0"), header
+		"GIT_TERMINAL_PROMPT=0"), nil
 }
 
-// inheritedGitConfigCount is the GIT_CONFIG_COUNT env sets, as git reads it: its last value, zero when it is absent or
-// not a count.
-func inheritedGitConfigCount(env []string) int {
-	count := 0
-	for _, kv := range env {
-		if v, ok := strings.CutPrefix(kv, "GIT_CONFIG_COUNT="); ok {
-			count = 0
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				count = n
-			}
+// gitCredentialHelper answers git's get with the Basic credential in gitBasicVar, as a pre-encoded authtype and
+// credential, which git sends as they are in its Authorization header; the sandbox's proxy then finds its placeholder
+// there whole. A username and password would reach the proxy only base64-encoded. It needs git 2.46 or later, which
+// asks with capability[]=authtype; an older git ignores the answer and, with no prompt, fails.
+const gitCredentialHelper = `!f() { test "$1" = get && test -n "$` + gitBasicVar + `" && ` +
+	`printf 'capability[]=authtype\nauthtype=Basic\ncredential=%s\n' "$` + gitBasicVar + `"; }; f`
+
+// gitConfig is the git configuration withGitHubToken writes: the credential helpers of https://github.com reset to
+// gitCredentialHelper alone, and id as user.name and user.email, each only when it is set and fits on one line.
+func gitConfig(id gitIdentity) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "[credential \"https://%s\"]\n\thelper =\n\thelper = %s\n", githubGitHost,
+		gitConfigValue(gitCredentialHelper))
+	var user []string
+	for _, kv := range [][2]string{{"name", id.name}, {"email", id.email}} {
+		if kv[1] != "" && !strings.ContainsAny(kv[1], "\n\r\x00") {
+			user = append(user, fmt.Sprintf("\t%s = %s\n", kv[0], gitConfigValue(kv[1])))
 		}
 	}
-	return count
+	if len(user) > 0 {
+		b.WriteString("[user]\n" + strings.Join(user, ""))
+	}
+	return b.String()
+}
+
+// gitConfigValue is v quoted for a git configuration file, which reads a backslash and a double quote inside quotes
+// only escaped. v holds no line break.
+func gitConfigValue(v string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(v) + `"`
+}
+
+// gitConfigTimeout bounds each `git config` that reads the user's identity.
+const gitConfigTimeout = 10 * time.Second
+
+// GlobalGitIdentity is a GitIdentity source: user.name and user.email as the user's global git configuration sets
+// them, includes followed, with git found on pathEnv and run with env. Each is empty when git is not there, does not
+// set it, or does not answer in time.
+func GlobalGitIdentity(pathEnv string, env []string) func() (string, string) {
+	return func() (string, string) {
+		paths := procutil.LookPath("git", pathEnv, nil)
+		if len(paths) == 0 {
+			return "", ""
+		}
+		read := func(key string) string {
+			out, _, err := procutil.Output(context.Background(), gitConfigTimeout, env, paths[0],
+				"config", "--global", "--includes", "--get", key)
+			if err != nil {
+				return ""
+			}
+			return strings.TrimSpace(out)
+		}
+		return read("user.name"), read("user.email")
+	}
 }
 
 // ghTokenTimeout bounds `gh auth token`.
